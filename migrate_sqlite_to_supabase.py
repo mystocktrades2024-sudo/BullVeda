@@ -158,19 +158,26 @@ def _src_equity_curve(conn) -> list[dict]:
 
 
 def _src_equity_audit(conn) -> list[dict]:
+    # Maps to the actual Supabase equity_audit schema:
+    # (occurred_at, event_type, delta, balance_after, note, sync_key). The source
+    # JSON uses old/new_equity/cash — fold into delta + balance_after + note so the
+    # rows actually insert (was failing 42703 on a non-existent "timestamp" column).
     j = _load_json(DATA_DIR / "portfolio_state.json")
     rows: list[dict] = []
     if j and isinstance(j, dict):
         for a in (j.get("equity_audit") or []):
+            oe, ne = a.get("old_equity"), a.get("new_equity")
+            delta = (ne - oe) if isinstance(oe, (int, float)) and isinstance(ne, (int, float)) else None
+            note = a.get("reason") or ""
+            if a.get("invested") is not None:
+                note = f"{note} · invested={a.get('invested')}".strip(" ·")
             rows.append({
-                "timestamp": a.get("timestamp"),
-                "old_equity": a.get("old_equity"),
-                "new_equity": a.get("new_equity"),
-                "old_cash": a.get("old_cash"),
-                "new_cash": a.get("new_cash"),
-                "invested": a.get("invested"),
-                "reason": a.get("reason"),
-                "sync_key": _hash_key("ea", a.get("timestamp"), a.get("reason")),
+                "occurred_at":   a.get("timestamp"),
+                "event_type":    "equity_update",
+                "delta":         delta,
+                "balance_after": ne,
+                "note":          note or None,
+                "sync_key":      _hash_key("ea", a.get("timestamp"), a.get("reason")),
             })
     return rows
 
@@ -371,9 +378,37 @@ def _src_paper_trading_config(conn) -> list[dict]:
     return []
 
 
+def _src_tickers(conn) -> list[dict]:
+    """Distinct tickers referenced by FK-bearing tables (signal_log, positions,
+    closed_trades). Upserted FIRST so downstream FK constraints — notably
+    signal_log_ticker_fkey — are satisfied and ALL rows load (was dropping whole
+    100-row batches when a referenced ticker like VELO wasn't in the tickers table).
+    The Supabase tickers table is a single `ticker` column, so a bare upsert is safe."""
+    syms: set[str] = set()
+    j = _load_json(DATA_DIR / "signal_log.json")
+    if isinstance(j, list):
+        for s in j:
+            t = (s.get("ticker") or "").upper().strip()
+            if t:
+                syms.add(t)
+    ps = _load_json(DATA_DIR / "portfolio_state.json")
+    if isinstance(ps, dict):
+        for p in (ps.get("positions") or []):
+            t = (p.get("ticker") or "").upper().strip()
+            if t:
+                syms.add(t)
+        for c in (ps.get("closed_trades") or []):
+            t = (c.get("ticker") or "").upper().strip()
+            if t:
+                syms.add(t)
+    return [{"ticker": s} for s in sorted(syms) if 1 <= len(s) <= 8]
+
+
 # (table_name, source_fn, on_conflict_column_or_None)
 # on_conflict now uses sync_key for insert-only tables → idempotent re-runs (no more dups)
+# NOTE: `tickers` MUST stay first — signal_log/positions FK-reference it.
 TABLES = [
+    ("tickers",              _src_tickers,              "ticker"),
     ("meta",                 _src_meta,                 "key"),
     ("portfolio_state",      _src_portfolio_state,      "id"),
     ("positions",            _src_positions,            "sync_key"),
