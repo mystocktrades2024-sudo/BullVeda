@@ -123,9 +123,9 @@ if [ $EXIT_CODE -eq 0 ]; then
     # ML inference runs only 4x/day (2026-06-03 · user) — pre-market / 2x session /
     # post-market — NOT every 30-min scan. Predictions are stable enough intraday;
     # 4 anchors keep them fresh without 16x compute. Anchors: <06:15 (pre/heavy),
-    # 09:30, 11:30, 13:30 (post-close). ml_edge_predictions.json persists between.
+    # 09:30, 11:30, 17:00 (post-market EOD refresh). ml_edge_predictions.json persists between.
     ML_EXIT=0
-    if [ "$_HHMM" -lt 615 ] || [ "$_HHMM" -eq 930 ] || [ "$_HHMM" -eq 1130 ] || [ "$_HHMM" -eq 1330 ]; then
+    if [ "$_HHMM" -lt 615 ] || [ "$_HHMM" -eq 930 ] || [ "$_HHMM" -eq 1130 ] || [ "$_HHMM" -eq 1700 ]; then
         "$PYTHON" -m ml.run_ml_edge >> "$LOG_FILE" 2>&1
         ML_EXIT=$?
     else
