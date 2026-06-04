@@ -360,6 +360,78 @@ class EODHDError(Exception):
     """Raised when EODHD returns an unrecoverable error."""
 
 
+class EODHDConnectivityError(EODHDError):
+    """Raised when the connectivity circuit breaker is open — the host can't
+    reach EODHD at all (fd exhaustion / DNS loss / EODHD down). Subclasses
+    EODHDError so existing per-ticker `except EODHDError` handlers still catch
+    it (the scan degrades fast rather than hard-crashing), while the distinct
+    type lets an orchestrator hard-abort if it wants to."""
+
+
+# ── Connectivity circuit breaker (2026-06-04) ────────────────────────────────
+# fd exhaustion / DNS loss / an EODHD outage all surface as back-to-back
+# connection-ESTABLISHMENT failures — getaddrinfo "nodename nor servname",
+# "Too many open files" (EMFILE), "Failed to establish a new connection".
+# Without a breaker, every one of a heavy scan's ~21k calls retries 3× with
+# exponential backoff, so a recoverable condition becomes a 90-min zero-progress
+# zombie that freezes the dashboard and blocks later scans (the 2026-06-04
+# 05:15 heavy-scan hang). Once N CONSECUTIVE connection-establishment failures
+# occur with no success in between, the breaker trips: every subsequent
+# _request fails instantly (no socket, no retry) so the scan blows through to a
+# fast, degraded finish. ANY successful round-trip — even a 404/429, which prove
+# connectivity — resets it. Timeouts and 5xx do NOT count (the host is reachable).
+_BREAKER_THRESHOLD = int(os.environ.get("EODHD_BREAKER_THRESHOLD", "40"))
+_breaker_lock = threading.Lock()
+_breaker_consec = 0        # consecutive connection-establishment failures
+_breaker_tripped = False
+
+_CONN_FAIL_MARKERS = (
+    "nodename nor servname",                 # getaddrinfo EAI_NONAME (fd exhaustion / DNS)
+    "Failed to establish a new connection",
+    "Too many open files",                   # EMFILE
+    "Temporary failure in name resolution",
+    "Name or service not known",
+)
+
+def _is_conn_establish_error(exc: Exception) -> bool:
+    s = str(exc)
+    return any(m in s for m in _CONN_FAIL_MARKERS)
+
+def _breaker_record_failure(exc: Exception) -> bool:
+    """Count a connection-establishment failure. Returns True once the breaker
+    is tripped (so the caller aborts this call immediately). Non-connection
+    errors (timeouts, 5xx) don't count — they mean the host IS reachable."""
+    global _breaker_consec, _breaker_tripped
+    if not _is_conn_establish_error(exc):
+        return False
+    with _breaker_lock:
+        _breaker_consec += 1
+        if _breaker_consec >= _BREAKER_THRESHOLD and not _breaker_tripped:
+            _breaker_tripped = True
+            log.error(
+                "EODHD connectivity breaker TRIPPED — %d consecutive connection "
+                "failures (fd exhaustion / DNS / host down). Failing all calls "
+                "fast until connectivity returns. Tune via EODHD_BREAKER_THRESHOLD.",
+                _breaker_consec,
+            )
+        return _breaker_tripped
+
+def _breaker_reset() -> None:
+    """Any successful round-trip proves connectivity — clear the breaker."""
+    global _breaker_consec, _breaker_tripped
+    if _breaker_consec or _breaker_tripped:
+        with _breaker_lock:
+            if _breaker_tripped:
+                log.info("EODHD connectivity breaker RESET — connection restored.")
+            _breaker_consec = 0
+            _breaker_tripped = False
+
+def breaker_status() -> dict:
+    """Introspection for ops/diagnostics."""
+    return {"tripped": _breaker_tripped, "consecutive_failures": _breaker_consec,
+            "threshold": _BREAKER_THRESHOLD}
+
+
 # Per-process EODHD call counter — for budget audit + duplicate-scan detection
 _CALL_COUNTER = {"network": 0, "cache_hit": 0, "errors": 0}
 
@@ -658,6 +730,13 @@ def _request(
     url = f"{BASE_URL}/{endpoint.lstrip('/')}"
     last_err: Exception | None = None
 
+    # Connectivity breaker open → fail instantly (no socket, no retry) so a
+    # wholesale-failure scan finishes fast instead of grinding for ~90 min.
+    if _breaker_tripped:
+        raise EODHDConnectivityError(
+            f"EODHD connectivity breaker open ({_breaker_consec} consecutive "
+            f"connection failures) — skipping {endpoint}")
+
     for attempt in range(max_retries):
         try:
             _limiter.acquire()
@@ -665,6 +744,7 @@ def _request(
             _bump_endpoint(endpoint, "network")
             _bump_quota_count(_endpoint_cost(endpoint))  # weighted billed-unit count (never raises)
             resp = _session.get(url, params=full_params, timeout=timeout)
+            _breaker_reset()  # got an HTTP response → connectivity is fine, clear the breaker
 
             # 200: success
             if resp.status_code == 200:
@@ -709,6 +789,12 @@ def _request(
 
         except requests.RequestException as e:
             last_err = e
+            # Connectivity breaker: count back-to-back connection-establishment
+            # failures. Once tripped, abort this call immediately (skip remaining
+            # retries) and let the open breaker fast-fail every subsequent call.
+            if _breaker_record_failure(e):
+                raise EODHDConnectivityError(
+                    f"EODHD connectivity breaker tripped on {endpoint}: {e}") from e
             delay = base_delay * (2 ** attempt)
             log.warning(
                 f"EODHD network error on {endpoint} "

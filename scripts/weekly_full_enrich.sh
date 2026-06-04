@@ -23,8 +23,12 @@ cd "$ROOT" || exit 1
 echo "==================================================" >> "$LOG"
 echo "WEEKLY full enrich (Saturday evening) — $(date)" >> "$LOG"
 
-# launchd inherits a low fd limit; the full-universe deep enrich opens many sockets.
-ulimit -n 10240 2>/dev/null || ulimit -Sn 10240 2>/dev/null || true
+# launchd inherits a ~256 fd limit; the full-universe deep enrich opens far more
+# sockets/files than that and exhausts it mid-run — the symptom is getaddrinfo
+# failures ("nodename nor servname" / "Too many open files") even though the
+# network is fine. Match run_daily_scan.sh: raise to 200000, well under this
+# host's kernel cap (kern.maxfilesperproc = 245760). Cascade down if rejected.
+ulimit -n 200000 2>/dev/null || ulimit -n 65536 2>/dev/null || ulimit -n 10240 2>/dev/null || ulimit -Sn 10240 2>/dev/null || true
 
 # Clear an orphaned scan lock if no live scan holds it.
 if [ -f /tmp/swing_trade_scan.lock ] && ! pgrep -f "swing_trade.py" >/dev/null 2>&1; then
