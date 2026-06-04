@@ -9715,6 +9715,50 @@ async def smc_matrix(ticker: str):
         return {"error": str(e)}
 
 
+# -- Pattern detectors (real bars) — BullVeda Patterns lens -------------------
+# One dispatcher for every theory (Wyckoff, Elliott, Fibonacci, …). Each engine
+# lives in engines/<name>.py and is auto-discovered by pattern_engines. The
+# SWING/POSITION/INVEST toggle drives the bar timeframe (daily/weekly/monthly).
+_PATTERN_CACHE: dict = {}
+_PATTERN_TTL = 6 * 3600  # 6h — daily/weekly/monthly structure is stable intraday
+
+@app.get("/api/pattern/{engine}/{ticker}")
+async def pattern_api(engine: str, ticker: str, mode: str = "SWING"):
+    """Real per-theory pattern read at the timeframe implied by ``mode``.
+    e.g. /api/pattern/wyckoff/AAPL?mode=POSITION → weekly Wyckoff schematic."""
+    import time as _t
+    engine = engine.lower().strip()
+    ticker = ticker.upper().strip()
+    mode = (mode or "SWING").upper().strip()
+    key = f"{engine}|{ticker}|{mode}"
+    now = _t.time()
+    hit = _PATTERN_CACHE.get(key)
+    if hit and (now - hit[0]) < _PATTERN_TTL:
+        return hit[1]
+    try:
+        import pattern_engines
+        out = pattern_engines.detect(engine, ticker, mode)
+    except Exception as e:
+        return {"ticker": ticker, "engine": engine, "ok": False, "source": "real",
+                "message": f"dispatch error: {e}"}
+    _PATTERN_CACHE[key] = (now, out)
+    return out
+
+@app.get("/api/patterns/engines")
+async def pattern_engines_list():
+    """Discoverable engine roster (name → label) for the Patterns lens."""
+    try:
+        import pattern_engines
+        return {"engines": pattern_engines.labels()}
+    except Exception as e:
+        return {"engines": {}, "error": str(e)}
+
+@app.get("/api/wyckoff/{ticker}")
+async def wyckoff_api(ticker: str, mode: str = "SWING"):
+    """Back-compat alias → the pattern dispatcher (engine=wyckoff)."""
+    return await pattern_api("wyckoff", ticker, mode)
+
+
 # -- Movers — REMOVED 2026-04-25 (Schwab decommissioned) --
 # Could be replaced with EODHD screener API call for sorted-by-change list.
 @app.get("/api/schwab/movers")

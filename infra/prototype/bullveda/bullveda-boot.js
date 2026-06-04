@@ -44,6 +44,32 @@
     });
   };
 
+  // ── Pattern engines (real, per-ticker, mode-aware) — Patterns lens ──
+  // Generic cached fetch of /api/pattern/{engine}/{sym}?mode=. The React hook
+  // (usePatternModel in patterns-core) reads the cache synchronously and falls
+  // back to each theory's illustrative fixture until the real payload resolves
+  // (and when the server is absent, e.g. the standalone dev showcase). Cache key
+  // is engine|sym|MODE so SWING/POSITION/INVEST each cache independently.
+  BV.patternCache = {};
+  BV.fetchPattern = function (engine, sym, mode) {
+    engine = (engine || "").toLowerCase();
+    sym = (sym || "").toUpperCase();
+    mode = (mode || "SWING").toUpperCase();
+    if (!engine || !sym) return Promise.resolve(null);
+    var key = engine + "|" + sym + "|" + mode;
+    if (BV.patternCache[key]) return Promise.resolve(BV.patternCache[key]);
+    return BV.get("/api/pattern/" + encodeURIComponent(engine) + "/" + encodeURIComponent(sym) + "?mode=" + encodeURIComponent(mode))
+      .then(function (d) { BV.patternCache[key] = d; return d; })
+      .catch(function () { return null; });
+  };
+  BV.patternCached = function (engine, sym, mode) {
+    var key = (engine || "").toLowerCase() + "|" + (sym || "").toUpperCase() + "|" + (mode || "SWING").toUpperCase();
+    return BV.patternCache[key] || null;
+  };
+  // back-compat (Wyckoff-only callers)
+  BV.wyckCache = BV.patternCache;
+  BV.fetchWyckoff = function (sym, mode) { return BV.fetchPattern("wyckoff", sym, mode); };
+
   // ── sector normaliser: real GICS sector → prototype short bucket ──
   var SECMAP = {
     "Technology": "Tech", "Information Technology": "Tech",

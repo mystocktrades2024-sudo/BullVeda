@@ -42,7 +42,7 @@ function LensPatternsV2({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
   const theCall = {
     ensemble: <span className="mono">Weighted composite <b className="up">{CE_COMPOSITE}/100</b> (≥ {CE_THRESHOLD}) · MTF consensus <b className="up">{CE_CONSENSUS}</b> · P(success) <b className="up">0.84</b>. Context → structure → projection align; TD warns of exhaustion near <b className="warn">$214–216</b>. Trigger above <b className="copper">$213.40</b>.</span>,
     mlforecast: <span className="mono">Meta-model over all 7 theories → <b className="up">BUY bias</b>, P(up) high when 5+ theories stack. Cross-checked against the 3-head AI ensemble; size by the confidence band, not the point estimate.</span>,
-    wyckoff: <span className="mono">Composite operator is <b className="copper">accumulating</b> — Phase D after a confirmed Spring + SOS. Mark-up on a close &gt; <b className="copper">$213.40</b>; P&amp;F count projects <b className="up">$221 → $237</b>. Invalid below <b className="dn">$187.60</b>.</span>,
+    wyckoff: window.WyckoffReadLine ? <WyckoffReadLine ticker={tk} mode={mode} /> : <span className="mono">Composite operator is <b className="copper">accumulating</b> — Phase D after a confirmed Spring + SOS. Mark-up on a close &gt; <b className="copper">$213.40</b>; P&amp;F count projects <b className="up">$221 → $237</b>. Invalid below <b className="dn">$187.60</b>.</span>,
     elliott: <span className="mono">Impulse from $178; in <b className="violet">Wave 3 of 5</b> testing the 1.618× extension at <b className="up">$214.6</b>. W5 objective <b className="up">$221–224</b>. Count voids on a close &lt; <b className="dn">$184.90</b>.</span>,
     fibonacci: <span className="mono">Major swing 178→214. Support <b className="warn">golden pocket $190–192</b> stacks .618 + Wyckoff ST + Gartley B (3-hit). Upside <b className="up">cluster $223–225</b> = 1.272 ext + Elliott W5 + P&amp;F. Void below $178.</span>,
     volprofile: <span className="mono">Auction is <b className="up">accepting above VAH $209</b> with POC fair value at <b className="cy">$204</b>. Thin LVN at 211–212 clears the path to <b className="up">$218 → $224</b>. Rotation back below VAL <b className="dn">$199</b> shifts value down.</span>,
@@ -65,21 +65,21 @@ function LensPatternsV2({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
         <DirSwitch dir={dir} onDir={setDir} />
       </div>
 
-      {tab === "ensemble" && <ConfluenceView ticker={tk} dir={dir} onTab={setTab} />}
-      {tab === "mlforecast" && <MLForecastView ticker={tk} dir={dir} />}
-      {tab === "wyckoff" && <WyckoffView ticker={tk} dir={dir} />}
-      {tab === "elliott" && <ElliottView ticker={tk} dir={dir} />}
-      {tab === "fibonacci" && <FibonacciView ticker={tk} dir={dir} />}
-      {tab === "volprofile" && <VolumeProfileView ticker={tk} dir={dir} />}
-      {tab === "ichimoku" && <IchimokuView ticker={tk} dir={dir} />}
-      {tab === "td" && <TDSequentialView ticker={tk} dir={dir} />}
-      {tab === "classical" && <ClassicalView ticker={tk} dir={dir} />}
-      {tab === "harmonic" && <HarmonicView ticker={tk} dir={dir} />}
-      {tab === "wolfe" && <WolfeView ticker={tk} dir={dir} />}
-      {tab === "candles" && <CandlestickView ticker={tk} dir={dir} />}
-      {tab === "altcharts" && <AltChartsView ticker={tk} dir={dir} />}
-      {tab === "gann" && <GannView ticker={tk} dir={dir} />}
-      {tab === "montecarlo" && <MonteCarloView ticker={tk} dir={dir} />}
+      {tab === "ensemble" && <ConfluenceView ticker={tk} dir={dir} mode={mode} onTab={setTab} />}
+      {tab === "mlforecast" && <MLForecastView ticker={tk} dir={dir} mode={mode} />}
+      {tab === "wyckoff" && <WyckoffView ticker={tk} dir={dir} mode={mode} />}
+      {tab === "elliott" && <ElliottView ticker={tk} dir={dir} mode={mode} />}
+      {tab === "fibonacci" && <FibonacciView ticker={tk} dir={dir} mode={mode} />}
+      {tab === "volprofile" && <VolumeProfileView ticker={tk} dir={dir} mode={mode} />}
+      {tab === "ichimoku" && <IchimokuView ticker={tk} dir={dir} mode={mode} />}
+      {tab === "td" && <TDSequentialView ticker={tk} dir={dir} mode={mode} />}
+      {tab === "classical" && <ClassicalView ticker={tk} dir={dir} mode={mode} />}
+      {tab === "harmonic" && <HarmonicView ticker={tk} dir={dir} mode={mode} />}
+      {tab === "wolfe" && <WolfeView ticker={tk} dir={dir} mode={mode} />}
+      {tab === "candles" && <CandlestickView ticker={tk} dir={dir} mode={mode} />}
+      {tab === "altcharts" && <AltChartsView ticker={tk} dir={dir} mode={mode} />}
+      {tab === "gann" && <GannView ticker={tk} dir={dir} mode={mode} />}
+      {tab === "montecarlo" && <MonteCarloView ticker={tk} dir={dir} mode={mode} />}
 
       <div className="lens-call">
         <span className="label-cap">The Read · {PV_SUBTABS.find(s => s.id === tab).label}</span>

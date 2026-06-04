@@ -310,6 +310,47 @@ function CandleChart({ bars, height = 300, bands = [], hlines = [], markers = []
   );
 }
 
+// ── shared real-data fetch primitive (mode-aware) ───────────────
+// Every pattern view calls this with its engine name + the active SWING/
+// POSITION/INVEST mode. Returns { real, state, sym, mode } where state is
+// "loading" (fetch in flight), "loaded" (server responded — `real.ok`/payload
+// present), or "mock" (no server — standalone showcase). Each view decides
+// whether `real` is *usable* and otherwise renders its illustrative fixture.
+function usePatternModel(engine, ticker, mode) {
+  const sym = (ticker && ticker.symbol) || "ARGN";
+  const md = (mode || "SWING").toUpperCase();
+  const key = engine + "|" + sym + "|" + md;
+  const read = () => {
+    try { return (window.__BV && window.__BV.patternCached && window.__BV.patternCached(engine, sym, md)) || null; }
+    catch (e) { return null; }
+  };
+  const [real, setReal] = usePC(read);
+  useEffPC(() => {
+    let alive = true;
+    const cached = read();
+    if (cached) setReal(cached);
+    else setReal(null);
+    try {
+      if (window.__BV && window.__BV.fetchPattern) {
+        window.__BV.fetchPattern(engine, sym, md).then(d => { if (alive) setReal(d); });
+      }
+    } catch (e) {}
+    return () => { alive = false; };
+  }, [key]);
+  let state = "mock";
+  if (real && typeof real === "object" && ("ok" in real || real.bars || real.events)) state = "loaded";
+  else if (real === null && window.__BV && window.__BV.fetchPattern) state = "loading";
+  return { real, state, sym, mode: md };
+}
+
+// generic source badge usable by any theory
+function PatternSrcBadge({ state, usable, sym, tier, tf }) {
+  if (usable) return <span className="wy-src wy-src--real mono" title={`computed from live ${tf || ""} bars · ${tier || "eodhd"}`}>● REAL · {sym || ""}{tf ? " · " + tf : ""}</span>;
+  if (state === "loading") return <span className="wy-src wy-src--load mono">◌ loading live data…</span>;
+  if (state === "loaded") return <span className="wy-src wy-src--none mono" title="real feed returned no usable structure for this timeframe">— no structure · illustrative</span>;
+  return <span className="wy-src wy-src--mock mono" title="standalone showcase — connect to :7432 for live data">◑ illustrative</span>;
+}
+
 // ── confidence bar ──────────────────────────────────────────────
 function ConfBar({ value, tone = "copper", width = 64 }) {
   const pct = Math.round(value * 100);
@@ -386,4 +427,5 @@ function MiniTable({ cols, rows, dense }) {
 Object.assign(window, {
   mulberry32, seedFromSym, buildSeries, CandleChart, ConfBar, useWidth,
   usePatternsDir, DirSwitch, SubTabs, MiniTable, PV_DIRS,
+  usePatternModel, PatternSrcBadge,
 });
