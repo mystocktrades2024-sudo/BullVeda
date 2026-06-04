@@ -1790,6 +1790,16 @@ def run_daily_scan(force_fresh: bool = False):
     # for the deep tier. Light-tier tickers can still produce a verdict from
     # OHLCV + cheap signals but won't get BUY upgrades (only WATCH at best).
     _tier1_n   = int(cfg.get("performance", {}).get("deep_enrichment_top_n", 200))
+    # DEEP_ENRICHMENT_OVERRIDE: lift the deep (options/UOA/gamma/news) tier for the
+    # weekly Saturday-evening full refresh — deep-enrich the WHOLE universe, not just
+    # the top-N. Set by scripts/weekly_full_enrich.sh. (2026-06-03)
+    _deep_override = os.environ.get("DEEP_ENRICHMENT_OVERRIDE")
+    if _deep_override:
+        try:
+            _tier1_n = max(_tier1_n, int(_deep_override))
+            log.info(f"  DEEP_ENRICHMENT_OVERRIDE={_tier1_n} → deep-enrich tier lifted (weekly full refresh)")
+        except Exception:
+            pass
     # 2026-05-28: LIGHT intraday mode. The heavy deep-enrich runs ONCE at 06:00
     # (warms the 7-day fundamentals cache + does full options/UOA on top 1,500).
     # The 5 intraday scans (07:00/11:00/13:30/15:00) run with SCAN_MODE=light:
