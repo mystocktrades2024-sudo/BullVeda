@@ -16,6 +16,10 @@ START_EPOCH=$(date +%s)
 LOG=/tmp/weekly-diagnostics.log
 echo "==== weekly diagnostics $DATE ====" >> "$LOG"
 
+# capture EODHD billed-unit counter at start (for the run-window delta) + post START alert
+EODHD_START=$(python3 -c "import json;print(json.load(open('cache/eodhd_quota.json')).get('count',0))" 2>/dev/null || echo 0)
+python3 scripts/_diag_report.py start 2>>"$LOG" >>"$LOG" || true
+
 # 1. Refresh signal_log backfill (alpha_vs_spy / exit_reason / regime4)
 python3 -c "
 import logging
@@ -61,12 +65,8 @@ LOG_DIR="cache/logs"
 mkdir -p "$LOG_DIR"
 python3 momentum_snapshot.py 2>&1 | tee -a "$LOG_DIR/momentum_snapshot_weekly.log" >> "$LOG"
 
-# 10. Post completion status to Slack (always — success or failure)
-python3 -c "
-import time
-from lib.autorun_reporter import report
-report('weekly-diagnostics', 'success',
-       summary='Weekly diagnostics complete: regime_sharpe_decomp + loss_streak + sharpe_screen + setup_trend + KPI + alerts run.',
-       duration_sec=$(( $(date +%s) - START_EPOCH )))" 2>>"$LOG"
+# 10. Post FINISH status to Slack — # EODHD calls (run-window delta), run time,
+#     and which diagnostic snapshots were updated vs still pending.
+python3 scripts/_diag_report.py finish "$START_EPOCH" "$EODHD_START" 2>>"$LOG" >>"$LOG" || true
 
 echo "==== done $DATE ====" >> "$LOG"
