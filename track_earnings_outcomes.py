@@ -79,7 +79,18 @@ def main(lookback_days: int = 5) -> int:
 
     log.info(f"Polling EODHD earnings calendar {start} → {today} ({lookback_days}d back)")
     import eodhd_client as e
-    raw = e.earnings_calendar(from_date=str(start), to_date=str(today))
+    try:
+        raw = e.earnings_calendar(from_date=str(start), to_date=str(today))
+    except e.EODHDError as _qe:
+        # Quota soft-limit defer (the guard's intended behavior) or a persistent EODHD
+        # error. This is a NON-ESSENTIAL daily back-fill; skip cleanly (exit 0) instead
+        # of crashing the launchd job. The 5-day lookback window recaptures any missed
+        # report dates on the next run. (Fix 2026-06-04: was exiting 1 on quota-defer.)
+        log.warning(f"earnings_calendar deferred/failed — skipping this run (non-fatal): {_qe}")
+        return 0
+    except Exception as _ne:
+        log.warning(f"earnings_calendar network/transient error — skipping this run (non-fatal): {_ne}")
+        return 0
     if not isinstance(raw, dict):
         log.error("earnings_calendar returned non-dict")
         return 1
