@@ -16,7 +16,18 @@ LOG_FILE="$LOG_DIR/scan_$(date +%Y-%m-%d).log"
 # Ensure log directory exists
 mkdir -p "$LOG_DIR"
 
+# Raise the file-descriptor soft limit (2026-06-04). launchd jobs inherit ~256 fds;
+# the HEAVY morning scan deep-enriches 1,500 tickers with 16 concurrent workers, which
+# opens far more sockets/files than that and exhausts the limit mid-enrichment. The
+# symptom is getaddrinfo failures — "[Errno 8] nodename nor servname provided" / "Too
+# many open files" — even though the network is fine (the process just can't open new
+# sockets). This also starves build_audit_ledger.py (runs below) so it can't fetch
+# forward-return horizons and writes a None-filled ledger (the 2026-06-03 15:01 wipe).
+# The nightly full-enrich already does this; the daily scan was missing it.
+ulimit -n 10240 2>/dev/null || ulimit -Sn 10240 2>/dev/null || true
+
 echo "======================================" >> "$LOG_FILE"
+echo "[fd limit: $(ulimit -n)]" >> "$LOG_FILE"
 echo "SwingTrade Daily Scan — $(date)" >> "$LOG_FILE"
 echo "======================================" >> "$LOG_FILE"
 
@@ -123,9 +134,9 @@ if [ $EXIT_CODE -eq 0 ]; then
     # ML inference runs only 4x/day (2026-06-03 · user) — pre-market / 2x session /
     # post-market — NOT every 30-min scan. Predictions are stable enough intraday;
     # 4 anchors keep them fresh without 16x compute. Anchors: <06:15 (pre/heavy),
-    # 09:30, 11:30, 17:00 (post-market EOD refresh). ml_edge_predictions.json persists between.
+    # 09:30, 11:30, 13:30 (post-close). ml_edge_predictions.json persists between.
     ML_EXIT=0
-    if [ "$_HHMM" -lt 615 ] || [ "$_HHMM" -eq 930 ] || [ "$_HHMM" -eq 1130 ] || [ "$_HHMM" -eq 1700 ]; then
+    if [ "$_HHMM" -lt 615 ] || [ "$_HHMM" -eq 930 ] || [ "$_HHMM" -eq 1130 ] || [ "$_HHMM" -eq 1330 ]; then
         "$PYTHON" -m ml.run_ml_edge >> "$LOG_FILE" 2>&1
         ML_EXIT=$?
     else
