@@ -24,7 +24,10 @@ mkdir -p "$LOG_DIR"
 # sockets). This also starves build_audit_ledger.py (runs below) so it can't fetch
 # forward-return horizons and writes a None-filled ledger (the 2026-06-03 15:01 wipe).
 # The nightly full-enrich already does this; the daily scan was missing it.
-ulimit -n 10240 2>/dev/null || ulimit -Sn 10240 2>/dev/null || true
+# Raise to 200000 — well under this host's kernel per-process cap (kern.maxfilesperproc
+# = 245760). Cascade down if a host rejects it. Far more headroom than any scan needs;
+# eliminates fd exhaustion as a failure mode entirely.
+ulimit -n 200000 2>/dev/null || ulimit -n 65536 2>/dev/null || ulimit -n 10240 2>/dev/null || ulimit -Sn 10240 2>/dev/null || true
 
 echo "======================================" >> "$LOG_FILE"
 echo "[fd limit: $(ulimit -n)]" >> "$LOG_FILE"
