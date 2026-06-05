@@ -162,6 +162,9 @@ if [ $EXIT_CODE -eq 0 ]; then
         set +e
         "$PYTHON" scripts/build_smc_scan.py >> "$LOG_FILE" 2>&1 || \
             echo "⚠ build_smc_scan failed (SMC Slack section will be empty)" >> "$LOG_FILE"
+        # Dedicated SMC-only Slack ping (morning, after the fresh SMC scan)
+        "$PYTHON" scripts/slack_smc_ping.py >> "$LOG_FILE" 2>&1 || \
+            echo "⚠ slack_smc_ping failed" >> "$LOG_FILE"
         set -e
     fi
 
