@@ -143,6 +143,16 @@ function SectionNav({ lensId }) {
   );
 }
 
+// real wall-clock in US Eastern (market tz), ticking — replaces the old frozen 14:23:08
+function LiveClock() {
+  const [t, setT] = React.useState(() => Date.now());
+  React.useEffect(() => { const id = setInterval(() => setT(Date.now()), 1000); return () => clearInterval(id); }, []);
+  let s;
+  try { s = new Date(t).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour12: false }); }
+  catch (e) { s = new Date(t).toLocaleTimeString("en-US", { hour12: false }); }
+  return <>{s} ET</>;
+}
+
 function DetailHeader({ ticker, mode, sizeCat, focusMode, onToggleFocus }) {
   const onWatch = useWatchlist(ticker.symbol);
   const addWatch = () => window.WatchStore && window.WatchStore.toggle({
@@ -193,13 +203,14 @@ function DetailHeader({ ticker, mode, sizeCat, focusMode, onToggleFocus }) {
           </div>
         )}
         <div className="dp-quote-extra mono dim">
-          {ticker.vol != null && <span>VOL <b className="dim2">{(ticker.vol / 1e6).toFixed(2)}M</b></span>}
-          {ticker.avgVol != null && <span>· AVG <b className="dim2">{(ticker.avgVol / 1e6).toFixed(2)}M</b></span>}
+          {ticker.vol != null && <span>VOL <b className="dim2">{(ticker.vol / 1e6).toFixed(2)}M</b> · </span>}
+          {ticker.rvol != null && <span>RVOL <b className="dim2">{ticker.rvol.toFixed(2)}×</b> · </span>}
+          {ticker.avgVol != null && <span>AVG <b className="dim2">{(ticker.avgVol / 1e6).toFixed(2)}M</b></span>}
           <span>· RSI <b className="dim2">{ticker.rsi != null ? ticker.rsi.toFixed(1) : "—"}</b></span>
           <span>· β <b className="dim2">{ticker.beta != null ? ticker.beta.toFixed(2) : "—"}</b></span>
         </div>
         <div className="dp-hdr-spacer" />
-        <Pill tone="gn" small dot>LIVE · 14:23:08 ET</Pill>
+        <Pill tone="gn" small dot>LIVE · <LiveClock /></Pill>
         {ticker.score != null
           ? <Pill tone="copper" small>{secBias(ticker.verdict)} · {ticker.score}</Pill>
           : ticker._offUniverse ? <Pill tone="slate" small>off-universe · not scanned</Pill> : null}

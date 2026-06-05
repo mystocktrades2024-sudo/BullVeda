@@ -242,7 +242,7 @@
       mcap: num(H.MarketCapitalization) || (sr.mcap || 0) * 1e9,
       price: sr.price, chg: sr.chg, chgAbs: +(sr.price * (sr.chg / 100)).toFixed(2),
       prev: +(sr.price / (1 + sr.chg / 100)).toFixed(2),
-      vol: num(r.avg_volume), avgVol: num(r.avg_volume),
+      vol: num(r.volume), avgVol: num(r.avg_volume), rvol: num(r.rvol),   // current-day vol often absent → null (header guards it)
       rsi: num(r.rsi),
       beta: num(H.Beta) != null ? +num(H.Beta).toFixed(2) : (sr.beta != null ? sr.beta : 1.0),
       shortFloat: num(S.ShortPercentFloat) != null ? +(S.ShortPercentFloat * 100).toFixed(1) : (sr.si != null ? sr.si : 0),

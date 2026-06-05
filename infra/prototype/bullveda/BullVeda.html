@@ -10817,7 +10817,7 @@ body {
       mcap: num(H.MarketCapitalization) || (sr.mcap || 0) * 1e9,
       price: sr.price, chg: sr.chg, chgAbs: +(sr.price * (sr.chg / 100)).toFixed(2),
       prev: +(sr.price / (1 + sr.chg / 100)).toFixed(2),
-      vol: num(r.avg_volume), avgVol: num(r.avg_volume),
+      vol: num(r.volume), avgVol: num(r.avg_volume), rvol: num(r.rvol),   // current-day vol often absent → null (header guards it)
       rsi: num(r.rsi),
       beta: num(H.Beta) != null ? +num(H.Beta).toFixed(2) : (sr.beta != null ? sr.beta : 1.0),
       shortFloat: num(S.ShortPercentFloat) != null ? +(S.ShortPercentFloat * 100).toFixed(1) : (sr.si != null ? sr.si : 0),
@@ -13062,6 +13062,20 @@ function SectionNav({ lensId }) {
     /* @__PURE__ */ React.createElement("span", { className: "sec-nav-l" }, it.label)
   ))));
 }
+function LiveClock() {
+  const [t, setT] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    const id = setInterval(() => setT(Date.now()), 1e3);
+    return () => clearInterval(id);
+  }, []);
+  let s;
+  try {
+    s = new Date(t).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour12: false });
+  } catch (e) {
+    s = new Date(t).toLocaleTimeString("en-US", { hour12: false });
+  }
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, s, " ET");
+}
 function DetailHeader({ ticker, mode, sizeCat, focusMode, onToggleFocus }) {
   const onWatch = useWatchlist(ticker.symbol);
   const addWatch = () => window.WatchStore && window.WatchStore.toggle({
@@ -13090,7 +13104,7 @@ function DetailHeader({ ticker, mode, sizeCat, focusMode, onToggleFocus }) {
       title: focusMode ? "Exit focus mode (show scan list)" : "Focus mode (collapse scan list)"
     },
     focusMode ? "\u25C0 Exit Focus" : "\u25C9 Focus"
-  ))), /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-row dp-hdr-quote" }, /* @__PURE__ */ React.createElement("div", { className: "dp-quote-price mono" }, /* @__PURE__ */ React.createElement("b", null, ticker.price != null ? "$" + ticker.price.toFixed(2) : ticker._loading ? "\u2026" : "\u2014")), ticker.price != null && ticker.chgAbs != null && /* @__PURE__ */ React.createElement("div", { className: `dp-quote-chg mono ${ticker.chg >= 0 ? "up" : "dn"}` }, ticker.chg >= 0 ? "+" : "", ticker.chgAbs.toFixed(2), " (", ticker.chg.toFixed(2), "%)"), /* @__PURE__ */ React.createElement("div", { className: "dp-quote-extra mono dim" }, ticker.vol != null && /* @__PURE__ */ React.createElement("span", null, "VOL ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, (ticker.vol / 1e6).toFixed(2), "M")), ticker.avgVol != null && /* @__PURE__ */ React.createElement("span", null, "\xB7 AVG ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, (ticker.avgVol / 1e6).toFixed(2), "M")), /* @__PURE__ */ React.createElement("span", null, "\xB7 RSI ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, ticker.rsi != null ? ticker.rsi.toFixed(1) : "\u2014")), /* @__PURE__ */ React.createElement("span", null, "\xB7 \u03B2 ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, ticker.beta != null ? ticker.beta.toFixed(2) : "\u2014"))), /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-spacer" }), /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true, dot: true }, "LIVE \xB7 14:23:08 ET"), ticker.score != null ? /* @__PURE__ */ React.createElement(Pill, { tone: "copper", small: true }, secBias(ticker.verdict), " \xB7 ", ticker.score) : ticker._offUniverse ? /* @__PURE__ */ React.createElement(Pill, { tone: "slate", small: true }, "off-universe \xB7 not scanned") : null));
+  ))), /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-row dp-hdr-quote" }, /* @__PURE__ */ React.createElement("div", { className: "dp-quote-price mono" }, /* @__PURE__ */ React.createElement("b", null, ticker.price != null ? "$" + ticker.price.toFixed(2) : ticker._loading ? "\u2026" : "\u2014")), ticker.price != null && ticker.chgAbs != null && /* @__PURE__ */ React.createElement("div", { className: `dp-quote-chg mono ${ticker.chg >= 0 ? "up" : "dn"}` }, ticker.chg >= 0 ? "+" : "", ticker.chgAbs.toFixed(2), " (", ticker.chg.toFixed(2), "%)"), /* @__PURE__ */ React.createElement("div", { className: "dp-quote-extra mono dim" }, ticker.vol != null && /* @__PURE__ */ React.createElement("span", null, "VOL ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, (ticker.vol / 1e6).toFixed(2), "M"), " \xB7 "), ticker.rvol != null && /* @__PURE__ */ React.createElement("span", null, "RVOL ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, ticker.rvol.toFixed(2), "\xD7"), " \xB7 "), ticker.avgVol != null && /* @__PURE__ */ React.createElement("span", null, "AVG ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, (ticker.avgVol / 1e6).toFixed(2), "M")), /* @__PURE__ */ React.createElement("span", null, "\xB7 RSI ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, ticker.rsi != null ? ticker.rsi.toFixed(1) : "\u2014")), /* @__PURE__ */ React.createElement("span", null, "\xB7 \u03B2 ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, ticker.beta != null ? ticker.beta.toFixed(2) : "\u2014"))), /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-spacer" }), /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true, dot: true }, "LIVE \xB7 ", /* @__PURE__ */ React.createElement(LiveClock, null)), ticker.score != null ? /* @__PURE__ */ React.createElement(Pill, { tone: "copper", small: true }, secBias(ticker.verdict), " \xB7 ", ticker.score) : ticker._offUniverse ? /* @__PURE__ */ React.createElement(Pill, { tone: "slate", small: true }, "off-universe \xB7 not scanned") : null));
 }
 function DetailTabs({ lensId, onLensId, sizeCat, tier = 4, variant = "wrap" }) {
   return /* @__PURE__ */ React.createElement("div", { className: `dp-tabs dp-tabs--${variant}` }, /* @__PURE__ */ React.createElement("div", { className: "dp-tabs-scroll" }, LENSES.map((l, i) => {
