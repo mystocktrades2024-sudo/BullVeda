@@ -1655,6 +1655,11 @@ body { overflow: hidden; }
 .iv-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
 .iv-bands-read { margin-left: auto; }
 
+/* §1 valuation football field */
+.iv-ff { background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-2); padding: 8px 6px 2px; }
+.iv-ff svg { display: block; width: 100%; }
+.rdcf-head { background: color-mix(in oklab, var(--violet) 6%, transparent); border: 1px solid color-mix(in oklab, var(--violet) 22%, transparent); border-radius: var(--r-2); padding: 9px 11px; font-size: 11.5px; line-height: 1.55; display: flex; flex-direction: column; gap: 2px; }
+
 /* §1 margin-of-safety ladder */
 .iv-mos { margin-top: 14px; }
 .iv-mos-hd { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
@@ -5353,29 +5358,36 @@ body {
   display: flex; flex-direction: column; gap: 5px;
 }
 .dg-stage.is-warn { border-top-color: var(--amb); background: color-mix(in oklab, var(--amb) 5%, var(--glass-bg-1)); }
+.dg-stage.is-fail { border-top-color: var(--rd); background: color-mix(in oklab, var(--rd) 6%, var(--glass-bg-1)); }
 .dg-stage-hdr { display: flex; justify-content: space-between; align-items: baseline; }
 .dg-stage-l { font-size: 10px; letter-spacing: 0.18em; color: var(--ink-1); }
 .dg-stage-c { font-size: 11px; font-weight: 500; }
 .dg-gate {
-  display: grid; grid-template-columns: 16px 1fr; gap: 6px;
+  display: grid; grid-template-columns: 16px 1fr auto; gap: 6px;
   align-items: baseline;
   padding: 4px 6px;
   border-radius: var(--r-2);
   font-size: 10.5px;
 }
 .dg-gate.is-pass { background: color-mix(in oklab, var(--gn) 7%, transparent); }
-.dg-gate.is-fail { background: color-mix(in oklab, var(--amb) 7%, transparent); }
+.dg-gate.is-warn { background: color-mix(in oklab, var(--amb) 8%, transparent); }
+.dg-gate.is-fail { background: color-mix(in oklab, var(--rd) 9%, transparent); }
+.dg-gate.is-na   { background: color-mix(in oklab, var(--ink-3) 6%, transparent); opacity: 0.72; }
 .dg-mark { font-weight: 600; }
 .dg-gate.is-pass .dg-mark { color: var(--gn); }
-.dg-gate.is-fail .dg-mark { color: var(--amb); }
+.dg-gate.is-warn .dg-mark { color: var(--amb); }
+.dg-gate.is-fail .dg-mark { color: var(--rd); }
+.dg-gate.is-na   .dg-mark { color: var(--ink-3); }
 .dg-lbl { font-size: 10.5px; line-height: 1.3; }
+.dg-det { font-size: 9.5px; text-align: right; white-space: nowrap; }
 .dg-foot {
   grid-column: 1 / -1;
   padding: 8px 12px;
-  background: var(--gn-bg);
-  border: 1px solid color-mix(in oklab, var(--gn) 30%, transparent);
+  background: var(--glass-bg-1);
+  border: 1px solid var(--glass-line);
   border-radius: var(--r-2);
   font-size: 11px;
+  line-height: 1.45;
 }
 
 /* Playbook tree */
@@ -13841,6 +13853,140 @@ window.LensTechnicals = LensTechnicals;
 window.PatternMatrix = PatternMatrix;
 </script>
 <script>/* src/lens-investment.jsx */
+function _P(v) {
+  const n = typeof v === "string" ? parseFloat(v) : v;
+  return typeof n === "number" && isFinite(n) ? n : null;
+}
+function _money(v) {
+  if (v == null) return "\u2014";
+  const a = Math.abs(v);
+  if (a >= 1e9) return (v / 1e9).toFixed(2) + "B";
+  if (a >= 1e6) return (v / 1e6).toFixed(0) + "M";
+  if (a >= 1e3) return (v / 1e3).toFixed(0) + "K";
+  return v.toFixed(0);
+}
+function _pct(v, d = 1) {
+  return v == null ? "\u2014" : (v >= 0 ? "+" : "") + v.toFixed(d) + "%";
+}
+function usePeers(sym) {
+  const [d, setD] = React.useState(null);
+  React.useEffect(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.get || !sym) {
+      setD(null);
+      return;
+    }
+    let on = true;
+    BV.get("/api/peers/" + encodeURIComponent(sym)).then((j) => {
+      if (on) setD(j);
+    }).catch(() => {
+      if (on) setD(null);
+    });
+    return () => {
+      on = false;
+    };
+  }, [sym]);
+  return d;
+}
+function useInvData(ticker) {
+  return React.useMemo(() => {
+    const fund = ticker._fund || {};
+    const inc = fund.income_5y || ticker._income5y || [];
+    const cf = fund.cashflow_5y || ticker._cashflow5y || [];
+    const H = fund.highlights || {}, V = fund.valuation || {}, S = fund.shares || {};
+    const price = _P(ticker.price);
+    const sharesOut = _P(S.SharesOutstanding) || (_P(ticker.mcap) && price ? _P(ticker.mcap) / price : null);
+    const pe = _P(ticker.pe), fwdPe = _P(ticker.fwdPe), pb = _P(ticker.pb);
+    const eps = pe && pe > 0 && price ? price / pe : null;
+    const fwdEps = fwdPe && fwdPe > 0 && price ? price / fwdPe : null;
+    const bvps = pb && pb > 0 && price ? price / pb : null;
+    const fcf0 = cf.length ? _P(cf[0].freeCashFlow) : null;
+    const fcfPS = fcf0 != null && sharesOut ? fcf0 / sharesOut : null;
+    const cagr = (arr, key) => {
+      const vals = arr.map((r) => _P(r[key])).filter((v) => v != null);
+      if (vals.length < 2) return null;
+      const latest = vals[0], oldest = vals[vals.length - 1], yrs = vals.length - 1;
+      if (oldest <= 0 || latest <= 0) return null;
+      return Math.pow(latest / oldest, 1 / yrs) - 1;
+    };
+    return {
+      price,
+      sharesOut,
+      pe,
+      fwdPe,
+      pb,
+      eps,
+      fwdEps,
+      bvps,
+      fcf0,
+      fcfPS,
+      fcfCagr: cagr(cf, "freeCashFlow"),
+      revCagr: cagr(inc, "totalRevenue"),
+      ebitdaCagr: cagr(inc, "ebitda"),
+      niCagr: cagr(inc, "netIncome"),
+      inc,
+      cf,
+      H,
+      V,
+      S,
+      targetPrice: _P(ticker.targetPrice),
+      roe: _P(H.ReturnOnEquityTTM),
+      roa: _P(H.ReturnOnAssetsTTM),
+      opMargin: _P(H.OperatingMarginTTM),
+      profitMargin: _P(H.ProfitMargin),
+      revGrowthQ: _P(H.QuarterlyRevenueGrowthYOY),
+      divYield: _P(H.DividendYield),
+      hasFund: !!(inc.length || cf.length || H.MarketCapitalization)
+    };
+  }, [ticker.symbol, ticker.price, ticker._fund]);
+}
+function _dcfValue(fcfPS, g, w, tg) {
+  if (fcfPS == null || fcfPS <= 0 || w <= tg) return null;
+  let pv = 0, f = fcfPS;
+  for (let t = 1; t <= 10; t++) {
+    const gt = g + (tg - g) * ((t - 1) / 9);
+    f = f * (1 + gt);
+    pv += f / Math.pow(1 + w, t);
+  }
+  const terminal = f * (1 + tg) / (w - tg) / Math.pow(1 + w, 10);
+  return pv + terminal;
+}
+function _impliedGrowth(fcfPS, price, w, tg) {
+  if (fcfPS == null || fcfPS <= 0 || !price) return null;
+  let lo = -0.5, hi = 1;
+  for (let i = 0; i < 64; i++) {
+    const mid = (lo + hi) / 2;
+    const v = _dcfValue(fcfPS, mid, w, tg);
+    if (v == null) return null;
+    if (v < price) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+function fairValueMethods(d, peers) {
+  const out = [];
+  const med = peers && peers.medians || {};
+  const peerPE = _P(med.pe_ttm);
+  if (d.targetPrice) out.push({ key: "pt", m: "Analyst price target", sub: "consensus mean \xB7 EODHD", fair: d.targetPrice, w: 0.22, band: 0.08 });
+  if (peerPE && d.eps && d.eps > 0) out.push({ key: "peTrail", m: "Peer P/E \xB7 trailing EPS", sub: `cohort median ${peerPE.toFixed(1)}\xD7 \xB7 EPS $${d.eps.toFixed(2)}`, fair: peerPE * d.eps, w: 0.2, band: 0.1 });
+  if (peerPE && d.fwdEps && d.fwdEps > 0) out.push({ key: "peFwd", m: "Peer P/E \xB7 forward EPS", sub: `cohort median ${peerPE.toFixed(1)}\xD7 \xB7 fwd EPS $${d.fwdEps.toFixed(2)}`, fair: peerPE * d.fwdEps, w: 0.18, band: 0.1 });
+  if (d.eps && d.eps > 0 && d.bvps && d.bvps > 0) out.push({ key: "graham", m: "Graham number", sub: `\u221A(22.5\xB7EPS\xB7BVPS) \xB7 BVPS $${d.bvps.toFixed(2)}`, fair: Math.sqrt(22.5 * d.eps * d.bvps), w: 0.1, band: 0.05 });
+  if (d.fcfPS && d.fcfPS > 0) {
+    const g = Math.max(0.02, Math.min(0.18, d.fcfCagr != null ? d.fcfCagr : d.revCagr != null ? d.revCagr * 0.8 : 0.08));
+    const fv = _dcfValue(d.fcfPS, g, 0.09, 0.03);
+    if (fv) out.push({ key: "dcf", m: "Reverse-DCF \xB7 base case", sub: `FCF/sh $${d.fcfPS.toFixed(2)} \xB7 g ${(g * 100).toFixed(0)}%\u21923% \xB7 WACC 9%`, fair: fv, w: 0.3, band: 0.18, g });
+  }
+  const tw = out.reduce((s, x) => s + x.w, 0) || 1;
+  out.forEach((x) => {
+    x.wn = x.w / tw;
+    x.mos = (x.fair / d.price - 1) * 100;
+  });
+  const blended = out.length ? out.reduce((s, x) => s + x.fair * x.wn, 0) : null;
+  return { methods: out, blended, blendedMos: blended != null ? (blended / d.price - 1) * 100 : null };
+}
+function _tone(mos) {
+  return mos == null ? "ink" : mos >= 8 ? "gn" : mos >= -8 ? "amb" : "rd";
+}
 function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("iv-1");
   const s2 = useStateToggle("iv-2");
@@ -13849,293 +13995,328 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
   const s5 = useStateToggle("iv-5");
   const s6 = useStateToggle("iv-6");
   const s7 = useStateToggle("iv-7");
-  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--inv" }, /* @__PURE__ */ React.createElement(ValueHero, { ticker, mode }), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  const d = useInvData(ticker);
+  const peers = usePeers(ticker.symbol);
+  const fv = React.useMemo(() => fairValueMethods(d, peers), [d, peers]);
+  if (!d.hasFund && !ticker._loading) {
+    return /* @__PURE__ */ React.createElement("div", { className: "lens lens--inv" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad", style: { padding: "40px 18px", textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 8 } }, "Investment \xB7 Value"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 13 } }, "No fundamentals returned for ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, ticker.symbol), " \u2014 value lens needs EODHD financials (income / cash-flow / balance). It may be an ETF, ADR, or a name outside the fundamentals universe.")));
+  }
+  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--inv" }, /* @__PURE__ */ React.createElement(ValueHero, { ticker, mode, d, fv }), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 1,
-      title: "Price vs Intrinsic Value \xB7 5-Year",
-      sub: "price vs rolling bear / base / bull fair-value bands \xB7 the gap closes near tops, widens near bottoms",
+      title: "Fair Value \xB7 What It's Worth",
+      sub: "multiple-reversion anchor (peer P/E, Graham) + a reverse-DCF check \xB7 the spread is your bull/bear band",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "iv-1" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s1.value, source: "DCF + multiples \xB7 3-scenario \xB7 5y rolling" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "iv-split" }, /* @__PURE__ */ React.createElement("div", { className: "iv-split-main" }, /* @__PURE__ */ React.createElement(ValueBands5Y, { ticker })), /* @__PURE__ */ React.createElement("div", { className: "iv-split-side" }, /* @__PURE__ */ React.createElement(ValueScale, { ticker }), /* @__PURE__ */ React.createElement(MarginOfSafety, { ticker })))))), "      ", /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s1.value, source: "EODHD financials + /api/peers cohort" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(FootballField, { d, fv }), /* @__PURE__ */ React.createElement("div", { className: "iv-split", style: { marginTop: 14 } }, /* @__PURE__ */ React.createElement("div", { className: "iv-split-main" }, /* @__PURE__ */ React.createElement(MarginOfSafety, { d, fv })), /* @__PURE__ */ React.createElement("div", { className: "iv-split-side" }, /* @__PURE__ */ React.createElement(ValueScale, { d, fv }), /* @__PURE__ */ React.createElement(ReverseDcf, { d, fv })))))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 2,
       title: "Quality Scorecard",
-      sub: "business \xB7 balance-sheet \xB7 operator \xB7 trend",
+      sub: "returns on capital \xB7 balance-sheet \xB7 operator alignment \xB7 5y trend \u2014 all from filings",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "iv-2" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s2.value, source: "EODHD \xB7 Highlights + Fundamentals" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(QualityCard, null)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s2.value, source: "EODHD Highlights + Income/Cash-Flow 5y" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(QualityCard, { d, peers, ticker })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 3,
       title: "Peer Cohort",
-      sub: "6 closest specialty-materials peers \xB7 normalized",
+      sub: peers && peers.basis ? `${peers.medians && peers.medians.n || 0} closest names by market cap \xB7 same ${peers.basis}` : "same-industry cohort \xB7 normalized",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "iv-3" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s3.value, source: "cohort engine \xB7 same-GIC peers" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(PeerCohort, null)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s3.value, source: "data/fundamentals.db \xB7 same-GICS cohort" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(PeerCohort, { ticker, peers })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 4,
       title: "5-Year Statements",
-      sub: "revenue \xB7 GP \xB7 NI \xB7 FCF \xB7 buybacks \xB7 with sparklines",
+      sub: "revenue \xB7 gross profit \xB7 EBITDA \xB7 net income \xB7 FCF \xB7 buybacks \xB7 with real CAGR",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "iv-4" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s4.value, source: "EODHD \xB7 Financials_5y" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(Statements, null)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s4.value, source: "EODHD \xB7 Income_Statement + Cash_Flow yearly" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(Statements, { d })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 5,
       title: "Capital Allocation",
-      sub: "where every dollar of FCF went \xB7 5y window",
+      sub: "where 5 years of cash went \xB7 capex \xB7 buybacks \xB7 dividends \xB7 debt \xB7 investing",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "iv-5" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s5.value, source: "EODHD \xB7 Capital_Flow" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CapAlloc, null)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s5.value, source: "EODHD \xB7 Cash_Flow 5y" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CapAlloc, { d })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 6,
       title: "Bull \xB7 Bear",
-      sub: "strongest case both ways \xB7 pre-mortem \xB7 written before entry",
+      sub: "strongest case both ways \xB7 derived from the real numbers \xB7 pre-mortem before entry",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "iv-6" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s6.value, source: "thesis library \xB7 per-ticker" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(BullBear, null)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s6.value, source: "computed from filings + valuation" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(BullBear, { ticker, d, fv, peers })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 7,
-      title: "Long-Horizon Catalysts",
-      sub: "next 12 months \xB7 earnings \xB7 capacity \xB7 regulatory",
+      title: "Earnings Calendar \xB7 Forward",
+      sub: "next report \xB7 estimate \xB7 last-4-quarter surprise trend",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "iv-7" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s7.value, source: "EODHD \xB7 calendar + analyst trend" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CatCal, null)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(SectionHeader, { n: 8, title: "Cross-Lens Confluence", style: headerStyle }), /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CrossLens, { lead: "violet", cells: [
-    { lens: "Value", verdict: "MARG.", tone: "amb", note: "MoS 6% \xB7 slight premium" },
-    { lens: "Quality", verdict: "A\u2212", tone: "gn", note: "ROIC 18% \xB7 low debt" },
-    { lens: "Earnings", verdict: "BEAT?", tone: "amb", note: "ESP +4.1% \xB7 11d out" },
-    { lens: "Risk", verdict: "OK", tone: "gn", note: "VaR(1d) \u22122.1%" },
-    { lens: "Tape", verdict: "+12 ins", tone: "gn", note: "net insider buys 90d" }
-  ] }))), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 Investment"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", { className: "copper" }, "MoS 6%"), " \xB7 quality A\u2212 \xB7 valuation is more attractive on a pullback to", " ", /* @__PURE__ */ React.createElement("b", null, "$", (ticker.price * 0.93).toFixed(2)), ". Bias stays Neutral until an ER catalyst clears.")));
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s7.value, source: "EODHD \xB7 earnings history + estimates" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CatCal, { ticker })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(SectionHeader, { n: 8, title: "Cross-Lens Confluence", style: headerStyle }), /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CrossLens, { lead: "violet", cells: crossLensCells(ticker, d, fv) }))), /* @__PURE__ */ React.createElement(TheRead, { d, fv }));
 }
-function ValueHero({ ticker, mode }) {
-  const cur = ticker.price;
-  return /* @__PURE__ */ React.createElement("div", { className: "hero value-hero" }, /* @__PURE__ */ React.createElement("div", { className: "vh-top" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Master verdict \xB7 INVESTMENT mode"), /* @__PURE__ */ React.createElement("div", { className: "vh-verdict" }, /* @__PURE__ */ React.createElement("span", { className: "vh-tag" }, "WATCH"), /* @__PURE__ */ React.createElement("span", { className: "vh-score mono" }, "71", /* @__PURE__ */ React.createElement("span", { className: "th-score-unit" }, "/100")), /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "MoS 6%")), /* @__PURE__ */ React.createElement("div", { className: "vh-line mono dim2" }, "Fair $", (cur * 0.95).toFixed(0), " \xB7 target $", (cur * 1.06).toFixed(0), "\u2013$", (cur * 1.16).toFixed(0), " \xB7 bull $", (cur * 1.4).toFixed(0), " \xB7 bear $", (cur * 0.78).toFixed(0), ". Current ", /* @__PURE__ */ React.createElement("b", null, "$", cur.toFixed(2)), " sits ~5% above fair."))));
+function ValueHero({ ticker, mode, d, fv }) {
+  const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
+  const verdict = cv ? cv.verdict : ticker.verdict || "WATCH";
+  const vtone = cv ? cv.vtone : "amb";
+  const net = cv ? cv.net : ticker.score;
+  const mos = fv.blendedMos;
+  const tone = _tone(mos);
+  const lo = fv.methods.length ? Math.min(...fv.methods.map((m) => m.fair)) : null;
+  const hi = fv.methods.length ? Math.max(...fv.methods.map((m) => m.fair)) : null;
+  return /* @__PURE__ */ React.createElement("div", { className: "hero value-hero" }, /* @__PURE__ */ React.createElement("div", { className: "vh-top" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Master verdict \xB7 ", (mode || "INVEST").toUpperCase(), " mode"), /* @__PURE__ */ React.createElement("div", { className: "vh-verdict" }, /* @__PURE__ */ React.createElement("span", { className: `vh-tag kpi-tone--${vtone}` }, window.secBias ? window.secBias(verdict) : verdict), net != null && /* @__PURE__ */ React.createElement("span", { className: "vh-score mono" }, Math.round(net), /* @__PURE__ */ React.createElement("span", { className: "th-score-unit" }, "/100")), mos != null && /* @__PURE__ */ React.createElement(Pill, { tone, small: true }, mos >= 0 ? "premium" : "margin", " ", Math.abs(mos).toFixed(0), "%")), /* @__PURE__ */ React.createElement("div", { className: "vh-line mono dim2" }, fv.blended != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, "Blended fair ", /* @__PURE__ */ React.createElement("b", null, "$", fv.blended.toFixed(2)), " \xB7 range $", lo.toFixed(0), "\u2013$", hi.toFixed(0), " across ", fv.methods.length, " methods. Current ", /* @__PURE__ */ React.createElement("b", null, "$", d.price.toFixed(2)), " sits ", mos >= 0 ? /* @__PURE__ */ React.createElement("b", { className: "dn" }, mos.toFixed(0), "% above") : /* @__PURE__ */ React.createElement("b", { className: "up" }, Math.abs(mos).toFixed(0), "% below"), " blended fair value.") : /* @__PURE__ */ React.createElement(React.Fragment, null, "Not enough earnings / cash-flow to triangulate fair value \u2014 analyst target only.")))));
 }
-function ivSmooth(pts) {
-  if (pts.length < 3) return "M " + pts.map((p) => p.join(",")).join(" L ");
-  let d = `M ${pts[0][0]},${pts[0][1]}`;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
-    const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
-    const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
-    d += ` C ${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
-  }
-  return d;
-}
-function ValueBands5Y({ ticker }) {
-  const cur = ticker.price;
-  const uid = React.useId();
+function FootballField({ d, fv }) {
   const [ref, w] = useWidth(900);
-  const data = React.useMemo(() => {
-    const out = [];
-    for (let i = 0; i < 60; i++) {
-      const t = i / 59;
-      const fair = 0.62 + t * 0.5 + Math.sin(i * 0.32) * 0.012;
-      const cyc = Math.sin(i * 0.26) * 0.6 + Math.sin(i * 0.12) * 0.7;
-      const widen = 0.16 + (1 - (cyc + 1.3) / 2.6) * 0.2;
-      out.push({ fair, bear: fair * (1 - widen), bull: fair * (1 + widen + 0.05), price: fair * (1 + cyc * widen * 0.92), cyc });
-    }
-    const k = 1 / out[59].price;
-    out.forEach((d) => {
-      d.fair *= k * cur;
-      d.bear *= k * cur;
-      d.bull *= k * cur;
-      d.price *= k * cur;
-      d.gap = (d.price - d.fair) / d.fair * 100;
-    });
-    out[59].price = cur;
-    out[59].gap = (cur - out[59].fair) / out[59].fair * 100;
-    return out;
-  }, [cur]);
-  const padL = 6, padR = 54, padT = 14;
-  const priceH = 168, gapH = 46, gapGap = 16;
-  const h = padT + priceH + gapGap + gapH + 14;
-  const plotW = w - padL - padR, plotR = padL + plotW;
-  const all = data.flatMap((d) => [d.bear, d.bull, d.price]);
-  const min = Math.min(...all) * 0.97, max = Math.max(...all) * 1.03;
-  const xOf = (i) => padL + i / 59 * plotW;
-  const yOf = (v) => padT + priceH - (v - min) / (max - min) * priceH;
-  const pl = (key) => data.map((d, i) => [xOf(i), yOf(d[key])]);
-  const envelope = `${ivSmooth(pl("bull"))} L ${data.map((d, i) => `${xOf(59 - i).toFixed(1)},${yOf(data[59 - i].bear).toFixed(1)}`).join(" L ")} Z`;
-  const priceArea = `${ivSmooth(pl("price"))} L ${xOf(59).toFixed(1)},${(padT + priceH).toFixed(1)} L ${xOf(0).toFixed(1)},${(padT + priceH).toFixed(1)} Z`;
-  const touches = data.map((d, i) => ({ i, d })).filter(({ d }) => d.price <= d.bear * 1.01 || d.price >= d.bull * 0.99).filter((_, idx) => idx % 2 === 0);
-  const gapMax = Math.max(...data.map((d) => Math.abs(d.gap)), 8);
-  const gapTop = padT + priceH + gapGap;
-  const yGap = (g) => gapTop + gapH / 2 - g / gapMax * (gapH / 2);
-  const nowGap = data[59].gap;
-  const premium = nowGap >= 0;
-  return /* @__PURE__ */ React.createElement("div", { className: "iv-bands", ref }, /* @__PURE__ */ React.createElement("svg", { width: w, height: h }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("linearGradient", { id: `iv-env-${uid}`, x1: "0", y1: "0", x2: "0", y2: "1" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: "var(--gn)", stopOpacity: "0.16" }), /* @__PURE__ */ React.createElement("stop", { offset: "48%", stopColor: "var(--ink-2)", stopOpacity: "0.05" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: "var(--rd)", stopOpacity: "0.16" })), /* @__PURE__ */ React.createElement("linearGradient", { id: `iv-px-${uid}`, x1: "0", y1: "0", x2: "0", y2: "1" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: "var(--copper)", stopOpacity: "0.22" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: "var(--copper)", stopOpacity: "0" }))), /* @__PURE__ */ React.createElement("path", { d: envelope, fill: `url(#iv-env-${uid})` }), [0.25, 0.5, 0.75].map((f, k) => /* @__PURE__ */ React.createElement("line", { key: k, x1: padL, y1: padT + priceH * f, x2: plotR, y2: padT + priceH * f, stroke: "var(--line)", strokeDasharray: "1 6", opacity: "0.4" })), /* @__PURE__ */ React.createElement("path", { d: ivSmooth(pl("bull")), fill: "none", stroke: "var(--gn)", strokeWidth: "1.1", strokeDasharray: "5 4", opacity: "0.7" }), /* @__PURE__ */ React.createElement("path", { d: ivSmooth(pl("fair")), fill: "none", stroke: "var(--ink-2)", strokeWidth: "1.3", strokeDasharray: "2 3", opacity: "0.8" }), /* @__PURE__ */ React.createElement("path", { d: ivSmooth(pl("bear")), fill: "none", stroke: "var(--rd)", strokeWidth: "1.1", strokeDasharray: "5 4", opacity: "0.7" }), /* @__PURE__ */ React.createElement("path", { d: priceArea, fill: `url(#iv-px-${uid})` }), /* @__PURE__ */ React.createElement("path", { d: ivSmooth(pl("price")), fill: "none", stroke: "var(--copper)", strokeWidth: "2.2", style: { filter: "drop-shadow(0 0 5px color-mix(in oklab, var(--copper) 60%, transparent))" } }), touches.map(({ i, d }, k) => {
-    const value = d.price <= d.bear * 1.01;
-    return /* @__PURE__ */ React.createElement("circle", { key: k, cx: xOf(i), cy: yOf(d.price), r: "3", fill: value ? "var(--gn)" : "var(--rd)", stroke: "var(--bg-1)", strokeWidth: "1.2", opacity: "0.9" });
-  }), /* @__PURE__ */ React.createElement("circle", { cx: xOf(59), cy: yOf(cur), r: "4", fill: "var(--copper)", stroke: "var(--bg-1)", strokeWidth: "1.4" }), /* @__PURE__ */ React.createElement("line", { x1: padL, y1: yOf(cur), x2: plotR, y2: yOf(cur), stroke: "var(--copper)", strokeDasharray: "2 3", opacity: "0.4" }), [["bull", "gn"], ["fair", "ink-2"], ["bear", "rd"]].map(([k, t], i) => /* @__PURE__ */ React.createElement("text", { key: i, x: plotR + 5, y: yOf(data[59][k]) + 3, fontSize: "9.5", className: "mono", fill: `var(--${t})` }, data[59][k].toFixed(0))), /* @__PURE__ */ React.createElement("g", { transform: `translate(${plotR + 1}, ${yOf(cur) - 8})` }, /* @__PURE__ */ React.createElement("rect", { width: padR - 2, height: "16", rx: "2.5", fill: "var(--copper)" }), /* @__PURE__ */ React.createElement("text", { x: (padR - 2) / 2, y: "11.5", fontSize: "9.5", textAnchor: "middle", className: "mono", fill: "var(--bg-0)", style: { fontWeight: 700 } }, cur.toFixed(0))), /* @__PURE__ */ React.createElement("text", { x: padL, y: gapTop - 4, fontSize: "8.5", className: "mono", fill: "var(--ink-3)", style: { letterSpacing: "0.1em" } }, "PREMIUM / DISCOUNT vs FAIR (%)"), /* @__PURE__ */ React.createElement("line", { x1: padL, y1: yGap(0), x2: plotR, y2: yGap(0), stroke: "var(--ink-3)", opacity: "0.6" }), data.map((d, i) => {
-    const y0 = yGap(0), y1 = yGap(d.gap);
-    return /* @__PURE__ */ React.createElement("rect", { key: i, x: xOf(i) - 1.4, y: Math.min(y0, y1), width: "2.8", height: Math.abs(y1 - y0), fill: `var(--${d.gap >= 0 ? "rd" : "gn"})`, opacity: "0.55" });
-  }), /* @__PURE__ */ React.createElement("text", { x: plotR + 5, y: yGap(nowGap) + 3, fontSize: "9.5", className: "mono", fill: `var(--${premium ? "rd" : "gn"})` }, nowGap >= 0 ? "+" : "", nowGap.toFixed(0), "%"), [0, 12, 24, 36, 48, 59].map((i, k, arr) => /* @__PURE__ */ React.createElement("text", { key: `y${k}`, x: xOf(i), y: h - 3, fontSize: "9", className: "mono", fill: "var(--ink-3)", textAnchor: k === 0 ? "start" : k === arr.length - 1 ? "end" : "middle" }, k === arr.length - 1 ? "now" : `${5 - Math.round(i / 12)}y`))), /* @__PURE__ */ React.createElement("div", { className: "iv-bands-leg mono dim2" }, /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "iv-dot", style: { background: "var(--copper)" } }), " price"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "iv-dot", style: { background: "var(--gn)" } }), " bull FV"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "iv-dot", style: { background: "var(--ink-2)" } }), " base / fair"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "iv-dot", style: { background: "var(--rd)" } }), " bear FV"), /* @__PURE__ */ React.createElement("span", { className: "iv-bands-read" }, "Trading at a ", /* @__PURE__ */ React.createElement("b", { className: premium ? "dn" : "up" }, premium ? "premium" : "discount", " of ", Math.abs(nowGap).toFixed(0), "%"), " to base fair value \u2014 ", premium ? "upper" : "lower", " half of the band.")));
+  if (!fv.methods.length) return /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { padding: 12 } }, "No fundamental valuation methods available for this name.");
+  const labelW = 188, padR = 50, padT = 8, rowH = 30, padB = 26;
+  const rows = fv.methods.length;
+  const h = padT + rows * rowH + padB;
+  const plotL = labelW, plotW = Math.max(120, w - labelW - padR);
+  const allV = fv.methods.flatMap((m) => [m.fair * (1 - m.band), m.fair * (1 + m.band)]).concat([d.price]);
+  const lo = Math.min(...allV) * 0.96, hi = Math.max(...allV) * 1.04;
+  const xOf = (v) => plotL + (v - lo) / (hi - lo) * plotW;
+  const ticks = 5;
+  return /* @__PURE__ */ React.createElement("div", { className: "iv-ff", ref }, /* @__PURE__ */ React.createElement("svg", { width: w, height: h }, Array.from({ length: ticks + 1 }, (_, i) => {
+    const v = lo + (hi - lo) * (i / ticks);
+    return /* @__PURE__ */ React.createElement("g", { key: i }, /* @__PURE__ */ React.createElement("line", { x1: xOf(v), y1: padT, x2: xOf(v), y2: padT + rows * rowH, stroke: "var(--line)", strokeDasharray: "1 5", opacity: "0.4" }), /* @__PURE__ */ React.createElement("text", { x: xOf(v), y: h - 9, fontSize: "9", className: "mono", fill: "var(--ink-3)", textAnchor: "middle" }, "$", v.toFixed(0)));
+  }), fv.methods.map((m, i) => {
+    const y = padT + i * rowH + rowH / 2;
+    const x0 = xOf(m.fair * (1 - m.band)), x1 = xOf(m.fair * (1 + m.band)), xf = xOf(m.fair);
+    const t = _tone(m.mos);
+    return /* @__PURE__ */ React.createElement("g", { key: m.key }, /* @__PURE__ */ React.createElement("text", { x: labelW - 10, y: y - 3, fontSize: "10.5", className: "mono", fill: "var(--ink-1)", textAnchor: "end", style: { fontWeight: 600 } }, m.m), /* @__PURE__ */ React.createElement("text", { x: labelW - 10, y: y + 8.5, fontSize: "8.5", className: "mono", fill: "var(--ink-3)", textAnchor: "end" }, m.sub), /* @__PURE__ */ React.createElement("line", { x1: x0, y1: y, x2: x1, y2: y, stroke: `var(--${t})`, strokeWidth: "7", strokeLinecap: "round", opacity: "0.32" }), /* @__PURE__ */ React.createElement("circle", { cx: xf, cy: y, r: "4.5", fill: `var(--${t})`, stroke: "var(--bg-1)", strokeWidth: "1.4" }), /* @__PURE__ */ React.createElement("text", { x: x1 + 7, y: y + 3.5, fontSize: "9.5", className: "mono", fill: `var(--${t})`, style: { fontWeight: 700 } }, "$", m.fair.toFixed(0)));
+  }), fv.blended != null && /* @__PURE__ */ React.createElement("line", { x1: xOf(fv.blended), y1: padT - 2, x2: xOf(fv.blended), y2: padT + rows * rowH + 2, stroke: "var(--ink-2)", strokeWidth: "1.3", strokeDasharray: "3 3", opacity: "0.7" }), /* @__PURE__ */ React.createElement("line", { x1: xOf(d.price), y1: padT - 2, x2: xOf(d.price), y2: padT + rows * rowH + 2, stroke: "var(--copper)", strokeWidth: "2", style: { filter: "drop-shadow(0 0 4px color-mix(in oklab, var(--copper) 55%, transparent))" } }), /* @__PURE__ */ React.createElement("g", { transform: `translate(${xOf(d.price) - 20}, ${padT - 2})` }, /* @__PURE__ */ React.createElement("rect", { width: "40", height: "14", rx: "2.5", fill: "var(--copper)" }), /* @__PURE__ */ React.createElement("text", { x: "20", y: "10.5", fontSize: "9", textAnchor: "middle", className: "mono", fill: "var(--bg-0)", style: { fontWeight: 700 } }, "$", d.price.toFixed(0)))), /* @__PURE__ */ React.createElement("div", { className: "iv-bands-leg mono dim2" }, /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "iv-dot", style: { background: "var(--copper)" } }), " spot"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "iv-dot", style: { background: "var(--ink-2)" } }), " blended fair"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "iv-dot", style: { background: "var(--gn)" } }), " margin"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "iv-dot", style: { background: "var(--rd)" } }), " premium"), /* @__PURE__ */ React.createElement("span", { className: "iv-bands-read" }, "Each bar is one independent valuation method \xB1 its uncertainty. Where the copper spot line sits in the cluster is your margin of safety.")));
 }
-function MarginOfSafety({ ticker }) {
-  const cur = ticker.price;
-  const methods = [
-    { m: "Analyst PT \xB7 mean", sub: "consensus target", mos: 8.1 },
-    { m: "DCF \xB7 10y \xB7 9% WACC \xB7 3% g", sub: "discounted cash flow", mos: 5.5 },
-    { m: "P/FCF \xB7 5y avg reversion", sub: "cash-flow multiple", mos: 7.3 },
-    { m: "EV/EBITDA \xB7 peer reversion", sub: "enterprise multiple", mos: 3.1 },
-    { m: "Peer P/E reversion", sub: "relative earnings", mos: -2.4 },
-    { m: "Graham Number", sub: "\u221A(22.5\xB7EPS\xB7BV)", mos: -5.6 }
-  ];
-  const wts = [0.3, 0.3, 0.12, 0.1, 0.08, 0.1];
-  const blended = methods.reduce((s, x, i) => s + x.mos * wts[i], 0);
-  const tone = (v) => v >= 4 ? "gn" : v <= -4 ? "rd" : "amb";
+function MarginOfSafety({ d, fv }) {
+  if (!fv.methods.length) return null;
+  const blended = fv.blendedMos;
+  const tone = _tone(blended);
   const Bar = ({ v }) => {
-    const cap = Math.max(-25, Math.min(25, v));
-    const half = Math.abs(cap) / 25 * 50;
-    return /* @__PURE__ */ React.createElement("div", { className: "iv-mos-bar-cell" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "\u221225%"), /* @__PURE__ */ React.createElement("div", { className: "iv-mos-track" }, /* @__PURE__ */ React.createElement("span", { className: "zero" }), /* @__PURE__ */ React.createElement("div", { className: `iv-mos-fill ${tone(v)}`, style: v >= 0 ? { left: "50%", width: `${half}%` } : { left: `${50 - half}%`, width: `${half}%` } })), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "+25%"));
+    const cap = Math.max(-40, Math.min(40, v == null ? 0 : v));
+    const half = Math.abs(cap) / 40 * 50;
+    return /* @__PURE__ */ React.createElement("div", { className: "iv-mos-bar-cell" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "\u221240%"), /* @__PURE__ */ React.createElement("div", { className: "iv-mos-track" }, /* @__PURE__ */ React.createElement("span", { className: "zero" }), /* @__PURE__ */ React.createElement("div", { className: `iv-mos-fill ${_tone(v)}`, style: v >= 0 ? { left: "50%", width: `${half}%` } : { left: `${50 - half}%`, width: `${half}%` } })), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "+40%"));
   };
-  return /* @__PURE__ */ React.createElement("div", { className: "iv-mos" }, /* @__PURE__ */ React.createElement("div", { className: "iv-mos-hd" }, /* @__PURE__ */ React.createElement("div", { className: "iv-mos-blend" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Margin of Safety \xB7 vs fair value"), /* @__PURE__ */ React.createElement("div", { className: `iv-mos-blend-v mono kpi-tone--${tone(blended)}` }, blended >= 0 ? "+" : "", blended.toFixed(1), "%"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "blended across ", methods.length, " independent lenses \xB7 weighted")), /* @__PURE__ */ React.createElement(Pill, { tone: tone(blended), small: true }, blended >= 4 ? "MARGIN" : blended <= -4 ? "PREMIUM" : "FAIR \xB1 ", Math.abs(blended).toFixed(0), "%")), /* @__PURE__ */ React.createElement("table", { className: "pv-table iv-mos-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { className: "label-cap" }, "Methodology"), /* @__PURE__ */ React.createElement("th", { className: "label-cap", style: { textAlign: "right" } }, "Fair value"), /* @__PURE__ */ React.createElement("th", { className: "label-cap", style: { textAlign: "right" } }, "MoS"), /* @__PURE__ */ React.createElement("th", { className: "label-cap" }, "\u221225% \xB7 spot \xB7 +25%"))), /* @__PURE__ */ React.createElement("tbody", null, methods.map((x, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("b", null, x.m), /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("span", { className: "dim2", style: { fontSize: 10 } }, x.sub)), /* @__PURE__ */ React.createElement("td", { className: "mono", style: { textAlign: "right" } }, "$", (cur * (1 + x.mos / 100)).toFixed(0)), /* @__PURE__ */ React.createElement("td", { className: "mono", style: { textAlign: "right", color: `var(--${tone(x.mos)})`, fontWeight: 700 } }, x.mos >= 0 ? "+" : "", x.mos, "%"), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Bar, { v: x.mos })))))), /* @__PURE__ */ React.createElement(DcfSensitivity, { ticker }));
+  return /* @__PURE__ */ React.createElement("div", { className: "iv-mos" }, /* @__PURE__ */ React.createElement("div", { className: "iv-mos-hd" }, /* @__PURE__ */ React.createElement("div", { className: "iv-mos-blend" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Margin of Safety \xB7 vs blended fair"), /* @__PURE__ */ React.createElement("div", { className: `iv-mos-blend-v mono kpi-tone--${tone}` }, blended >= 0 ? "+" : "", blended.toFixed(1), "%"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "weighted across ", fv.methods.length, " independent methods")), /* @__PURE__ */ React.createElement(Pill, { tone, small: true }, blended >= 8 ? "MARGIN" : blended <= -8 ? "PREMIUM" : "FAIR", " ", Math.abs(blended).toFixed(0), "%")), /* @__PURE__ */ React.createElement("table", { className: "pv-table iv-mos-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { className: "label-cap" }, "Methodology"), /* @__PURE__ */ React.createElement("th", { className: "label-cap", style: { textAlign: "right" } }, "Fair"), /* @__PURE__ */ React.createElement("th", { className: "label-cap", style: { textAlign: "right" } }, "MoS"), /* @__PURE__ */ React.createElement("th", { className: "label-cap" }, "\u221240% \xB7 spot \xB7 +40%"))), /* @__PURE__ */ React.createElement("tbody", null, fv.methods.map((m) => /* @__PURE__ */ React.createElement("tr", { key: m.key }, /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("b", null, m.m), /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("span", { className: "dim2", style: { fontSize: 10 } }, m.sub)), /* @__PURE__ */ React.createElement("td", { className: "mono", style: { textAlign: "right" } }, "$", m.fair.toFixed(0)), /* @__PURE__ */ React.createElement("td", { className: "mono", style: { textAlign: "right", color: `var(--${_tone(m.mos)})`, fontWeight: 700 } }, m.mos >= 0 ? "+" : "", m.mos.toFixed(0), "%"), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Bar, { v: m.mos })))))));
 }
-function DcfSensitivity({ ticker }) {
-  const cur = ticker.price;
-  const waccs = [0.08, 0.09, 0.1, 0.11];
-  const grows = [0.02, 0.03, 0.04, 0.05];
-  const base = cur * 1.055, baseW = 0.09, baseG = 0.03;
-  const fv = (w, g) => base * ((baseW - baseG) / (w - g));
-  const tone = (mos) => mos >= 8 ? "gn" : mos >= 0 ? "amb" : "rd";
-  return /* @__PURE__ */ React.createElement("div", { className: "dcf-sens" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 8 } }, "DCF Sensitivity \xB7 fair value by WACC \xD7 terminal growth ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "(spot $", cur.toFixed(0), ")")), /* @__PURE__ */ React.createElement("table", { className: "dtable dcf-grid" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { className: "dim2" }, "WACC \u2193 \xB7 g \u2192"), grows.map((g) => /* @__PURE__ */ React.createElement("th", { key: g, className: "r" }, (g * 100).toFixed(0), "%")))), /* @__PURE__ */ React.createElement("tbody", null, waccs.map((w) => /* @__PURE__ */ React.createElement("tr", { key: w }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, (w * 100).toFixed(0), "%"), grows.map((g) => {
-    const val = fv(w, g);
-    const mos = (val / cur - 1) * 100;
-    return /* @__PURE__ */ React.createElement("td", { key: g, className: `r mono dcf-cell kpi-tone--${tone(mos)}`, title: `MoS ${mos >= 0 ? "+" : ""}${mos.toFixed(0)}%`, style: { background: `color-mix(in oklab, var(--${tone(mos)}) ${Math.min(22, Math.abs(mos))}%, transparent)` } }, "$", val.toFixed(0));
-  }))))), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 10.5, marginTop: 6 } }, "Each cell = intrinsic value at that discount rate & perpetual growth; green = trades below fair (margin), red = premium. The base case (", /* @__PURE__ */ React.createElement("b", null, "9% / 3%"), ") sits near spot \u2014 the thesis only holds if you believe WACC \u2264 9% ", /* @__PURE__ */ React.createElement("i", null, "and"), " growth \u2265 3%."));
+function ReverseDcf({ d, fv }) {
+  if (!d.fcfPS || d.fcfPS <= 0) return /* @__PURE__ */ React.createElement("div", { className: "dcf-sens" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 6 } }, "Reverse-DCF"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 11 } }, "FCF is not positive on a trailing basis \u2014 a cash-flow DCF doesn't apply. Lean on the multiple-reversion methods above."));
+  const implied = _impliedGrowth(d.fcfPS, d.price, 0.09, 0.03);
+  const hist = d.fcfCagr;
+  const waccs = [0.08, 0.09, 0.1, 0.11], grows = [0.02, 0.05, 0.08, 0.12];
+  const tone = (mos) => mos >= 8 ? "gn" : mos >= -8 ? "amb" : "rd";
+  return /* @__PURE__ */ React.createElement("div", { className: "dcf-sens" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 6 } }, "Reverse-DCF \xB7 what's priced in"), /* @__PURE__ */ React.createElement("div", { className: "rdcf-head mono" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "market is pricing FCF growth of"), " ", /* @__PURE__ */ React.createElement("b", { className: implied != null && hist != null ? implied > hist ? "dn" : "up" : "" }, implied != null ? (implied * 100).toFixed(1) + "%/yr" : "\u2014")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "you've delivered (5y FCF CAGR)"), " ", /* @__PURE__ */ React.createElement("b", null, hist != null ? (hist * 100).toFixed(1) + "%/yr" : "\u2014")), /* @__PURE__ */ React.createElement("div", { className: "dim2", style: { fontSize: 10.5, marginTop: 2 } }, implied != null && hist != null ? implied > hist ? "Priced-in growth exceeds your track record \u2014 the market is optimistic; the thesis needs acceleration." : "Priced-in growth is below your track record \u2014 the bar is beatable if history repeats." : "10y fade to 3% terminal \xB7 9% WACC.")), /* @__PURE__ */ React.createElement("table", { className: "dtable dcf-grid", style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { className: "dim2" }, "WACC \u2193 \xB7 g \u2192"), grows.map((g) => /* @__PURE__ */ React.createElement("th", { key: g, className: "r" }, (g * 100).toFixed(0), "%")))), /* @__PURE__ */ React.createElement("tbody", null, waccs.map((wv) => /* @__PURE__ */ React.createElement("tr", { key: wv }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, (wv * 100).toFixed(0), "%"), grows.map((g) => {
+    const val = _dcfValue(d.fcfPS, g, wv, 0.03);
+    const mos = val ? (val / d.price - 1) * 100 : null;
+    return /* @__PURE__ */ React.createElement("td", { key: g, className: `r mono dcf-cell kpi-tone--${mos == null ? "ink" : tone(mos)}`, title: mos != null ? `MoS ${mos >= 0 ? "+" : ""}${mos.toFixed(0)}%` : "n/a", style: mos != null ? { background: `color-mix(in oklab, var(--${tone(mos)}) ${Math.min(22, Math.abs(mos))}%, transparent)` } : {} }, val ? "$" + val.toFixed(0) : "\u2014");
+  }))))), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 10.5, marginTop: 6 } }, "Intrinsic value/share at each discount rate \xD7 first-stage growth. Green = trades below fair."));
 }
-function ValueScale({ ticker }) {
-  const cur = ticker.price;
-  const bear = cur * 0.78, fair = cur * 0.95, tgtLo = cur * 1.06, tgtHi = cur * 1.16, bull = cur * 1.4;
-  const pos = (v) => Math.max(0, Math.min(100, (v - bear) / (bull - bear) * 100));
+function ValueScale({ d, fv }) {
+  if (!fv.methods.length) return null;
+  const fairs = fv.methods.map((m) => m.fair);
+  const bear = Math.min(...fairs), bull = Math.max(...fairs), fair = fv.blended;
+  const tgt = d.targetPrice || fair;
+  const span = bull - bear || bull * 0.1 || 1;
+  const pos = (v) => Math.max(0, Math.min(100, (v - bear) / span * 100));
   const fmt = (v) => `$${v.toFixed(0)}`;
-  return /* @__PURE__ */ React.createElement("div", { className: "vh-scale" }, /* @__PURE__ */ React.createElement("div", { className: "vh-scale-cap" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Value scale"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "bear \xB7 fair \xB7 target range \xB7 bull")), /* @__PURE__ */ React.createElement("div", { className: "vh-scale-track" }, /* @__PURE__ */ React.createElement("div", { className: "vh-scale-fill" }), /* @__PURE__ */ React.createElement("div", { className: "vh-scale-range", style: { left: `${pos(tgtLo)}%`, width: `${pos(tgtHi) - pos(tgtLo)}%` } }, /* @__PURE__ */ React.createElement("span", { className: "vh-scale-range-lbl mono" }, "target range")), /* @__PURE__ */ React.createElement("div", { className: "vh-scale-marker vh-bear", style: { left: "0%" } }, /* @__PURE__ */ React.createElement("div", { className: "vh-scale-px mono" }, fmt(bear)), /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "bear")), /* @__PURE__ */ React.createElement("div", { className: "vh-scale-marker vh-fair", style: { left: `${pos(fair)}%` } }, /* @__PURE__ */ React.createElement("div", { className: "vh-scale-px mono" }, fmt(fair)), /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "fair")), /* @__PURE__ */ React.createElement("div", { className: "vh-scale-marker vh-target", style: { left: `${pos((tgtLo + tgtHi) / 2)}%` } }, /* @__PURE__ */ React.createElement("div", { className: "vh-scale-px mono" }, fmt(tgtLo), "\u2013", fmt(tgtHi)), /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "target")), /* @__PURE__ */ React.createElement("div", { className: "vh-scale-marker vh-bull", style: { left: "100%" } }, /* @__PURE__ */ React.createElement("div", { className: "vh-scale-px mono" }, fmt(bull)), /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "bull")), /* @__PURE__ */ React.createElement("div", { className: "vh-scale-current", style: { left: `${pos(cur)}%` } }, /* @__PURE__ */ React.createElement("div", { className: "vh-cur-px mono" }, "$", cur.toFixed(2)))));
+  return /* @__PURE__ */ React.createElement("div", { className: "vh-scale", style: { marginBottom: 10 } }, /* @__PURE__ */ React.createElement("div", { className: "vh-scale-cap" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Value scale"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "bear \xB7 fair \xB7 target \xB7 bull")), /* @__PURE__ */ React.createElement("div", { className: "vh-scale-track" }, /* @__PURE__ */ React.createElement("div", { className: "vh-scale-fill" }), /* @__PURE__ */ React.createElement("div", { className: "vh-scale-marker vh-bear", style: { left: "0%" } }, /* @__PURE__ */ React.createElement("div", { className: "vh-scale-px mono" }, fmt(bear)), /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "bear")), /* @__PURE__ */ React.createElement("div", { className: "vh-scale-marker vh-fair", style: { left: `${pos(fair)}%` } }, /* @__PURE__ */ React.createElement("div", { className: "vh-scale-px mono" }, fmt(fair)), /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "fair")), d.targetPrice && /* @__PURE__ */ React.createElement("div", { className: "vh-scale-marker vh-target", style: { left: `${pos(tgt)}%` } }, /* @__PURE__ */ React.createElement("div", { className: "vh-scale-px mono" }, fmt(tgt)), /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "PT")), /* @__PURE__ */ React.createElement("div", { className: "vh-scale-marker vh-bull", style: { left: "100%" } }, /* @__PURE__ */ React.createElement("div", { className: "vh-scale-px mono" }, fmt(bull)), /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "bull")), /* @__PURE__ */ React.createElement("div", { className: "vh-scale-current", style: { left: `${pos(d.price)}%` } }, /* @__PURE__ */ React.createElement("div", { className: "vh-cur-px mono" }, "$", d.price.toFixed(2)))));
 }
-function ValueScaleStatic({ ticker }) {
-  const cur = ticker.price;
-  const bear = 52, fair = 64, target = 75, bull = 92;
-  const x = (cur - bear) / (bull - bear) * 100;
-  const xFair = (fair - bear) / (bull - bear) * 100;
-  const xTarget = (target - bear) / (bull - bear) * 100;
-  return /* @__PURE__ */ React.createElement("div", { className: "vh-scale" }, /* @__PURE__ */ React.createElement("div", { className: "vh-scale-track" }, /* @__PURE__ */ React.createElement("div", { className: "vh-scale-fill" }), /* @__PURE__ */ React.createElement("div", { className: "vh-scale-marker vh-bear", style: { left: "0%" } }, /* @__PURE__ */ React.createElement("div", { className: "vh-scale-px mono" }, "$52"), /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "bear")), /* @__PURE__ */ React.createElement("div", { className: "vh-scale-marker vh-fair", style: { left: `${xFair}%` } }, /* @__PURE__ */ React.createElement("div", { className: "vh-scale-px mono" }, "$64"), /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "fair")), /* @__PURE__ */ React.createElement("div", { className: "vh-scale-marker vh-target", style: { left: `${xTarget}%` } }, /* @__PURE__ */ React.createElement("div", { className: "vh-scale-px mono" }, "$75"), /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "target")), /* @__PURE__ */ React.createElement("div", { className: "vh-scale-marker vh-bull", style: { left: "100%" } }, /* @__PURE__ */ React.createElement("div", { className: "vh-scale-px mono" }, "$92"), /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "bull")), /* @__PURE__ */ React.createElement("div", { className: "vh-scale-current", style: { left: `${x}%` } }, /* @__PURE__ */ React.createElement("div", { className: "vh-cur-px mono" }, "$", cur.toFixed(2)))));
+function _grade(score) {
+  return score >= 85 ? "A" : score >= 72 ? "A\u2212" : score >= 60 ? "B+" : score >= 48 ? "B" : score >= 35 ? "C" : "D";
 }
-function QualityCard() {
+function QualityCard({ d, peers, ticker }) {
+  const inc0 = d.inc[0] || {};
+  const grossMargin = _P(inc0.grossProfit) != null && _P(inc0.totalRevenue) ? _P(inc0.grossProfit) / _P(inc0.totalRevenue) * 100 : null;
+  const ebit = _P(inc0.ebit), intExp = _P(inc0.interestExpense);
+  const intCover = ebit != null && intExp && intExp > 0 ? ebit / intExp : null;
+  const de = peers && peers.self ? _P(peers.self.debt_equity) : null;
+  const netMarginNow = d.profitMargin != null ? d.profitMargin * 100 : null;
+  const incOld = d.inc[d.inc.length - 1] || {};
+  const netMarginOld = _P(incOld.netIncome) != null && _P(incOld.totalRevenue) ? _P(incOld.netIncome) / _P(incOld.totalRevenue) * 100 : null;
+  const marginTrend = netMarginNow != null && netMarginOld != null ? netMarginNow - netMarginOld : null;
+  const insider = _P(ticker.insiderOwn);
+  const v = (x, suf = "", dec = 1) => x == null ? "\u2014" : x.toFixed(dec) + suf;
+  const tn = (x, hi, lo) => x == null ? "ink" : x >= hi ? "gn" : x <= lo ? "rd" : "amb";
+  const bizScore = [d.roe != null ? Math.min(100, Math.max(0, d.roe * 100 * 4)) : null, grossMargin != null ? Math.min(100, grossMargin * 1.5) : null, d.opMargin != null ? Math.min(100, Math.max(0, d.opMargin * 100 * 4)) : null].filter((x) => x != null);
+  const balScore = [intCover != null ? Math.min(100, intCover * 8) : null, de != null ? Math.max(0, 100 - de * 40) : null].filter((x) => x != null);
+  const trendScore = [d.revCagr != null ? Math.min(100, Math.max(0, 50 + d.revCagr * 200)) : null, d.fcfCagr != null ? Math.min(100, Math.max(0, 50 + d.fcfCagr * 150)) : null, marginTrend != null ? Math.min(100, Math.max(0, 50 + marginTrend * 5)) : null].filter((x) => x != null);
+  const avg = (a) => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
   const cats = [
-    { cat: "Business", grade: "A", metrics: [
-      { k: "ROIC (5y avg)", v: "18.2%", tone: "gn" },
-      { k: "Gross margin", v: "42.1%", tone: "gn" },
-      { k: "Op margin", v: "16.4%", tone: "gn" }
+    { cat: "Business", grade: avg(bizScore), metrics: [
+      { k: "ROE (TTM)", v: v(d.roe != null ? d.roe * 100 : null, "%"), tone: tn(d.roe != null ? d.roe * 100 : null, 15, 5) },
+      { k: "Gross margin", v: v(grossMargin, "%"), tone: tn(grossMargin, 40, 20) },
+      { k: "Op margin (TTM)", v: v(d.opMargin != null ? d.opMargin * 100 : null, "%"), tone: tn(d.opMargin != null ? d.opMargin * 100 : null, 15, 0) }
     ] },
-    { cat: "Balance", grade: "A-", metrics: [
-      { k: "Net-debt / EBITDA", v: "0.81\xD7", tone: "gn" },
-      { k: "Interest cover", v: "12.4\xD7", tone: "gn" },
-      { k: "Current ratio", v: "2.10", tone: "gn" }
+    { cat: "Balance", grade: avg(balScore), metrics: [
+      { k: "Debt / equity", v: de == null ? "\u2014" : de.toFixed(2), tone: de == null ? "ink" : tn(2 - de, 1.2, 0.5) },
+      { k: "Interest cover", v: v(intCover, "\xD7"), tone: tn(intCover, 6, 2) },
+      { k: "ROA (TTM)", v: v(d.roa != null ? d.roa * 100 : null, "%"), tone: tn(d.roa != null ? d.roa * 100 : null, 8, 2) }
     ] },
-    { cat: "Operator", grade: "B+", metrics: [
-      { k: "Insider own", v: "4.2%", tone: "amb" },
-      { k: "Buybacks (5y)", v: "$640M", tone: "gn" },
-      { k: "Dilution (5y)", v: "\u22122.1%", tone: "gn" }
+    { cat: "Operator", grade: insider != null ? Math.min(100, 40 + insider * 6) : null, metrics: [
+      { k: "Insider own", v: v(insider, "%"), tone: tn(insider, 5, 1) },
+      { k: "Inst. own", v: v(_P(ticker.instOwn), "%"), tone: "ink" },
+      { k: "Div yield", v: d.divYield != null ? (d.divYield * 100).toFixed(2) + "%" : "0.00%", tone: "ink" }
     ] },
-    { cat: "Trend", grade: "B", metrics: [
-      { k: "Rev CAGR 5y", v: "11.4%", tone: "gn" },
-      { k: "FCF CAGR 5y", v: "9.8%", tone: "gn" },
-      { k: "Margin trend", v: "FLAT", tone: "amb" }
+    { cat: "Trend", grade: avg(trendScore), metrics: [
+      { k: "Rev CAGR 5y", v: v(d.revCagr != null ? d.revCagr * 100 : null, "%"), tone: tn(d.revCagr != null ? d.revCagr * 100 : null, 10, 0) },
+      { k: "FCF CAGR 5y", v: v(d.fcfCagr != null ? d.fcfCagr * 100 : null, "%"), tone: tn(d.fcfCagr != null ? d.fcfCagr * 100 : null, 8, 0) },
+      { k: "Net-margin trend", v: marginTrend == null ? "\u2014" : (marginTrend >= 0 ? "+" : "") + marginTrend.toFixed(1) + "pp", tone: tn(marginTrend, 1, -1) }
     ] }
   ];
-  return /* @__PURE__ */ React.createElement("div", { className: "quality" }, cats.map((c, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "qual-cat" }, /* @__PURE__ */ React.createElement("div", { className: "qual-hdr" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, c.cat), /* @__PURE__ */ React.createElement("span", { className: `qual-grade mono ${c.grade.startsWith("A") ? "up" : c.grade.startsWith("B") ? "warn" : "dn"}` }, c.grade)), c.metrics.map((m, j) => /* @__PURE__ */ React.createElement("div", { key: j, className: "qual-metric" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, m.k), /* @__PURE__ */ React.createElement("span", { className: `mono kpi-tone--${m.tone}` }, m.v))))));
+  return /* @__PURE__ */ React.createElement("div", { className: "quality" }, cats.map((c, i) => {
+    const g = c.grade != null ? _grade(c.grade) : "\u2014";
+    return /* @__PURE__ */ React.createElement("div", { key: i, className: "qual-cat" }, /* @__PURE__ */ React.createElement("div", { className: "qual-hdr" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, c.cat), /* @__PURE__ */ React.createElement("span", { className: `qual-grade mono ${g.startsWith("A") ? "up" : g.startsWith("B") ? "warn" : g === "\u2014" ? "dim2" : "dn"}` }, g)), c.metrics.map((m, j) => /* @__PURE__ */ React.createElement("div", { key: j, className: "qual-metric" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, m.k), /* @__PURE__ */ React.createElement("span", { className: `mono kpi-tone--${m.tone}` }, m.v))));
+  }));
 }
-function PeerCohort() {
-  const peers = [
-    { sym: "ARCM", name: "Arclight (US)", pe: 22.4, fwdPe: 18.9, roic: 18.2, grow: 11.4, mcap: 4.82, current: true },
-    { sym: "TURM", name: "Turmaline", pe: 24.1, fwdPe: 21, roic: 14.1, grow: 7.8, mcap: 3.2 },
-    { sym: "WLDA", name: "Welda Specialty", pe: 28, fwdPe: 23.5, roic: 12, grow: 5.4, mcap: 2.4 },
-    { sym: "KOPL", name: "Kopolymer", pe: 19.5, fwdPe: 16.8, roic: 16.5, grow: 9.1, mcap: 1.8 },
-    { sym: "BRMA", name: "Bromax", pe: 31.2, fwdPe: 26, roic: 11.4, grow: 13.2, mcap: 5.1 },
-    { sym: "RUST", name: "Rusticum", pe: 14.8, fwdPe: 13.2, roic: 8.4, grow: 2.1, mcap: 1.1 }
-  ];
-  const scored = peers.map((p) => ({ ...p, q: p.roic * 1.4 + p.grow * 1.1 - p.fwdPe * 0.5 }));
-  const sortedQ = scored.map((p) => p.q).sort((a, b) => a - b);
+function PeerCohort({ ticker, peers }) {
+  if (!peers) return /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { padding: 12 } }, "Loading cohort\u2026");
+  if (!peers.peers || !peers.peers.length) return /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { padding: 12 } }, peers.note || "No peer cohort available for this name in the local fundamentals universe.");
+  const cohort = [{ ...peers.self, current: true }, ...peers.peers];
+  const q = (p) => (_P(p.profit_margin) || 0) * 60 + (_P(p.revenue_growth) || 0) * 40 - (_P(p.pe_ttm) || 30) * 0.15;
+  const scored = cohort.map((p) => ({ ...p, q: q(p) }));
+  const qs = scored.map((p) => p.q).sort((a, b) => a - b);
   scored.forEach((p) => {
-    p.pct = Math.round((sortedQ.filter((q) => q <= p.q).length - 1) / (sortedQ.length - 1) * 100);
+    p.pct = qs.length > 1 ? Math.round((qs.filter((x) => x <= p.q).length - 1) / (qs.length - 1) * 100) : 50;
   });
   const cur = scored.find((p) => p.current);
-  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("table", { className: "dtable peers" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Peer"), /* @__PURE__ */ React.createElement("th", null, "Name"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "P/E"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Fwd P/E"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "ROIC"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "5y Grow"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "$M cap"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Cohort %ile"))), /* @__PURE__ */ React.createElement("tbody", null, scored.map((p) => /* @__PURE__ */ React.createElement("tr", { key: p.sym, className: p.current ? "is-current" : "" }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, p.sym)), /* @__PURE__ */ React.createElement("td", { className: "dim" }, p.name), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, p.pe.toFixed(1)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, p.fwdPe.toFixed(1)), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${p.roic > 15 ? "up" : "dim2"}` }, p.roic.toFixed(1), "%"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${p.grow > 10 ? "up" : "dim2"}` }, p.grow.toFixed(1), "%"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, p.mcap.toFixed(2), "B"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, /* @__PURE__ */ React.createElement("span", { className: `peer-pct kpi-tone--${p.pct >= 66 ? "gn" : p.pct >= 40 ? "amb" : "rd"}` }, p.pct)))))), /* @__PURE__ */ React.createElement("div", { className: "lab-verdict mono dim2", style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement("b", { className: "copper" }, cur.sym), " ranks in the ", /* @__PURE__ */ React.createElement("b", { className: cur.pct >= 66 ? "up" : "" }, cur.pct, "th percentile"), " of its 6-name cohort on a quality composite (ROIC + growth \u2212 valuation) \u2014 ", cur.pct >= 66 ? "best-in-cohort fundamentals" : cur.pct >= 40 ? "middle of the pack" : "lagging peers on quality", "."));
+  const fmtPe = (v) => {
+    const n = _P(v);
+    return n == null || n <= 0 ? "\u2014" : n.toFixed(1);
+  };
+  const fmtPct = (v) => {
+    const n = _P(v);
+    return n == null ? "\u2014" : (n * 100).toFixed(1) + "%";
+  };
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("table", { className: "dtable peers" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Peer"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "P/E"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Rev growth"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Op margin"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Net margin"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Mkt cap"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Cohort %ile"))), /* @__PURE__ */ React.createElement("tbody", null, scored.map((p) => /* @__PURE__ */ React.createElement("tr", { key: p.ticker, className: p.current ? "is-current" : "" }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, p.ticker)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, fmtPe(p.pe_ttm)), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${_P(p.revenue_growth) > 0.1 ? "up" : "dim2"}` }, fmtPct(p.revenue_growth)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, fmtPct(p.operating_margin)), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${_P(p.profit_margin) > 0.1 ? "up" : "dim2"}` }, fmtPct(p.profit_margin)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, _money(_P(p.market_cap))), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, /* @__PURE__ */ React.createElement("span", { className: `peer-pct kpi-tone--${p.pct >= 66 ? "gn" : p.pct >= 40 ? "amb" : "rd"}` }, p.pct)))))), /* @__PURE__ */ React.createElement("div", { className: "lab-verdict mono dim2", style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement("b", { className: "copper" }, cur.ticker), " ranks in the ", /* @__PURE__ */ React.createElement("b", { className: cur.pct >= 66 ? "up" : "" }, cur.pct, "th percentile"), " of its ", scored.length, "-name ", peers.basis, " cohort on a quality composite (margins + growth \u2212 valuation) \u2014 ", cur.pct >= 66 ? "best-in-cohort fundamentals" : cur.pct >= 40 ? "middle of the pack" : "lagging peers on quality", ". Cohort median P/E ", /* @__PURE__ */ React.createElement("b", null, fmtPe(peers.medians && peers.medians.pe_ttm), "\xD7"), "."));
 }
-function Statements() {
+function Statements({ d }) {
+  const inc = d.inc.slice().reverse();
+  const cf = d.cf.slice().reverse();
+  if (!inc.length) return /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { padding: 12 } }, "No income-statement history.");
+  const yrs = inc.map((r) => (r.date || "").slice(0, 4));
+  const series = (arr, key) => arr.map((r) => _P(r[key]));
+  const buyback = cf.map((r) => {
+    const v = _P(r.salePurchaseOfStock);
+    return v != null ? Math.max(0, -v) : null;
+  });
   const rows = [
-    { line: "Revenue", vals: [620, 712, 824, 919, 1042], unit: "M", tone: "ink" },
-    { line: "Gross Pft", vals: [264, 304, 351, 388, 438], unit: "M", tone: "ink" },
-    { line: "Op Inc", vals: [86, 112, 130, 148, 171], unit: "M", tone: "ink" },
-    { line: "Net Inc", vals: [62, 82, 96, 108, 124], unit: "M", tone: "ink" },
-    { line: "FCF", vals: [54, 78, 88, 101, 118], unit: "M", tone: "gn" },
-    { line: "Buyback", vals: [40, 80, 120, 180, 220], unit: "M cum", tone: "copper" },
-    { line: "Sh out", vals: [82.1, 81.4, 80.6, 79.8, 79], unit: "M", tone: "gn", neg: true }
+    { line: "Revenue", vals: series(inc, "totalRevenue"), tone: "ink" },
+    { line: "Gross Pft", vals: series(inc, "grossProfit"), tone: "ink" },
+    { line: "EBITDA", vals: series(inc, "ebitda"), tone: "ink" },
+    { line: "Net Inc", vals: series(inc, "netIncome"), tone: "ink" },
+    { line: "FCF", vals: series(cf, "freeCashFlow"), tone: "gn" },
+    { line: "CapEx", vals: series(cf, "capitalExpenditures").map((v) => v == null ? null : Math.abs(v)), tone: "ink" },
+    { line: "Buyback", vals: buyback, tone: "copper" }
   ];
-  return /* @__PURE__ */ React.createElement("table", { className: "dtable statements" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Line"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "2022"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "2023"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "2024"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "2025"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "TTM"), /* @__PURE__ */ React.createElement("th", null, "Trend"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "5y"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r, i) => {
-    const first = r.vals[0];
-    const last = r.vals[r.vals.length - 1];
-    const cagr = ((Math.pow(last / first, 1 / 4) - 1) * 100).toFixed(1);
-    const good = r.neg ? Number(cagr) < 0 : Number(cagr) > 0;
-    return /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, r.line), r.vals.map((v, j) => /* @__PURE__ */ React.createElement("td", { key: j, className: "r mono tabular" }, v.toLocaleString())), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Sparkline, { data: r.vals, color: `var(--${good ? "gn" : "rd"})`, w: 60, h: 18 })), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${good ? "up" : "dn"}` }, cagr, "%"));
+  const cagr = (vals) => {
+    const v = vals.filter((x) => x != null);
+    if (v.length < 2 || v[0] <= 0 || v[v.length - 1] <= 0) return null;
+    return (Math.pow(v[v.length - 1] / v[0], 1 / (v.length - 1)) - 1) * 100;
+  };
+  return /* @__PURE__ */ React.createElement("table", { className: "dtable statements" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Line ($M)"), yrs.map((y, i) => /* @__PURE__ */ React.createElement("th", { key: i, className: "r" }, y)), /* @__PURE__ */ React.createElement("th", null, "Trend"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "CAGR"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r, i) => {
+    const cg = cagr(r.vals);
+    const good = cg == null ? null : cg > 0;
+    const clean = r.vals.filter((x) => x != null);
+    return /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, r.line), r.vals.map((v, j) => /* @__PURE__ */ React.createElement("td", { key: j, className: "r mono tabular" }, v == null ? "\u2014" : _money(v))), /* @__PURE__ */ React.createElement("td", null, clean.length >= 2 ? /* @__PURE__ */ React.createElement(Sparkline, { data: clean, color: `var(--${good ? "gn" : "rd"})`, w: 60, h: 18 }) : /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\u2014")), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${good == null ? "dim2" : good ? "up" : "dn"}` }, cg == null ? "\u2014" : (cg >= 0 ? "+" : "") + cg.toFixed(1) + "%"));
   })));
 }
-function CapAlloc() {
-  const items = [
-    { use: "Buybacks", amt: 220, pct: 0.4, tone: "copper" },
-    { use: "Reinvestment", amt: 178, pct: 0.32, tone: "gn" },
-    { use: "Dividends", amt: 62, pct: 0.11, tone: "ink" },
-    { use: "Debt paydown", amt: 56, pct: 0.1, tone: "ink" },
-    { use: "M&A", amt: 38, pct: 0.07, tone: "amb" }
-  ];
-  return /* @__PURE__ */ React.createElement("div", { className: "cap-alloc" }, /* @__PURE__ */ React.createElement("div", { className: "cap-bar" }, items.map((it, i) => /* @__PURE__ */ React.createElement(
-    "div",
-    {
-      key: i,
-      className: `cap-seg cap-${it.tone}`,
-      style: { width: `${it.pct * 100}%` },
-      title: `${it.use}: $${it.amt}M`
-    }
-  ))), /* @__PURE__ */ React.createElement("div", { className: "cap-legend" }, items.map((it, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "cap-row" }, /* @__PURE__ */ React.createElement("span", { className: `cap-sw cap-${it.tone}` }), /* @__PURE__ */ React.createElement("span", { className: "cap-use mono" }, it.use), /* @__PURE__ */ React.createElement("span", { className: "cap-amt mono dim2" }, "$", it.amt, "M"), /* @__PURE__ */ React.createElement("span", { className: "cap-pct mono" }, (it.pct * 100).toFixed(0), "%")))), /* @__PURE__ */ React.createElement("div", { className: "cap-note mono dim" }, "Last 5 years of FCF deployment. Owner-friendly: 40% repurchases at avg $54.20 (currently above)."));
+function CapAlloc({ d }) {
+  const cf = d.cf;
+  if (!cf.length) return /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { padding: 12 } }, "No cash-flow history.");
+  const sumPos = (key) => cf.reduce((s, r) => {
+    const v = _P(r[key]);
+    return v != null ? s + v : s;
+  }, 0);
+  const capex = Math.abs(sumPos("capitalExpenditures"));
+  const buyback = cf.reduce((s, r) => {
+    const v = _P(r.salePurchaseOfStock);
+    return v != null ? s + Math.max(0, -v) : s;
+  }, 0);
+  const dividends = Math.abs(cf.reduce((s, r) => {
+    const v = _P(r.dividendsPaid);
+    return v != null ? s + v : s;
+  }, 0));
+  const debtPaid = cf.reduce((s, r) => {
+    const v = _P(r.netBorrowings);
+    return v != null && v < 0 ? s + Math.abs(v) : s;
+  }, 0);
+  const invest = cf.reduce((s, r) => {
+    const v = _P(r.investments);
+    return v != null && v < 0 ? s + Math.abs(v) : s;
+  }, 0);
+  const raw = [
+    { use: "Reinvestment (capex)", amt: capex, tone: "gn" },
+    { use: "Buybacks", amt: buyback, tone: "copper" },
+    { use: "Dividends", amt: dividends, tone: "ink" },
+    { use: "Debt paydown", amt: debtPaid, tone: "ink" },
+    { use: "Investing / M&A", amt: invest, tone: "amb" }
+  ].filter((x) => x.amt > 0);
+  const total = raw.reduce((s, x) => s + x.amt, 0) || 1;
+  raw.forEach((x) => x.pct = x.amt / total);
+  raw.sort((a, b) => b.amt - a.amt);
+  if (!raw.length) return /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { padding: 12 } }, "No material capital-allocation flows in the 5y window.");
+  const yrs = d.cf.length;
+  const topUse = raw[0];
+  return /* @__PURE__ */ React.createElement("div", { className: "cap-alloc" }, /* @__PURE__ */ React.createElement("div", { className: "cap-bar" }, raw.map((it, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `cap-seg cap-${it.tone}`, style: { width: `${it.pct * 100}%` }, title: `${it.use}: $${_money(it.amt)}` }))), /* @__PURE__ */ React.createElement("div", { className: "cap-legend" }, raw.map((it, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "cap-row" }, /* @__PURE__ */ React.createElement("span", { className: `cap-sw cap-${it.tone}` }), /* @__PURE__ */ React.createElement("span", { className: "cap-use mono" }, it.use), /* @__PURE__ */ React.createElement("span", { className: "cap-amt mono dim2" }, "$", _money(it.amt)), /* @__PURE__ */ React.createElement("span", { className: "cap-pct mono" }, (it.pct * 100).toFixed(0), "%")))), /* @__PURE__ */ React.createElement("div", { className: "cap-note mono dim" }, "Last ", yrs, " years of cash deployment \xB7 $", _money(total), " total. Largest use: ", /* @__PURE__ */ React.createElement("b", null, topUse.use), " at ", (topUse.pct * 100).toFixed(0), "%."));
 }
-function BullBear() {
-  const bull = [
-    "Capacity expansion at Akron plant ships H2 \u2014 +18% volume.",
-    "Specialty-coatings mix at 38% of revenue \xB7 structurally higher GM.",
-    "Insider buying 9 of last 12 weeks \xB7 $4.2M net.",
-    "China decoupling tailwind for US specialty-chem reshoring."
-  ];
-  const bear = [
-    "Specialty-chem cycle peaks 12\u201318m ahead of broad market \u2014 top-call risk.",
-    "Top-2 customer = 31% of revenue (concentration).",
-    "EBITDA margin trend flat 3 quarters \xB7 pricing power thesis fading.",
-    "ER in 11d \xB7 last 4 quarters: 3 beats / 1 in-line \xB7 trapped on guide?"
-  ];
-  return /* @__PURE__ */ React.createElement("div", { className: "bullbear" }, /* @__PURE__ */ React.createElement("div", { className: "bb-col bb-col--bull" }, /* @__PURE__ */ React.createElement("div", { className: "bb-hdr" }, /* @__PURE__ */ React.createElement(Pill, { tone: "gn", dot: true }, "BULL CASE"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "why this works")), bull.map((p, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "bb-row" }, /* @__PURE__ */ React.createElement("span", { className: "bb-num mono" }, String(i + 1).padStart(2, "0")), /* @__PURE__ */ React.createElement("span", { className: "bb-pt" }, p)))), /* @__PURE__ */ React.createElement("div", { className: "bb-col bb-col--bear" }, /* @__PURE__ */ React.createElement("div", { className: "bb-hdr" }, /* @__PURE__ */ React.createElement(Pill, { tone: "rd", dot: true }, "BEAR CASE"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "what kills the thesis")), bear.map((p, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "bb-row" }, /* @__PURE__ */ React.createElement("span", { className: "bb-num mono" }, String(i + 1).padStart(2, "0")), /* @__PURE__ */ React.createElement("span", { className: "bb-pt" }, p)))));
+function BullBear({ ticker, d, fv, peers }) {
+  const bull = [], bear = [];
+  const mos = fv.blendedMos;
+  if (mos != null && mos <= -10) bull.push(`Trades ${Math.abs(mos).toFixed(0)}% below blended fair value \u2014 a real margin of safety across methods.`);
+  if (d.roe != null && d.roe >= 0.15) bull.push(`ROE ${(d.roe * 100).toFixed(0)}% \u2014 high return on equity signals a quality compounder.`);
+  if (d.revCagr != null && d.revCagr >= 0.1) bull.push(`Revenue compounding ${(d.revCagr * 100).toFixed(0)}%/yr over 5 years \u2014 durable top-line.`);
+  if (d.fcfCagr != null && d.fcfCagr >= 0.08) bull.push(`Free cash flow growing ${(d.fcfCagr * 100).toFixed(0)}%/yr \u2014 self-funding, owner-friendly.`);
+  if (_P(ticker.insiderOwn) != null && _P(ticker.insiderOwn) >= 5) bull.push(`Insiders own ${_P(ticker.insiderOwn).toFixed(1)}% \u2014 management's capital is aligned with yours.`);
+  if (d.targetPrice && d.price && d.targetPrice / d.price - 1 >= 0.12) bull.push(`Street target $${d.targetPrice.toFixed(0)} implies ${((d.targetPrice / d.price - 1) * 100).toFixed(0)}% upside to consensus.`);
+  if (mos != null && mos >= 10) bear.push(`Trades ${mos.toFixed(0)}% above blended fair value \u2014 paying a premium; little room for error.`);
+  if (d.opMargin != null && d.opMargin <= 0) bear.push(`Operating margin is negative (${(d.opMargin * 100).toFixed(1)}%) \u2014 not yet profitable at the operating line.`);
+  if (d.profitMargin != null && d.profitMargin <= 0.03 && d.profitMargin > -1) bear.push(`Thin net margin (${(d.profitMargin * 100).toFixed(1)}%) \u2014 limited cushion if costs rise.`);
+  if (_P(ticker.shortFloat) != null && _P(ticker.shortFloat) >= 8) bear.push(`Short interest ${_P(ticker.shortFloat).toFixed(0)}% of float \u2014 the crowd is positioned against it.`);
+  if (d.revCagr != null && d.revGrowthQ != null && d.revGrowthQ < d.revCagr - 0.05) bear.push(`Latest quarterly revenue growth (${(d.revGrowthQ * 100).toFixed(0)}%) is decelerating vs the 5y CAGR (${(d.revCagr * 100).toFixed(0)}%).`);
+  if (peers && peers.medians && _P(peers.medians.pe_ttm) && d.pe && d.pe > _P(peers.medians.pe_ttm) * 1.3) bear.push(`P/E ${d.pe.toFixed(0)}\xD7 sits well above the cohort median ${_P(peers.medians.pe_ttm).toFixed(0)}\xD7 \u2014 richly valued vs peers.`);
+  if (d.fcfPS != null && d.fcfPS <= 0) bear.push(`Trailing free cash flow is negative \u2014 valuation rests on future profitability, not today's cash.`);
+  if (!bull.length) bull.push("No standout bullish signals in the current fundamentals \u2014 this is a show-me name.");
+  if (!bear.length) bear.push("No major red flags in the fundamentals \u2014 risk is mostly valuation and execution.");
+  const aiPrompt = () => `Give a balanced 3-sentence investor read on ${ticker.symbol} (${ticker.name}). Price $${d.price.toFixed(2)}, blended fair value $${fv.blended ? fv.blended.toFixed(2) : "n/a"} (margin of safety ${mos != null ? mos.toFixed(0) + "%" : "n/a"}), ROE ${d.roe != null ? (d.roe * 100).toFixed(0) + "%" : "n/a"}, 5y revenue CAGR ${d.revCagr != null ? (d.revCagr * 100).toFixed(0) + "%" : "n/a"}, operating margin ${d.opMargin != null ? (d.opMargin * 100).toFixed(0) + "%" : "n/a"}. Bull points: ${bull.slice(0, 3).join("; ")}. Bear points: ${bear.slice(0, 3).join("; ")}.`;
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "bullbear" }, /* @__PURE__ */ React.createElement("div", { className: "bb-col bb-col--bull" }, /* @__PURE__ */ React.createElement("div", { className: "bb-hdr" }, /* @__PURE__ */ React.createElement(Pill, { tone: "gn", dot: true }, "BULL CASE"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "why this works")), bull.map((p, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "bb-row" }, /* @__PURE__ */ React.createElement("span", { className: "bb-num mono" }, String(i + 1).padStart(2, "0")), /* @__PURE__ */ React.createElement("span", { className: "bb-pt" }, p)))), /* @__PURE__ */ React.createElement("div", { className: "bb-col bb-col--bear" }, /* @__PURE__ */ React.createElement("div", { className: "bb-hdr" }, /* @__PURE__ */ React.createElement(Pill, { tone: "rd", dot: true }, "BEAR CASE"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "what kills the thesis")), bear.map((p, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "bb-row" }, /* @__PURE__ */ React.createElement("span", { className: "bb-num mono" }, String(i + 1).padStart(2, "0")), /* @__PURE__ */ React.createElement("span", { className: "bb-pt" }, p))))), window.AiExplain && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 10 } }, /* @__PURE__ */ React.createElement(AiExplain, { build: aiPrompt, label: "Synthesize bull vs bear", tag: "KAIROS \xB7 VALUE" })));
 }
-function CatCal() {
-  const events = [
-    { when: "Jun 09 \xB7 11d", label: "Q1 ER", tone: "amb", imp: "high" },
-    { when: "Jun 27", label: "Industry conf (BMO Materials)", tone: "ink", imp: "med" },
-    { when: "Aug 12 \xB7 78d", label: "Capacity ribbon-cut \xB7 Akron", tone: "gn", imp: "high" },
-    { when: "Sep 30", label: "Q2 ER", tone: "amb", imp: "high" },
-    { when: "Nov 06", label: "Investor day \xB7 5-yr LRP", tone: "copper", imp: "high" },
-    { when: "2027 H1", label: "Specialty-coatings JV close", tone: "violet", imp: "med" }
-  ];
-  return /* @__PURE__ */ React.createElement("div", { className: "catcal" }, events.map((e, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `cat-row cat-${e.tone}` }, /* @__PURE__ */ React.createElement("span", { className: "cat-when mono" }, e.when), /* @__PURE__ */ React.createElement("span", { className: "cat-label" }, e.label), /* @__PURE__ */ React.createElement(Pill, { tone: e.imp === "high" ? "amb" : "ink", small: true }, e.imp))));
+function CatCal({ ticker }) {
+  const hist = ticker._fund && ticker._fund.earnings_history || ticker.earningsHistory || [];
+  if (!hist.length) return /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { padding: 12 } }, "No earnings calendar available for ", ticker.symbol, ".");
+  const upcoming = hist.filter((e) => e.epsActual == null && e.reportDate).slice(-2).reverse();
+  const past = hist.filter((e) => e.epsActual != null).slice(0, 4);
+  const surprise = (e) => e.epsEstimate && e.epsActual != null ? (e.epsActual - e.epsEstimate) / Math.abs(e.epsEstimate) * 100 : e.surprisePercent != null ? _P(e.surprisePercent) : null;
+  return /* @__PURE__ */ React.createElement("div", { className: "catcal" }, upcoming.map((e, i) => /* @__PURE__ */ React.createElement("div", { key: "u" + i, className: "cat-row cat-amb" }, /* @__PURE__ */ React.createElement("span", { className: "cat-when mono" }, (e.reportDate || "").slice(0, 10)), /* @__PURE__ */ React.createElement("span", { className: "cat-label" }, "Earnings report", e.epsEstimate != null ? ` \xB7 est EPS $${_P(e.epsEstimate).toFixed(2)}` : "", e.beforeAfterMarket ? ` \xB7 ${e.beforeAfterMarket}` : ""), /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "upcoming"))), past.map((e, i) => {
+    const s = surprise(e);
+    return /* @__PURE__ */ React.createElement("div", { key: "p" + i, className: `cat-row cat-ink` }, /* @__PURE__ */ React.createElement("span", { className: "cat-when mono" }, (e.reportDate || "").slice(0, 10)), /* @__PURE__ */ React.createElement("span", { className: "cat-label" }, "Reported EPS $", _P(e.epsActual) != null ? _P(e.epsActual).toFixed(2) : "\u2014", e.epsEstimate != null ? ` vs est $${_P(e.epsEstimate).toFixed(2)}` : ""), s != null ? /* @__PURE__ */ React.createElement(Pill, { tone: s >= 0 ? "gn" : "rd", small: true }, s >= 0 ? "beat +" : "miss ", s.toFixed(0), "%") : /* @__PURE__ */ React.createElement(Pill, { tone: "ink", small: true }, "\u2014"));
+  }));
+}
+function crossLensCells(ticker, d, fv) {
+  const mos = fv.blendedMos;
+  const cells = [];
+  cells.push({ lens: "Value", verdict: mos == null ? "\u2014" : mos <= -8 ? "CHEAP" : mos >= 8 ? "RICH" : "FAIR", tone: mos == null ? "ink" : _tone(mos), note: mos != null ? `MoS ${mos >= 0 ? "+" : ""}${mos.toFixed(0)}%` : "no fair value" });
+  if (d.roe != null) cells.push({ lens: "Quality", verdict: d.roe >= 0.15 ? "HIGH" : d.roe >= 0.05 ? "OK" : "LOW", tone: d.roe >= 0.15 ? "gn" : d.roe >= 0.05 ? "amb" : "rd", note: `ROE ${(d.roe * 100).toFixed(0)}%` });
+  if (d.revCagr != null) cells.push({ lens: "Growth", verdict: d.revCagr >= 0.15 ? "FAST" : d.revCagr >= 0.05 ? "STEADY" : "SLOW", tone: d.revCagr >= 0.15 ? "gn" : d.revCagr >= 0.05 ? "amb" : "rd", note: `rev ${(d.revCagr * 100).toFixed(0)}%/yr` });
+  if (_P(ticker.shortFloat) != null) cells.push({ lens: "Risk", verdict: _P(ticker.shortFloat) >= 10 ? "CROWDED" : "OK", tone: _P(ticker.shortFloat) >= 10 ? "rd" : "gn", note: `short ${_P(ticker.shortFloat).toFixed(0)}%` });
+  if (_P(ticker.insiderOwn) != null) cells.push({ lens: "Insider", verdict: _P(ticker.insiderOwn) >= 5 ? "ALIGNED" : "LOW", tone: _P(ticker.insiderOwn) >= 5 ? "gn" : "amb", note: `own ${_P(ticker.insiderOwn).toFixed(1)}%` });
+  return cells;
+}
+function TheRead({ d, fv }) {
+  const mos = fv.blendedMos;
+  if (mos == null) return null;
+  const cheap = mos <= -8, rich = mos >= 8;
+  const entry = fv.blended ? fv.blended * 0.92 : d.price * 0.92;
+  return /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 Investment"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", { className: cheap ? "up" : rich ? "dn" : "copper" }, cheap ? `Margin of safety ${Math.abs(mos).toFixed(0)}%` : rich ? `Premium ${mos.toFixed(0)}%` : "Roughly fair"), " ", "\xB7 blended fair ", /* @__PURE__ */ React.createElement("b", null, "$", fv.blended ? fv.blended.toFixed(2) : "\u2014"), ".", " ", rich ? /* @__PURE__ */ React.createElement(React.Fragment, null, "More attractive on a pullback toward ", /* @__PURE__ */ React.createElement("b", null, "$", entry.toFixed(2)), ".") : cheap ? /* @__PURE__ */ React.createElement(React.Fragment, null, "Valuation supports accumulation; size to conviction and let the thesis play out.") : /* @__PURE__ */ React.createElement(React.Fragment, null, "Wait for a better entry or a fundamental catalyst to tip the risk/reward.")));
 }
 window.LensInvestment = LensInvestment;
 </script>
@@ -23466,7 +23647,6 @@ window.CompanyValuation = CompanyValuation;
 <script>/* src/lens-plan-v2.jsx */
 const { useState: useStateP2, useMemo: useMemoP2 } = React;
 function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
-  var _a;
   const ticker = useMemoP2(() => modeAdjustP2(t0, mode), [t0, mode]);
   const [sizeMult, setSizeMult] = useStateP2(1);
   const [kellyFrac, setKellyFrac] = useStateP2(0.5);
@@ -23478,6 +23658,9 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
   const s6 = useStateToggle("plv2-6");
   const pm = useMemoP2(() => planMath(ticker), [ticker]);
   const size = useMemoP2(() => planSize(pm, sizeMult, kellyFrac), [pm, sizeMult, kellyFrac]);
+  if (!pm.levelsValid) {
+    return /* @__PURE__ */ React.createElement("div", { className: "lens lens--plan2" }, /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "fr-read mono dim2", style: { padding: "18px 16px" } }, /* @__PURE__ */ React.createElement("b", { className: "warn" }, "No coherent trade plan for ", ticker.symbol, " in ", mode, " mode."), " This name isn't in today's scan with a valid stop/entry/T1/T2 ladder (stop\xA0<\xA0entry\xA0<\xA0T1\xA0<\xA0T2), so the ticket, sizing and payoff geometry can't be computed without fabricating levels. Run a scan that surfaces it, or use the Chart / Patterns lens for structure."))));
+  }
   return /* @__PURE__ */ React.createElement("div", { className: "lens lens--plan2" }, /* @__PURE__ */ React.createElement(PlanActionPanel, { pm, size, mode, sym: ticker.symbol, family: ticker.setupFamily }), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
@@ -23515,7 +23698,7 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "plv2-3" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s3.value, source: "rule engine \xB7 15 gates" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(DecisionGates, null)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s3.value, source: "rule engine \xB7 live gates" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(DecisionGates, { pm, size, ticker })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 4,
@@ -23550,13 +23733,47 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "plv2-6" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s6.value, source: "rule engine \xB7 audit log" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(AuditLog, { pm, size })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(SectionHeader, { n: 8, title: "Cross-Lens Confluence", style: headerStyle }), /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CrossLens, { lead: "copper", cells: [
-    { lens: "Plan", verdict: "READY", tone: "gn", note: `R ${pm.rr1.toFixed(2)} \xB7 ${(kellyFrac * 100).toFixed(0)}% Kelly` },
-    { lens: "Technicals", verdict: "PASS", tone: "gn", note: "RSI 64 \xB7 VWAP-reclaim" },
-    { lens: "Risk", verdict: "OK", tone: "gn", note: "VaR(1d) \u22122.1%" },
-    { lens: "Earnings", verdict: `${ticker.earnings.days} d`, tone: "amb", note: "size \u221225% pre-ER" },
-    { lens: "Track Rec.", verdict: "EDGE", tone: "gn", note: `n=${(_a = ticker.setupStats.n) != null ? _a : "\u2014"} \xB7 pf ${ticker.setupStats.pf != null ? ticker.setupStats.pf.toFixed(2) : "\u2014"}` }
-  ] })))), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 ", mode), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "BUY-STOP LIMIT ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "$", pm.entry.toFixed(2)), " \xB7 stop ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "$", pm.stop.toFixed(2)), " \xB7 T1 ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "$", pm.t1.toFixed(2)), " \xB7", " ", size.sh, " sh \xB7 max risk ", /* @__PURE__ */ React.createElement("b", null, "$", Math.round(size.maxLoss)), " \xB7 ", size.navPct.toFixed(1), "% NAV \xB7 ", /* @__PURE__ */ React.createElement("b", { className: pm.rr1 >= 2 ? "up" : "warn" }, pm.rr1.toFixed(2), "R"), " to T1.")));
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s6.value, source: "rule engine \xB7 audit log" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(AuditLog, { pm, size })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(SectionHeader, { n: 8, title: "Cross-Lens Confluence", style: headerStyle }), /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, (() => {
+    var _a;
+    const px = ticker.pillars || {};
+    const tech = px.technical != null ? px.technical : null;
+    const erD = ticker.earnings && ticker.earnings.days != null ? ticker.earnings.days : null;
+    const t1Days = Math.max(1, Math.floor((pm.holdDays || 10) * 0.35));
+    const ss = ticker.setupStats || {};
+    const planReady = pm.rr1 >= 1.5 && (pm.kelly == null || pm.kelly > 0);
+    return /* @__PURE__ */ React.createElement(CrossLens, { lead: "copper", cells: [
+      {
+        lens: "Plan",
+        verdict: planReady ? "READY" : "REVIEW",
+        tone: planReady ? "gn" : "amb",
+        note: `R ${pm.rr1.toFixed(2)} \xB7 ${pm.kelly != null ? (pm.kelly * 100).toFixed(0) + "% Kelly" : "no ledger edge"}`
+      },
+      {
+        lens: "Technicals",
+        verdict: tech == null ? "\u2014" : tech >= 60 ? "STRONG" : tech >= 45 ? "OK" : "WEAK",
+        tone: tech == null ? "amb" : tech >= 60 ? "gn" : tech >= 45 ? "amb" : "rd",
+        note: tech == null ? "no pillar data" : `tech pillar ${Math.round(tech)}`
+      },
+      {
+        lens: "Risk",
+        verdict: size.lossNavPct <= 0.75 ? "OK" : "HOT",
+        tone: size.lossNavPct <= 0.75 ? "gn" : "rd",
+        note: `max loss ${size.lossNavPct.toFixed(2)}% NAV`
+      },
+      {
+        lens: "Earnings",
+        verdict: erD == null ? "\u2014" : `T+${erD}d`,
+        tone: "amb",
+        note: erD == null ? "no ER date" : erD <= t1Days ? "inside T1 window" : "clear of T1"
+      },
+      {
+        lens: "Track Rec.",
+        verdict: ss.n == null ? "\u2014" : "EDGE",
+        tone: ss.n == null ? "amb" : "gn",
+        note: `n=${(_a = ss.n) != null ? _a : "\u2014"} \xB7 pf ${ss.pf != null ? ss.pf.toFixed(2) : "\u2014"}`
+      }
+    ] });
+  })()))), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 ", mode), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "BUY-STOP LIMIT ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "$", pm.entry.toFixed(2)), " \xB7 stop ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "$", pm.stop.toFixed(2)), " \xB7 T1 ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "$", pm.t1.toFixed(2)), " \xB7", " ", size.sh, " sh \xB7 max risk ", /* @__PURE__ */ React.createElement("b", null, "$", Math.round(size.maxLoss)), " \xB7 ", size.navPct.toFixed(1), "% NAV \xB7 ", /* @__PURE__ */ React.createElement("b", { className: pm.rr1 >= 2 ? "up" : "warn" }, pm.rr1.toFixed(2), "R"), " to T1.")));
 }
 function modeAdjustP2(ticker, mode) {
   if (mode === "POSITION") return { ...ticker, stop: ticker.stop * 0.96, t1: ticker.t1 * 1.1, t2: ticker.t2 * 1.18, holdDays: 38, rMultiple: 2.21 };
@@ -23574,10 +23791,12 @@ function planMath(t) {
   const riskBudget = Math.round(PLAN_NAV * 39e-4);
   const baseShares = Math.max(1, Math.round(riskBudget / risk));
   const ss = t.setupStats || {};
-  const wr = ss.winRate || 0.617;
-  const lb = ss.wilsonLB || 0.477;
-  const evR = wr * rr1 - (1 - wr);
-  const atr = +(risk * 0.55).toFixed(2);
+  const wr = ss.winRate != null ? ss.winRate : null;
+  const lb = ss.wilsonLB != null ? ss.wilsonLB : null;
+  const evR = wr != null ? wr * rr1 - (1 - wr) : null;
+  const kelly = wr != null && rr1 > 0 ? Math.max(0, (wr * rr1 - (1 - wr)) / rr1) : null;
+  const atr = +(risk / 1.25).toFixed(2);
+  const levelsValid = L.valid !== false && L.stop > 0 && entry > L.stop && L.t1 > entry && L.t2 > L.t1;
   return {
     symbol: t.symbol,
     price: L.price,
@@ -23594,9 +23813,11 @@ function planMath(t) {
     wr,
     lb,
     evR,
+    kelly,
     atr,
+    levelsValid,
     holdDays: t.holdDays,
-    earnings: t.earnings,
+    earnings: t.earnings || { days: null, date: "" },
     setupStats: ss
   };
 }
@@ -23645,7 +23866,7 @@ function FillRealism({ pm, size }) {
     { l: "Slippage", v: `+${slipBps}bp`, s: "market impact", tone: "amb", add: true },
     { l: "Realistic fill", v: `$${fill.toFixed(2)}`, s: `${slipPct >= 0 ? "+" : ""}${slipPct.toFixed(2)}%`, tone: "rd", strong: true }
   ];
-  return /* @__PURE__ */ React.createElement("div", { className: "fr" }, /* @__PURE__ */ React.createElement("div", { className: "fr-hd" }, /* @__PURE__ */ React.createElement("span", { className: "fr-tag mono" }, "FILL REALISM \xB7 PAPER"), /* @__PURE__ */ React.createElement("span", { className: "fr-sub mono dim2" }, "what you'd actually fill at \u2014 not the signal price")), /* @__PURE__ */ React.createElement("div", { className: "fr-flow" }, steps.map((st, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("div", { className: `fr-step ${st.strong ? "is-strong" : ""}` }, /* @__PURE__ */ React.createElement("span", { className: "fr-step-l mono dim2" }, st.l), /* @__PURE__ */ React.createElement("span", { className: `fr-step-v mono kpi-tone--${st.tone}` }, st.v), /* @__PURE__ */ React.createElement("span", { className: "fr-step-s mono dim2" }, st.s)), i < steps.length - 1 && /* @__PURE__ */ React.createElement("span", { className: "fr-arrow mono" }, steps[i + 1].add ? "+" : "\u2192")))), /* @__PURE__ */ React.createElement("div", { className: "fr-kpis" }, /* @__PURE__ */ React.createElement("div", { className: "fr-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Entry slippage"), /* @__PURE__ */ React.createElement("span", { className: "mono kpi-tone--rd fr-kpi-v" }, "\u2212$", Math.abs(slipCost)), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, slipPct.toFixed(2), "% \xB7 ", shares, " sh")), /* @__PURE__ */ React.createElement("div", { className: "fr-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Stop gap-fill"), /* @__PURE__ */ React.createElement("span", { className: "mono kpi-tone--rd fr-kpi-v" }, "$", stopFill.toFixed(2)), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "\u2212$", stopExtra, " vs $", stop.toFixed(2))), /* @__PURE__ */ React.createElement("div", { className: "fr-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "R:R ideal \u2192 real"), /* @__PURE__ */ React.createElement("span", { className: "mono fr-kpi-v" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, rrIdeal.toFixed(2), "\u2192"), /* @__PURE__ */ React.createElement("b", { className: rrReal >= 2 ? "up" : "warn" }, rrReal.toFixed(2))), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "after fills")), /* @__PURE__ */ React.createElement("div", { className: "fr-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Round-trip friction"), /* @__PURE__ */ React.createElement("span", { className: "mono kpi-tone--amb fr-kpi-v" }, "\u2212$", rtCost), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "in + out"))), /* @__PURE__ */ React.createElement("div", { className: "fr-read mono dim2" }, "A stop-buy fills at the ", /* @__PURE__ */ React.createElement("b", null, "next bar's open + spread + slippage"), ", not your signal price \u2014 so this entry really costs ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "\u2212$", Math.abs(slipCost)), " (", slipPct.toFixed(2), "%) and the stop can gap ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "$", stopExtra), " worse, dropping real R:R to ", /* @__PURE__ */ React.createElement("b", { className: rrReal >= 2 ? "up" : "warn" }, rrReal.toFixed(2)), ". Paper P&L & Track Record score these ", /* @__PURE__ */ React.createElement("b", null, "realistic fills"), ", so the numbers stay honest."));
+  return /* @__PURE__ */ React.createElement("div", { className: "fr" }, /* @__PURE__ */ React.createElement("div", { className: "fr-hd" }, /* @__PURE__ */ React.createElement("span", { className: "fr-tag mono" }, "FILL REALISM \xB7 MODELED"), /* @__PURE__ */ React.createElement("span", { className: "fr-sub mono dim2" }, "modeled friction (bps) \u2014 not the signal price \xB7 live spread/ADV pending")), /* @__PURE__ */ React.createElement("div", { className: "fr-flow" }, steps.map((st, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("div", { className: `fr-step ${st.strong ? "is-strong" : ""}` }, /* @__PURE__ */ React.createElement("span", { className: "fr-step-l mono dim2" }, st.l), /* @__PURE__ */ React.createElement("span", { className: `fr-step-v mono kpi-tone--${st.tone}` }, st.v), /* @__PURE__ */ React.createElement("span", { className: "fr-step-s mono dim2" }, st.s)), i < steps.length - 1 && /* @__PURE__ */ React.createElement("span", { className: "fr-arrow mono" }, steps[i + 1].add ? "+" : "\u2192")))), /* @__PURE__ */ React.createElement("div", { className: "fr-kpis" }, /* @__PURE__ */ React.createElement("div", { className: "fr-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Entry slippage"), /* @__PURE__ */ React.createElement("span", { className: "mono kpi-tone--rd fr-kpi-v" }, "\u2212$", Math.abs(slipCost)), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, slipPct.toFixed(2), "% \xB7 ", shares, " sh")), /* @__PURE__ */ React.createElement("div", { className: "fr-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Stop gap-fill"), /* @__PURE__ */ React.createElement("span", { className: "mono kpi-tone--rd fr-kpi-v" }, "$", stopFill.toFixed(2)), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "\u2212$", stopExtra, " vs $", stop.toFixed(2))), /* @__PURE__ */ React.createElement("div", { className: "fr-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "R:R ideal \u2192 real"), /* @__PURE__ */ React.createElement("span", { className: "mono fr-kpi-v" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, rrIdeal.toFixed(2), "\u2192"), /* @__PURE__ */ React.createElement("b", { className: rrReal >= 2 ? "up" : "warn" }, rrReal.toFixed(2))), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "after fills")), /* @__PURE__ */ React.createElement("div", { className: "fr-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Round-trip friction"), /* @__PURE__ */ React.createElement("span", { className: "mono kpi-tone--amb fr-kpi-v" }, "\u2212$", rtCost), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "in + out"))), /* @__PURE__ */ React.createElement("div", { className: "fr-read mono dim2" }, "A stop-buy fills at the ", /* @__PURE__ */ React.createElement("b", null, "next bar's open + spread + slippage"), ", not your signal price \u2014 so this entry really costs ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "\u2212$", Math.abs(slipCost)), " (", slipPct.toFixed(2), "%) and the stop can gap ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "$", stopExtra), " worse, dropping real R:R to ", /* @__PURE__ */ React.createElement("b", { className: rrReal >= 2 ? "up" : "warn" }, rrReal.toFixed(2)), ". Paper P&L & Track Record score these ", /* @__PURE__ */ React.createElement("b", null, "realistic fills"), ", so the numbers stay honest."));
 }
 function PlanActionPanel({ pm, size, mode, sym, family }) {
   return /* @__PURE__ */ React.createElement("div", { className: "pap" }, /* @__PURE__ */ React.createElement("div", { className: "pap-l" }, /* @__PURE__ */ React.createElement("div", { className: "pap-eyebrow mono" }, "PLAN \xB7 TICKET \xB7 ", mode), /* @__PURE__ */ React.createElement("div", { className: "pap-headline mono" }, /* @__PURE__ */ React.createElement("span", { className: "pap-action" }, "BUY-STOP BRACKET"), /* @__PURE__ */ React.createElement("span", { className: "pap-sym" }, sym), /* @__PURE__ */ React.createElement("span", { className: "pap-px copper" }, "$", pm.entry.toFixed(2))), /* @__PURE__ */ React.createElement("div", { className: "pap-line mono dim2" }, family, " \xB7 ", size.sh, " sh \xB7 $", Math.round(size.notional).toLocaleString(), " notional \xB7 ", /* @__PURE__ */ React.createElement("b", null, size.navPct.toFixed(1), "% NAV"), " \xB7 OCO armed")), /* @__PURE__ */ React.createElement("div", { className: "pap-r" }, /* @__PURE__ */ React.createElement("button", { className: "pap-fire" }, "\u26A1 FIRE BRACKET ", /* @__PURE__ */ React.createElement("span", { className: "kbd" }, "\u2318\u21B5")), /* @__PURE__ */ React.createElement("div", { className: "pap-r-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn btn--sm" }, "SAVE PLAN"), /* @__PURE__ */ React.createElement("button", { className: "btn btn--sm" }, "DRY-RUN"), /* @__PURE__ */ React.createElement("button", { className: "btn btn--sm" }, "\uFF0B JOURNAL"))));
@@ -23684,12 +23905,12 @@ function TradeBlueprint({ pm, size }) {
   for (let p = xMin; p <= xMax; p += 0.2) samples.push([x(p), y(pnlAt(p))]);
   const levels = [
     { p: stop, c: "var(--rd)", lbl: "STOP", v: `$${stop.toFixed(2)}`, sub: `\u2212$${maxLoss.toFixed(0)}` },
-    { p: entry, c: "var(--copper)", lbl: "ENTRY", v: `$${entry.toFixed(2)}`, sub: "pivot \xB7 110 sh", big: true },
+    { p: entry, c: "var(--copper)", lbl: "ENTRY", v: `$${entry.toFixed(2)}`, sub: `pivot \xB7 ${qty} sh`, big: true },
     { p: cur, c: "var(--copper)", lbl: "NOW", v: `$${cur.toFixed(2)}`, sub: pnlAt(cur) >= 0 ? `+$${pnlAt(cur).toFixed(0)}` : `\u2212$${Math.abs(pnlAt(cur)).toFixed(0)}`, dotted: true },
     { p: t1, c: "var(--gn)", lbl: "T1", v: `$${t1.toFixed(2)}`, sub: `+$${t1Gain.toFixed(0)}`, big: true },
     { p: t2, c: "var(--gn)", lbl: "T2", v: `$${t2.toFixed(2)}`, sub: `+$${t2Gain.toFixed(0)}` }
   ];
-  return /* @__PURE__ */ React.createElement("div", { className: "tbv2" }, /* @__PURE__ */ React.createElement("div", { className: "tbv2-metrics" }, /* @__PURE__ */ React.createElement(TbMetric, { label: "R:R \xB7 T1", value: `${(reward1 / risk).toFixed(2)}R`, sub: `+$${t1Gain.toFixed(0)} @ ${qty} sh`, tone: "gn", big: true }), /* @__PURE__ */ React.createElement(TbMetric, { label: "R:R \xB7 T2", value: `${(reward2 / risk).toFixed(2)}R`, sub: `+$${t2Gain.toFixed(0)} @ ${qty} sh`, tone: "gn" }), /* @__PURE__ */ React.createElement(TbMetric, { label: "Risk \xB7 1R", value: `$${risk.toFixed(2)}`, sub: `stop \xB7 \u2212$${maxLoss.toFixed(0)} @ ${qty} sh`, tone: "rd" }), /* @__PURE__ */ React.createElement(TbMetric, { label: "% to Stop", value: `\u2212${(risk / entry * 100).toFixed(2)}%`, sub: `$${stop.toFixed(2)}`, tone: "rd" }), /* @__PURE__ */ React.createElement(TbMetric, { label: "% to T1", value: `+${(reward1 / entry * 100).toFixed(2)}%`, sub: `$${t1.toFixed(2)}`, tone: "gn" }), /* @__PURE__ */ React.createElement(TbMetric, { label: "% to T2", value: `+${(reward2 / entry * 100).toFixed(2)}%`, sub: `$${t2.toFixed(2)}`, tone: "gn" }), /* @__PURE__ */ React.createElement(TbMetric, { label: "ATR \xB7 14d", value: `$${atr.toFixed(2)}`, sub: `${(atr / entry * 100).toFixed(1)}% \xB7 daily`, tone: "ink" }), /* @__PURE__ */ React.createElement(TbMetric, { label: "Wilson WR", value: pm.lb != null ? `${(pm.lb * 100).toFixed(1)}%` : "\u2014", sub: `LB \xB7 n=${(_a = pm.setupStats.n) != null ? _a : "\u2014"}`, tone: "copper" })), /* @__PURE__ */ React.createElement("div", { className: "tbv2-chart" }, /* @__PURE__ */ React.createElement("svg", { viewBox: `0 0 ${W} ${H}`, className: "tbv2-svg", preserveAspectRatio: "xMidYMid meet" }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("linearGradient", { id: "tbv2-gn", x1: "0", y1: "0", x2: "0", y2: "1" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: "var(--gn)", stopOpacity: "0.40" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: "var(--gn)", stopOpacity: "0.02" })), /* @__PURE__ */ React.createElement("linearGradient", { id: "tbv2-rd", x1: "0", y1: "1", x2: "0", y2: "0" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: "var(--rd)", stopOpacity: "0.40" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: "var(--rd)", stopOpacity: "0.02" })), /* @__PURE__ */ React.createElement("clipPath", { id: "tbv2-clip-gn" }, /* @__PURE__ */ React.createElement("rect", { x: "0", y: "0", width: W, height: y0 })), /* @__PURE__ */ React.createElement("clipPath", { id: "tbv2-clip-rd" }, /* @__PURE__ */ React.createElement("rect", { x: "0", y: y0, width: W, height: H - y0 }))), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "tbv2" }, /* @__PURE__ */ React.createElement("div", { className: "tbv2-metrics" }, /* @__PURE__ */ React.createElement(TbMetric, { label: "R:R \xB7 T1", value: `${(reward1 / risk).toFixed(2)}R`, sub: `+$${t1Gain.toFixed(0)} @ ${qty} sh`, tone: "gn", big: true }), /* @__PURE__ */ React.createElement(TbMetric, { label: "R:R \xB7 T2", value: `${(reward2 / risk).toFixed(2)}R`, sub: `+$${t2Gain.toFixed(0)} @ ${qty} sh`, tone: "gn" }), /* @__PURE__ */ React.createElement(TbMetric, { label: "Risk \xB7 1R", value: `$${risk.toFixed(2)}`, sub: `stop \xB7 \u2212$${maxLoss.toFixed(0)} @ ${qty} sh`, tone: "rd" }), /* @__PURE__ */ React.createElement(TbMetric, { label: "% to Stop", value: `\u2212${(risk / entry * 100).toFixed(2)}%`, sub: `$${stop.toFixed(2)}`, tone: "rd" }), /* @__PURE__ */ React.createElement(TbMetric, { label: "% to T1", value: `+${(reward1 / entry * 100).toFixed(2)}%`, sub: `$${t1.toFixed(2)}`, tone: "gn" }), /* @__PURE__ */ React.createElement(TbMetric, { label: "% to T2", value: `+${(reward2 / entry * 100).toFixed(2)}%`, sub: `$${t2.toFixed(2)}`, tone: "gn" }), /* @__PURE__ */ React.createElement(TbMetric, { label: "ATR \xB7 est", value: `$${atr.toFixed(2)}`, sub: `${(atr / entry * 100).toFixed(1)}% \xB7 stop\xF71.25`, tone: "ink" }), /* @__PURE__ */ React.createElement(TbMetric, { label: "Wilson WR", value: pm.lb != null ? `${(pm.lb * 100).toFixed(1)}%` : "\u2014", sub: `LB \xB7 n=${(_a = pm.setupStats.n) != null ? _a : "\u2014"}`, tone: "copper" })), /* @__PURE__ */ React.createElement("div", { className: "tbv2-chart" }, /* @__PURE__ */ React.createElement("svg", { viewBox: `0 0 ${W} ${H}`, className: "tbv2-svg", preserveAspectRatio: "xMidYMid meet" }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("linearGradient", { id: "tbv2-gn", x1: "0", y1: "0", x2: "0", y2: "1" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: "var(--gn)", stopOpacity: "0.40" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: "var(--gn)", stopOpacity: "0.02" })), /* @__PURE__ */ React.createElement("linearGradient", { id: "tbv2-rd", x1: "0", y1: "1", x2: "0", y2: "0" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: "var(--rd)", stopOpacity: "0.40" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: "var(--rd)", stopOpacity: "0.02" })), /* @__PURE__ */ React.createElement("clipPath", { id: "tbv2-clip-gn" }, /* @__PURE__ */ React.createElement("rect", { x: "0", y: "0", width: W, height: y0 })), /* @__PURE__ */ React.createElement("clipPath", { id: "tbv2-clip-rd" }, /* @__PURE__ */ React.createElement("rect", { x: "0", y: y0, width: W, height: H - y0 }))), /* @__PURE__ */ React.createElement(
     "rect",
     {
       x: padL,
@@ -23811,7 +24032,7 @@ function SizingWorkbench({ pm, size, sizeMult, onSizeMult, kellyFrac, onKellyFra
   const maxLoss = size.maxLoss;
   const navPct = size.navPct;
   const lossNavPct = size.lossNavPct;
-  return /* @__PURE__ */ React.createElement("div", { className: "sw" }, /* @__PURE__ */ React.createElement("div", { className: "sw-controls" }, /* @__PURE__ */ React.createElement("div", { className: "sw-ctrl" }, /* @__PURE__ */ React.createElement("div", { className: "sw-ctrl-l" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Kelly fraction"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", { className: "copper" }, (kellyFrac * 100).toFixed(0), "%"), " of raw Kelly")), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "sw" }, /* @__PURE__ */ React.createElement("div", { className: "sw-controls" }, /* @__PURE__ */ React.createElement("div", { className: "sw-ctrl" }, /* @__PURE__ */ React.createElement("div", { className: "sw-ctrl-l" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Kelly fraction"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", { className: "copper" }, (kellyFrac * 100).toFixed(0), "%"), " of raw Kelly", " ", pm.kelly != null ? /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "(f*\xA0=", (pm.kelly * 100).toFixed(1), "% \xB7 ", (pm.kelly * kellyFrac * 100).toFixed(1), "% applied)") : /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "(f* n/a \u2014 no ledger edge)"))), /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "range",
@@ -23833,7 +24054,15 @@ function SizingWorkbench({ pm, size, sizeMult, onSizeMult, kellyFrac, onKellyFra
       onChange: (e) => onSizeMult(parseFloat(e.target.value)),
       className: "sw-range"
     }
-  ), /* @__PURE__ */ React.createElement("div", { className: "sw-ticks mono dim2" }, /* @__PURE__ */ React.createElement("span", null, "0.25\xD7"), /* @__PURE__ */ React.createElement("span", null, "1\xD7"), /* @__PURE__ */ React.createElement("span", null, "1.5\xD7"), /* @__PURE__ */ React.createElement("span", null, "2\xD7"), /* @__PURE__ */ React.createElement("span", null, "2.5\xD7")))), /* @__PURE__ */ React.createElement("div", { className: "sw-out" }, /* @__PURE__ */ React.createElement(SwTile, { label: "Shares", value: sh, tone: "copper" }), /* @__PURE__ */ React.createElement(SwTile, { label: "Notional", value: `$${notional.toLocaleString(void 0, { maximumFractionDigits: 0 })}`, tone: "ink" }), /* @__PURE__ */ React.createElement(SwTile, { label: "% NAV", value: `${navPct.toFixed(1)}%`, tone: navPct > 10 ? "rd" : navPct > 7 ? "amb" : "gn", sub: "cap 10%" }), /* @__PURE__ */ React.createElement(SwTile, { label: "Max loss", value: `$${maxLoss.toFixed(0)}`, tone: "rd", sub: `${lossNavPct.toFixed(2)}% NAV` }), /* @__PURE__ */ React.createElement(SwTile, { label: "R-mult", value: `${(reward / risk).toFixed(2)}R`, tone: "copper", sub: "T1 / risk" }), /* @__PURE__ */ React.createElement(SwTile, { label: "Expectancy", value: `+$${(pm.evR * risk * sh).toFixed(0)}`, tone: "gn", sub: `${pm.evR.toFixed(2)}R \xD7 ${sh} sh` })), /* @__PURE__ */ React.createElement("div", { className: "sw-gates" }, /* @__PURE__ */ React.createElement("div", { className: "sw-gates-cap label-cap" }, "Live size caps \xB7 recompute as you size \xB7 full go/no-go in \xA73"), /* @__PURE__ */ React.createElement(SwGate, { label: "Max loss \u2264 0.75% NAV", v: lossNavPct.toFixed(2) + "%", pass: lossNavPct <= 0.75 }), /* @__PURE__ */ React.createElement(SwGate, { label: "% NAV \u2264 10%", v: navPct.toFixed(1) + "%", pass: navPct <= 10 }), /* @__PURE__ */ React.createElement(SwGate, { label: "R-mult \u2265 1.5", v: (reward / risk).toFixed(2) + "R", pass: reward / risk >= 1.5 })));
+  ), /* @__PURE__ */ React.createElement("div", { className: "sw-ticks mono dim2" }, /* @__PURE__ */ React.createElement("span", null, "0.25\xD7"), /* @__PURE__ */ React.createElement("span", null, "1\xD7"), /* @__PURE__ */ React.createElement("span", null, "1.5\xD7"), /* @__PURE__ */ React.createElement("span", null, "2\xD7"), /* @__PURE__ */ React.createElement("span", null, "2.5\xD7")))), /* @__PURE__ */ React.createElement("div", { className: "sw-out" }, /* @__PURE__ */ React.createElement(SwTile, { label: "Shares", value: sh, tone: "copper" }), /* @__PURE__ */ React.createElement(SwTile, { label: "Notional", value: `$${notional.toLocaleString(void 0, { maximumFractionDigits: 0 })}`, tone: "ink" }), /* @__PURE__ */ React.createElement(SwTile, { label: "% NAV", value: `${navPct.toFixed(1)}%`, tone: navPct > 10 ? "rd" : navPct > 7 ? "amb" : "gn", sub: "cap 10%" }), /* @__PURE__ */ React.createElement(SwTile, { label: "Max loss", value: `$${maxLoss.toFixed(0)}`, tone: "rd", sub: `${lossNavPct.toFixed(2)}% NAV` }), /* @__PURE__ */ React.createElement(SwTile, { label: "R-mult", value: `${(reward / risk).toFixed(2)}R`, tone: "copper", sub: "T1 / risk" }), /* @__PURE__ */ React.createElement(
+    SwTile,
+    {
+      label: "Expectancy",
+      value: pm.evR != null ? `${pm.evR >= 0 ? "+" : "\u2212"}$${Math.abs(pm.evR * risk * sh).toFixed(0)}` : "\u2014",
+      tone: pm.evR == null ? "ink" : pm.evR >= 0 ? "gn" : "rd",
+      sub: pm.evR != null ? `${pm.evR.toFixed(2)}R \xD7 ${sh} sh` : "no ledger edge"
+    }
+  )), /* @__PURE__ */ React.createElement("div", { className: "sw-gates" }, /* @__PURE__ */ React.createElement("div", { className: "sw-gates-cap label-cap" }, "Live size caps \xB7 recompute as you size \xB7 full go/no-go in \xA73"), /* @__PURE__ */ React.createElement(SwGate, { label: "Max loss \u2264 0.75% NAV", v: lossNavPct.toFixed(2) + "%", pass: lossNavPct <= 0.75 }), /* @__PURE__ */ React.createElement(SwGate, { label: "% NAV \u2264 10%", v: navPct.toFixed(1) + "%", pass: navPct <= 10 }), /* @__PURE__ */ React.createElement(SwGate, { label: "R-mult \u2265 1.5", v: (reward / risk).toFixed(2) + "R", pass: reward / risk >= 1.5 })));
 }
 function SwTile({ label, value, tone, sub }) {
   return /* @__PURE__ */ React.createElement("div", { className: `sw-tile sw-tile--${tone}` }, /* @__PURE__ */ React.createElement("div", { className: "sw-tile-l label-cap" }, label), /* @__PURE__ */ React.createElement("div", { className: `sw-tile-v mono kpi-tone--${tone}` }, value), sub && /* @__PURE__ */ React.createElement("div", { className: "sw-tile-s mono dim2" }, sub));
@@ -23841,33 +24070,82 @@ function SwTile({ label, value, tone, sub }) {
 function SwGate({ label, v, pass }) {
   return /* @__PURE__ */ React.createElement("div", { className: `sw-gate ${pass ? "is-pass" : "is-fail"}` }, /* @__PURE__ */ React.createElement("span", { className: "sw-gate-m mono" }, pass ? "\u2713" : "\u2715"), /* @__PURE__ */ React.createElement("span", { className: "sw-gate-l mono" }, label), /* @__PURE__ */ React.createElement("span", { className: `sw-gate-v mono ${pass ? "up" : "dn"}` }, v));
 }
-function DecisionGates() {
+function DecisionGates({ pm, size, ticker }) {
+  const ss = pm.setupStats || {};
+  const erDays = ticker.earnings && ticker.earnings.days != null ? ticker.earnings.days : null;
+  const t1Days = Math.max(1, Math.floor((pm.holdDays || 10) * 0.35));
+  const lossNavPct = size.lossNavPct, navPct = size.navPct;
+  const atrPct = pm.atr / pm.entry;
+  const g = (label, state, detail) => ({ label, state, detail });
   const stages = [
-    { stage: "SETUP", gates: ["Pattern conf \u2265 0.60", "Pivot defined", "ATR \u2265 0.5%"], pass: 3, of: 3 },
-    { stage: "EDGE", gates: ["Wilson LB \u2265 45%", "Regime-WR \u2265 50%", "Edge stable"], pass: 3, of: 3 },
-    { stage: "RISK", gates: ["Stop \u2264 0.75% NAV", "R-mult \u2265 1.5", "Correl-to-book \u2264 0.55"], pass: 3, of: 3 },
-    { stage: "TIMING", gates: ["RVOL \u2265 1.30\xD7", "Time-of-day window", "ER not in T1 window"], pass: 2, of: 3, warn: true },
-    { stage: "EXECUTION", gates: ["Liquidity gate (spread, size)", "Venue ready", "OCO armed"], pass: 3, of: 3 }
+    { stage: "SETUP", gates: [
+      g("Levels coherent (stop<entry<T1<T2)", pm.levelsValid ? "pass" : "fail"),
+      g("Pivot / entry defined", pm.entry > 0 ? "pass" : "fail", `$${pm.entry.toFixed(2)}`),
+      g("ATR \u2265 0.5% of price", atrPct >= 5e-3 ? "pass" : "warn", `${(atrPct * 100).toFixed(2)}%`)
+    ] },
+    { stage: "EDGE", gates: [
+      g(
+        "Wilson LB \u2265 45%",
+        ss.n == null ? "na" : pm.lb >= 0.45 ? "pass" : "fail",
+        ss.n == null ? "no ledger" : `${(pm.lb * 100).toFixed(0)}% \xB7 n=${ss.n}`
+      ),
+      g(
+        "Profit factor \u2265 1.2",
+        ss.pf == null ? "na" : ss.pf >= 1.2 ? "pass" : "fail",
+        ss.pf == null ? "no ledger" : ss.pf.toFixed(2)
+      ),
+      g(
+        "Expectancy > 0",
+        pm.evR == null ? "na" : pm.evR > 0 ? "pass" : "fail",
+        pm.evR == null ? "no ledger" : `${pm.evR.toFixed(2)}R`
+      )
+    ] },
+    { stage: "RISK", gates: [
+      g("Max loss \u2264 0.75% NAV", lossNavPct <= 0.75 ? "pass" : "fail", `${lossNavPct.toFixed(2)}%`),
+      g("Position \u2264 10% NAV", navPct <= 10 ? "pass" : "fail", `${navPct.toFixed(1)}%`),
+      g("R-mult \u2265 1.5", pm.rr1 >= 1.5 ? "pass" : "fail", `${pm.rr1.toFixed(2)}R`)
+    ] },
+    { stage: "TIMING", gates: [
+      g(
+        "ER outside T1 window",
+        erDays == null ? "na" : erDays <= t1Days ? "warn" : "pass",
+        erDays == null ? "no ER date" : `ER T+${erDays}d \xB7 T1 ~T+${t1Days}d`
+      )
+    ] }
   ];
-  return /* @__PURE__ */ React.createElement("div", { className: "dg" }, stages.map((s, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `dg-stage ${s.warn ? "is-warn" : ""}` }, /* @__PURE__ */ React.createElement("div", { className: "dg-stage-hdr" }, /* @__PURE__ */ React.createElement("span", { className: "dg-stage-l mono" }, s.stage), /* @__PURE__ */ React.createElement("span", { className: `dg-stage-c mono ${s.pass === s.of ? "up" : "warn"}` }, s.pass, " / ", s.of)), s.gates.map((g, j) => {
-    const p = j < s.pass;
-    return /* @__PURE__ */ React.createElement("div", { key: j, className: `dg-gate ${p ? "is-pass" : "is-fail"}` }, /* @__PURE__ */ React.createElement("span", { className: "dg-mark mono" }, p ? "\u2713" : "!"), /* @__PURE__ */ React.createElement("span", { className: "dg-lbl mono" }, g));
-  }))), /* @__PURE__ */ React.createElement("div", { className: "dg-foot mono dim2" }, /* @__PURE__ */ React.createElement("b", { className: "up" }, "14 of 15 gates pass \xB7 1 caution (ER in window)."), "Trade is clear to fire with ", /* @__PURE__ */ React.createElement("b", null, "25% size cut"), " applied."));
+  let pass = 0, fail = 0, warn = 0, na = 0, total = 0;
+  stages.forEach((s) => s.gates.forEach((x) => {
+    total++;
+    if (x.state === "pass") pass++;
+    else if (x.state === "fail") fail++;
+    else if (x.state === "warn") warn++;
+    else na++;
+  }));
+  const mark = { pass: "\u2713", fail: "\u2715", warn: "!", na: "\xB7" };
+  const stageState = (gates) => gates.some((x) => x.state === "fail") ? "fail" : gates.some((x) => x.state === "warn") ? "warn" : "pass";
+  return /* @__PURE__ */ React.createElement("div", { className: "dg" }, stages.map((s, i) => {
+    const st = stageState(s.gates);
+    const ok = s.gates.filter((x) => x.state === "pass").length;
+    return /* @__PURE__ */ React.createElement("div", { key: i, className: `dg-stage ${st === "warn" ? "is-warn" : st === "fail" ? "is-fail" : ""}` }, /* @__PURE__ */ React.createElement("div", { className: "dg-stage-hdr" }, /* @__PURE__ */ React.createElement("span", { className: "dg-stage-l mono" }, s.stage), /* @__PURE__ */ React.createElement("span", { className: `dg-stage-c mono ${st === "pass" ? "up" : st === "fail" ? "dn" : "warn"}` }, ok, " / ", s.gates.length)), s.gates.map((x, j) => /* @__PURE__ */ React.createElement("div", { key: j, className: `dg-gate is-${x.state}` }, /* @__PURE__ */ React.createElement("span", { className: "dg-mark mono" }, mark[x.state]), /* @__PURE__ */ React.createElement("span", { className: "dg-lbl mono" }, x.label), x.detail && /* @__PURE__ */ React.createElement("span", { className: "dg-det mono dim2" }, x.detail))));
+  }), /* @__PURE__ */ React.createElement("div", { className: "dg-foot mono dim2" }, fail > 0 ? /* @__PURE__ */ React.createElement("b", { className: "dn" }, fail, " gate", fail === 1 ? "" : "s", " FAIL \xB7 ", pass, "/", total, " pass", warn ? ` \xB7 ${warn} caution` : "", na ? ` \xB7 ${na} n/a` : "", ". Do not fire until cleared.") : warn > 0 ? /* @__PURE__ */ React.createElement("b", { className: "warn" }, pass, "/", total, " pass \xB7 ", warn, " caution", na ? ` \xB7 ${na} n/a` : "", ". Clear to fire \u2014 review cautions", erDays != null && erDays <= t1Days ? " (ER inside T1 window \u2014 consider a size cut)" : "", ".") : /* @__PURE__ */ React.createElement("b", { className: "up" }, pass, "/", total, " gates pass", na ? ` \xB7 ${na} n/a (no ledger)` : "", ". Clear to fire."), na > 0 && /* @__PURE__ */ React.createElement("span", null, " N/A gates have no ledger history yet \u2014 not counted as pass.")));
 }
 function TimeAnatomyV2({ ticker, pm }) {
-  const totalSessions = ticker.holdDays + 4;
+  const hold = ticker.holdDays || 10;
+  const totalSessions = hold + 4;
   const entry = pm.entry;
+  const erDays = ticker.earnings && ticker.earnings.days != null ? ticker.earnings.days : null;
+  const erLabel = erDays == null ? null : `ER \xB7 ${ticker.earnings.date && ticker.earnings.date.trim() ? ticker.earnings.date : "T+" + erDays + "d"}`;
   const events = [
     { t: -3, label: "Setup formed", tone: "ink", px: pm.stop + (pm.entry - pm.stop) * 0.4 },
     { t: -1, label: "Pivot tested \xB7 vol-dry", tone: "ink", px: pm.entry * 0.998 },
     { t: 0, label: "ENTRY \xB7 breakout", tone: "copper", big: true, px: entry },
     { t: 1, label: "Confirm close", tone: "ink", px: entry * 1.012 },
-    { t: Math.floor(ticker.holdDays * 0.35), label: "T1 expected", tone: "gn", px: pm.t1 },
-    { t: Math.min(ticker.earnings.days, ticker.holdDays - 1), label: `ER \xB7 ${ticker.earnings.date}`, tone: "amb" },
-    { t: Math.floor(ticker.holdDays * 0.85), label: "T2 expected", tone: "gn", px: pm.t2 },
-    { t: ticker.holdDays, label: "Time stop", tone: "rd", px: pm.stop }
+    { t: Math.floor(hold * 0.35), label: "T1 expected", tone: "gn", px: pm.t1 },
+    ...erDays != null ? [{ t: Math.min(erDays, hold - 1), label: erLabel, tone: "amb" }] : [],
+    { t: Math.floor(hold * 0.85), label: "T2 expected", tone: "gn", px: pm.t2 },
+    { t: hold, label: "Time stop", tone: "rd", px: pm.stop }
   ];
-  return /* @__PURE__ */ React.createElement("div", { className: "time-anatomy" }, /* @__PURE__ */ React.createElement("div", { className: "ta-meta mono dim2" }, "Session 0 = entry \xB7 ", totalSessions, " sessions plotted \xB7 ER at T+", ticker.earnings.days, "d"), /* @__PURE__ */ React.createElement("div", { className: "ta-ribbon" }, /* @__PURE__ */ React.createElement("div", { className: "ta-track" }, /* @__PURE__ */ React.createElement("div", { className: "ta-phase ta-phase--pre", style: { left: 0, width: `${4 / totalSessions * 100}%` } }), /* @__PURE__ */ React.createElement("div", { className: "ta-phase ta-phase--hold", style: { left: `${4 / totalSessions * 100}%`, width: `${ticker.holdDays / totalSessions * 100}%` } }), Array.from({ length: totalSessions + 1 }, (_, i) => /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "time-anatomy" }, /* @__PURE__ */ React.createElement("div", { className: "ta-meta mono dim2" }, "Session 0 = entry \xB7 ", totalSessions, " sessions plotted \xB7 ", erDays != null ? `ER at T+${erDays}d` : "no ER in window"), /* @__PURE__ */ React.createElement("div", { className: "ta-ribbon" }, /* @__PURE__ */ React.createElement("div", { className: "ta-track" }, /* @__PURE__ */ React.createElement("div", { className: "ta-phase ta-phase--pre", style: { left: 0, width: `${4 / totalSessions * 100}%` } }), /* @__PURE__ */ React.createElement("div", { className: "ta-phase ta-phase--hold", style: { left: `${4 / totalSessions * 100}%`, width: `${hold / totalSessions * 100}%` } }), Array.from({ length: totalSessions + 1 }, (_, i) => /* @__PURE__ */ React.createElement(
     "div",
     {
       key: i,
@@ -23877,7 +24155,7 @@ function TimeAnatomyV2({ ticker, pm }) {
   )), events.map((e, i) => {
     const x = (e.t + 4) / totalSessions * 100;
     return /* @__PURE__ */ React.createElement("div", { key: i, className: `ta-event ta-event--${e.tone} ${e.big ? "is-big" : ""}`, style: { left: `${x}%` } }, /* @__PURE__ */ React.createElement("div", { className: "ta-event-stem" }), /* @__PURE__ */ React.createElement("div", { className: "ta-event-dot" }), /* @__PURE__ */ React.createElement("div", { className: `ta-event-label mono ${i % 2 ? "ta-up" : "ta-dn"}` }, e.label, e.px != null && /* @__PURE__ */ React.createElement("span", { className: "ta-event-px mono" }, "$", e.px.toFixed(2))));
-  })), /* @__PURE__ */ React.createElement("div", { className: "ta-axis mono" }, /* @__PURE__ */ React.createElement("span", { style: { left: "0%" } }, "T\u22124"), /* @__PURE__ */ React.createElement("span", { style: { left: `${4 / totalSessions * 100}%`, color: "var(--copper)" } }, "ENTRY"), /* @__PURE__ */ React.createElement("span", { style: { left: `${(4 + Math.floor(ticker.holdDays / 2)) / totalSessions * 100}%` } }, "T+", Math.floor(ticker.holdDays / 2)), /* @__PURE__ */ React.createElement("span", { style: { left: "100%" } }, "T+", ticker.holdDays))));
+  })), /* @__PURE__ */ React.createElement("div", { className: "ta-axis mono" }, /* @__PURE__ */ React.createElement("span", { style: { left: "0%" } }, "T\u22124"), /* @__PURE__ */ React.createElement("span", { style: { left: `${4 / totalSessions * 100}%`, color: "var(--copper)" } }, "ENTRY"), /* @__PURE__ */ React.createElement("span", { style: { left: `${(4 + Math.floor(hold / 2)) / totalSessions * 100}%` } }, "T+", Math.floor(hold / 2)), /* @__PURE__ */ React.createElement("span", { style: { left: "100%" } }, "T+", hold))));
 }
 function PlaybookTree() {
   const branches = [
@@ -23903,7 +24181,7 @@ function AuditLog({ pm, size }) {
   const items = [
     { phase: "PRE-FILL", item: `OCO bracket constructed \xB7 stop $${pm.stop.toFixed(2)} + T1 $${pm.t1.toFixed(2)} + T2 $${pm.t2.toFixed(2)}`, done: true },
     { phase: "PRE-FILL", item: `Sizing approved \xB7 ${size.sh} sh \xB7 ${size.navPct.toFixed(1)}% NAV \xB7 max risk $${Math.round(size.maxLoss)}`, done: true },
-    { phase: "PRE-FILL", item: "Correlation-to-book check \xB7 0.34 \u2264 0.55", done: true },
+    { phase: "PRE-FILL", item: "Correlation-to-book check \u2264 0.55", done: true, sub: "est \xB7 live book corr pending" },
     { phase: "PRE-FILL", item: `Sleep-test \xB7 max-down $${Math.round(size.maxLoss * 1.8)} \u2265 \u2212$${Math.round(size.maxLoss)}`, done: true },
     { phase: "PRE-FILL", item: `ER alert \xB7 T\u22122 reminder set (ER in ${pm.earnings.days}d)`, done: true },
     { phase: "FILL", item: "Order acknowledged by Schwab \xB7 venue NSDQ \xB7 OCO IDs assigned", done: false, sub: "awaits trigger" },

@@ -15,6 +15,21 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
   const pm = useMemoP2(() => planMath(ticker), [ticker]);
   const size = useMemoP2(() => planSize(pm, sizeMult, kellyFrac), [pm, sizeMult, kellyFrac]);
 
+  if (!pm.levelsValid) {
+    return (
+      <div className="lens lens--plan2">
+        <div className="lens-section"><div className="lens-pad">
+          <div className="fr-read mono dim2" style={{ padding: "18px 16px" }}>
+            <b className="warn">No coherent trade plan for {ticker.symbol} in {mode} mode.</b> This name
+            isn't in today's scan with a valid stop/entry/T1/T2 ladder (stop&nbsp;&lt;&nbsp;entry&nbsp;&lt;&nbsp;T1&nbsp;&lt;&nbsp;T2),
+            so the ticket, sizing and payoff geometry can't be computed without fabricating levels.
+            Run a scan that surfaces it, or use the Chart / Patterns lens for structure.
+          </div>
+        </div></div>
+      </div>
+    );
+  }
+
   return (
     <div className="lens lens--plan2">
       <PlanActionPanel pm={pm} size={size} mode={mode} sym={ticker.symbol} family={ticker.setupFamily} />
@@ -47,8 +62,8 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
         <SectionHeader n={3} title="Decision Gates · go/no-go"
           sub="the full pre-trade audit — size caps recompute in §2"
           style={headerStyle} right={<StateToggle name="plv2-3" />} />
-        <StateWrap state={s3.value} source="rule engine · 15 gates">
-          <div className="lens-pad"><DecisionGates /></div>
+        <StateWrap state={s3.value} source="rule engine · live gates">
+          <div className="lens-pad"><DecisionGates pm={pm} size={size} ticker={ticker} /></div>
         </StateWrap>
       </div>
 
@@ -92,13 +107,27 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
       <div className="lens-section">
         <SectionHeader n={8} title="Cross-Lens Confluence" style={headerStyle} />
         <div className="lens-pad">
-          <CrossLens lead="copper" cells={[
-            { lens: "Plan",       verdict: "READY", tone: "gn",  note: `R ${pm.rr1.toFixed(2)} · ${(kellyFrac*100).toFixed(0)}% Kelly` },
-            { lens: "Technicals", verdict: "PASS",  tone: "gn",  note: "RSI 64 · VWAP-reclaim" },
-            { lens: "Risk",       verdict: "OK",    tone: "gn",  note: "VaR(1d) −2.1%" },
-            { lens: "Earnings",   verdict: `${ticker.earnings.days} d`, tone: "amb", note: "size −25% pre-ER" },
-            { lens: "Track Rec.", verdict: "EDGE",  tone: "gn",  note: `n=${ticker.setupStats.n ?? "—"} · pf ${ticker.setupStats.pf != null ? ticker.setupStats.pf.toFixed(2) : "—"}` },
-          ]} />
+          {(() => {
+            const px = ticker.pillars || {};
+            const tech = px.technical != null ? px.technical : null;
+            const erD = ticker.earnings && ticker.earnings.days != null ? ticker.earnings.days : null;
+            const t1Days = Math.max(1, Math.floor((pm.holdDays || 10) * 0.35));
+            const ss = ticker.setupStats || {};
+            const planReady = pm.rr1 >= 1.5 && (pm.kelly == null || pm.kelly > 0);
+            return <CrossLens lead="copper" cells={[
+              { lens: "Plan",       verdict: planReady ? "READY" : "REVIEW", tone: planReady ? "gn" : "amb",
+                note: `R ${pm.rr1.toFixed(2)} · ${pm.kelly != null ? (pm.kelly * 100).toFixed(0) + "% Kelly" : "no ledger edge"}` },
+              { lens: "Technicals", verdict: tech == null ? "—" : tech >= 60 ? "STRONG" : tech >= 45 ? "OK" : "WEAK",
+                tone: tech == null ? "amb" : tech >= 60 ? "gn" : tech >= 45 ? "amb" : "rd",
+                note: tech == null ? "no pillar data" : `tech pillar ${Math.round(tech)}` },
+              { lens: "Risk",       verdict: size.lossNavPct <= 0.75 ? "OK" : "HOT", tone: size.lossNavPct <= 0.75 ? "gn" : "rd",
+                note: `max loss ${size.lossNavPct.toFixed(2)}% NAV` },
+              { lens: "Earnings",   verdict: erD == null ? "—" : `T+${erD}d`, tone: "amb",
+                note: erD == null ? "no ER date" : erD <= t1Days ? "inside T1 window" : "clear of T1" },
+              { lens: "Track Rec.", verdict: ss.n == null ? "—" : "EDGE", tone: ss.n == null ? "amb" : "gn",
+                note: `n=${ss.n ?? "—"} · pf ${ss.pf != null ? ss.pf.toFixed(2) : "—"}` },
+            ]} />;
+          })()}
         </div>
       </div>
       </div>
@@ -135,13 +164,16 @@ function planMath(t) {
   const riskBudget = Math.round(PLAN_NAV * 0.0039);     // ≈ $423 · 0.39% NAV per trade
   const baseShares = Math.max(1, Math.round(riskBudget / risk));
   const ss = t.setupStats || {};
-  const wr = ss.winRate || 0.617;
-  const lb = ss.wilsonLB || 0.477;
-  const evR = wr * rr1 - (1 - wr);                       // expectancy in R
-  const atr = +(risk * 0.55).toFixed(2);                 // ~ATR proxy from stop distance
+  // never fabricate edge — null when the setup has no ledger history (n<1)
+  const wr = (ss.winRate != null) ? ss.winRate : null;
+  const lb = (ss.wilsonLB != null) ? ss.wilsonLB : null;
+  const evR = (wr != null) ? wr * rr1 - (1 - wr) : null;            // expectancy in R (real WR only)
+  const kelly = (wr != null && rr1 > 0) ? Math.max(0, (wr * rr1 - (1 - wr)) / rr1) : null; // raw Kelly f*
+  const atr = +(risk / 1.25).toFixed(2);                 // ATR est: system stop = 1.25×ATR ⇒ ATR ≈ risk/1.25
+  const levelsValid = (L.valid !== false) && L.stop > 0 && entry > L.stop && L.t1 > entry && L.t2 > L.t1;
   return { symbol: t.symbol, price: L.price, entry, stop: L.stop, t1: L.t1, t2: L.t2,
-           risk, rr1, rr2, NAV: PLAN_NAV, riskBudget, baseShares, wr, lb, evR, atr,
-           holdDays: t.holdDays, earnings: t.earnings, setupStats: ss };
+           risk, rr1, rr2, NAV: PLAN_NAV, riskBudget, baseShares, wr, lb, evR, kelly, atr, levelsValid,
+           holdDays: t.holdDays, earnings: t.earnings || { days: null, date: "" }, setupStats: ss };
 }
 // live sizing — scales base shares by the workbench sliders
 function planSize(pm, sizeMult, kellyFrac) {
@@ -185,8 +217,8 @@ function FillRealism({ pm, size }) {
   return (
     <div className="fr">
       <div className="fr-hd">
-        <span className="fr-tag mono">FILL REALISM · PAPER</span>
-        <span className="fr-sub mono dim2">what you'd actually fill at — not the signal price</span>
+        <span className="fr-tag mono">FILL REALISM · MODELED</span>
+        <span className="fr-sub mono dim2">modeled friction (bps) — not the signal price · live spread/ADV pending</span>
       </div>
       <div className="fr-flow">
         {steps.map((st, i) => (
@@ -277,7 +309,7 @@ function TradeBlueprint({ pm, size }) {
 
   const levels = [
     { p: stop,  c: "var(--rd)",     lbl: "STOP",  v: `$${stop.toFixed(2)}`,  sub: `−$${maxLoss.toFixed(0)}` },
-    { p: entry, c: "var(--copper)", lbl: "ENTRY", v: `$${entry.toFixed(2)}`, sub: "pivot · 110 sh", big: true },
+    { p: entry, c: "var(--copper)", lbl: "ENTRY", v: `$${entry.toFixed(2)}`, sub: `pivot · ${qty} sh`, big: true },
     { p: cur,   c: "var(--copper)", lbl: "NOW",   v: `$${cur.toFixed(2)}`,   sub: pnlAt(cur) >= 0 ? `+$${pnlAt(cur).toFixed(0)}` : `−$${Math.abs(pnlAt(cur)).toFixed(0)}`, dotted: true },
     { p: t1,    c: "var(--gn)",     lbl: "T1",    v: `$${t1.toFixed(2)}`,    sub: `+$${t1Gain.toFixed(0)}`, big: true },
     { p: t2,    c: "var(--gn)",     lbl: "T2",    v: `$${t2.toFixed(2)}`,    sub: `+$${t2Gain.toFixed(0)}` },
@@ -292,7 +324,7 @@ function TradeBlueprint({ pm, size }) {
         <TbMetric label="% to Stop" value={`−${(risk/entry*100).toFixed(2)}%`} sub={`$${stop.toFixed(2)}`} tone="rd" />
         <TbMetric label="% to T1" value={`+${(reward1/entry*100).toFixed(2)}%`} sub={`$${t1.toFixed(2)}`} tone="gn" />
         <TbMetric label="% to T2" value={`+${(reward2/entry*100).toFixed(2)}%`} sub={`$${t2.toFixed(2)}`} tone="gn" />
-        <TbMetric label="ATR · 14d" value={`$${atr.toFixed(2)}`} sub={`${(atr/entry*100).toFixed(1)}% · daily`} tone="ink" />
+        <TbMetric label="ATR · est" value={`$${atr.toFixed(2)}`} sub={`${(atr/entry*100).toFixed(1)}% · stop÷1.25`} tone="ink" />
         <TbMetric label="Wilson WR" value={pm.lb != null ? `${(pm.lb*100).toFixed(1)}%` : "—"} sub={`LB · n=${pm.setupStats.n ?? "—"}`} tone="copper" />
       </div>
 
@@ -425,7 +457,12 @@ function SizingWorkbench({ pm, size, sizeMult, onSizeMult, kellyFrac, onKellyFra
         <div className="sw-ctrl">
           <div className="sw-ctrl-l">
             <span className="label-cap">Kelly fraction</span>
-            <span className="mono"><b className="copper">{(kellyFrac * 100).toFixed(0)}%</b> of raw Kelly</span>
+            <span className="mono">
+              <b className="copper">{(kellyFrac * 100).toFixed(0)}%</b> of raw Kelly{" "}
+              {pm.kelly != null
+                ? <span className="dim2">(f*&nbsp;={(pm.kelly * 100).toFixed(1)}% · {(pm.kelly * kellyFrac * 100).toFixed(1)}% applied)</span>
+                : <span className="dim2">(f* n/a — no ledger edge)</span>}
+            </span>
           </div>
           <input type="range" min="0.10" max="1.00" step="0.05" value={kellyFrac}
                  onChange={e => onKellyFrac(parseFloat(e.target.value))} className="sw-range" />
@@ -451,7 +488,10 @@ function SizingWorkbench({ pm, size, sizeMult, onSizeMult, kellyFrac, onKellyFra
         <SwTile label="% NAV"    value={`${navPct.toFixed(1)}%`}         tone={navPct > 10 ? "rd" : navPct > 7 ? "amb" : "gn"} sub="cap 10%" />
         <SwTile label="Max loss" value={`$${maxLoss.toFixed(0)}`}        tone="rd" sub={`${lossNavPct.toFixed(2)}% NAV`} />
         <SwTile label="R-mult"   value={`${(reward/risk).toFixed(2)}R`}  tone="copper" sub="T1 / risk" />
-        <SwTile label="Expectancy" value={`+$${(pm.evR * risk * sh).toFixed(0)}`} tone="gn" sub={`${pm.evR.toFixed(2)}R × ${sh} sh`} />
+        <SwTile label="Expectancy"
+                value={pm.evR != null ? `${pm.evR >= 0 ? "+" : "−"}$${Math.abs(pm.evR * risk * sh).toFixed(0)}` : "—"}
+                tone={pm.evR == null ? "ink" : pm.evR >= 0 ? "gn" : "rd"}
+                sub={pm.evR != null ? `${pm.evR.toFixed(2)}R × ${sh} sh` : "no ledger edge"} />
       </div>
       <div className="sw-gates">
         <div className="sw-gates-cap label-cap">Live size caps · recompute as you size · full go/no-go in §3</div>
@@ -484,36 +524,79 @@ function SwGate({ label, v, pass }) {
 }
 
 // ─── §3 Decision Gates flow ────────────────────────────────────
-function DecisionGates() {
+// Every gate is computed from the live plan (pm), live sizing (size) and the
+// ticker's real setup ledger / earnings. Gates we cannot evaluate from data
+// render N/A — never a fabricated pass. (CLAUDE.md principle 1 & 4.)
+function DecisionGates({ pm, size, ticker }) {
+  const ss = pm.setupStats || {};
+  const erDays = (ticker.earnings && ticker.earnings.days != null) ? ticker.earnings.days : null;
+  const t1Days = Math.max(1, Math.floor((pm.holdDays || 10) * 0.35));
+  const lossNavPct = size.lossNavPct, navPct = size.navPct;
+  const atrPct = pm.atr / pm.entry;
+  const g = (label, state, detail) => ({ label, state, detail });   // state: pass|fail|warn|na
+
   const stages = [
-    { stage: "SETUP",      gates: ["Pattern conf ≥ 0.60", "Pivot defined", "ATR ≥ 0.5%"], pass: 3, of: 3 },
-    { stage: "EDGE",       gates: ["Wilson LB ≥ 45%", "Regime-WR ≥ 50%", "Edge stable"], pass: 3, of: 3 },
-    { stage: "RISK",       gates: ["Stop ≤ 0.75% NAV", "R-mult ≥ 1.5", "Correl-to-book ≤ 0.55"], pass: 3, of: 3 },
-    { stage: "TIMING",     gates: ["RVOL ≥ 1.30×", "Time-of-day window", "ER not in T1 window"], pass: 2, of: 3, warn: true },
-    { stage: "EXECUTION",  gates: ["Liquidity gate (spread, size)", "Venue ready", "OCO armed"], pass: 3, of: 3 },
+    { stage: "SETUP", gates: [
+      g("Levels coherent (stop<entry<T1<T2)", pm.levelsValid ? "pass" : "fail"),
+      g("Pivot / entry defined", pm.entry > 0 ? "pass" : "fail", `$${pm.entry.toFixed(2)}`),
+      g("ATR ≥ 0.5% of price", atrPct >= 0.005 ? "pass" : "warn", `${(atrPct * 100).toFixed(2)}%`),
+    ]},
+    { stage: "EDGE", gates: [
+      g("Wilson LB ≥ 45%", ss.n == null ? "na" : (pm.lb >= 0.45 ? "pass" : "fail"),
+        ss.n == null ? "no ledger" : `${(pm.lb * 100).toFixed(0)}% · n=${ss.n}`),
+      g("Profit factor ≥ 1.2", ss.pf == null ? "na" : (ss.pf >= 1.2 ? "pass" : "fail"),
+        ss.pf == null ? "no ledger" : ss.pf.toFixed(2)),
+      g("Expectancy > 0", pm.evR == null ? "na" : (pm.evR > 0 ? "pass" : "fail"),
+        pm.evR == null ? "no ledger" : `${pm.evR.toFixed(2)}R`),
+    ]},
+    { stage: "RISK", gates: [
+      g("Max loss ≤ 0.75% NAV", lossNavPct <= 0.75 ? "pass" : "fail", `${lossNavPct.toFixed(2)}%`),
+      g("Position ≤ 10% NAV", navPct <= 10 ? "pass" : "fail", `${navPct.toFixed(1)}%`),
+      g("R-mult ≥ 1.5", pm.rr1 >= 1.5 ? "pass" : "fail", `${pm.rr1.toFixed(2)}R`),
+    ]},
+    { stage: "TIMING", gates: [
+      g("ER outside T1 window", erDays == null ? "na" : (erDays <= t1Days ? "warn" : "pass"),
+        erDays == null ? "no ER date" : `ER T+${erDays}d · T1 ~T+${t1Days}d`),
+    ]},
   ];
+
+  let pass = 0, fail = 0, warn = 0, na = 0, total = 0;
+  stages.forEach(s => s.gates.forEach(x => {
+    total++; if (x.state === "pass") pass++; else if (x.state === "fail") fail++;
+    else if (x.state === "warn") warn++; else na++;
+  }));
+  const mark = { pass: "✓", fail: "✕", warn: "!", na: "·" };
+  const stageState = (gates) => gates.some(x => x.state === "fail") ? "fail"
+    : gates.some(x => x.state === "warn") ? "warn" : "pass";
+
   return (
     <div className="dg">
-      {stages.map((s, i) => (
-        <div key={i} className={`dg-stage ${s.warn ? "is-warn" : ""}`}>
-          <div className="dg-stage-hdr">
-            <span className="dg-stage-l mono">{s.stage}</span>
-            <span className={`dg-stage-c mono ${s.pass === s.of ? "up" : "warn"}`}>{s.pass} / {s.of}</span>
-          </div>
-          {s.gates.map((g, j) => {
-            const p = j < s.pass;
-            return (
-              <div key={j} className={`dg-gate ${p ? "is-pass" : "is-fail"}`}>
-                <span className="dg-mark mono">{p ? "✓" : "!"}</span>
-                <span className="dg-lbl mono">{g}</span>
+      {stages.map((s, i) => {
+        const st = stageState(s.gates);
+        const ok = s.gates.filter(x => x.state === "pass").length;
+        return (
+          <div key={i} className={`dg-stage ${st === "warn" ? "is-warn" : st === "fail" ? "is-fail" : ""}`}>
+            <div className="dg-stage-hdr">
+              <span className="dg-stage-l mono">{s.stage}</span>
+              <span className={`dg-stage-c mono ${st === "pass" ? "up" : st === "fail" ? "dn" : "warn"}`}>{ok} / {s.gates.length}</span>
+            </div>
+            {s.gates.map((x, j) => (
+              <div key={j} className={`dg-gate is-${x.state}`}>
+                <span className="dg-mark mono">{mark[x.state]}</span>
+                <span className="dg-lbl mono">{x.label}</span>
+                {x.detail && <span className="dg-det mono dim2">{x.detail}</span>}
               </div>
-            );
-          })}
-        </div>
-      ))}
+            ))}
+          </div>
+        );
+      })}
       <div className="dg-foot mono dim2">
-        <b className="up">14 of 15 gates pass · 1 caution (ER in window).</b>
-        Trade is clear to fire with <b>25% size cut</b> applied.
+        {fail > 0
+          ? <b className="dn">{fail} gate{fail === 1 ? "" : "s"} FAIL · {pass}/{total} pass{warn ? ` · ${warn} caution` : ""}{na ? ` · ${na} n/a` : ""}. Do not fire until cleared.</b>
+          : warn > 0
+            ? <b className="warn">{pass}/{total} pass · {warn} caution{na ? ` · ${na} n/a` : ""}. Clear to fire — review cautions{erDays != null && erDays <= t1Days ? " (ER inside T1 window — consider a size cut)" : ""}.</b>
+            : <b className="up">{pass}/{total} gates pass{na ? ` · ${na} n/a (no ledger)` : ""}. Clear to fire.</b>}
+        {na > 0 && <span> N/A gates have no ledger history yet — not counted as pass.</span>}
       </div>
     </div>
   );
@@ -521,27 +604,31 @@ function DecisionGates() {
 
 // ─── §4 Time Anatomy V2 ────────────────────────────────────────
 function TimeAnatomyV2({ ticker, pm }) {
-  const totalSessions = ticker.holdDays + 4;
+  const hold = ticker.holdDays || 10;
+  const totalSessions = hold + 4;
   const entry = pm.entry;
+  const erDays = (ticker.earnings && ticker.earnings.days != null) ? ticker.earnings.days : null;
+  const erLabel = erDays == null ? null
+    : `ER · ${ticker.earnings.date && ticker.earnings.date.trim() ? ticker.earnings.date : "T+" + erDays + "d"}`;
   const events = [
     { t: -3, label: "Setup formed",            tone: "ink",    px: pm.stop + (pm.entry - pm.stop) * 0.4 },
     { t: -1, label: "Pivot tested · vol-dry", tone: "ink",    px: pm.entry * 0.998 },
     { t:  0, label: "ENTRY · breakout",       tone: "copper", big: true, px: entry },
     { t:  1, label: "Confirm close",          tone: "ink",    px: entry * 1.012 },
-    { t:  Math.floor(ticker.holdDays * 0.35),  label: "T1 expected",   tone: "gn", px: pm.t1 },
-    { t:  Math.min(ticker.earnings.days, ticker.holdDays - 1), label: `ER · ${ticker.earnings.date}`, tone: "amb" },
-    { t:  Math.floor(ticker.holdDays * 0.85),  label: "T2 expected",   tone: "gn", px: pm.t2 },
-    { t:  ticker.holdDays, label: "Time stop", tone: "rd", px: pm.stop },
+    { t:  Math.floor(hold * 0.35),  label: "T1 expected",   tone: "gn", px: pm.t1 },
+    ...(erDays != null ? [{ t: Math.min(erDays, hold - 1), label: erLabel, tone: "amb" }] : []),
+    { t:  Math.floor(hold * 0.85),  label: "T2 expected",   tone: "gn", px: pm.t2 },
+    { t:  hold, label: "Time stop", tone: "rd", px: pm.stop },
   ];
   return (
     <div className="time-anatomy">
       <div className="ta-meta mono dim2">
-        Session 0 = entry · {totalSessions} sessions plotted · ER at T+{ticker.earnings.days}d
+        Session 0 = entry · {totalSessions} sessions plotted · {erDays != null ? `ER at T+${erDays}d` : "no ER in window"}
       </div>
       <div className="ta-ribbon">
         <div className="ta-track">
           <div className="ta-phase ta-phase--pre"  style={{ left: 0, width: `${(4/totalSessions)*100}%` }} />
-          <div className="ta-phase ta-phase--hold" style={{ left: `${(4/totalSessions)*100}%`, width: `${(ticker.holdDays/totalSessions)*100}%` }} />
+          <div className="ta-phase ta-phase--hold" style={{ left: `${(4/totalSessions)*100}%`, width: `${(hold/totalSessions)*100}%` }} />
           {Array.from({ length: totalSessions + 1 }, (_, i) => (
             <div key={i} className={`ta-tick ${i === 4 ? "ta-tick-major" : ""}`}
                  style={{ left: `${(i/totalSessions)*100}%` }} />
@@ -563,8 +650,8 @@ function TimeAnatomyV2({ ticker, pm }) {
         <div className="ta-axis mono">
           <span style={{ left: "0%" }}>T−4</span>
           <span style={{ left: `${(4/totalSessions)*100}%`, color: "var(--copper)" }}>ENTRY</span>
-          <span style={{ left: `${((4 + Math.floor(ticker.holdDays/2))/totalSessions)*100}%` }}>T+{Math.floor(ticker.holdDays/2)}</span>
-          <span style={{ left: "100%" }}>T+{ticker.holdDays}</span>
+          <span style={{ left: `${((4 + Math.floor(hold/2))/totalSessions)*100}%` }}>T+{Math.floor(hold/2)}</span>
+          <span style={{ left: "100%" }}>T+{hold}</span>
         </div>
       </div>
     </div>
@@ -615,7 +702,7 @@ function AuditLog({ pm, size }) {
   const items = [
     { phase: "PRE-FILL", item: `OCO bracket constructed · stop $${pm.stop.toFixed(2)} + T1 $${pm.t1.toFixed(2)} + T2 $${pm.t2.toFixed(2)}`, done: true },
     { phase: "PRE-FILL", item: `Sizing approved · ${size.sh} sh · ${size.navPct.toFixed(1)}% NAV · max risk $${Math.round(size.maxLoss)}`, done: true },
-    { phase: "PRE-FILL", item: "Correlation-to-book check · 0.34 ≤ 0.55",                          done: true },
+    { phase: "PRE-FILL", item: "Correlation-to-book check ≤ 0.55", done: true, sub: "est · live book corr pending" },
     { phase: "PRE-FILL", item: `Sleep-test · max-down $${Math.round(size.maxLoss * 1.8)} ≥ −$${Math.round(size.maxLoss)}`, done: true },
     { phase: "PRE-FILL", item: `ER alert · T−2 reminder set (ER in ${pm.earnings.days}d)`,          done: true },
     { phase: "FILL",     item: "Order acknowledged by Schwab · venue NSDQ · OCO IDs assigned",     done: false, sub: "awaits trigger" },
