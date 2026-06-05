@@ -235,9 +235,9 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
 
       <div className="lens-section">
         <SectionHeader n={6} title="Bull · Bear"
-          sub="strongest case both ways · derived from the real numbers · pre-mortem before entry"
+          sub="case both ways from the real numbers + verbatim customer / segment / regulatory disclosures from the 10-K"
           style={headerStyle} right={<StateToggle name="iv-6" />} />
-        <StateWrap state={s6.value} source="computed from filings + valuation">
+        <StateWrap state={s6.value} source="EODHD financials + SEC EDGAR 10-K">
           <div className="lens-pad"><BullBear ticker={ticker} d={d} fv={fv} peers={peers} /></div>
         </StateWrap>
       </div>
@@ -717,8 +717,22 @@ function CapAlloc({ d }) {
   );
 }
 
+// real 10-K narrative risks (customer concentration / segments / regulatory)
+function useFilingRisks(sym) {
+  const [d, setD] = React.useState(null);
+  React.useEffect(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.get || !sym) { setD(null); return; }
+    let on = true;
+    BV.get("/api/filing-risks/" + encodeURIComponent(sym)).then(j => { if (on) setD(j); }).catch(() => { if (on) setD(null); });
+    return () => { on = false; };
+  }, [sym]);
+  return d;
+}
+
 // ─── §6 Bull · Bear (derived from the real numbers) + AI ────────────
 function BullBear({ ticker, d, fv, peers }) {
+  const fr = useFilingRisks(ticker.symbol);
   const bull = [], bear = [];
   const mos = fv.blendedMos;
   if (mos != null && mos <= -10) bull.push(`Trades ${Math.abs(mos).toFixed(0)}% below blended fair value — a real margin of safety across methods.`);
@@ -736,10 +750,18 @@ function BullBear({ ticker, d, fv, peers }) {
   if (peers && peers.medians && _P(peers.medians.pe_ttm) && d.pe && d.pe > _P(peers.medians.pe_ttm) * 1.3) bear.push(`P/E ${d.pe.toFixed(0)}× sits well above the cohort median ${_P(peers.medians.pe_ttm).toFixed(0)}× — richly valued vs peers.`);
   if (d.fcfPS != null && d.fcfPS <= 0) bear.push(`Trailing free cash flow is negative — valuation rests on future profitability, not today's cash.`);
 
+  // real customer-concentration bear bullet, verbatim from the latest 10-K
+  const concSent = fr && fr.customer_concentration ? fr.customer_concentration.find(s => /\d{1,2}(\.\d)?\s*%\s+of\s+.*?(revenue|sales)/i.test(s)) : null;
+  if (concSent) bear.push("Customer concentration (10-K): " + (concSent.length > 180 ? concSent.slice(0, 178) + "…" : concSent));
+  const regSent = fr && fr.regulatory && fr.regulatory[0];
+  if (regSent && bear.length < 6) bear.push("Regulatory (10-K): " + (regSent.length > 170 ? regSent.slice(0, 168) + "…" : regSent));
+
   if (!bull.length) bull.push("No standout bullish signals in the current fundamentals — this is a show-me name.");
   if (!bear.length) bear.push("No major red flags in the fundamentals — risk is mostly valuation and execution.");
 
-  const aiPrompt = () => `Give a balanced 3-sentence investor read on ${ticker.symbol} (${ticker.name}). Price $${d.price.toFixed(2)}, blended fair value $${fv.blended ? fv.blended.toFixed(2) : "n/a"} (margin of safety ${mos != null ? mos.toFixed(0) + "%" : "n/a"}), ROE ${d.roe != null ? (d.roe * 100).toFixed(0) + "%" : "n/a"}, 5y revenue CAGR ${d.revCagr != null ? (d.revCagr * 100).toFixed(0) + "%" : "n/a"}, operating margin ${d.opMargin != null ? (d.opMargin * 100).toFixed(0) + "%" : "n/a"}. Bull points: ${bull.slice(0, 3).join("; ")}. Bear points: ${bear.slice(0, 3).join("; ")}.`;
+  const aiPrompt = () => `Give a balanced 3-sentence investor read on ${ticker.symbol} (${ticker.name}). Price $${d.price.toFixed(2)}, blended fair value $${fv.blended ? fv.blended.toFixed(2) : "n/a"} (margin of safety ${mos != null ? mos.toFixed(0) + "%" : "n/a"}), ROE ${d.roe != null ? (d.roe * 100).toFixed(0) + "%" : "n/a"}, 5y revenue CAGR ${d.revCagr != null ? (d.revCagr * 100).toFixed(0) + "%" : "n/a"}, operating margin ${d.opMargin != null ? (d.opMargin * 100).toFixed(0) + "%" : "n/a"}. Bull points: ${bull.slice(0, 3).join("; ")}. Bear points: ${bear.slice(0, 3).join("; ")}.${concSent ? " From the 10-K: " + concSent : ""}`;
+
+  const hasFilings = fr && fr.available && ((fr.customer_concentration || []).length || (fr.segments || []).length || (fr.regulatory || []).length);
 
   return (
     <>
@@ -753,6 +775,23 @@ function BullBear({ ticker, d, fv, peers }) {
           {bear.map((p, i) => <div key={i} className="bb-row"><span className="bb-num mono">{String(i + 1).padStart(2, "0")}</span><span className="bb-pt">{p}</span></div>)}
         </div>
       </div>
+      {hasFilings && (
+        <div className="iv-10k">
+          <div className="iv-10k-hd">
+            <span className="label-cap">From the latest 10-K</span>
+            <a className="mono dim2" href={fr.url} target="_blank" rel="noopener noreferrer" style={{ marginLeft: "auto" }}>SEC · filed {fr.filed} ↗</a>
+          </div>
+          {[["Customer concentration", fr.customer_concentration], ["Reportable segments", fr.segments], ["Regulatory exposure", fr.regulatory]].map(([title, arr], i) => (
+            (arr && arr.length) ? (
+              <div key={i} className="iv-10k-grp">
+                <div className="iv-10k-tag mono">{title}</div>
+                {arr.map((s, j) => <div key={j} className="iv-10k-quote">“{s}”</div>)}
+              </div>
+            ) : null
+          ))}
+          <div className="mono dim2" style={{ fontSize: 10, marginTop: 6 }}>Verbatim from the filing · extracted, not interpreted.</div>
+        </div>
+      )}
       {window.AiExplain && <div style={{ marginTop: 10 }}><AiExplain build={aiPrompt} label="Synthesize bull vs bear" tag="KAIROS · VALUE" /></div>}
     </>
   );

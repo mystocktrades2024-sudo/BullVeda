@@ -507,3 +507,147 @@ def fundamentals_as_of(ticker: str, as_of_date: Any) -> Optional[dict]:
         "long_term_debt": _instant_as_of(LTDEBT_TAGS),
         "source": "edgar",
     }
+
+
+# ── 10-K narrative risk signals (customer concentration / segments / regulatory) ──
+# These are NOT in XBRL — they live in the 10-K text (Item 1 Business, Item 1A Risk
+# Factors, and the financial-statement concentration notes). We fetch the latest 10-K
+# primary document, strip it to text, and extract the REAL sentences that disclose
+# customer concentration, reportable segments, and regulatory exposure. Heuristic
+# extraction, but every returned sentence is verbatim from the filing — never invented.
+import re as _re
+import html as _html
+
+SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
+_ARCHIVES = "https://www.sec.gov/Archives/edgar/data/{cik}/{acc}/{doc}"
+_RISK_TTL = 86400 * 30  # 10-Ks are annual; cache a month
+
+_CONC_PATS = [
+    r"\b(one|two|three|four|five|a single|our largest|the largest|no single|its largest)\s+(customer|client)s?\b",
+    r"\bcustomers?\s+(accounted for|represented|comprised|made up)\b",
+    r"\b\d{1,2}(\.\d)?\s*%\s+of\s+(our\s+|its\s+|total\s+|net\s+|consolidated\s+|annual\s+)*(net\s+)?(revenue|net sales|sales|total revenue)",
+    r"\bconcentration[s]?\s+of\s+(credit\s+)?risk\b",
+    r"\bsignificant\s+customer",
+    r"\bmajor\s+customer",
+]
+_SEG_PATS = [
+    r"\b(\w+|\d+)\s+reportable\s+segment",
+    r"\boperating\s+segment",
+    r"\bgeographic\s+(region|area)s?\b.{0,60}revenue",
+]
+_REG_PATS = [
+    r"\b(subject to|extensively|heavily|increasingly|changes in|evolving|complex)\s+[\w\s,]{0,45}(regulat|legislation|licens)",
+    r"\b(regulatory|antitrust|data privacy|export control|tariff)\s+[\w\s,]{0,45}(could|may|adversely|materially|harm|impact|require|restrict|subject)",
+    r"\bfailure to comply with[\w\s,]{0,45}(law|regulat|requirement)",
+    r"\b(new|proposed|changing|stricter)\s+[\w\s,]{0,30}(law|regulat|tariff|export control)s?\b[\w\s,]{0,40}(could|may|adversely|harm|impact)",
+]
+# boilerplate the patterns catch but that carries no signal — drop it
+_DENY = _re.compile(
+    r"investor relations|free of charge|press release|webcast|where you can find|"
+    r"conference call|business and financial information|sec-filings|sec filings|"
+    r"10-k summary|table of contents|signatures|forward-looking statement|"
+    r"available on our website|annual report on form|item \d", _re.I)
+
+
+def _strip_html(raw: bytes) -> str:
+    try:
+        txt = raw.decode("utf-8", errors="ignore")
+    except Exception:
+        return ""
+    txt = _re.sub(r"(?is)<(script|style|head)[^>]*>.*?</\1>", " ", txt)
+    txt = _re.sub(r"(?s)<[^>]+>", " ", txt)        # drop all tags
+    txt = _html.unescape(txt)
+    txt = txt.replace("\xa0", " ").replace("​", "")
+    txt = _re.sub(r"\s+", " ", txt)
+    return txt
+
+
+def _sentences(text: str) -> list:
+    # split on sentence boundaries; keep reasonably-sized prose only
+    parts = _re.split(r"(?<=[.;])\s+(?=[A-Z(])", text)
+    out = []
+    for s in parts:
+        s = s.strip()
+        if 40 <= len(s) <= 400 and sum(c.isalpha() for c in s) > len(s) * 0.55:
+            out.append(s)
+    return out
+
+
+def _extract(sents: list, pats: list, limit: int, prefer=None) -> list:
+    rx = [_re.compile(p, _re.I) for p in pats]
+    pref = _re.compile(prefer, _re.I) if prefer else None
+    seen, strong, weak = set(), [], []
+    for s in sents:
+        if _DENY.search(s):
+            continue
+        if any(r.search(s) for r in rx):
+            key = s[:80].lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            (strong if (pref and pref.search(s)) else weak).append(s)
+    return (strong + weak)[:limit]
+
+
+def _latest_10k_meta(cik: str) -> Optional[dict]:
+    raw = _throttled_get(SUBMISSIONS_URL.format(cik=cik))
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except Exception:
+        return None
+    rec = (data.get("filings", {}) or {}).get("recent", {}) or {}
+    forms = rec.get("form", []) or []
+    for i, form in enumerate(forms):
+        if form in ("10-K", "10-K405", "10-KSB"):
+            acc = (rec.get("accessionNumber", []) or [None])[i]
+            doc = (rec.get("primaryDocument", []) or [None])[i]
+            filed = (rec.get("filingDate", []) or [None])[i]
+            if acc and doc:
+                return {"acc": acc.replace("-", ""), "doc": doc, "filed": filed}
+    return None
+
+
+def risk_signals(ticker: str, cache_ttl: int = _RISK_TTL) -> Optional[dict]:
+    """Real customer-concentration / segment / regulatory disclosures from the latest
+    10-K. Returns {ticker, form, filed, url, customer_concentration[], segments[],
+    regulatory[]} — every sentence verbatim from the filing — or None. Never throws."""
+    t = (ticker or "").upper().strip()
+    if not t:
+        return None
+    cache = _CACHE_DIR / f"risks_{t}.json"
+    try:
+        if cache.exists() and (time.time() - cache.stat().st_mtime) < cache_ttl:
+            return json.loads(cache.read_text())
+    except Exception:
+        pass
+    try:
+        cik = cik_for(t)
+        if not cik:
+            return None
+        meta = _latest_10k_meta(cik)
+        if not meta:
+            return None
+        url = _ARCHIVES.format(cik=int(cik), acc=meta["acc"], doc=meta["doc"])
+        raw = _throttled_get(url, timeout=45)
+        if not raw:
+            return None
+        text = _strip_html(raw)
+        if len(text) < 2000:
+            return None
+        sents = _sentences(text)
+        out = {
+            "ticker": t, "form": "10-K", "filed": meta.get("filed"), "url": url,
+            "customer_concentration": _extract(sents, _CONC_PATS, 3, prefer=r"%\s+of\s+(our\s+|its\s+|total\s+|net\s+)*(net\s+)?(revenue|sales)"),
+            "segments": _extract(sents, _SEG_PATS, 2, prefer=r"reportable segment"),
+            "regulatory": _extract(sents, _REG_PATS, 3),
+        }
+        try:
+            cache.write_text(json.dumps(out))
+        except Exception:
+            pass
+        return out
+    except Exception as e:
+        log.debug("edgar risk_signals failed %s: %s", t, e)
+        return None

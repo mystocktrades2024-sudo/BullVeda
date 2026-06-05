@@ -3024,6 +3024,23 @@ async def peers_api(ticker: str):
     except Exception as e:
         raise HTTPException(500, str(e))
 
+@app.get("/api/filing-risks/{ticker}")
+def filing_risks_api(ticker: str):
+    """Real customer-concentration / segment / regulatory disclosures extracted
+    verbatim from the company's latest 10-K (SEC EDGAR, free). Sync def so FastAPI
+    threadpools the (cache-missed) multi-MB filing download. 30-day disk cache."""
+    ticker = ticker.upper().strip()
+    try:
+        import edgar_client as ed
+        r = ed.risk_signals(ticker)
+        if not r:
+            return {"ticker": ticker, "available": False,
+                    "customer_concentration": [], "segments": [], "regulatory": []}
+        r["available"] = True
+        return r
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 @app.get("/api/social/{ticker}")
 async def social_api(ticker: str):
     """Social + news sentiment + SEC Form-4 insider activity (live, on-demand)."""
