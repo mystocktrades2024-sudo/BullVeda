@@ -954,7 +954,11 @@ window.OvSection = OvSection;
   .shp-mid{ position:absolute; left:50%; top:0; width:1px; height:12px; background:var(--ink-3); opacity:.55; }
   .shp-bar{ position:absolute; top:2px; height:8px; border-radius:2px; }
   .shp-up{ background:color-mix(in oklab,var(--gn) 72%,transparent); } .shp-dn{ background:color-mix(in oklab,var(--rd) 70%,transparent); }
-  .shp-v{ font-size:11px; text-align:right; }`;
+  .shp-v{ font-size:11px; text-align:right; }
+  .ov-conv2col{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; align-items:start; }
+  .ov-conv-col{ display:flex; flex-direction:column; gap:10px; min-width:0; }
+  .ov-conv-coltag{ font:700 8.5px var(--mono); letter-spacing:.12em; color:var(--ink-3); margin-bottom:-2px; }
+  @media (max-width:900px){ .ov-conv2col{ grid-template-columns:1fr; } }`;
   if (!document.getElementById("eo-css")) { const s = document.createElement("style"); s.id = "eo-css"; s.textContent = css; document.head.appendChild(s); }
 })();
 const _pc = v => Math.max(0, Math.min(100, v));
@@ -1117,14 +1121,24 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
         sub="3 horizons · regime fit · which engines flagged it · every lens' read"
         headerStyle={headerStyle} defaultOpen={true}
         teaser="conviction meter · probabilistic edge · horizons · lens confluence">
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {(() => { const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null; return cv ? <ConvictionMeter cv={cv} /> : null; })()}
-          <EdgeOdds ticker={ticker} mode={mode} />
-          <ShapDrivers ticker={ticker} />
-          <HorizonStrip ticker={ticker} mode={mode} onMode={(m) => window.__setMode && window.__setMode(m)} />
-          <RegimeFit ticker={ticker} mode={mode} />
-          <SurfacedBy ticker={ticker} />
-          <ConfluenceHeatmap ticker={ticker} mode={mode} />
+          <div className="ov-conv2col">
+            {/* LEFT · the model's quantified edge */}
+            <div className="ov-conv-col">
+              <div className="ov-conv-coltag mono">▼ THE MODEL · QUANTIFIED EDGE</div>
+              <EdgeOdds ticker={ticker} mode={mode} />
+              <ShapDrivers ticker={ticker} />
+            </div>
+            {/* RIGHT · do independent views agree */}
+            <div className="ov-conv-col">
+              <div className="ov-conv-coltag mono">▼ INDEPENDENT VIEWS · AGREEMENT</div>
+              <HorizonStrip ticker={ticker} mode={mode} onMode={(m) => window.__setMode && window.__setMode(m)} />
+              <RegimeFit ticker={ticker} mode={mode} />
+              <SurfacedBy ticker={ticker} />
+              <ConfluenceHeatmap ticker={ticker} mode={mode} />
+            </div>
+          </div>
         </div>
       </OvSection>
 
