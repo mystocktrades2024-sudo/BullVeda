@@ -14,6 +14,7 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
   // ── single source of truth — every level/size/R:R below reads from here ──
   const pm = useMemoP2(() => planMath(ticker), [ticker]);
   const size = useMemoP2(() => planSize(pm, sizeMult, kellyFrac), [pm, sizeMult, kellyFrac]);
+  const fillLive = (typeof pm.spread === "number" && pm.spread > 0) && (typeof pm.dvol === "number" && pm.dvol > 0);
 
   if (!pm.levelsValid) {
     return (
@@ -77,8 +78,10 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={4} title="Fill Realism · modeled fills"
-          sub="what you'd likely fill at — modeled next-bar open + spread + slippage (live spread/ADV pending)"
+        <SectionHeader n={4} title={`Fill Realism · ${fillLive ? "live fills" : "modeled fills"}`}
+          sub={fillLive
+            ? "what you'd realistically fill at — next-bar open + live spread + ADV-scaled slippage"
+            : "what you'd likely fill at — next-bar open + spread + slippage (modeled from β; live spread/ADV unavailable)"}
           style={headerStyle} />
         <div className="lens-pad"><FillRealism pm={pm} size={size} /></div>
       </div>
@@ -267,6 +270,9 @@ function FillRealism({ pm, size }) {
           {real
             ? `spread ${spreadPct.toFixed(2)}% · ADV $${dvol >= 1e9 ? (dvol/1e9).toFixed(1)+"B" : (dvol/1e6).toFixed(0)+"M"} · β ${beta.toFixed(2)} · ${participationPct < 0.01 ? "<0.01" : participationPct.toFixed(2)}% of daily vol`
             : "live spread/ADV unavailable — modeled from β"}
+          {real && spreadPct > 0.5 && (
+            <b className="warn" title="Reported spread is unusually wide for the price — friction below may be overstated. Verify the live quote before sizing.">{" · ⚠ wide spread — verify quote"}</b>
+          )}
         </span>
       </div>
       <div className="fr-flow">
@@ -300,6 +306,9 @@ function FillRealism({ pm, size }) {
 // inline confirmation — no silent no-ops. Live trading is intentionally not wired.
 function PlanActionPanel({ pm, size, mode, sym, family }) {
   const [msg, setMsg] = useStateP2(null);   // { text, tone }
+  const [armed, setArmed] = useStateP2(false);  // 2-step confirm guard
+  const mk = (window.__BV && window.__BV.market) || null;
+  const pctToT1 = (pm.t1 - pm.entry) / pm.entry * 100;
   const plan = {
     sym, mode, family, entry: pm.entry, stop: pm.stop, t1: pm.t1, t2: pm.t2,
     shares: size.sh, notional: Math.round(size.notional), navPct: +size.navPct.toFixed(1),
@@ -325,31 +334,47 @@ function PlanActionPanel({ pm, size, mode, sym, family }) {
     } catch (e) { setMsg({ tone: "rd", text: "Couldn't write journal entry." }); }
   };
   const fire = () => {
+    if (!window.MyPF) return setMsg({ tone: "amb", text: "Paper book unavailable." });
+    if (!armed) {   // step 1: arm + ask for confirmation (prevents misclick)
+      setArmed(true);
+      setMsg({ tone: "amb", text: `Confirm PAPER fill — click again to add ${size.sh} sh ${sym} @ $${pm.entry.toFixed(2)} to your paper book.` });
+      return;
+    }
+    setArmed(false);   // step 2: execute
     try {
-      if (!window.MyPF) return setMsg({ tone: "amb", text: "Paper portfolio unavailable." });
       const pid = window.MyPF.activeId();
       window.MyPF.addHolding(pid, { sym, qty: size.sh, cost: pm.entry, stop: pm.stop,
         target: pm.t1, target2: pm.t2, notes: `${mode} · ${family} · OCO bracket from Plan tab` });
-      const nm = (window.MyPF.active() || {}).name || "portfolio";
+      const nm = (window.MyPF.active() || {}).name || "paper book";
       setMsg({ tone: "gn", text: `✓ PAPER FILL · ${size.sh} sh ${sym} @ $${pm.entry.toFixed(2)} added to "${nm}" with OCO stop $${pm.stop.toFixed(2)} / T1 $${pm.t1.toFixed(2)} / T2 $${pm.t2.toFixed(2)}.` });
-    } catch (e) { setMsg({ tone: "rd", text: "Couldn't add to paper portfolio." }); }
+    } catch (e) { setMsg({ tone: "rd", text: "Couldn't add to paper book." }); }
   };
   return (
     <div className="pap">
       <div className="pap-l">
-        <div className="pap-eyebrow mono">PLAN · TICKET · {mode}</div>
+        <div className="pap-eyebrow mono">PLAN · TICKET · {mode}
+          {mk && mk.regime4 && (
+            <span className="pap-regime" title="Current market regime + max position-size cap. The whole system is regime-conditioned — a setup's edge depends on the regime.">
+              {" · "}{mk.regime4.replace(/_/g, " ")}{mk.maxSize != null ? ` · max ${mk.maxSize}%` : ""}
+            </span>
+          )}
+        </div>
         <div className="pap-headline mono">
           <span className="pap-action">BUY-STOP BRACKET</span>
           <span className="pap-sym">{sym}</span>
           <span className="pap-px copper">${pm.entry.toFixed(2)}</span>
         </div>
         <div className="pap-line mono dim2">
-          {family} · {size.sh} sh · ${Math.round(size.notional).toLocaleString()} notional · <b>{size.navPct.toFixed(1)}% NAV</b> · OCO stop ${pm.stop.toFixed(2)}
+          {family} · {size.sh} sh · ${Math.round(size.notional).toLocaleString()} notional · <b>{size.navPct.toFixed(1)}% NAV</b> · <span title="One-Cancels-Other: the stop and target orders are placed together; filling one cancels the other.">OCO</span> stop ${pm.stop.toFixed(2)}
+        </div>
+        <div className="pap-read mono">
+          ▸ Buy-stop at <b className="copper">${pm.entry.toFixed(2)}</b> · you risk <b className="dn">${Math.round(size.maxLoss)}</b> ({size.lossNavPct.toFixed(2)}% of account) if it stops out · first target <b className="up">${pm.t1.toFixed(2)}</b> <span className="dim2">(+{pctToT1.toFixed(1)}%)</span>.
         </div>
       </div>
       <div className="pap-r">
-        <button className="pap-fire" onClick={fire}>
-          ⚡ FIRE BRACKET <span className="pap-paper">PAPER</span>
+        <button className={`pap-fire ${armed ? "is-armed" : ""}`} onClick={fire}
+          title="Adds an OCO bracket (entry + stop + targets) to your local paper book. Live trading is not wired.">
+          ⚡ {armed ? "CONFIRM PAPER FILL" : "FIRE BRACKET"} <span className="pap-paper">PAPER</span>
         </button>
         <div className="pap-r-actions">
           <button className="btn btn--sm" onClick={savePlan}>SAVE PLAN</button>
@@ -382,6 +407,7 @@ function TradeBlueprint({ pm, size }) {
   const runnerSh = Math.max(0, qty - thirdSh);
   const t1Lock = thirdSh * (t1 - entry);
   const runnerT2 = runnerSh * (t2 - entry);
+  const blendedR = ((thirdSh * (reward1 / risk)) + (runnerSh * (reward2 / risk))) / qty;  // if plan fills
 
   const W = 900, H = 408, padT = 56, padB = 78, padL = 72, padR = 108;
   const span = t2 - stop;
@@ -425,14 +451,22 @@ function TradeBlueprint({ pm, size }) {
   return (
     <div className="tbv2">
       <div className="tbv2-metrics">
-        <TbMetric label="R:R · T1" value={`${(reward1/risk).toFixed(2)}R`} sub={`+$${t1Gain.toFixed(0)} @ ${qty} sh`} tone="gn" big primary />
-        <TbMetric label="Risk · 1R" value={`$${risk.toFixed(2)}`} sub={`stop · −$${maxLoss.toFixed(0)} @ ${qty} sh`} tone="rd" primary />
-        <TbMetric label="% to T1" value={`+${(reward1/entry*100).toFixed(2)}%`} sub={`$${t1.toFixed(2)}`} tone="gn" primary />
-        <TbMetric label="% to Stop" value={`−${(risk/entry*100).toFixed(2)}%`} sub={`$${stop.toFixed(2)}`} tone="rd" />
-        <TbMetric label="R:R · T2" value={`${(reward2/risk).toFixed(2)}R`} sub={`+$${t2Gain.toFixed(0)} @ ${qty} sh`} tone="gn" secondary />
-        <TbMetric label="% to T2" value={`+${(reward2/entry*100).toFixed(2)}%`} sub={`$${t2.toFixed(2)}`} tone="gn" secondary />
-        <TbMetric label="ATR · est" value={`$${atr.toFixed(2)}`} sub={`${(atr/entry*100).toFixed(1)}% · stop÷1.25`} tone="ink" secondary />
-        <TbMetric label="Wilson WR" value={pm.lb != null ? `${(pm.lb*100).toFixed(1)}%` : "—"} sub={`LB · n=${pm.setupStats.n ?? "—"}`} tone="copper" secondary />
+        <TbMetric label="R:R · T1" value={`${(reward1/risk).toFixed(2)}R`} sub={`+$${t1Gain.toFixed(0)} @ ${qty} sh`} tone="gn" big primary
+          tip="Reward-to-risk to the first target = (T1 − entry) ÷ (entry − stop). ≥2 is healthy; the system floor is 1.5." />
+        <TbMetric label="Risk · 1R" value={`$${risk.toFixed(2)}`} sub={`stop · −$${maxLoss.toFixed(0)} @ ${qty} sh`} tone="rd" primary
+          tip="1R = your risk per share (entry − stop). Every target and result is measured in multiples of this 'R'." />
+        <TbMetric label="% to T1" value={`+${(reward1/entry*100).toFixed(2)}%`} sub={`$${t1.toFixed(2)}`} tone="gn" primary
+          tip="How far price must move from entry to reach the first target." />
+        <TbMetric label="% to Stop" value={`−${(risk/entry*100).toFixed(2)}%`} sub={`$${stop.toFixed(2)}`} tone="rd"
+          tip="How far price can fall from entry before the stop triggers." />
+        <TbMetric label="R:R · T2" value={`${(reward2/risk).toFixed(2)}R`} sub={`+$${t2Gain.toFixed(0)} @ ${qty} sh`} tone="gn" secondary
+          tip="Reward-to-risk to the second (runner) target." />
+        <TbMetric label="% to T2" value={`+${(reward2/entry*100).toFixed(2)}%`} sub={`$${t2.toFixed(2)}`} tone="gn" secondary
+          tip="How far price must move from entry to reach the second target." />
+        <TbMetric label="ATR · est" value={`$${atr.toFixed(2)}`} sub={`${(atr/entry*100).toFixed(1)}% · stop÷1.25`} tone="ink" secondary
+          tip="Average True Range — typical daily move. Estimated as stop ÷ 1.25 (the stop is set at 1.25× ATR)." />
+        <TbMetric label="Wilson WR" value={pm.lb != null ? `${(pm.lb*100).toFixed(1)}%` : "—"} sub={`LB · n=${pm.setupStats.n ?? "—"}`} tone="copper" secondary
+          tip="Wilson 95% lower-bound win-rate for this setup over n past trades — the conservative, sample-size-aware floor, not the rosy point estimate." />
       </div>
 
       <div className="tbv2-cap mono">
@@ -537,20 +571,22 @@ function TradeBlueprint({ pm, size }) {
       </div>
 
       <div className="tbv2-scale mono">
-        <span className="label-cap">Scale-out</span>
+        <span className="label-cap" title="Pre-decided exit plan: bank part of the position at the first target, let the rest run to the second.">Scale-out</span>
         <span>Sell <b className="copper">⅓ ({thirdSh} sh)</b> at T1 → <b className="up">+${Math.round(t1Lock)}</b> locked, stop→breakeven</span>
         <span className="tbv2-scale-sep">·</span>
         <span>Runner <b className="copper">{runnerSh} sh</b> to T2 → <b className="up">+${Math.round(runnerT2)}</b></span>
         <span className="tbv2-scale-sep">·</span>
-        <span className="dim2">after the T1 partial + stop→BE, the runner is <b className="up">risk-free</b></span>
+        <span title="Position-weighted R if both targets fill: (⅓ at T1 + runner at T2) ÷ shares.">Blended <b className="up">{blendedR.toFixed(2)}R</b> if plan fills</span>
+        <span className="tbv2-scale-sep">·</span>
+        <span className="dim2">after the T1 partial + stop→BE the runner's <b className="up">planned downside is removed</b> (barring a gap through the stop — see §4)</span>
       </div>
     </div>
   );
 }
 
-function TbMetric({ label, value, sub, tone, big, primary, secondary }) {
+function TbMetric({ label, value, sub, tone, big, primary, secondary, tip }) {
   return (
-    <div className={`tbv2-metric tbv2-metric--${tone} ${big ? "is-big" : ""} ${primary ? "is-primary" : ""} ${secondary ? "is-secondary" : ""}`}>
+    <div className={`tbv2-metric tbv2-metric--${tone} ${big ? "is-big" : ""} ${primary ? "is-primary" : ""} ${secondary ? "is-secondary" : ""} ${tip ? "has-tip" : ""}`} title={tip || undefined}>
       <div className="tbv2-metric-l label-cap">{label}</div>
       <div className={`tbv2-metric-v mono kpi-tone--${tone}`}>{value}</div>
       <div className="tbv2-metric-s mono dim2">{sub}</div>
@@ -573,7 +609,7 @@ function SizingWorkbench({ pm, size, sizeMult, onSizeMult, kellyFrac, onKellyFra
       <div className="sw-controls">
         <div className="sw-ctrl">
           <div className="sw-ctrl-l">
-            <span className="label-cap">Kelly fraction</span>
+            <span className="label-cap" title="Kelly = the bet size that maximizes long-run growth from your win-rate and reward-to-risk. f* is the raw optimum; the slider applies a fraction of it — half-Kelly (50%) is the common, safer choice that cuts volatility.">Kelly fraction</span>
             <span className="mono">
               <b className="copper">{(kellyFrac * 100).toFixed(0)}%</b> of raw Kelly{" "}
               {pm.kelly != null
@@ -604,11 +640,13 @@ function SizingWorkbench({ pm, size, sizeMult, onSizeMult, kellyFrac, onKellyFra
         <SwTile label="Notional" value={`$${notional.toLocaleString(undefined, {maximumFractionDigits:0})}`} tone="ink" />
         <SwTile label="% NAV"    value={`${navPct.toFixed(1)}%`}         tone={navPct > 10 ? "rd" : navPct > 7 ? "amb" : "gn"} sub="cap 10%" />
         <SwTile label="Max loss" value={`$${maxLoss.toFixed(0)}`}        tone="rd" sub={`${lossNavPct.toFixed(2)}% NAV`} />
-        <SwTile label="R-mult"   value={`${(reward/risk).toFixed(2)}R`}  tone="copper" sub="T1 / risk" />
+        <SwTile label="R-mult"   value={`${(reward/risk).toFixed(2)}R`}  tone="copper" sub="T1 / risk"
+                tip="Reward-to-risk at the first target — the same ratio shown in §1, recomputed at your current size." />
         <SwTile label="Expectancy"
                 value={pm.evR != null ? `${pm.evR >= 0 ? "+" : "−"}$${Math.abs(pm.evR * risk * sh).toFixed(0)}` : "—"}
                 tone={pm.evR == null ? "ink" : pm.evR >= 0 ? "gn" : "rd"}
-                sub={pm.evR != null ? `${pm.evR.toFixed(2)}R × ${sh} sh` : "no ledger edge"} />
+                sub={pm.evR != null ? `${pm.evR.toFixed(2)}R × ${sh} sh` : "no ledger edge"}
+                tip="Average $ you'd expect per trade at this size = win% × reward − loss% × risk, using this setup's real win-rate. Needs ledger history." />
       </div>
       <div className="sw-gates">
         <div className="sw-gates-cap label-cap">
@@ -625,9 +663,9 @@ function SizingWorkbench({ pm, size, sizeMult, onSizeMult, kellyFrac, onKellyFra
   );
 }
 
-function SwTile({ label, value, tone, sub }) {
+function SwTile({ label, value, tone, sub, tip }) {
   return (
-    <div className={`sw-tile sw-tile--${tone}`}>
+    <div className={`sw-tile sw-tile--${tone} ${tip ? "has-tip" : ""}`} title={tip || undefined}>
       <div className="sw-tile-l label-cap">{label}</div>
       <div className={`sw-tile-v mono kpi-tone--${tone}`}>{value}</div>
       {sub && <div className="sw-tile-s mono dim2">{sub}</div>}
@@ -718,7 +756,7 @@ function DecisionGates({ pm, size, ticker }) {
           : warn > 0
             ? <b className="warn">{pass}/{total} pass · {warn} caution{na ? ` · ${na} n/a` : ""}. Clear to fire — review cautions{erDays != null && erDays <= t1Days ? " (ER inside T1 window — consider a size cut)" : ""}.</b>
             : <b className="up">{pass}/{total} gates pass{na ? ` · ${na} n/a (no ledger)` : ""}. Clear to fire.</b>}
-        {na > 0 && <span> N/A gates have no ledger history yet — not counted as pass.</span>}
+        {" "}<span>The 3 SETUP checks are structural sanity (rarely fail); the EDGE / RISK / TIMING gates carry the real go/no-go weight.{na > 0 ? " N/A = no ledger history yet — not counted as pass." : ""}</span>
       </div>
     </div>
   );
@@ -742,6 +780,20 @@ function TimeAnatomyV2({ ticker, pm }) {
     { t:  Math.floor(hold * 0.85),  label: "T2 expected",   tone: "gn", px: pm.t2 },
     { t:  hold, label: "Time stop", tone: "rd", px: pm.stop },
   ];
+  // collision-aware label layout — alternate sides in X-ORDER (adjacent events go
+  // opposite sides) and stack to a 2nd level only if still overlapping.
+  const MINX = 9;   // % min horizontal separation before stacking
+  const ev = events.map((e) => ({ ...e, x: ((e.t + 4) / totalSessions) * 100 }));
+  const upLanes = [], dnLanes = [];
+  let sideToggle = 0;
+  [...ev].sort((a, b) => a.x - b.x).forEach((e) => {
+    const up = (sideToggle++ % 2) === 0;
+    const lanes = up ? upLanes : dnLanes;
+    let lvl = 0;
+    while (lvl < lanes.length && e.x - lanes[lvl] < MINX) lvl++;
+    lanes[lvl] = e.x;
+    e._up = up; e._lvl = lvl;
+  });
   return (
     <div className="time-anatomy">
       <div className="ta-meta mono dim2">
@@ -755,13 +807,13 @@ function TimeAnatomyV2({ ticker, pm }) {
             <div key={i} className={`ta-tick ${i === 4 ? "ta-tick-major" : ""}`}
                  style={{ left: `${(i/totalSessions)*100}%` }} />
           ))}
-          {events.map((e, i) => {
-            const x = ((e.t + 4) / totalSessions) * 100;
+          {ev.map((e, i) => {
+            const labelTop = e._up ? -86 - e._lvl * 46 : 28 + e._lvl * 46;
             return (
-              <div key={i} className={`ta-event ta-event--${e.tone} ${e.big ? "is-big" : ""}`} style={{ left: `${x}%` }}>
+              <div key={i} className={`ta-event ta-event--${e.tone} ${e.big ? "is-big" : ""}`} style={{ left: `${e.x}%` }}>
                 <div className="ta-event-stem" />
                 <div className="ta-event-dot" />
-                <div className={`ta-event-label mono ${i % 2 ? "ta-up" : "ta-dn"}`}>
+                <div className={`ta-event-label mono ${e._up ? "ta-up" : "ta-dn"}`} style={{ top: `${labelTop}px` }}>
                   {e.label}
                   {e.px != null && <span className="ta-event-px mono">${e.px.toFixed(2)}</span>}
                 </div>
@@ -884,8 +936,8 @@ function AuditLog({ pm, size }) {
     { phase: "PRE-FILL", item: bookTxt, done: true, sub: bookSub },
     { phase: "PRE-FILL", item: `Sleep-test · β-gap worst-case −$${Math.round(size.maxLoss * gapMult)} vs −$${Math.round(size.maxLoss)} planned`, done: true, sub: `β ${beta.toFixed(2)} overnight gap` },
     { phase: "PRE-FILL", item: pm.earnings.days != null ? `ER alert · T−2 reminder set (ER in ${pm.earnings.days}d)` : "ER alert · none in hold window", done: true },
-    { phase: "FILL",     item: "Order acknowledged by Alpaca (paper) · OCO IDs assigned",          done: false, sub: "awaits trigger" },
-    { phase: "POST-FILL",item: "Position added to portfolio_state · risk recompute",                done: false },
+    { phase: "FILL",     item: "Order staged to paper book · OCO bracket armed",                    done: false, sub: "fires on FIRE BRACKET" },
+    { phase: "POST-FILL",item: "Position added to paper book · risk recompute",                      done: false },
     { phase: "POST-FILL",item: "Journal entry written · 1-paragraph thesis",                        done: false },
     { phase: "POST-FILL",item: "Alert wired · trail stop to breakeven at T+0.5R",                   done: false },
   ];
