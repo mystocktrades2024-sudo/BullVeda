@@ -136,7 +136,14 @@ function fairValueMethods(d, peers) {
   if (peerPS && d.salesPS && d.salesPS > 0) out.push({ key: "ps", m: "Peer P/S", sub: `cohort ${peerPS.toFixed(1)}× · sales/sh $${d.salesPS.toFixed(2)}${adjLbl}`, fair: peerPS * d.salesPS * growthAdj, w: 0.12, band: 0.15 });
   // Graham number: deep-value floor — only meaningful for sub-15%-growth, asset-relevant names
   if (!isGrowth && d.eps && d.eps > 0 && d.bvps && d.bvps > 0) out.push({ key: "graham", m: "Graham number", sub: `√(22.5·EPS·BVPS) · BVPS $${d.bvps.toFixed(2)}`, fair: Math.sqrt(22.5 * d.eps * d.bvps), w: 0.10, band: 0.05 });
-  if (d.fcfPS && d.fcfPS > 0) {
+  // FINANCIALS: justified P/B from return-on-equity vs cost of equity (Gordon for banks/
+  // lenders — the correct model where FCF/EV are distorted). fair = (ROE÷COE) × book/sh.
+  if (isFinancial && d.roe && d.roe > 0 && d.bvps && d.bvps > 0) {
+    const coe = wacc, justPB = Math.max(0.3, Math.min(5, d.roe / coe));
+    out.push({ key: "pbRoe", m: "Justified P/B · ROE÷COE", sub: `ROE ${(d.roe * 100).toFixed(0)}% ÷ COE ${(coe * 100).toFixed(1)}% → ${justPB.toFixed(2)}× · BVPS $${d.bvps.toFixed(2)}`, fair: justPB * d.bvps, w: 0.24, band: 0.13 });
+  }
+  // Reverse-DCF — skip for financials (FCF distorted by loan-book / funding flows)
+  if (!isFinancial && d.fcfPS && d.fcfPS > 0) {
     const g = Math.max(0.02, Math.min(0.18, d.fcfCagr != null ? d.fcfCagr : (d.revCagr != null ? d.revCagr * 0.8 : 0.08)));
     const fv = _dcfValue(d.fcfPS, g, wacc, 0.03);
     if (fv) out.push({ key: "dcf", m: "Reverse-DCF · base case", sub: `FCF/sh $${d.fcfPS.toFixed(2)} · g ${(g * 100).toFixed(0)}%→3% · WACC ${(wacc * 100).toFixed(1)}%`, fair: fv, w: 0.26, band: 0.18, g });
@@ -144,7 +151,7 @@ function fairValueMethods(d, peers) {
   const tw = out.reduce((s, x) => s + x.w, 0) || 1;
   out.forEach(x => { x.wn = x.w / tw; x.mos = (x.fair / d.price - 1) * 100; });
   const blended = out.length ? out.reduce((s, x) => s + x.fair * x.wn, 0) : null;
-  return { methods: out, blended, blendedMos: blended != null ? (blended / d.price - 1) * 100 : null, growthAdj, isGrowth, wacc };
+  return { methods: out, blended, blendedMos: blended != null ? (blended / d.price - 1) * 100 : null, growthAdj, isGrowth, isFinancial, wacc };
 }
 
 function _tone(mos) { return mos == null ? "ink" : mos >= 8 ? "gn" : mos >= -8 ? "amb" : "rd"; }
@@ -245,8 +252,9 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={8} title="Cross-Lens Confluence" style={headerStyle} />
-        <div className="lens-pad"><CrossLens lead="violet" cells={crossLensCells(ticker, d, fv)} /></div>
+        <SectionHeader n={8} title="Cross-Lens Confluence"
+          sub="this lens's value read alongside the live reads from the other engine lenses" style={headerStyle} />
+        <div className="lens-pad"><CrossLens lead="violet" cells={crossLensCells(ticker, mode, d, fv)} /></div>
       </div>
 
       <TheRead d={d} fv={fv} />
@@ -465,6 +473,10 @@ function MarginOfSafety({ d, fv }) {
 
 // ─── §1 · Reverse-DCF — what growth is priced in vs delivered ───────
 function ReverseDcf({ d, fv }) {
+  if (fv.isFinancial) return (
+    <div className="dcf-sens"><div className="label-cap" style={{ marginBottom: 6 }}>Reverse-DCF</div>
+      <div className="mono dim2" style={{ fontSize: 11 }}>This is a financial — its free cash flow is distorted by loan-book and funding flows, so a cash-flow DCF doesn't apply. Value rests on the <b>Justified P/B (ROE÷COE)</b> method above instead.</div></div>
+  );
   if (!d.fcfPS || d.fcfPS <= 0) return (
     <div className="dcf-sens"><div className="label-cap" style={{ marginBottom: 6 }}>Reverse-DCF</div>
       <div className="mono dim2" style={{ fontSize: 11 }}>FCF is not positive on a trailing basis — a cash-flow DCF doesn't apply. Lean on the multiple-reversion methods above.</div></div>
@@ -789,15 +801,26 @@ function CatCal({ ticker }) {
   );
 }
 
-// ─── §8 Cross-lens (real reads) ─────────────────────────────────────
-function crossLensCells(ticker, d, fv) {
-  const mos = fv.blendedMos;
+// ─── §8 Cross-lens — this lens's value read + the REAL engine reads from the
+//     other lenses (compositeVerdict reconciliation, not recomputed locally) ──
+function crossLensCells(ticker, mode, d, fv) {
   const cells = [];
+  const mos = fv.blendedMos;
+  // (1) value-specific read — the one cell this lens owns, with fundamental detail
   cells.push({ lens: "Value", verdict: mos == null ? "—" : mos <= -8 ? "CHEAP" : mos >= 8 ? "RICH" : "FAIR", tone: mos == null ? "ink" : _tone(mos), note: mos != null ? `MoS ${mos >= 0 ? "+" : ""}${mos.toFixed(0)}%` : "no fair value" });
-  if (d.roe != null) cells.push({ lens: "Quality", verdict: d.roe >= 0.15 ? "HIGH" : d.roe >= 0.05 ? "OK" : "LOW", tone: d.roe >= 0.15 ? "gn" : d.roe >= 0.05 ? "amb" : "rd", note: `ROE ${(d.roe * 100).toFixed(0)}%` });
-  if (d.revCagr != null) cells.push({ lens: "Growth", verdict: d.revCagr >= 0.15 ? "FAST" : d.revCagr >= 0.05 ? "STEADY" : "SLOW", tone: d.revCagr >= 0.15 ? "gn" : d.revCagr >= 0.05 ? "amb" : "rd", note: `rev ${(d.revCagr * 100).toFixed(0)}%/yr` });
-  if (_P(ticker.shortFloat) != null) cells.push({ lens: "Risk", verdict: _P(ticker.shortFloat) >= 10 ? "CROWDED" : "OK", tone: _P(ticker.shortFloat) >= 10 ? "rd" : "gn", note: `short ${_P(ticker.shortFloat).toFixed(0)}%` });
-  if (_P(ticker.insiderOwn) != null) cells.push({ lens: "Insider", verdict: _P(ticker.insiderOwn) >= 5 ? "ALIGNED" : "LOW", tone: _P(ticker.insiderOwn) >= 5 ? "gn" : "amb", note: `own ${_P(ticker.insiderOwn).toFixed(1)}%` });
+  // (2) live reads pulled from the engine's other lenses (real scores + reasons)
+  const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
+  if (cv && cv.lenses) {
+    const want = ["AI Edge", "Earnings", "Insider", "Risk", "Track Rec."];
+    want.forEach(k => {
+      const l = cv.lenses.find(x => x.k === k);
+      if (l) cells.push({ lens: l.k, verdict: l.v >= 60 ? "BULL" : l.v >= 45 ? "MIXED" : "BEAR", tone: l.tone, note: l.why });
+    });
+  } else {
+    // engine unavailable (off-universe) — fall back to fundamental-derived reads
+    if (d.roe != null) cells.push({ lens: "Quality", verdict: d.roe >= 0.15 ? "HIGH" : d.roe >= 0.05 ? "OK" : "LOW", tone: d.roe >= 0.15 ? "gn" : d.roe >= 0.05 ? "amb" : "rd", note: `ROE ${(d.roe * 100).toFixed(0)}%` });
+    if (d.revCagr != null) cells.push({ lens: "Growth", verdict: d.revCagr >= 0.15 ? "FAST" : d.revCagr >= 0.05 ? "STEADY" : "SLOW", tone: d.revCagr >= 0.15 ? "gn" : d.revCagr >= 0.05 ? "amb" : "rd", note: `rev ${(d.revCagr * 100).toFixed(0)}%/yr` });
+  }
   return cells;
 }
 
