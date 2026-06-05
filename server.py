@@ -9741,7 +9741,21 @@ async def pattern_api(engine: str, ticker: str, mode: str = "SWING"):
     except Exception as e:
         return {"ticker": ticker, "engine": engine, "ok": False, "source": "real",
                 "message": f"dispatch error: {e}"}
-    _PATTERN_CACHE[key] = (now, out)
+    # Only cache reads that actually ran on bars — NEVER cache a transient
+    # bar-fetch failure (bars=0 with no price), which would otherwise poison the
+    # cache until TTL expires (the 2026-06-04 TWLO case: a morning network blip
+    # cached an empty result, so the Patterns tab stayed blank all day). A legit
+    # "no pattern" result (bars=0 but cur_close/n_real present → bars WERE fetched)
+    # is still cached so it doesn't refetch every open.
+    _ran_on_data = isinstance(out, dict) and (
+        bool(out.get("bars"))
+        or out.get("state") in ("real", "loaded")
+        or bool(out.get("events")) or bool(out.get("pivots"))
+        or out.get("cur_close") is not None
+        or bool(out.get("n_real"))
+    )
+    if _ran_on_data:
+        _PATTERN_CACHE[key] = (now, out)
     return out
 
 @app.get("/api/patterns/engines")
