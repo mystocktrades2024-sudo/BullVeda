@@ -68,19 +68,34 @@ const HR = (function () {
   }
   // per-mode engine verdict (BUY/WATCH/AVOID/SHORT) for a scan row — so Home sections
   // respect the Swing/Position/Invest toggle instead of always showing the overall call.
-  function vmode(row, mode) {
+  function mdec(row, mode) {
     const dbm = row && row._raw && row._raw.decisions_by_mode;
-    const v = dbm && dbm[modeKey(mode)] && dbm[modeKey(mode)].verdict;
-    return String(v || (row && row.verdict) || "").toUpperCase();
+    return (dbm && dbm[modeKey(mode)]) || null;
   }
-  return { num, numStr, sym0, rows, pool, ledgerSet, ledgerReal, auditOnly, inAudit, findRow, held, modeKey, vmode, has: () => rows().length > 0 };
+  function vmode(row, mode) {
+    const d = mdec(row, mode);
+    return String((d && d.verdict) || (row && row.verdict) || "").toUpperCase();
+  }
+  return { num, numStr, sym0, rows, pool, ledgerSet, ledgerReal, auditOnly, inAudit, findRow, held, modeKey, vmode, mdec, has: () => rows().length > 0 };
 })();
 
 function HomeView({ onTicker, onSurface, mode, surface }) {
   const uni = (window.__BV && window.__BV.market && window.__BV.market.funnel && window.__BV.market.funnel.universe) || null;
   const uniStr = uni != null ? uni.toLocaleString() : "612";
+  const liveDown = !HR.has();  // live universe failed to load → sections show sample data
   return (
     <div className="home">
+      {liveDown && (
+        <div className="home-feed-warn mono" style={{
+          margin: "0 0 10px", padding: "10px 14px", borderRadius: 10, fontSize: 12.5, lineHeight: 1.5,
+          background: "color-mix(in oklab, var(--rd) 14%, var(--bg-1))",
+          border: "1px solid color-mix(in oklab, var(--rd) 45%, transparent)", color: "var(--ink-1)",
+        }}>
+          <b className="dn">⚠ LIVE DATA UNAVAILABLE</b> — the market feed isn't reachable, so the
+          tickers, prices and signals below are an <b>illustrative sample layout, not real data</b>.
+          Do not trade on them. Reload once the feed is back.
+        </div>
+      )}
       {/* TIER 1 · MARKET STATE — regime + scan funnel + cross-asset tape */}
       <HomeHero mode={mode} onSurface={onSurface} />
       <IndexStrip />
@@ -205,8 +220,12 @@ function IndexStrip() {
       {idx.map((i, k) => {
         const series = i.spark ? sparks[i.spark] : null;
         const up = i.c == null ? true : i.c >= 0;
+        const isCommodity = ["WTI", "GOLD", "COPPER", "SILVER"].includes(i.s);
+        const tip = i.spark ? (isCommodity
+          ? `value = front-month future · sparkline tracks the ${i.spark} ETF (closest free proxy path)`
+          : `sparkline: ${i.spark} · 22 daily closes`) : undefined;
         return (
-          <div key={k} className={`ix ix--${i.c == null ? "ink" : up ? "gn" : "rd"}`}>
+          <div key={k} className={`ix ix--${i.c == null ? "ink" : up ? "gn" : "rd"}`} title={tip}>
             <span className="ix-s mono">{i.s}</span>
             <span className="ix-v mono">{i.v}</span>
             {i.c != null
@@ -232,7 +251,7 @@ function MarketBriefing({ onSurface, onTicker }) {
     { k: ">200-DMA", v: M.breadth200 != null ? Math.round(M.breadth200) + "%" : "—", tone: "gn" },
     { k: "New highs", v: M.newHighs != null ? "+" + M.newHighs : "—", tone: "gn" },
     { k: "New lows", v: M.newLows != null ? String(M.newLows) : "—", tone: M.newLows > (M.newHighs || 0) ? "rd" : "gn" },
-    { k: "Fear/Greed", v: M.fearGreed != null ? String(M.fearGreed) : "—", tone: "gn" },
+    { k: "F&G proxy", v: M.fearGreed != null ? String(M.fearGreed) : "—", tone: "gn" },
     { k: "Put/Call", v: M.putCall != null ? M.putCall.toFixed(2) : "—", tone: "amb" },
   ] : [
     { k: ">50-DMA", v: "62%", tone: "gn" }, { k: ">200-DMA", v: "58%", tone: "gn" },
@@ -475,10 +494,13 @@ function resolveEarningsToday() {
   return src.map(e => {
     const sym = HR.sym0(e.ticker);
     const d = HR.num(e.days_to_earnings, null);
+    const im = ((e.breakdown || {}).implied_move || {});
+    const imp = HR.num(im.implied_move_pct, null);  // real Schwab straddle-implied move
     return {
       sym, when: /before/i.test(e.before_after || "") ? "BMO" : "AMC",
       time: d === 0 ? "today" : d != null ? "T−" + d : "",
       beat: e.beat_score != null ? Math.round(e.beat_score) : null,
+      imp: imp != null ? "±" + imp.toFixed(1) + "%" : null,
       tier: e.tier || "", tone: tierTone(e.tier || ""), held: held.has(sym),
     };
   });
@@ -494,15 +516,15 @@ function EarningsToday({ onTicker }) {
         {heldRows.length
           ? <span className="warn">{heldRows.length} held ({heldRows.join(", ")})</span>
           : <span className="dim">no book exposure</span>}
-        <span> · beat-score model</span>
+        <span> · implied move + beat-score</span>
       </div>
       {rows.map((r, i) => (
         <div key={i} className={`et-row ${r.held ? "is-held" : ""}`} onClick={() => onTicker(r.sym)}>
           <span className="et-sym mono"><b>{r.sym}</b></span>
           <span className={`et-when mono ${r.when === "BMO" ? "cy" : "amb"}`}>{r.when}</span>
           <span className="et-time mono dim2">{r.time}</span>
-          <span className={`et-move mono kpi-tone--${r.tone}`}>{r.tier || "—"}</span>
-          <span className={`et-esp mono kpi-tone--${r.tone}`}>{r.beat != null ? "BEAT " + r.beat : "—"}</span>
+          <span className="et-move mono warn" title="options-implied move (Schwab ATM straddle)">{r.imp || "—"}</span>
+          <span className={`et-esp mono kpi-tone--${r.tone}`}>{r.tier ? r.tier + (r.beat != null ? " " + r.beat : "") : (r.beat != null ? "BEAT " + r.beat : "—")}</span>
           {r.held
             ? <span className="et-expo mono gn">HELD</span>
             : <span className="et-expo mono dim">—</span>}
@@ -729,19 +751,29 @@ function resolveScannerPicks() {
   const rows = HR.pool();
   if (!rows.length) return SCANNER_PICKS;
   const rank = (v) => v === "BUY" ? 0 : v === "WATCH" ? 1 : v === "SHORT" ? 2 : 3;
-  // per-mode verdict (Swing/Position/Invest), not the overall call
+  // per-mode verdict/score/R:R (Swing/Position/Invest) from decisions_by_mode —
+  // so the WHOLE row reflects the active horizon, not a swing call with swing R:R.
   const picks = [...rows]
-    .map(r => ({ r, vm: HR.vmode(r) }))
+    .map(r => ({ r, d: HR.mdec(r), vm: HR.vmode(r) }))
     .filter(x => ["BUY", "WATCH", "SHORT"].includes(x.vm) && HR.inAudit(x.r.sym))
-    .sort((a, b) => rank(a.vm) - rank(b.vm) || b.r.score - a.r.score)
+    .sort((a, b) => {
+      const sa = (a.d && HR.num(a.d.composite_score, a.r.score)) || a.r.score;
+      const sb = (b.d && HR.num(b.d.composite_score, b.r.score)) || b.r.score;
+      return rank(a.vm) - rank(b.vm) || sb - sa;
+    })
     .slice(0, 5)
-    .map(({ r, vm }) => ({
-      sym: r.sym, name: r.name, score: r.score,
-      rr: r.rr !== "—" ? r.rr : null,
-      wlb: r.wlb,  // feed-honest (null → "—")
-      edge: r.aiEdge != null ? (r.aiEdge >= 0 ? "+" : "") + r.aiEdge.toFixed(2) : null,
-      v: vm,
-    }));
+    .map(({ r, d, vm }) => {
+      const modeRR = d && HR.num(d.rr_ratio, null);
+      const modeScore = d && HR.num(d.composite_score, null);
+      return {
+        sym: r.sym, name: r.name,
+        score: modeScore != null ? Math.round(modeScore) : r.score,
+        rr: modeRR != null ? modeRR.toFixed(1) : (r.rr !== "—" ? r.rr : null),
+        wlb: r.wlb,  // feed-honest (null → "—")
+        edge: r.aiEdge != null ? (r.aiEdge >= 0 ? "+" : "") + r.aiEdge.toFixed(2) : null,
+        v: vm,
+      };
+    });
   return picks.length ? picks : SCANNER_PICKS;
 }
 
@@ -998,13 +1030,13 @@ function HomeHero({ mode, onSurface }) {
           <div className="qh-funnel-bar">
             <i className="qh-seg qh-seg--gn"  style={{ width: seg(buy) }}   title={`${buy} Bullish`} />
             <i className="qh-seg qh-seg--amb" style={{ width: seg(watch) }} title={`${watch} Neutral`} />
-            <i className="qh-seg qh-seg--rd"  style={{ width: seg(avoid) }} title={`${avoid} Bearish`} />
+            <i className="qh-seg qh-seg--rd"  style={{ width: seg(avoid) }} title={`${avoid} Avoid (excluded from longs)`} />
           </div>
           <div className="qh-funnel-stats">
             <button className="qh-fstat qh-fstat--copper" onClick={scan("ALL")}   title="Scanner · all"><b>{universe}</b><span>universe</span></button>
             <button className="qh-fstat qh-fstat--gn"     onClick={scan("BUY")}   title="Scanner · Bullish"><b>{buy}</b><span>bullish</span></button>
             <button className="qh-fstat qh-fstat--amb"    onClick={scan("WATCH")} title="Scanner · Neutral"><b>{watch}</b><span>neutral</span></button>
-            <button className="qh-fstat qh-fstat--rd"     onClick={scan("SHORT")} title="Scanner · Bearish"><b>{avoid}</b><span>bearish</span></button>
+            <button className="qh-fstat qh-fstat--rd"     onClick={scan("SHORT")} title="Scanner · Avoid — excluded from longs (not necessarily shortable)"><b>{avoid}</b><span>avoid</span></button>
           </div>
         </div>
 
@@ -1012,8 +1044,8 @@ function HomeHero({ mode, onSurface }) {
           <div className="qh-cap mono">MARKET MOOD</div>
           <div className="qh-mood-row">
             {mood.map((m, i) => (
-              <div key={i} className={`qh-m qh-m--${m.tone}`}>
-                <span className="qh-m-l mono">{m.l}</span>
+              <div key={i} className={`qh-m qh-m--${m.tone}`} title={m.l === "FEAR/GREED" ? "Computed proxy from breadth + put/call (not the CNN Fear & Greed index)" : undefined}>
+                <span className="qh-m-l mono">{m.l === "FEAR/GREED" ? "F&G PROXY" : m.l}</span>
                 <span className="qh-m-v mono">{m.v}</span>
                 <span className="qh-m-bar"><i style={{ width: `${m.pct}%` }} /></span>
               </div>
@@ -1167,7 +1199,7 @@ function resolveSignalFeed() {
   if (er[0]) out.push({ t: scanT, tone: "amb", tag: "ER", sym: er[0].sym, text: `ER in ${er[0].er} sessions · event-risk elevated` });
   if (bear[0]) out.push({ t: scanT, tone: "rd", tag: "BEARISH", sym: bear[0].sym, text: `${HR.vmode(bear[0])} · score ${bear[0].score} · excluded from longs` });
   const _F = realFunnel(window.__tmode) || (M && M.funnel);
-  if (_F) out.push({ t: scanT, tone: "ink", tag: "BUNDLE", sym: null, text: `Daily bundle · ${_F.universe} ranked · ${_F.bullish} Bullish · ${_F.neutral} Neutral · ${_F.bearish} Bearish` });
+  if (_F) out.push({ t: scanT, tone: "ink", tag: "BUNDLE", sym: null, text: `Daily bundle · ${_F.universe} ranked · ${_F.bullish} Bullish · ${_F.neutral} Neutral · ${_F.bearish} Avoid` });
   if (ai[0]) out.push({ t: scanT, tone: "violet", tag: "AI", sym: ai[0].sym, text: `AI edge +${ai[0].aiEdge.toFixed(2)} · highest hit-net today` });
   if (ins[0]) out.push({ t: scanT, tone: "cy", tag: "INSIDER", sym: ins[0].sym, text: `Insider cluster · +${ins[0].insNet} net open-market buys` });
   return out.length ? out : SIGNALFEED_MOCK;

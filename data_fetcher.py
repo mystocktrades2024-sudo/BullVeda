@@ -2865,8 +2865,10 @@ def _stooq_quote(sym: str) -> dict | None:
     try:
         import requests
         url = f"https://stooq.com/q/l/?s={sym}&f=sd2t2ohlcvp&e=csv"
-        for _ in range(2):
-            r = requests.get(url, timeout=6, headers={"User-Agent": "Mozilla/5.0"})
+        # Single short-timeout attempt: this runs on the cached boot path, so a hung
+        # upstream must never stall the page. A miss falls back to last-good / ETF.
+        for _ in range(1):
+            r = requests.get(url, timeout=3, headers={"User-Agent": "Mozilla/5.0"})
             t = (r.text or "").strip()
             # anti-bot challenge or HTML → miss
             if not t or "<" in t[:1] or "crypto.subtle" in t or "script" in t[:80].lower():
