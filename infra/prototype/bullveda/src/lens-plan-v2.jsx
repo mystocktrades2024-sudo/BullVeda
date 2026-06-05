@@ -86,10 +86,10 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
 
       <div className="lens-section">
         <SectionHeader n={6} title="Conditional Playbook · IF/THEN tree"
-          sub="pre-decided reactions to every realistic price/vol path"
+          sub={`pre-decided reactions for a ${mode === "POSITION" ? "1–6 month position" : mode === "INVESTMENT" ? "multi-year holding" : "2–15 day swing"} — tied to your ladder`}
           style={headerStyle} right={<StateToggle name="plv2-5" />} />
-        <StateWrap state={s5.value} source="playbook · per-setup family rules">
-          <div className="lens-pad"><PlaybookTree /></div>
+        <StateWrap state={s5.value} source={`playbook · ${mode.toLowerCase()} horizon rules`}>
+          <div className="lens-pad"><PlaybookTree mode={mode} pm={pm} /></div>
         </StateWrap>
       </div>
       </div>
@@ -245,8 +245,46 @@ function FillRealism({ pm, size }) {
   );
 }
 
-// ─── §0 Action Panel ────────────────────────────────────────────
+// ─── §0 Action Panel — functional, paper-only execution ─────────
+// FIRE adds an OCO bracket to the ACTIVE paper portfolio (window.MyPF). SAVE /
+// JOURNAL persist via window.UserPrefs (cross-device). Every action returns an
+// inline confirmation — no silent no-ops. Live trading is intentionally not wired.
 function PlanActionPanel({ pm, size, mode, sym, family }) {
+  const [msg, setMsg] = useStateP2(null);   // { text, tone }
+  const plan = {
+    sym, mode, family, entry: pm.entry, stop: pm.stop, t1: pm.t1, t2: pm.t2,
+    shares: size.sh, notional: Math.round(size.notional), navPct: +size.navPct.toFixed(1),
+    rr1: +pm.rr1.toFixed(2), maxLoss: Math.round(size.maxLoss), ts: new Date().toISOString(),
+  };
+  const dryRun = () => setMsg({ tone: "ink", text:
+    `DRY-RUN · BUY-STOP ${size.sh} ${sym} @ $${pm.entry.toFixed(2)} · stop $${pm.stop.toFixed(2)} (−$${Math.round(size.maxLoss)}) · T1 $${pm.t1.toFixed(2)} · ${pm.rr1.toFixed(2)}R · ${size.navPct.toFixed(1)}% NAV — no order sent.` });
+  const savePlan = () => {
+    try {
+      if (!window.UserPrefs) return setMsg({ tone: "amb", text: "Prefs unavailable — plan not saved." });
+      const all = window.UserPrefs.get("savedPlans", {}) || {};
+      all[sym] = plan; window.UserPrefs.set("savedPlans", all);
+      setMsg({ tone: "gn", text: `✓ Plan saved for ${sym} · restore from any device.` });
+    } catch (e) { setMsg({ tone: "rd", text: "Couldn't save plan." }); }
+  };
+  const journal = () => {
+    try {
+      if (!window.UserPrefs) return setMsg({ tone: "amb", text: "Prefs unavailable — not journaled." });
+      const log = window.UserPrefs.get("journal", []) || [];
+      log.unshift({ ...plan, note: `Plan logged · ${family} · ${mode}` });
+      window.UserPrefs.set("journal", log.slice(0, 200));
+      setMsg({ tone: "gn", text: `✓ Journaled ${sym} plan · ${log.length} total entries.` });
+    } catch (e) { setMsg({ tone: "rd", text: "Couldn't write journal entry." }); }
+  };
+  const fire = () => {
+    try {
+      if (!window.MyPF) return setMsg({ tone: "amb", text: "Paper portfolio unavailable." });
+      const pid = window.MyPF.activeId();
+      window.MyPF.addHolding(pid, { sym, qty: size.sh, cost: pm.entry, stop: pm.stop,
+        target: pm.t1, target2: pm.t2, notes: `${mode} · ${family} · OCO bracket from Plan tab` });
+      const nm = (window.MyPF.active() || {}).name || "portfolio";
+      setMsg({ tone: "gn", text: `✓ PAPER FILL · ${size.sh} sh ${sym} @ $${pm.entry.toFixed(2)} added to "${nm}" with OCO stop $${pm.stop.toFixed(2)} / T1 $${pm.t1.toFixed(2)} / T2 $${pm.t2.toFixed(2)}.` });
+    } catch (e) { setMsg({ tone: "rd", text: "Couldn't add to paper portfolio." }); }
+  };
   return (
     <div className="pap">
       <div className="pap-l">
@@ -257,17 +295,20 @@ function PlanActionPanel({ pm, size, mode, sym, family }) {
           <span className="pap-px copper">${pm.entry.toFixed(2)}</span>
         </div>
         <div className="pap-line mono dim2">
-          {family} · {size.sh} sh · ${Math.round(size.notional).toLocaleString()} notional · <b>{size.navPct.toFixed(1)}% NAV</b> · OCO armed
+          {family} · {size.sh} sh · ${Math.round(size.notional).toLocaleString()} notional · <b>{size.navPct.toFixed(1)}% NAV</b> · OCO stop ${pm.stop.toFixed(2)}
         </div>
       </div>
       <div className="pap-r">
-        <button className="pap-fire">⚡ FIRE BRACKET <span className="kbd">⌘↵</span></button>
+        <button className="pap-fire" onClick={fire}>
+          ⚡ FIRE BRACKET <span className="pap-paper">PAPER</span>
+        </button>
         <div className="pap-r-actions">
-          <button className="btn btn--sm">SAVE PLAN</button>
-          <button className="btn btn--sm">DRY-RUN</button>
-          <button className="btn btn--sm">＋ JOURNAL</button>
+          <button className="btn btn--sm" onClick={savePlan}>SAVE PLAN</button>
+          <button className="btn btn--sm" onClick={dryRun}>DRY-RUN</button>
+          <button className="btn btn--sm" onClick={journal}>＋ JOURNAL</button>
         </div>
       </div>
+      {msg && <div className={`pap-msg mono kpi-tone--${msg.tone}`}>{msg.text}</div>}
     </div>
   );
 }
@@ -658,25 +699,68 @@ function TimeAnatomyV2({ ticker, pm }) {
   );
 }
 
-// ─── §5 Playbook IF/THEN tree ──────────────────────────────────
-function PlaybookTree() {
-  const branches = [
-    { tag: "OPEN",  scenarios: [
-      { cond: "Gap +3% on news",      then: "Skip · wait first 30m · re-validate pivot", tone: "amb" },
-      { cond: "Gap −2% no news",      then: "Hold · first 15m candle is the read",        tone: "ink" },
-      { cond: "VWAP reclaim by 11:00",then: "Add ¼ on consolidation > VWAP",                tone: "gn" },
+// ─── §5 Playbook IF/THEN tree — mode-aware ─────────────────────
+// Rules are pre-decided per trade horizon and reference the live ladder. Swing
+// reacts intraday/over days; Position reacts on weekly closes; Investment on
+// fundamentals/quarters. Conditions cite $entry/$stop/$T1 so they're actionable.
+function playbookFor(mode, pm) {
+  const E = `$${pm.entry.toFixed(2)}`, S = `$${pm.stop.toFixed(2)}`, T1 = `$${pm.t1.toFixed(2)}`, T2 = `$${pm.t2.toFixed(2)}`;
+  if (mode === "POSITION") return [
+    { tag: "ENTER", scenarios: [
+      { cond: `Weekly close back above pivot ${E}`, then: "Take the planned starter · scale on 21-EMA pullbacks", tone: "gn" },
+      { cond: `Opens below ${E}, trend intact`,      then: "Wait for the BUY-STOP — don't pre-buy weakness",       tone: "ink" },
+      { cond: "RS rank ≥ 80 + sector leading",       then: "Size to full target weight",                          tone: "gn" },
     ]},
-    { tag: "MID",   scenarios: [
-      { cond: "Volume < 0.6× avg by 14:00", then: "Trim ¼ · distribution risk",              tone: "amb" },
-      { cond: "T1 hit on +1.5× vol", then: "Sell ½ · trail rest with ATR×2.2",               tone: "gn"  },
-      { cond: "Close strong + > +1R", then: "Trail stop to breakeven · raise next day",      tone: "gn"  },
+    { tag: "MANAGE", scenarios: [
+      { cond: `First target ${T1} (+1R)`,            then: "Trim ¼ · trail remainder under the weekly 21-EMA",     tone: "gn" },
+      { cond: "50-DMA flattens / RS fades < 70",     then: "Stop adding · ride core only",                         tone: "amb" },
+      { cond: `Runs to ${T2} on expanding volume`,   then: "Trim ¼ more · let the rest trend",                     tone: "gn" },
     ]},
-    { tag: "INVAL", scenarios: [
-      { cond: "Pre-mortem #1 fires",  then: "OCO armed · no manual override",                tone: "rd" },
-      { cond: "Sector ETF −5%",       then: "Reduce 50% · pause new entries",                tone: "amb" },
-      { cond: "Hits hard stop",       then: "OCO auto-exit",                                  tone: "rd" },
+    { tag: "EXIT", scenarios: [
+      { cond: `Weekly close below ${S}`,             then: "Trend break · exit on the close (no intraday override)", tone: "rd" },
+      { cond: "Earnings miss / guidance cut",        then: "Reduce 50% · re-rate the thesis before re-adding",     tone: "amb" },
+      { cond: "Time stop — thesis stalls 6–8 wks",   then: "Recycle capital to a fresher setup",                   tone: "ink" },
     ]},
   ];
+  if (mode === "INVESTMENT") return [
+    { tag: "ACCUMULATE", scenarios: [
+      { cond: `Price within ~5% of value support ${S}`, then: "Add a tranche · dollar-cost on weakness",           tone: "gn" },
+      { cond: "Quarter beats + raises guide",           then: "Hold full weight · let it compound",                tone: "gn" },
+      { cond: "Multiple re-rates rich vs 5-yr history", then: "Hold — don't add at a premium",                     tone: "amb" },
+    ]},
+    { tag: "HOLD", scenarios: [
+      { cond: `Unrealized > +30% toward ${T2}`,         then: "Trim to target weight · book partial gains",        tone: "gn" },
+      { cond: "Annual rebalance window",                then: "Reset position to model weight",                    tone: "ink" },
+      { cond: "Dividend raised / buyback expanded",     then: "Reinvest · thesis strengthening",                   tone: "gn" },
+    ]},
+    { tag: "EXIT", scenarios: [
+      { cond: "Thesis pillar breaks (margins / share loss / 2 misses)", then: "Sell · reallocate capital",         tone: "rd" },
+      { cond: "Dividend cut / balance-sheet stress",    then: "Exit — fundamental break",                          tone: "rd" },
+      { cond: "Better risk-adjusted opportunity",       then: "Rotate · opportunity cost",                         tone: "ink" },
+    ]},
+  ];
+  // SWING (default) — execution over 2–15 days
+  return [
+    { tag: "OPEN", scenarios: [
+      { cond: `Triggers + holds above ${E} first 30m`, then: "In play · trail under the 5-min higher-lows",        tone: "gn" },
+      { cond: `Gaps >3% above ${E} on news`,           then: `Don't chase · re-enter only on a higher-low above ${E}`, tone: "amb" },
+      { cond: `Opens below ${E}, no catalyst`,         then: "Stand down · let the BUY-STOP do the work",          tone: "ink" },
+    ]},
+    { tag: "MANAGE", scenarios: [
+      { cond: `Hits +1R near ${T1}`,                   then: "Sell ⅓ · move stop to breakeven " + E,               tone: "gn" },
+      { cond: "Volume < 0.6× avg for 2 sessions",      then: "Tighten to ATR×1.5 · momentum fading",               tone: "amb" },
+      { cond: `Closes strong toward ${T2}`,            then: "Trail the rest with ATR×2.2",                        tone: "gn" },
+    ]},
+    { tag: "INVALIDATE", scenarios: [
+      { cond: `Daily close below ${S}`,                then: "Exit on close · OCO covers the intraday wick",       tone: "rd" },
+      { cond: "Sector ETF −2% intraday",               then: "Halve size · correlation risk",                      tone: "amb" },
+      { cond: "Hard stop hit",                         then: "OCO auto-exit · no manual override",                 tone: "rd" },
+    ]},
+  ];
+}
+
+function PlaybookTree({ mode, pm }) {
+  const branches = playbookFor(mode, pm);
   return (
     <div className="pbk">
       {branches.map((b, i) => (
