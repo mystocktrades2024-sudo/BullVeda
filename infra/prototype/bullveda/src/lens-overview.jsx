@@ -241,6 +241,34 @@ function HorizonStrip({ ticker, mode, onMode }) {
   );
 }
 
+// ─── RegimeFit — the missing P5 line: does THIS setup work in THIS regime? ───
+const FAM_REG_FIT = {
+  "Breakout Expansion": { trending: "GOOD", choppy: "OK", risk_off: "POOR", panic: "POOR" },
+  "Trend Continuation": { trending: "GOOD", choppy: "OK", risk_off: "POOR", panic: "POOR" },
+  "Impulse Catalyst": { trending: "GOOD", choppy: "GOOD", risk_off: "OK", panic: "OK" },
+  "Special Situation": { trending: "GOOD", choppy: "GOOD", risk_off: "OK", panic: "OK" },
+};
+function RegimeFit({ ticker, mode }) {
+  const M = (window.__BV && window.__BV.market) || null;
+  const reg4 = (M && M.regime4) || (ticker._scan && ticker._scan._raw && ticker._scan._raw.regime4) || null;
+  if (!reg4 && !M) return null;
+  const regLabel = M ? `${M.regimeLabel} · ${M.regimeTrend}` : String(reg4 || "").replace(/_/g, " ");
+  const regKind = /trending/.test(reg4 || "") ? "trending" : /choppy/.test(reg4 || "") ? "choppy" : /panic/.test(reg4 || "") ? "panic" : /off/.test(reg4 || "") ? "risk_off" : "choppy";
+  const fam = ticker.setupFamily || "";
+  const fit = (FAM_REG_FIT[fam] || {})[regKind] || (fam ? "OK" : null);
+  const fitTone = fit === "GOOD" ? "up" : fit === "POOR" ? "dn" : "warn";
+  const cat = ticker.catalystTier;
+  return (
+    <div className="rfit mono" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 11.5, padding: "7px 12px", margin: "0 0 10px", background: "var(--glass-bg-2)", border: "1px solid var(--glass-line)", borderRadius: 8 }}>
+      <span className="label-cap" style={{ fontSize: 9 }}>REGIME FIT</span>
+      <span><b className={M && !M.regimeOn ? "dn" : "up"}>{regLabel}</b>{M && M.maxSize != null ? <span className="dim2"> · max size {M.maxSize}%</span> : null}</span>
+      {fam ? <span className="dim2">·</span> : null}
+      {fam ? <span>setup <b>{fam}</b> in this regime: <b className={fitTone}>{fit}</b></span> : null}
+      {cat ? <><span className="dim2">·</span><span>catalyst <b className={cat === 1 ? "up" : cat === 2 ? "warn" : "dim2"}>T{cat}</b></span></> : null}
+      {fit === "POOR" ? <span className="dn" style={{ fontSize: 10.5 }}>⚠ setup is regime-misaligned — size down or wait</span> : null}
+    </div>
+  );
+}
 function SurfacedBy({ ticker }) {
   const engines = React.useMemo(() => discoveryFootprint(ticker), [ticker.symbol]);
   const hits = engines.filter(e => e.hit);
@@ -482,6 +510,16 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
   const modeRR = dec && typeof dec.rr_ratio === "number" ? dec.rr_ratio : (ticker.rMultiple || null);
   const [chartView, setChartView] = React.useState(() => { try { return localStorage.getItem("dh-chart-view") || "full"; } catch (e) { return "full"; } });
   const pickChartView = v => { setChartView(v); try { localStorage.setItem("dh-chart-view", v); } catch (e) {} };
+  // ── live actions (real): watchlist toggle + route to Automated Trade / Alerts ──
+  const [wlOn, setWlOn] = React.useState(() => !!(window.WatchStore && window.WatchStore.has(ticker.symbol)));
+  React.useEffect(() => {
+    const h = () => setWlOn(!!(window.WatchStore && window.WatchStore.has(ticker.symbol)));
+    window.addEventListener("watchlist-change", h);
+    return () => window.removeEventListener("watchlist-change", h);
+  }, [ticker.symbol]);
+  const actWatch = () => { if (window.WatchStore) window.WatchStore.toggle({ sym: ticker.symbol, name: ticker.name, price: ticker.price, chg: ticker.chg, score: ticker.score, verdict: ticker.verdict, setup: ticker.setupFamily }); };
+  const actTrade = () => window.__setSurface && window.__setSurface("portfolio-srf");
+  const actAlerts = () => window.__setSurface && window.__setSurface("alerts");
   const entry = L.pivot;                       // the trigger / entry
   const risk = entry - L.stop;
   const reward1 = L.t1 - entry;
@@ -634,11 +672,11 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
       </div>
 
       <div className="dh-actions">
-        <button className="dh-act dh-act--primary">▲ Place bracket</button>
-        <button className="dh-act">＋ Watchlist</button>
-        <button className="dh-act">⚙ Adjust size</button>
-        <button className="dh-act">🔔 Alert at ${entry.toFixed(2)}</button>
-        <button className="dh-act dh-act--rd dh-act--spacer">▼ Place short</button>
+        <button className="dh-act dh-act--primary" onClick={actTrade} title="Open Automated Trade to place a bracket order">▲ Place bracket</button>
+        <button className={`dh-act ${wlOn ? "dh-act--primary" : ""}`} onClick={actWatch}>{wlOn ? "✓ Watchlisted" : "＋ Watchlist"}</button>
+        <button className="dh-act" onClick={actTrade} title="Open Automated Trade to size the position">⚙ Adjust size</button>
+        <button className="dh-act" onClick={actAlerts} title="Open Alerts to arm a price alert">🔔 Alert at ${entry.toFixed(2)}</button>
+        <button className="dh-act dh-act--rd dh-act--spacer" onClick={actTrade} title="Open Automated Trade to place a short">▼ Place short</button>
       </div>
     </div>
   );
@@ -981,6 +1019,9 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
       {/* ── HORIZON STRIP · swing / position / investment verdicts side-by-side ── */}
       <HorizonStrip ticker={ticker} mode={mode} onMode={(m) => window.__setMode && window.__setMode(m)} />
 
+      {/* ── REGIME FIT · does THIS setup work in THIS regime (P5) + catalyst tier ── */}
+      <RegimeFit ticker={ticker} mode={mode} />
+
       {/* ── 1 · COMPANY & CATALYSTS · context first (full width, above the analysis) ── */}
       <OvSection n={1} title="Company & Catalysts · Context"
         sub="who they are · valuation · earnings · what's hitting the tape"
@@ -1056,6 +1097,18 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
             <div className="ov-honest-sub label-cap">⚙ Why the edge exists · mechanism</div>
             <SleeveAttribution ticker={ticker} />
           </div>
+        </div>
+      </OvSection>
+
+      {/* ── 6 · MACRO · STRESS · DESK READ (revived, real) ── */}
+      <OvSection n={6} title="Macro · Stress · Desk Read"
+        sub="the backdrop · book stress under shocks · one-line desk recap"
+        headerStyle={headerStyle} defaultOpen={false}
+        teaser="regime + rates + credit · β-scaled stress · desk recap">
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div><div className="ov-honest-sub label-cap">▼ Macro backdrop</div><MacroDrill /></div>
+          <div><div className="ov-honest-sub label-cap">▼ Book stress · β-scaled shocks</div><StressSnapshot ticker={ticker} /></div>
+          <DeskRead ticker={ticker} mode={mode} />
         </div>
       </OvSection>
 
@@ -1219,14 +1272,24 @@ function GateCascade({ ticker }) {
 }
 
 function MacroDrill() {
+  const c = (window.__BV && window.__BV.critical) || null;
+  const M = (window.__BV && window.__BV.market) || null;
+  const mac = (c && c.macro_signals) || {};
+  const bf = (c && c.bonds_forex) || {};
+  const rg = (c && c.regime) || {};
+  const n = v => (typeof v === "number" && isFinite(v)) ? v : null;
+  const vix = n(rg.vix_current) != null ? n(rg.vix_current) : (rg.vix && n(rg.vix.vix_current));
+  const tiles = [];
+  if (M) tiles.push({ label: "Regime · multi-factor", value: `${M.regimeLabel} · ${M.regimeTrend}`, tone: M.regimeOn ? "gn" : "rd", sub: M.maxSize != null ? `max size ${M.maxSize}%` : "regime gate" });
+  if (vix != null) tiles.push({ label: "VIX", value: vix.toFixed(1), tone: vix < 18 ? "gn" : vix < 25 ? "amb" : "rd", sub: vix < 18 ? "low-vol · risk-on" : vix < 25 ? "elevated" : "stressed" });
+  if (M && M.breadthPct != null) tiles.push({ label: "Breadth >50-DMA", value: Math.round(M.breadthPct) + "%", tone: M.breadthPct >= 55 ? "gn" : M.breadthPct >= 40 ? "amb" : "rd", sub: "participation" });
+  if (mac.credit && mac.credit.state) tiles.push({ label: "HY credit (HYG)", value: mac.credit.state, tone: mac.credit.state === "healthy" ? "gn" : "amb", sub: mac.hyg && mac.hyg.chg5d != null ? `5d ${mac.hyg.chg5d >= 0 ? "+" : ""}${mac.hyg.chg5d}%` : "risk appetite" });
+  if (mac.dxy && mac.dxy.chg5d != null) tiles.push({ label: "Dollar (UUP)", value: `${mac.dxy.chg5d >= 0 ? "+" : ""}${mac.dxy.chg5d}% 5d`, tone: mac.dxy.trend === "rising" ? "amb" : "gn", sub: mac.dxy.trend || "fx" });
+  if (bf["TYX.INDX"] && n(bf["TYX.INDX"].price) != null) tiles.push({ label: "US 30Y yield", value: n(bf["TYX.INDX"].price).toFixed(2) + "%", tone: "ink", sub: "duration" });
+  if (!tiles.length) return <span className="mono dim2">Macro context unavailable.</span>;
   return (
-    <div className="kpi-row" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
-      <KpiTile label="Regime · MULTI-FACTOR" value="BULL · LOW-VIX" tone="gn" sub="highest WR regime · 71% historical" />
-      <KpiTile label="XLB · 50-DMA"          value="+3.4%"          tone="gn" sub="rising · sector tailwind" />
-      <KpiTile label="VIX percentile 1y"     value="32%"            tone="gn" sub="below median · risk-on" />
-      <KpiTile label="US10Y · 5d delta"      value="−14bp"          tone="gn" sub="rates easing · duration friendly" />
-      <KpiTile label="Breadth · A/D NYSE"    value="1.84"           tone="gn" sub="participation broad" />
-      <KpiTile label="HY spread · 5d"        value="−6bp"           tone="gn" sub="risk appetite holding" />
+    <div className="kpi-row" style={{ gridTemplateColumns: `repeat(${Math.min(3, tiles.length)}, 1fr)` }}>
+      {tiles.map((t, i) => <KpiTile key={i} {...t} />)}
     </div>
   );
 }
@@ -1281,20 +1344,29 @@ function WhatChanged({ ticker }) {
   );
 }
 
-function StressSnapshot() {
-  const scenarios = [
-    { name: "VIX spike +8",       pnl: "−$680",   pct: "−0.63% NAV", action: "Cut 50%",    tone: "amb" },
-    { name: "Sector rotation −5%",pnl: "−$520",   pct: "−0.48% NAV", action: "Trim 25%",   tone: "amb" },
-    { name: "Earnings gap −15%",  pnl: "−$420",   pct: "−0.39% NAV", action: "OCO exit",   tone: "rd"  },
-    { name: "Macro shock (CPI)",  pnl: "−$610",   pct: "−0.56% NAV", action: "Reduce 50%", tone: "amb" },
-    { name: "Sector kill",        pnl: "−$890",   pct: "−0.82% NAV", action: "Flatten",    tone: "rd"  },
-    { name: "Liquidity dry-up",   pnl: "−$340",   pct: "−0.31% NAV", action: "Hold · wide",tone: "ink" },
+function StressSnapshot({ ticker }) {
+  const NAV = (window.__BV && window.__BV.nav) || 100000;
+  const beta = ticker.beta != null ? ticker.beta : 1.0;
+  const posPct = 0.05;                         // 5%-NAV notional position reference
+  const pos = NAV * posPct;
+  const scen = [
+    { name: "Market −3%", mkt: -3 },
+    { name: "Market −5%", mkt: -5 },
+    { name: "VIX spike (−8%)", mkt: -8 },
+    { name: "Risk-off (−10%)", mkt: -10 },
   ];
+  const tiles = scen.map(s => {
+    const move = s.mkt * beta;                 // stock move ≈ β × market move
+    const pnl = pos * move / 100;
+    const pct = pnl / NAV * 100;
+    return { label: s.name, value: `${pnl < 0 ? "−$" : "$"}${Math.abs(Math.round(pnl)).toLocaleString()}`, tone: pct <= -0.6 ? "rd" : pct <= -0.3 ? "amb" : "ink", sub: `${pct.toFixed(2)}% NAV · β${beta.toFixed(2)}` };
+  });
   return (
-    <div className="kpi-row" style={{ gridTemplateColumns: "repeat(6, 1fr)" }}>
-      {scenarios.map((s, i) => (
-        <KpiTile key={i} label={s.name} value={s.pnl} tone={s.tone} sub={`${s.pct} · ${s.action}`} />
-      ))}
+    <div>
+      <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+        {tiles.map((t, i) => <KpiTile key={i} {...t} />)}
+      </div>
+      <div className="mono dim2" style={{ fontSize: 10, marginTop: 4 }}>β-scaled P&L on a {(posPct * 100)}%-NAV (${Math.round(pos).toLocaleString()}) position vs real NAV ${Math.round(NAV).toLocaleString()}. Illustrative market shocks; β is real.</div>
     </div>
   );
 }
@@ -1304,32 +1376,31 @@ window.LensOverview = LensOverview;
 
 // ─── Desk Read — how a 20-yr quant scans it in 2 seconds ────────
 function DeskRead({ ticker, mode }) {
-  const entry = ticker.pivot * 1.002;
-  const risk = entry - ticker.stop;
-  const reward = ticker.t1 - entry;
-  const wr = 0.617, lb = 0.477;
-  // expectancy in R: p*win − q*loss (loss capped at 1R)
-  const evR = (wr * (reward / risk) - (1 - wr) * 1).toFixed(2);
+  const L = window.coherentLevels ? window.coherentLevels(ticker) : ticker;
+  const ss = ticker.setupStats || {};
+  const dmKey = mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "investment" : "swing";
+  const dec = ticker.decisionsByMode && ticker.decisionsByMode[dmKey];
+  const rr = (dec && typeof dec.rr_ratio === "number") ? dec.rr_ratio : ticker.rMultiple;
+  const wr = ss.winRate, lb = ss.wilsonLB;
+  const rrT1 = (L.valid && (L.pivot - L.stop) > 0) ? (L.t1 - L.pivot) / (L.pivot - L.stop) : null;
+  const evR = (wr != null && rrT1 != null) ? (wr * rrT1 - (1 - wr)) : null;
+  const er = ticker.earnings && ticker.earnings.days;
   return (
     <div className="dr">
       <div className="dr-metrics">
-        <DrCell label="EXPECTANCY" value={`+${evR}R`} tone="gn" tip="p·b − q · per unit risk" />
-        <DrCell label="EDGE · WILSON LB" value={`${(lb*100).toFixed(0)}%`} tone="gn" tip="95% lower bound · n=47" />
-        <DrCell label="DOWNSIDE" value="−$420" tone="rd" tip="0.39% NAV · hard stop" />
-        <DrCell label="R:R" value={`${(reward/risk).toFixed(2)}`} tone="copper" tip="reward ÷ risk to T1" />
-        <DrCell label="CORREL → BOOK" value="0.34" tone="gn" tip="cap 0.55 · adds cleanly" />
-        <DrCell label="LIQUIDITY" value="A" tone="gn" tip="2 bp spread · 1.12M ADV" />
-        <DrCell label="REGIME FIT" value="71%" tone="gn" tip="setup WR in current regime" />
-        <DrCell label="TIME RISK" value="ER 11d" tone="amb" tip="event risk into the print" />
+        <DrCell label="EXPECTANCY" value={evR != null ? `${evR >= 0 ? "+" : ""}${evR.toFixed(2)}R` : "—"} tone={evR != null ? (evR >= 0 ? "gn" : "rd") : "ink"} tip="p·b − q · per unit risk" />
+        <DrCell label="EDGE · WILSON LB" value={lb != null ? `${(lb * 100).toFixed(0)}%` : "—"} tone={lb != null ? (lb >= 0.45 ? "gn" : "amb") : "ink"} tip={ss.n != null ? `95% LB · n=${ss.n}` : "no per-setup sample"} />
+        <DrCell label="R:R" value={rr != null ? rr.toFixed(2) : "—"} tone="copper" tip="reward ÷ risk" />
+        <DrCell label="PF" value={ss.pf != null ? ss.pf.toFixed(2) : "—"} tone={ss.pf != null ? (ss.pf >= 1.3 ? "gn" : "amb") : "ink"} tip="profit factor" />
+        <DrCell label="$ LIQUIDITY" value={ticker.dvol ? `$${(ticker.dvol / 1e6).toFixed(0)}M` : "—"} tone="gn" tip={ticker.spread != null ? `${ticker.spread.toFixed(2)}% spread` : "avg $ volume"} />
+        <DrCell label="SHORT FLOAT" value={ticker.shortFloat != null ? `${ticker.shortFloat.toFixed(1)}%` : "—"} tone={ticker.shortFloat >= 15 ? "amb" : "gn"} tip="squeeze / borrow risk" />
+        <DrCell label="CATALYST" value={ticker.catalystTier ? `T${ticker.catalystTier}` : "—"} tone={ticker.catalystTier === 1 ? "gn" : "amb"} tip="catalyst tier" />
+        <DrCell label="TIME RISK" value={er != null ? `ER ${er}d` : "clear"} tone={er != null && er <= 10 ? "amb" : "gn"} tip="event risk into the print" />
       </div>
-
       <div className="dr-call mono">
         <span className="dr-call-tag">DESK READ</span>
         <span className="dr-call-txt">
-          Clean continuation BO with a real, sample-validated edge (LB 48%, +{evR}R expectancy).
-          Downside bounded at 0.39% NAV, adds at 0.34 correl, fits the bull/low-VIX regime where this
-          setup wins 71%. <b className="warn">One caveat:</b> ER in 11d — historically this setup is sized −25% and flattened T−2 when unconfirmed.
-          <b className="copper"> Ticket is pre-filled for your review.</b>
+          {ticker.symbol} — {ticker.setupFamily || "setup"}{lb != null ? `, edge LB ${(lb * 100).toFixed(0)}%${ss.n != null ? ` (n=${ss.n})` : ""}` : ", no per-setup track record yet"}{evR != null ? `, ${evR >= 0 ? "+" : ""}${evR.toFixed(2)}R expectancy` : ""}. {L.valid ? <>Risk bounded at the <b>${L.stop.toFixed(2)}</b> stop.</> : "No complete trade plan."} {er != null && er <= 10 ? <b className="warn"> ER in {er}d — size down / flatten pre-print.</b> : " Catalyst window clear."}
         </span>
       </div>
     </div>
