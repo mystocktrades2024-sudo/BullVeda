@@ -64,7 +64,7 @@ const FIXTURE_STAT = {
   confidence: 0.64,
 };
 
-const FIXTURE_MODEL = {
+var FIXTURE_MODEL = {
   isReal: false, source: "illustrative",
   pattern: { name: "VCP / Ascending Triangle", tone: "cy" },
   contractions: FIXTURE_CONTRACTIONS,

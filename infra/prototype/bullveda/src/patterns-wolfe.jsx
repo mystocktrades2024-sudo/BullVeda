@@ -71,7 +71,7 @@ function _buildFixtureBars(ticker) {
 }
 
 // FIXTURE_MODEL — keeps original fixture for standalone showcase
-const FIXTURE_MODEL = {
+var FIXTURE_MODEL = {
   isReal: false, source: "illustrative",
   wfPts: WF_PTS_FIXTURE,
   epa: WF_EPA_FIXTURE,

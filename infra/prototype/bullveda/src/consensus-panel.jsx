@@ -12,7 +12,7 @@ const CNS_SHORT = {
 
 function buildConsensus() {
   const engines = (window.resolveEngines ? window.resolveEngines() : window.TBE_ENGINES) || [];
-  const scanner = window.SCANNER_PICKS || [];
+  const scanner = (window.resolveScannerPicks ? window.resolveScannerPicks() : window.SCANNER_PICKS) || [];
   const map = {};
   const names = {};
   const add = (sym, src) => {

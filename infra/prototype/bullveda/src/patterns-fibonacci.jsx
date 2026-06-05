@@ -60,7 +60,7 @@ function _buildMockBars(ticker) {
   return buildSeries({ n: 51, anchors, seed, volSpikes: { 6: 1.6, 30: 1.5 } });
 }
 
-const FIXTURE_MODEL = {
+var FIXTURE_MODEL = {
   isReal: false, source: "illustrative",
   swing: FB_FIX_SWING, golden_pocket: FB_FIX_GOLDEN,
   retr_levels: FB_FIX_RETR, ext_levels: FB_FIX_EXT,

@@ -104,7 +104,7 @@ function buildFixtureModel(ticker) {
 }
 
 // Fixture model constant used as fallback reference
-const FIXTURE_MODEL = buildFixtureModel({ symbol: "ARGN" });
+var FIXTURE_MODEL = buildFixtureModel({ symbol: "ARGN" });
 
 // ── data hook: real → fixture fallback (mode-aware) ───────────────────────────
 function useIchimokuModel(ticker, mode) {

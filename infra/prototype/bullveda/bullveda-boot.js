@@ -399,6 +399,10 @@
     // critical subset — real market context + setup stats + options flow (essential, stays sync)
     BV.critical = BOOT ? BOOT.critical : (syncGet("/v2/data.critical.json") || null);
     BV.optionsFlow = (BV.critical && BV.critical.options_flow_top30) || null; // ticker-level UOA (from critical)
+    BV.marketNews = (BV.critical && BV.critical.market_news) || null; // real EODHD market headlines (Home · MARKETS·NEWS)
+    // true headline-index tape (Schwab indices + EODHD crypto): boot payload first
+    // (fresh, <120s), else the copy persisted in critical (scan-cadence fallback).
+    BV.indexQuotes = (BOOT && BOOT.index_quotes) || (BV.critical && BV.critical.index_quotes) || null;
     // real per-setup track-record stats (Wilson) keyed by setup family
     BV.setupStatsBy = (function () {
       var sf = BV.critical && BV.critical.setup_family_stats;
@@ -408,7 +412,7 @@
         .forEach(function (s) { if (s && s.setup) m[s.setup] = s; });
       return m;
     })();
-  } else { BV.crypto = BV.earningsBeat = BV.earningsWatch = BV.optionsFlow = BV.critical = BV.setupStatsBy = BV.leaders = null; }
+  } else { BV.crypto = BV.earningsBeat = BV.earningsWatch = BV.optionsFlow = BV.marketNews = BV.indexQuotes = BV.critical = BV.setupStatsBy = BV.leaders = null; }
 
   // ── real market context for the Home hero (regime · funnel · breadth · mood) ──
   BV.market = (function () {

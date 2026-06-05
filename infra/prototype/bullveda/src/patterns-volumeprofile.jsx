@@ -59,7 +59,7 @@ const FIX_STAT = {
   poc_raw: 205, vah_raw: 211, val_raw: 199,
 };
 
-const FIXTURE_MODEL = {
+var FIXTURE_MODEL = {
   isReal: false, source: "illustrative",
   profile: _FIX_VP.bins, poc: _FIX_VP.poc, vah: _FIX_VP.vah, val: _FIX_VP.val,
   nodes: FIX_NODES, targets: FIX_TARGETS, invalidation: FIX_INVALIDATION,

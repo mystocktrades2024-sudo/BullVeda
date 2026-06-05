@@ -67,7 +67,7 @@ function _buildFixtureBars(ticker) {
   return buildSeries({ n: 66, anchors, seed, volSpikes });
 }
 
-const FIXTURE_MODEL = {
+var FIXTURE_MODEL = {
   isReal: false, source: "illustrative",
   // chart annotations
   hmPts: HM_PTS_FIXTURE,

@@ -67,7 +67,7 @@ function _buildFixtureBars(ticker) {
   return buildSeries({ n: TD_BARS, anchors: TD_FIX_ANCHORS, seed, volSpikes: {} });
 }
 
-const FIXTURE_MODEL = {
+var FIXTURE_MODEL = {
   bars:        null,   // populated dynamically from ticker seed in the hook
   tdst:        TD_FIX_HLINES,
   markers:     TD_FIX_MARKERS,

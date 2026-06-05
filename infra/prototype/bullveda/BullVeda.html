@@ -10932,6 +10932,10 @@ body {
     // critical subset — real market context + setup stats + options flow (essential, stays sync)
     BV.critical = BOOT ? BOOT.critical : (syncGet("/v2/data.critical.json") || null);
     BV.optionsFlow = (BV.critical && BV.critical.options_flow_top30) || null; // ticker-level UOA (from critical)
+    BV.marketNews = (BV.critical && BV.critical.market_news) || null; // real EODHD market headlines (Home · MARKETS·NEWS)
+    // true headline-index tape (Schwab indices + EODHD crypto): boot payload first
+    // (fresh, <120s), else the copy persisted in critical (scan-cadence fallback).
+    BV.indexQuotes = (BOOT && BOOT.index_quotes) || (BV.critical && BV.critical.index_quotes) || null;
     // real per-setup track-record stats (Wilson) keyed by setup family
     BV.setupStatsBy = (function () {
       var sf = BV.critical && BV.critical.setup_family_stats;
@@ -10941,7 +10945,7 @@ body {
         .forEach(function (s) { if (s && s.setup) m[s.setup] = s; });
       return m;
     })();
-  } else { BV.crypto = BV.earningsBeat = BV.earningsWatch = BV.optionsFlow = BV.critical = BV.setupStatsBy = BV.leaders = null; }
+  } else { BV.crypto = BV.earningsBeat = BV.earningsWatch = BV.optionsFlow = BV.marketNews = BV.indexQuotes = BV.critical = BV.setupStatsBy = BV.leaders = null; }
 
   // ── real market context for the Home hero (regime · funnel · breadth · mood) ──
   BV.market = (function () {
@@ -12920,7 +12924,7 @@ function DetailHeader({ ticker, mode, sizeCat, focusMode, onToggleFocus }) {
       title: focusMode ? "Exit focus mode (show scan list)" : "Focus mode (collapse scan list)"
     },
     focusMode ? "\u25C0 Exit Focus" : "\u25C9 Focus"
-  ))), /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-row dp-hdr-quote" }, /* @__PURE__ */ React.createElement("div", { className: "dp-quote-price mono" }, /* @__PURE__ */ React.createElement("b", null, "$", ticker.price.toFixed(2))), /* @__PURE__ */ React.createElement("div", { className: `dp-quote-chg mono ${ticker.chg >= 0 ? "up" : "dn"}` }, ticker.chg >= 0 ? "+" : "", ticker.chgAbs.toFixed(2), " (", ticker.chg.toFixed(2), "%)"), /* @__PURE__ */ React.createElement("div", { className: "dp-quote-extra mono dim" }, /* @__PURE__ */ React.createElement("span", null, "VOL ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, (ticker.vol / 1e6).toFixed(2), "M")), /* @__PURE__ */ React.createElement("span", null, "\xB7 AVG ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, (ticker.avgVol / 1e6).toFixed(2), "M")), /* @__PURE__ */ React.createElement("span", null, "\xB7 RSI ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, ticker.rsi.toFixed(1))), /* @__PURE__ */ React.createElement("span", null, "\xB7 \u03B2 ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, ticker.beta.toFixed(2)))), /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-spacer" }), /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true, dot: true }, "LIVE \xB7 14:23:08 ET"), /* @__PURE__ */ React.createElement(Pill, { tone: "copper", small: true }, secBias(ticker.verdict), " \xB7 ", ticker.score)));
+  ))), /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-row dp-hdr-quote" }, /* @__PURE__ */ React.createElement("div", { className: "dp-quote-price mono" }, /* @__PURE__ */ React.createElement("b", null, "$", ticker.price.toFixed(2))), /* @__PURE__ */ React.createElement("div", { className: `dp-quote-chg mono ${ticker.chg >= 0 ? "up" : "dn"}` }, ticker.chg >= 0 ? "+" : "", ticker.chgAbs.toFixed(2), " (", ticker.chg.toFixed(2), "%)"), /* @__PURE__ */ React.createElement("div", { className: "dp-quote-extra mono dim" }, /* @__PURE__ */ React.createElement("span", null, "VOL ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, (ticker.vol / 1e6).toFixed(2), "M")), /* @__PURE__ */ React.createElement("span", null, "\xB7 AVG ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, (ticker.avgVol / 1e6).toFixed(2), "M")), /* @__PURE__ */ React.createElement("span", null, "\xB7 RSI ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, ticker.rsi != null ? ticker.rsi.toFixed(1) : "\u2014")), /* @__PURE__ */ React.createElement("span", null, "\xB7 \u03B2 ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, ticker.beta.toFixed(2)))), /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-spacer" }), /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true, dot: true }, "LIVE \xB7 14:23:08 ET"), /* @__PURE__ */ React.createElement(Pill, { tone: "copper", small: true }, secBias(ticker.verdict), " \xB7 ", ticker.score)));
 }
 function DetailTabs({ lensId, onLensId, sizeCat, tier = 4, variant = "wrap" }) {
   return /* @__PURE__ */ React.createElement("div", { className: `dp-tabs dp-tabs--${variant}` }, /* @__PURE__ */ React.createElement("div", { className: "dp-tabs-scroll" }, LENSES.map((l, i) => {
@@ -22970,7 +22974,7 @@ function CompanySnapshot({ ticker }) {
   return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "cs-card cs-card--who" }, /* @__PURE__ */ React.createElement("div", { className: "cs-card-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "WHO \xB7 ", ticker.symbol), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, ticker.exchange, " \xB7 ", ticker.sector, " \xB7 ", ticker.industry)), /* @__PURE__ */ React.createElement("div", { className: "cs-name mono" }, ticker.name), /* @__PURE__ */ React.createElement("div", { className: "cs-blurb mono dim" }, "Mid-cap specialty-materials operator \xB7 70% specialty coatings / 30% adjacent chemicals \xB7 top-2 customers = 31% of revenue \xB7 Akron capacity expansion ships H2 (+18% volume)."), /* @__PURE__ */ React.createElement("div", { className: "cs-meta" }, /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "mcap"), " ", /* @__PURE__ */ React.createElement("b", null, "$", (ticker.mcap / 1e9).toFixed(2), "B")), /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\u03B2"), " ", /* @__PURE__ */ React.createElement("b", null, ticker.beta.toFixed(2))), /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "float"), " ", /* @__PURE__ */ React.createElement("b", null, "76.4M")), /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "short"), " ", /* @__PURE__ */ React.createElement("b", null, ticker.shortFloat.toFixed(1), "%")), /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "insider own"), " ", /* @__PURE__ */ React.createElement("b", null, ticker.insiderOwn.toFixed(1), "%")), /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "ADV 20d"), " ", /* @__PURE__ */ React.createElement("b", null, (ticker.avgVol / 1e6).toFixed(2), "M sh")), /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "spread"), " ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "2 bp")), /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "opt OI"), " ", /* @__PURE__ */ React.createElement("b", null, "48k")))), /* @__PURE__ */ React.createElement("div", { className: "cs-card cs-card--er" }, /* @__PURE__ */ React.createElement("div", { className: "cs-card-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "EARNINGS \xB7 NEXT CATALYST"), /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "T\u2212", ticker.earnings.days, "d")), /* @__PURE__ */ React.createElement("div", { className: "cs-er-big" }, /* @__PURE__ */ React.createElement("div", { className: "cs-er-num mono" }, ticker.earnings.days), /* @__PURE__ */ React.createElement("div", { className: "cs-er-meta" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "days to print"), /* @__PURE__ */ React.createElement("div", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, ticker.earnings.date), " \xB7 BMO \xB7 Wed"))), /* @__PURE__ */ React.createElement("div", { className: "cs-er-tiles" }, /* @__PURE__ */ React.createElement("div", { className: "cs-er-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "ESP"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "+4.1%"))), /* @__PURE__ */ React.createElement("div", { className: "cs-er-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "EPS est."), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, "$0.97"))), /* @__PURE__ */ React.createElement("div", { className: "cs-er-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Beat rate"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "6 / 8 Q"))), /* @__PURE__ */ React.createElement("div", { className: "cs-er-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Implied move"), /* @__PURE__ */ React.createElement("span", { className: "mono warn" }, /* @__PURE__ */ React.createElement("b", null, "\xB16.4%")))), /* @__PURE__ */ React.createElement("div", { className: "cs-er-history mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "last 8Q:"), [5.2, 3.1, -6.2, 2.4, 0.6, 2.8, -1.4, 3.9].map((r, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: r >= 0 ? "up" : "dn" }, r >= 0 ? "\u25B2" : "\u25BC", Math.abs(r).toFixed(1))))));
 }
 function CompanyValuation({ ticker }) {
-  return /* @__PURE__ */ React.createElement("div", { className: "cs-card cs-card--val" }, /* @__PURE__ */ React.createElement("div", { className: "cs-card-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "VALUATION \xB7 QUALITY"), /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "MoS 6%")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-row" }, /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "P/E TTM"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, ticker.pe.toFixed(1))), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "peers 24.1")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Fwd P/E"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, ticker.fwdPe.toFixed(1))), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "peers 21.0")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "P/S TTM"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, "4.6")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "peers 5.2")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "EV/EBITDA"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "14.8")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "peers 17.4"))), /* @__PURE__ */ React.createElement("div", { className: "cs-val-row" }, /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "ROIC 5y"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "18.2%")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "A \xB7 top quartile")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Op margin"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "16.4%")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "stable 3Q")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Net debt/EBITDA"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "0.81\xD7")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "low leverage")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "FCF yield"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "4.8%")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "vs UST 4.32%"))));
+  return /* @__PURE__ */ React.createElement("div", { className: "cs-card cs-card--val" }, /* @__PURE__ */ React.createElement("div", { className: "cs-card-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "VALUATION \xB7 QUALITY"), /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "MoS 6%")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-row" }, /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "P/E TTM"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, ticker.pe != null ? ticker.pe.toFixed(1) : "\u2014")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "peers 24.1")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Fwd P/E"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, ticker.fwdPe != null ? ticker.fwdPe.toFixed(1) : "\u2014")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "peers 21.0")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "P/S TTM"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, "4.6")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "peers 5.2")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "EV/EBITDA"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "14.8")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "peers 17.4"))), /* @__PURE__ */ React.createElement("div", { className: "cs-val-row" }, /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "ROIC 5y"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "18.2%")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "A \xB7 top quartile")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Op margin"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "16.4%")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "stable 3Q")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Net debt/EBITDA"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "0.81\xD7")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "low leverage")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "FCF yield"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "4.8%")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "vs UST 4.32%"))));
 }
 window.CompanyValuation = CompanyValuation;
 </script>
@@ -24396,26 +24400,110 @@ window.TierPicker = TierPicker;
 </script>
 <script>/* src/home.jsx */
 const { useMemo: useMemoH } = React;
+const HR = /* @__PURE__ */ (function() {
+  const num = (v, d) => typeof v === "number" && isFinite(v) ? v : d;
+  const numStr = (v) => {
+    const n = parseFloat(v);
+    return isFinite(n) ? n : null;
+  };
+  const sym0 = (s) => String(s || "").split(".")[0].toUpperCase();
+  let _LSET = null, _LKEY = "";
+  function ledgerSet() {
+    const SL = window.SigLedger;
+    if (!SL || !SL.SIGNALS || !SL.SIGNALS.length) return null;
+    const key = (SL.real ? "R" : "S") + SL.SIGNALS.length;
+    if (key !== _LKEY) {
+      _LSET = new Set(SL.SIGNALS.map((s) => s.sym));
+      _LKEY = key;
+    }
+    return _LSET;
+  }
+  function ledgerReal() {
+    return !!(window.SigLedger && window.SigLedger.real);
+  }
+  function rows() {
+    const BV = window.__BV;
+    return BV && BV.ready && BV.scanRows ? BV.scanRows() : [];
+  }
+  function pool() {
+    const rs = rows();
+    if (!rs.length) return [];
+    const set = ledgerSet();
+    if (set && ledgerReal()) {
+      const inb = rs.filter((r) => set.has(r.sym));
+      if (inb.length >= 12) return inb;
+    }
+    return rs;
+  }
+  function auditOnly(syms) {
+    const set = ledgerSet();
+    if (!set || !ledgerReal()) return syms;
+    return syms.filter((s) => set.has(sym0(s)));
+  }
+  function inAudit(sym) {
+    const set = ledgerSet();
+    if (!set || !ledgerReal()) return true;
+    return set.has(sym0(sym));
+  }
+  function findRow(sym) {
+    const BV = window.__BV;
+    return BV && BV.findRow ? BV.findRow(sym0(sym)) : null;
+  }
+  function held() {
+    const BV = window.__BV, h = BV && BV.realHoldings && BV.realHoldings();
+    return new Set((h || []).map((p) => sym0(p.sym)));
+  }
+  return { num, numStr, sym0, rows, pool, ledgerSet, ledgerReal, auditOnly, inAudit, findRow, held, has: () => rows().length > 0 };
+})();
 function HomeView({ onTicker, onSurface, mode, surface }) {
-  return /* @__PURE__ */ React.createElement("div", { className: "home" }, /* @__PURE__ */ React.createElement(HomeHero, { mode, onSurface }), /* @__PURE__ */ React.createElement(IndexStrip, null), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "MARKET CONTEXT \xB7 BEFORE YOU TRADE"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "top-down read \xB7 regime gates your size \xB7 click any card to go deeper")), /* @__PURE__ */ React.createElement(MarketBriefing, { onSurface, onTicker }), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "MARKETS \xB7 NEWS"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "the tape in words \xB7 trending names \xB7 today's movers")), /* @__PURE__ */ React.createElement(NewsMarketsBoard, { onTicker, onSurface }), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "OPPORTUNITY \xB7 TODAY'S SCAN"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "612 ranked \xB7 regime-fit \xB7 edge-validated")), /* @__PURE__ */ React.createElement("div", { className: "home-grid-3" }, /* @__PURE__ */ React.createElement(HomeCard, { title: "Top setups", sub: "top 5 of 612 universe \xB7 ranked by edge (R \xD7 Wilson LB)", cta: "Scanner \u2192", onCta: () => onSurface && onSurface("signal-scanner") }, /* @__PURE__ */ React.createElement(TopSetups, { onTicker })), /* @__PURE__ */ React.createElement(HomeCard, { title: "\u25D0 Discovery", sub: "52w highs \xB7 squeezes \xB7 insider \xB7 UOA \xB7 emerging", cta: "Scanner \u2192", onCta: () => onSurface && onSurface("signal-scanner") }, /* @__PURE__ */ React.createElement(Discovery, { onTicker })), /* @__PURE__ */ React.createElement(HomeCard, { title: "Top movers", sub: "gainers \xB7 losers \xB7 in-scan universe" }, /* @__PURE__ */ React.createElement(TopMovers, { onTicker }))), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "BEST IDEAS \xB7 TOP 5 PER ENGINE"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "each discovery model's highest-conviction names today")), /* @__PURE__ */ React.createElement(TopByEngine, { onTicker, onSurface }), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "ATTENTION \xB7 CATALYSTS & FLOW"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "next 24h \xB7 sentiment-scored")), /* @__PURE__ */ React.createElement("div", { className: "home-grid-3" }, /* @__PURE__ */ React.createElement(HomeCard, { title: "Earnings today", sub: "reporting \xB7 implied move \xB7 your exposure", cta: "Calendar \u2192", onCta: () => onSurface && onSurface("premarket") }, /* @__PURE__ */ React.createElement(EarningsToday, { onTicker })), /* @__PURE__ */ React.createElement(HomeCard, { title: "Top stories", sub: "market-moving \xB7 last 6h \xB7 sentiment-scored", cta: "News \u2192", onCta: () => onSurface && onSurface("news") }, /* @__PURE__ */ React.createElement(TopStories, { onTicker })), /* @__PURE__ */ React.createElement(HomeCard, { title: "Overnight signals", sub: "bias shifts \xB7 alerts \xB7 insider \xB7 ML", cta: "View all \u2192", onCta: () => onSurface && onSurface("alerts") }, /* @__PURE__ */ React.createElement(SignalFeed, { onTicker }))));
+  const uni = window.__BV && window.__BV.market && window.__BV.market.funnel && window.__BV.market.funnel.universe || null;
+  const uniStr = uni != null ? uni.toLocaleString() : "612";
+  return /* @__PURE__ */ React.createElement("div", { className: "home" }, /* @__PURE__ */ React.createElement(HomeHero, { mode, onSurface }), /* @__PURE__ */ React.createElement(IndexStrip, null), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "MARKET CONTEXT \xB7 BEFORE YOU TRADE"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "top-down read \xB7 regime gates your size \xB7 click any card to go deeper")), /* @__PURE__ */ React.createElement(MarketBriefing, { onSurface, onTicker }), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "MARKETS \xB7 NEWS"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "the tape in words \xB7 trending names \xB7 today's movers")), /* @__PURE__ */ React.createElement(NewsMarketsBoard, { onTicker, onSurface }), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "OPPORTUNITY \xB7 TODAY'S SCAN"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, uniStr, " ranked \xB7 regime-fit \xB7 edge-validated")), /* @__PURE__ */ React.createElement("div", { className: "home-grid-3" }, /* @__PURE__ */ React.createElement(HomeCard, { title: "Top setups", sub: `top 5 of ${uniStr} universe \xB7 ranked by edge (R \xD7 Wilson LB)`, cta: "Scanner \u2192", onCta: () => onSurface && onSurface("signal-scanner") }, /* @__PURE__ */ React.createElement(TopSetups, { onTicker })), /* @__PURE__ */ React.createElement(HomeCard, { title: "\u25D0 Discovery", sub: "52w highs \xB7 squeezes \xB7 insider \xB7 UOA \xB7 emerging", cta: "Scanner \u2192", onCta: () => onSurface && onSurface("signal-scanner") }, /* @__PURE__ */ React.createElement(Discovery, { onTicker })), /* @__PURE__ */ React.createElement(HomeCard, { title: "Top movers", sub: "gainers \xB7 losers \xB7 in-scan universe" }, /* @__PURE__ */ React.createElement(TopMovers, { onTicker }))), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "BEST IDEAS \xB7 TOP 5 PER ENGINE"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "each discovery model's highest-conviction names today")), /* @__PURE__ */ React.createElement(TopByEngine, { onTicker, onSurface }), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "ATTENTION \xB7 CATALYSTS & FLOW"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "next 24h \xB7 sentiment-scored")), /* @__PURE__ */ React.createElement("div", { className: "home-grid-3" }, /* @__PURE__ */ React.createElement(HomeCard, { title: "Earnings today", sub: "reporting \xB7 implied move \xB7 your exposure", cta: "Calendar \u2192", onCta: () => onSurface && onSurface("premarket") }, /* @__PURE__ */ React.createElement(EarningsToday, { onTicker })), /* @__PURE__ */ React.createElement(HomeCard, { title: "Top stories", sub: "market-moving \xB7 last 6h \xB7 sentiment-scored", cta: "News \u2192", onCta: () => onSurface && onSurface("news") }, /* @__PURE__ */ React.createElement(TopStories, { onTicker })), /* @__PURE__ */ React.createElement(HomeCard, { title: "Overnight signals", sub: "bias shifts \xB7 alerts \xB7 insider \xB7 ML", cta: "View all \u2192", onCta: () => onSurface && onSurface("alerts") }, /* @__PURE__ */ React.createElement(SignalFeed, { onTicker }))));
+}
+const IDXSTRIP_MOCK = [
+  { s: "S&P 500", v: "6,148.2", c: 0.42 },
+  { s: "NASDAQ", v: "20,310", c: 0.84 },
+  { s: "VIX", v: "16.3", c: -1.81 },
+  { s: "US 10Y", v: "4.32%", c: -0.46 },
+  { s: "DXY", v: "103.4", c: 0.1 },
+  { s: "GOLD", v: "2,418", c: 0.34 }
+];
+function resolveIndexStrip() {
+  const BV = window.__BV;
+  const n = (v) => typeof v === "number" && isFinite(v) ? v : null;
+  const fmt = (v, dp = 2) => v == null ? "\u2014" : v >= 1e3 ? Math.round(v).toLocaleString() : v.toFixed(dp);
+  const out = [];
+  const have = /* @__PURE__ */ new Set();
+  const push = (s, v, c2) => {
+    if (v != null && v !== "\u2014" && !have.has(s)) {
+      out.push({ s, v, c: c2 });
+      have.add(s);
+    }
+  };
+  const iq = BV && BV.indexQuotes || null;
+  if (iq && iq.length) {
+    iq.forEach((q) => {
+      if (!q || q.value == null) return;
+      const v = q.suffix === "%" ? q.value.toFixed(2) + "%" : fmt(q.value);
+      push(q.label, v, q.chg != null ? q.chg : null);
+    });
+  }
+  const c = BV && BV.critical || null;
+  if (c) {
+    const mac = c.macro_signals || {}, bf = c.bonds_forex || {};
+    const bfc = (k) => bf[k] ? n(bf[k].change_p) : null;
+    if (mac.gld) push("GOLD\xB7GLD", fmt(n(mac.gld.price)), n(mac.gld.chg5d));
+    if (mac.dxy) push("DXY\xB7UUP", fmt(n(mac.dxy.price)), n(mac.dxy.chg5d));
+    if (bf["TYX.INDX"]) push("US 30Y", n(bf["TYX.INDX"].price) != null ? n(bf["TYX.INDX"].price).toFixed(2) + "%" : null, bfc("TYX.INDX"));
+    if (bf["EURUSD.FOREX"]) push("EUR/USD", fmt(n(bf["EURUSD.FOREX"].price), 4), bfc("EURUSD.FOREX"));
+    if (bf["USDJPY.FOREX"]) push("USD/JPY", fmt(n(bf["USDJPY.FOREX"].price), 2), bfc("USDJPY.FOREX"));
+    if (mac.hyg) push("HY\xB7HYG", fmt(n(mac.hyg.price)), n(mac.hyg.chg5d));
+  }
+  return out.length >= 4 ? out : IDXSTRIP_MOCK;
 }
 function IndexStrip() {
-  const idx = [
-    { s: "S&P 500", v: "6,148.2", c: 0.42, tone: "gn" },
-    { s: "NASDAQ", v: "20,310", c: 0.84, tone: "gn" },
-    { s: "DOW", v: "42,684", c: 0.18, tone: "gn" },
-    { s: "RUSSELL", v: "2,182", c: -0.21, tone: "rd" },
-    { s: "VIX", v: "16.3", c: -1.81, tone: "gn" },
-    { s: "US 10Y", v: "4.32%", c: -0.46, tone: "gn" },
-    { s: "US 2Y", v: "4.71%", c: -0.3, tone: "gn" },
-    { s: "DXY", v: "103.4", c: 0.1, tone: "ink" },
-    { s: "BTCUSD", v: "71,240", c: 2.14, tone: "gn" },
-    { s: "ETHUSD", v: "3,842", c: 1.63, tone: "gn" },
-    { s: "WTI", v: "$74.10", c: -0.92, tone: "rd" },
-    { s: "GOLD", v: "2,418", c: 0.34, tone: "gn" },
-    { s: "COPPER", v: "$4.58", c: 0.71, tone: "gn" }
-  ];
-  return /* @__PURE__ */ React.createElement("div", { className: "ix-strip" }, idx.map((i, k) => /* @__PURE__ */ React.createElement("div", { key: k, className: `ix ix--${i.c >= 0 ? "gn" : i.tone === "ink" ? "ink" : "rd"}` }, /* @__PURE__ */ React.createElement("span", { className: "ix-s mono" }, i.s), /* @__PURE__ */ React.createElement("span", { className: "ix-v mono" }, i.v), /* @__PURE__ */ React.createElement("span", { className: `ix-c mono ${i.c >= 0 ? "up" : "dn"}` }, i.c >= 0 ? "+" : "", i.c.toFixed(2), "%"), /* @__PURE__ */ React.createElement(Spark, { sym: i.s, up: i.c >= 0 }))));
+  const idx = useMemoH(() => resolveIndexStrip(), [bvTok()]);
+  return /* @__PURE__ */ React.createElement("div", { className: "ix-strip" }, idx.map((i, k) => /* @__PURE__ */ React.createElement("div", { key: k, className: `ix ix--${i.c == null ? "ink" : i.c >= 0 ? "gn" : "rd"}` }, /* @__PURE__ */ React.createElement("span", { className: "ix-s mono" }, i.s), /* @__PURE__ */ React.createElement("span", { className: "ix-v mono" }, i.v), i.c != null ? /* @__PURE__ */ React.createElement("span", { className: `ix-c mono ${i.c >= 0 ? "up" : "dn"}` }, i.c >= 0 ? "+" : "", i.c.toFixed(2), "%") : /* @__PURE__ */ React.createElement("span", { className: "ix-c mono dim2" }, "\u2014"), /* @__PURE__ */ React.createElement(Spark, { sym: i.s, up: i.c == null ? true : i.c >= 0 }))));
 }
 function Spark({ sym, up }) {
   const data = useMemoH(() => {
@@ -24432,7 +24520,15 @@ function Spark({ sym, up }) {
 }
 function MarketBriefing({ onSurface, onTicker }) {
   const go = (id) => onSurface && onSurface(id);
-  const breadth = [
+  const M = window.__BV && window.__BV.market || null;
+  const breadth = M ? [
+    { k: ">50-DMA", v: M.breadthPct != null ? Math.round(M.breadthPct) + "%" : "\u2014", tone: "gn" },
+    { k: ">200-DMA", v: M.breadth200 != null ? Math.round(M.breadth200) + "%" : "\u2014", tone: "gn" },
+    { k: "New highs", v: M.newHighs != null ? "+" + M.newHighs : "\u2014", tone: "gn" },
+    { k: "New lows", v: M.newLows != null ? String(M.newLows) : "\u2014", tone: M.newLows > (M.newHighs || 0) ? "rd" : "gn" },
+    { k: "Fear/Greed", v: M.fearGreed != null ? String(M.fearGreed) : "\u2014", tone: "gn" },
+    { k: "Put/Call", v: M.putCall != null ? M.putCall.toFixed(2) : "\u2014", tone: "amb" }
+  ] : [
     { k: ">50-DMA", v: "62%", tone: "gn" },
     { k: ">200-DMA", v: "58%", tone: "gn" },
     { k: "A/D line", v: "+1,240", tone: "gn" },
@@ -24440,25 +24536,128 @@ function MarketBriefing({ onSurface, onTicker }) {
     { k: "VIX", v: "16.3", tone: "gn" },
     { k: "Put/Call", v: "0.82", tone: "amb" }
   ];
-  const gappers = [
-    { sym: "NVDA", pct: 4.2, why: "capex guide", held: false },
-    { sym: "ARGN", pct: 2.1, why: "sector flows", held: true },
-    { sym: "XOM", pct: -2.6, why: "crude \u22122%", held: false },
-    { sym: "GENO", pct: -3.8, why: "offering", held: false }
-  ];
-  const events = [
-    { d: "Tue", t: "CPI \xB7 MoM", imp: "high", note: "08:30 \xB7 core in focus" },
-    { d: "Wed", t: "FOMC minutes", imp: "high", note: "14:00 \xB7 dot-plot" },
-    { d: "Thu", t: "ARGN earnings", imp: "med", note: "AMC \xB7 \xB16.4% implied", held: true },
-    { d: "Fri", t: "PCE \xB7 NFP", imp: "med", note: "08:30" }
-  ];
-  return /* @__PURE__ */ React.createElement("div", { className: "home-grid-3 mbf" }, /* @__PURE__ */ React.createElement("div", { className: "mbf-card", onClick: () => go("internals") }, /* @__PURE__ */ React.createElement("div", { className: "mbf-hd" }, /* @__PURE__ */ React.createElement("span", { className: "mbf-tag mono" }, "REGIME"), /* @__PURE__ */ React.createElement("span", { className: "mbf-go mono" }, "Internals \u2192")), /* @__PURE__ */ React.createElement("div", { className: "mbf-regime" }, /* @__PURE__ */ React.createElement("span", { className: "mbf-regime-v mono" }, /* @__PURE__ */ React.createElement("b", { className: "up" }, "RISK-ON"), " \xB7 ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "CHOPPY")), /* @__PURE__ */ React.createElement("span", { className: "mbf-regime-cap mono dim2" }, "~70% size \xB7 BUY floor 72")), /* @__PURE__ */ React.createElement("div", { className: "mbf-breadth" }, breadth.map((b, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "mbf-br" }, /* @__PURE__ */ React.createElement("span", { className: "mbf-br-k mono dim2" }, b.k), /* @__PURE__ */ React.createElement("span", { className: `mbf-br-v mono ${b.tone === "gn" ? "up" : b.tone === "rd" ? "dn" : "warn"}` }, b.v)))), /* @__PURE__ */ React.createElement("div", { className: "mbf-foot mono dim2" }, "Breadth healthy but tape choppy \u2014 CPI 08:30 is the risk. Trim to ~70% size until it resolves.")), /* @__PURE__ */ React.createElement("div", { className: "mbf-card", onClick: () => go("premarket") }, /* @__PURE__ */ React.createElement("div", { className: "mbf-hd" }, /* @__PURE__ */ React.createElement("span", { className: "mbf-tag mono" }, "PRE-MARKET"), /* @__PURE__ */ React.createElement("span", { className: "mbf-go mono" }, "Gap board \u2192")), /* @__PURE__ */ React.createElement("div", { className: "mbf-sub mono dim2" }, "ES +0.3% \xB7 NQ +0.5% \xB7 4:42 ET \xB7 top gaps"), /* @__PURE__ */ React.createElement("div", { className: "mbf-gaps" }, gappers.map((g, i) => /* @__PURE__ */ React.createElement("button", { key: i, className: "mbf-gap", onClick: (e) => {
+  const gappers = useMemoH(() => {
+    const rows = HR.pool();
+    if (!rows.length) return [
+      { sym: "NVDA", pct: 4.2, why: "capex guide", held: false },
+      { sym: "ARGN", pct: 2.1, why: "sector flows", held: true },
+      { sym: "XOM", pct: -2.6, why: "crude \u22122%", held: false },
+      { sym: "GENO", pct: -3.8, why: "offering", held: false }
+    ];
+    const a = rows.filter((r) => HR.num(r.chg, null) != null && HR.inAudit(r.sym));
+    const held = HR.held();
+    const ups = [...a].sort((x, y) => y.chg - x.chg).slice(0, 2);
+    const dns = [...a].sort((x, y) => x.chg - y.chg).slice(0, 2);
+    return [...ups, ...dns].map((r) => ({ sym: r.sym, pct: +r.chg.toFixed(1), why: r.setup || r.sector || "flow", held: held.has(r.sym) }));
+  }, [bvTok()]);
+  const events = useMemoH(() => {
+    const eb = window.__BV && window.__BV.earningsBeat || [];
+    const c = window.__BV && window.__BV.critical || null;
+    const held = HR.held();
+    const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const dlabel = (d) => {
+      if (d == null) return "";
+      const dt = new Date(Date.now() + d * 864e5);
+      return d === 0 ? "Today" : DOW[dt.getDay()];
+    };
+    const now = Date.now();
+    const seen = /* @__PURE__ */ new Set();
+    const macro = (c && c.economic_events || []).filter((e) => (e.country === "US" || !e.country) && e.date).map((e) => ({ ...e, _ts: Date.parse((e.date || "").replace(" ", "T")) })).filter((e) => isFinite(e._ts) && e._ts >= now - 864e5 && e._ts <= now + 14 * 864e5).sort((a, b) => a._ts - b._ts).filter((e) => {
+      const k = e.type + "|" + e.date;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    }).slice(0, 3).map((e) => ({
+      d: DOW[new Date(e._ts).getDay()],
+      t: e.type + (e.period ? " \xB7 " + e.period : ""),
+      imp: e._impact === "HIGH" ? "high" : e._impact === "LOW" ? "low" : "med",
+      note: new Date(e._ts).toLocaleDateString("en-US", { month: "short", day: "numeric" }) + (e.previous != null ? " \xB7 prev " + e.previous : "")
+    }));
+    const earn = eb.filter((e) => e.ticker && HR.num(e.days_to_earnings, 99) <= 5 && HR.inAudit(e.ticker)).sort((a, b) => a.days_to_earnings - b.days_to_earnings || (b.beat_score || 0) - (a.beat_score || 0)).slice(0, 2).map((e) => ({
+      d: dlabel(e.days_to_earnings),
+      t: HR.sym0(e.ticker) + " earnings",
+      imp: e.tier && /strong/i.test(e.tier) ? "high" : "med",
+      note: (/before/i.test(e.before_after || "") ? "BMO" : "AMC") + (e.beat_score != null ? " \xB7 beat " + Math.round(e.beat_score) : ""),
+      held: held.has(HR.sym0(e.ticker))
+    }));
+    const merged = [...macro, ...earn];
+    if (merged.length) return merged;
+    return [
+      { d: "Tue", t: "CPI \xB7 MoM", imp: "high", note: "08:30 \xB7 core in focus" },
+      { d: "Wed", t: "FOMC minutes", imp: "high", note: "14:00 \xB7 dot-plot" }
+    ];
+  }, [bvTok()]);
+  return /* @__PURE__ */ React.createElement("div", { className: "home-grid-3 mbf" }, /* @__PURE__ */ React.createElement("div", { className: "mbf-card", onClick: () => go("internals") }, /* @__PURE__ */ React.createElement("div", { className: "mbf-hd" }, /* @__PURE__ */ React.createElement("span", { className: "mbf-tag mono" }, "REGIME"), /* @__PURE__ */ React.createElement("span", { className: "mbf-go mono" }, "Internals \u2192")), /* @__PURE__ */ React.createElement("div", { className: "mbf-regime" }, /* @__PURE__ */ React.createElement("span", { className: "mbf-regime-v mono" }, /* @__PURE__ */ React.createElement("b", { className: M && !M.regimeOn ? "dn" : "up" }, M ? M.regimeLabel : "RISK-ON"), " \xB7 ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, M ? M.regimeTrend : "CHOPPY")), /* @__PURE__ */ React.createElement("span", { className: "mbf-regime-cap mono dim2" }, M && M.maxSize != null ? `~${M.maxSize}% max size` : "~70% size")), /* @__PURE__ */ React.createElement("div", { className: "mbf-breadth" }, breadth.map((b, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "mbf-br" }, /* @__PURE__ */ React.createElement("span", { className: "mbf-br-k mono dim2" }, b.k), /* @__PURE__ */ React.createElement("span", { className: `mbf-br-v mono ${b.tone === "gn" ? "up" : b.tone === "rd" ? "dn" : "warn"}` }, b.v)))), /* @__PURE__ */ React.createElement("div", { className: "mbf-foot mono dim2" }, (() => {
+    if (!M) return "Breadth healthy but tape choppy \u2014 size into prints carefully.";
+    const rgc = window.__BV && window.__BV.critical && window.__BV.critical.regime || {};
+    const dist = rgc.distribution_state ? String(rgc.distribution_state).replace(/_/g, " ") : null;
+    const b = M.breadthPct != null ? Math.round(M.breadthPct) : null;
+    return `${M.regimeLabel} \xB7 ${M.regimeTrend}${b != null ? ` \xB7 breadth ${b}%` : ""}${dist ? ` \xB7 ${dist}` : ""} \u2014 max size ${M.maxSize != null ? M.maxSize : 70}%.`;
+  })())), /* @__PURE__ */ React.createElement("div", { className: "mbf-card", onClick: () => go("premarket") }, /* @__PURE__ */ React.createElement("div", { className: "mbf-hd" }, /* @__PURE__ */ React.createElement("span", { className: "mbf-tag mono" }, "PRE-MARKET"), /* @__PURE__ */ React.createElement("span", { className: "mbf-go mono" }, "Gap board \u2192")), /* @__PURE__ */ React.createElement("div", { className: "mbf-sub mono dim2" }, (() => {
+    const rgc = window.__BV && window.__BV.critical && window.__BV.critical.regime || {};
+    const spy = typeof rgc.spy_daily_chg === "number" ? rgc.spy_daily_chg : null;
+    const pm = window.__BV && window.__BV.critical && window.__BV.critical.premarket || {};
+    const sess = pm._meta && pm._meta.session_active ? "pre-market" : "prior close";
+    return `${spy != null ? `SPY ${spy >= 0 ? "+" : ""}${spy.toFixed(1)}% \xB7 ` : ""}${sess} \xB7 top movers`;
+  })()), /* @__PURE__ */ React.createElement("div", { className: "mbf-gaps" }, gappers.map((g, i) => /* @__PURE__ */ React.createElement("button", { key: i, className: "mbf-gap", onClick: (e) => {
     e.stopPropagation();
     onTicker && onTicker(g.sym);
-  } }, /* @__PURE__ */ React.createElement("span", { className: "mbf-gap-sym mono" }, g.sym, g.held && /* @__PURE__ */ React.createElement("span", { className: "mbf-held mono" }, "HELD")), /* @__PURE__ */ React.createElement("span", { className: `mbf-gap-pct mono ${g.pct >= 0 ? "up" : "dn"}` }, g.pct >= 0 ? "+" : "", g.pct.toFixed(1), "%"), /* @__PURE__ */ React.createElement("span", { className: "mbf-gap-why mono dim2" }, g.why)))), /* @__PURE__ */ React.createElement("div", { className: "mbf-foot mono dim2" }, /* @__PURE__ */ React.createElement("b", { className: "copper" }, "ARGN"), " in your book gapping +2.1% on sector flows.")), /* @__PURE__ */ React.createElement("div", { className: "mbf-card", onClick: () => go("macro-cal") }, /* @__PURE__ */ React.createElement("div", { className: "mbf-hd" }, /* @__PURE__ */ React.createElement("span", { className: "mbf-tag mono" }, "THIS WEEK"), /* @__PURE__ */ React.createElement("span", { className: "mbf-go mono" }, "Calendar \u2192")), /* @__PURE__ */ React.createElement("div", { className: "mbf-sub mono dim2" }, "macro prints + your earnings \xB7 event risk"), /* @__PURE__ */ React.createElement("div", { className: "mbf-events" }, events.map((e, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `mbf-evt mbf-evt--${e.imp}` }, /* @__PURE__ */ React.createElement("span", { className: "mbf-evt-d mono" }, e.d), /* @__PURE__ */ React.createElement("span", { className: "mbf-evt-t mono" }, e.t, e.held && /* @__PURE__ */ React.createElement("span", { className: "mbf-held mono" }, "HELD")), /* @__PURE__ */ React.createElement("span", { className: "mbf-evt-n mono dim2" }, e.note)))), /* @__PURE__ */ React.createElement("div", { className: "mbf-foot mono dim2" }, "CPI Tue + FOMC Wed are regime risks \u2014 size into them carefully.")));
+  } }, /* @__PURE__ */ React.createElement("span", { className: "mbf-gap-sym mono" }, g.sym, g.held && /* @__PURE__ */ React.createElement("span", { className: "mbf-held mono" }, "HELD")), /* @__PURE__ */ React.createElement("span", { className: `mbf-gap-pct mono ${g.pct >= 0 ? "up" : "dn"}` }, g.pct >= 0 ? "+" : "", g.pct.toFixed(1), "%"), /* @__PURE__ */ React.createElement("span", { className: "mbf-gap-why mono dim2" }, g.why)))), /* @__PURE__ */ React.createElement("div", { className: "mbf-foot mono dim2" }, (() => {
+    const heldG = gappers.find((g) => g.held);
+    if (heldG) return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("b", { className: "copper" }, heldG.sym), " in your book ", heldG.pct >= 0 ? "up" : "down", " ", Math.abs(heldG.pct).toFixed(1), "% \xB7 ", heldG.why, ".");
+    const top = gappers[0];
+    return top ? /* @__PURE__ */ React.createElement(React.Fragment, null, "Biggest mover ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, top.sym), " ", top.pct >= 0 ? "+" : "", top.pct.toFixed(1), "% \xB7 ", top.why, ".") : "No notable gaps.";
+  })())), /* @__PURE__ */ React.createElement("div", { className: "mbf-card", onClick: () => go("macro-cal") }, /* @__PURE__ */ React.createElement("div", { className: "mbf-hd" }, /* @__PURE__ */ React.createElement("span", { className: "mbf-tag mono" }, "THIS WEEK"), /* @__PURE__ */ React.createElement("span", { className: "mbf-go mono" }, "Calendar \u2192")), /* @__PURE__ */ React.createElement("div", { className: "mbf-sub mono dim2" }, "macro prints + your earnings \xB7 event risk"), /* @__PURE__ */ React.createElement("div", { className: "mbf-events" }, events.map((e, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `mbf-evt mbf-evt--${e.imp}` }, /* @__PURE__ */ React.createElement("span", { className: "mbf-evt-d mono" }, e.d), /* @__PURE__ */ React.createElement("span", { className: "mbf-evt-t mono" }, e.t, e.held && /* @__PURE__ */ React.createElement("span", { className: "mbf-held mono" }, "HELD")), /* @__PURE__ */ React.createElement("span", { className: "mbf-evt-n mono dim2" }, e.note)))), /* @__PURE__ */ React.createElement("div", { className: "mbf-foot mono dim2" }, (() => {
+    const high = events.filter((e) => e.imp === "high");
+    if (high.length) return `${high.map((e) => e.t.replace(/ · .*/, "")).slice(0, 2).join(" + ")} ${high.length > 1 ? "are" : "is a"} high-impact \u2014 size into ${high.length > 1 ? "them" : "it"} carefully.`;
+    return events.length ? "Lighter calendar \u2014 no high-impact prints flagged." : "Calendar loading\u2026";
+  })())));
+}
+function fmtAgo(dateStr) {
+  if (!dateStr) return "";
+  const then = Date.parse(dateStr);
+  if (!isFinite(then)) return "";
+  const min = Math.max(0, Math.round((Date.now() - then) / 6e4));
+  if (min < 60) return min + "m";
+  const hr = min / 60;
+  if (hr < 24) return (hr < 10 ? hr.toFixed(0) : Math.round(hr)) + "h";
+  return Math.round(hr / 24) + "d";
+}
+function realStories(limit) {
+  const mn = window.__BV && window.__BV.marketNews || [];
+  if (!mn.length) return null;
+  const out = [];
+  for (const a of mn) {
+    if (!a.title) continue;
+    const syms = HR.auditOnly((a.symbols || []).map(HR.sym0).filter(Boolean));
+    const tone = a.sentiment === "positive" ? "gn" : a.sentiment === "negative" ? "rd" : "amb";
+    const pol = HR.num(a.polarity, null);
+    const sent = pol == null ? null : tone === "rd" ? -Math.abs(pol) : tone === "amb" ? 0 : Math.abs(pol);
+    const tickers = syms.slice(0, 3).map((s) => {
+      const row = HR.findRow(s);
+      return [s, row ? HR.num(row.chg, 0) : 0];
+    });
+    out.push({
+      t: fmtAgo(a.date),
+      date: a.date,
+      src: a.source || "EODHD",
+      sym: syms[0] || null,
+      sent,
+      tone,
+      head: a.title,
+      sum: a.summary || "",
+      url: a.url || "",
+      tickers,
+      affects: syms.slice(0, 3),
+      impact: tone === "gn" ? "Bullish" : tone === "rd" ? "Bearish" : "Neutral"
+    });
+    if (out.length >= (limit || 99)) break;
+  }
+  return out.length ? out : null;
 }
 function TopStories({ onTicker }) {
-  const stories = [
+  const real = useMemoH(() => realStories(5), [bvTok()]);
+  const stories = real || [
     {
       t: "12:48",
       sym: "NVDA",
@@ -24515,8 +24714,8 @@ function TopStories({ onTicker }) {
       affects: ["GENO"]
     }
   ];
-  const impactTone = { "Sector tailwind": "gn", "Stock-specific": "gn", "Macro \xB7 rates": "amb", "Binary catalyst": "amb", "Sector risk": "rd" };
-  return /* @__PURE__ */ React.createElement("div", { className: "ts" }, stories.map((s, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `ts-row ts-${s.tone}`, onClick: () => s.sym && onTicker(s.sym) }, /* @__PURE__ */ React.createElement("div", { className: "ts-top" }, /* @__PURE__ */ React.createElement("span", { className: "ts-time mono dim2" }, s.t), /* @__PURE__ */ React.createElement("span", { className: "ts-src mono dim2" }, s.src), s.sym && /* @__PURE__ */ React.createElement("span", { className: "ts-sym mono" }, s.sym), /* @__PURE__ */ React.createElement("span", { className: `ts-sent mono ${s.sent >= 0 ? "up" : "dn"}` }, s.sent >= 0 ? "+" : "", s.sent.toFixed(1))), /* @__PURE__ */ React.createElement("div", { className: "ts-head" }, s.head), /* @__PURE__ */ React.createElement("div", { className: "ts-sum" }, s.sum), /* @__PURE__ */ React.createElement("div", { className: "ts-foot" }, /* @__PURE__ */ React.createElement("span", { className: `ts-impact mono kpi-tone--${impactTone[s.impact] || "amb"}` }, s.impact), /* @__PURE__ */ React.createElement("span", { className: "ts-affects mono dim2" }, "affects"), s.affects.map((tk) => /* @__PURE__ */ React.createElement("button", { key: tk, className: "ts-tk mono", onClick: (e) => {
+  const impactTone = { "Sector tailwind": "gn", "Stock-specific": "gn", "Macro \xB7 rates": "amb", "Binary catalyst": "amb", "Sector risk": "rd", "Bullish": "gn", "Bearish": "rd", "Neutral": "amb" };
+  return /* @__PURE__ */ React.createElement("div", { className: "ts" }, stories.map((s, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `ts-row ts-${s.tone}`, onClick: () => s.sym && onTicker(s.sym) }, /* @__PURE__ */ React.createElement("div", { className: "ts-top" }, /* @__PURE__ */ React.createElement("span", { className: "ts-time mono dim2" }, s.t, s.t ? " ago" : ""), /* @__PURE__ */ React.createElement("span", { className: "ts-src mono dim2" }, s.src), s.sym && /* @__PURE__ */ React.createElement("span", { className: "ts-sym mono" }, s.sym), s.sent != null && /* @__PURE__ */ React.createElement("span", { className: `ts-sent mono ${s.sent >= 0 ? "up" : "dn"}` }, s.sent >= 0 ? "+" : "", s.sent.toFixed(1))), /* @__PURE__ */ React.createElement("div", { className: "ts-head" }, s.head), /* @__PURE__ */ React.createElement("div", { className: "ts-sum" }, s.sum), /* @__PURE__ */ React.createElement("div", { className: "ts-foot" }, /* @__PURE__ */ React.createElement("span", { className: `ts-impact mono kpi-tone--${impactTone[s.impact] || "amb"}` }, s.impact), /* @__PURE__ */ React.createElement("span", { className: "ts-affects mono dim2" }, "affects"), s.affects.map((tk) => /* @__PURE__ */ React.createElement("button", { key: tk, className: "ts-tk mono", onClick: (e) => {
     e.stopPropagation();
     onTicker(tk);
   } }, tk))))));
@@ -24557,27 +24756,83 @@ function MarketSentiment() {
 function MsRow({ label, v, tone, pct }) {
   return /* @__PURE__ */ React.createElement("div", { className: "ms-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2 ms-row-l" }, label), /* @__PURE__ */ React.createElement("div", { className: "ms-bar" }, /* @__PURE__ */ React.createElement("div", { className: `ms-fill ms-fill--${tone}`, style: { width: `${pct}%` } })), /* @__PURE__ */ React.createElement("span", { className: `mono kpi-tone--${tone} ms-row-v` }, v));
 }
+const EARNINGS_MOCK = [
+  { sym: "CRWV", when: "BMO", time: "today", beat: 71, tier: "SOLID", tone: "amb", held: false },
+  { sym: "GENO", when: "AMC", time: "today", beat: 64, tier: "SOLID", tone: "amb", held: false },
+  { sym: "TURM", when: "AMC", time: "today", beat: 48, tier: "WEAK", tone: "rd", held: false },
+  { sym: "BORA", when: "AMC", time: "today", beat: 82, tier: "STRONG", tone: "gn", held: true }
+];
+function resolveEarningsToday() {
+  const eb = window.__BV && window.__BV.earningsBeat || [];
+  if (!eb.length) return EARNINGS_MOCK;
+  const held = HR.held();
+  const tierTone = (t) => /strong/i.test(t) ? "gn" : /solid/i.test(t) ? "amb" : "rd";
+  const today = eb.filter((e) => e.ticker && HR.num(e.days_to_earnings, 99) <= 1);
+  const src = (today.length ? today : eb).slice(0, 6).sort((a, b) => (b.beat_score || 0) - (a.beat_score || 0));
+  return src.map((e) => {
+    const sym = HR.sym0(e.ticker);
+    const d = HR.num(e.days_to_earnings, null);
+    return {
+      sym,
+      when: /before/i.test(e.before_after || "") ? "BMO" : "AMC",
+      time: d === 0 ? "today" : d != null ? "T\u2212" + d : "",
+      beat: e.beat_score != null ? Math.round(e.beat_score) : null,
+      tier: e.tier || "",
+      tone: tierTone(e.tier || ""),
+      held: held.has(sym)
+    };
+  });
+}
 function EarningsToday({ onTicker }) {
-  const rows = [
-    { sym: "CRWV", when: "BMO", time: "08:00", exp: "\xB19.2%", expo: "\u2014", esp: 5.1, tone: "amb", held: false },
-    { sym: "GENO", when: "AMC", time: "16:05", exp: "\xB111.4%", expo: "WATCH", esp: 2.4, tone: "amb", held: false },
-    { sym: "TURM", when: "AMC", time: "16:30", exp: "\xB16.8%", expo: "\u2014", esp: -1.2, tone: "rd", held: false },
-    { sym: "BORA", when: "AMC", time: "16:45", exp: "\xB15.1%", expo: "HELD", esp: 3.8, tone: "gn", held: true }
+  const rows = useMemoH(() => resolveEarningsToday(), [bvTok()]);
+  const heldRows = rows.filter((r) => r.held).map((r) => r.sym);
+  return /* @__PURE__ */ React.createElement("div", { className: "et" }, /* @__PURE__ */ React.createElement("div", { className: "et-hdr mono dim2" }, /* @__PURE__ */ React.createElement("span", null, rows.length, " reporting \xB7 "), heldRows.length ? /* @__PURE__ */ React.createElement("span", { className: "warn" }, heldRows.length, " held (", heldRows.join(", "), ")") : /* @__PURE__ */ React.createElement("span", { className: "dim" }, "no book exposure"), /* @__PURE__ */ React.createElement("span", null, " \xB7 beat-score model")), rows.map((r, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `et-row ${r.held ? "is-held" : ""}`, onClick: () => onTicker(r.sym) }, /* @__PURE__ */ React.createElement("span", { className: "et-sym mono" }, /* @__PURE__ */ React.createElement("b", null, r.sym)), /* @__PURE__ */ React.createElement("span", { className: `et-when mono ${r.when === "BMO" ? "cy" : "amb"}` }, r.when), /* @__PURE__ */ React.createElement("span", { className: "et-time mono dim2" }, r.time), /* @__PURE__ */ React.createElement("span", { className: `et-move mono kpi-tone--${r.tone}` }, r.tier || "\u2014"), /* @__PURE__ */ React.createElement("span", { className: `et-esp mono kpi-tone--${r.tone}` }, r.beat != null ? "BEAT " + r.beat : "\u2014"), r.held ? /* @__PURE__ */ React.createElement("span", { className: "et-expo mono gn" }, "HELD") : /* @__PURE__ */ React.createElement("span", { className: "et-expo mono dim" }, "\u2014"))));
+}
+const DISCOVERY_MOCK = [
+  { tag: "52W HIGH", tone: "gn", items: [["ARGN", "+3.1"], ["NVRH", "+2.4"], ["DRSH", "+2.9"]] },
+  { tag: "SQUEEZE", tone: "amb", items: [["MERC", "8.1d"], ["KARO", "6.4d"], ["FOLD", "5.2d"]] },
+  { tag: "INSIDER", tone: "cy", items: [["ARCM", "+$0.5M"], ["BORA", "+$0.3M"], ["INPR", "+$0.2M"]] },
+  { tag: "UOA", tone: "violet", items: [["ARGN", "70C\xD74"], ["GENO", "30C\xD73"], ["DRSH", "60C\xD72"]] },
+  { tag: "EMERGING", tone: "copper", items: [["IPSO", "new"], ["SEND", "new"], ["AXLE", "new"]] }
+];
+function resolveDiscovery() {
+  const rows = HR.pool();
+  if (!rows.length) return DISCOVERY_MOCK;
+  const pick = (arr, n) => HR.auditOnly(arr.map((x) => x[0]).slice(0, n + 4)).slice(0, n).map((s) => {
+    const o = arr.find((a) => a[0] === s);
+    return o ? [o[0], o[1]] : [s, ""];
+  });
+  const hi = rows.filter((r) => r.off52 != null && r.off52 >= -3 && HR.num(r.chg, null) != null).sort((a, b) => b.off52 - a.off52).map((r) => [r.sym, (r.chg >= 0 ? "+" : "") + r.chg.toFixed(1)]);
+  const sq = rows.filter((r) => r.sqRank >= 1).sort((a, b) => b.sqRank - a.sqRank || b.score - a.score).map((r) => [r.sym, r.squeeze]);
+  const ins = rows.filter((r) => HR.num(r.insUsd, 0) > 0).sort((a, b) => b.insUsd - a.insUsd).map((r) => [r.sym, "+$" + r.insUsd.toFixed(1) + "M"]);
+  const of = window.__BV && window.__BV.optionsFlow || [];
+  const uoa = of.filter((o) => o.ticker).sort((a, b) => (b.uoa_calls || 0) - (a.uoa_calls || 0)).map((o) => [HR.sym0(o.ticker), o.status || "UOA"]);
+  const emg = rows.filter((r) => r.verdict === "WATCH" && r.score >= 55).sort((a, b) => b.score - a.score).map((r) => [r.sym, "watch"]);
+  const groups = [
+    { tag: "52W HIGH", tone: "gn", items: pick(hi, 3) },
+    { tag: "SQUEEZE", tone: "amb", items: pick(sq, 3) },
+    { tag: "INSIDER", tone: "cy", items: pick(ins, 3) },
+    { tag: "UOA", tone: "violet", items: HR.auditOnly(uoa.map((x) => x[0]).slice(0, 7)).slice(0, 3).map((s) => {
+      const o = uoa.find((a) => a[0] === s);
+      return o ? [o[0], o[1]] : [s, "UOA"];
+    }) },
+    { tag: "EMERGING", tone: "copper", items: pick(emg, 3) }
   ];
-  return /* @__PURE__ */ React.createElement("div", { className: "et" }, /* @__PURE__ */ React.createElement("div", { className: "et-hdr mono dim2" }, /* @__PURE__ */ React.createElement("span", null, "4 reporting \xB7 "), /* @__PURE__ */ React.createElement("span", { className: "warn" }, "1 held (BORA)"), /* @__PURE__ */ React.createElement("span", null, " \xB7 implied moves shown")), rows.map((r, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `et-row ${r.held ? "is-held" : ""}`, onClick: () => onTicker(r.sym) }, /* @__PURE__ */ React.createElement("span", { className: "et-sym mono" }, /* @__PURE__ */ React.createElement("b", null, r.sym)), /* @__PURE__ */ React.createElement("span", { className: `et-when mono ${r.when === "BMO" ? "cy" : "amb"}` }, r.when), /* @__PURE__ */ React.createElement("span", { className: "et-time mono dim2" }, r.time), /* @__PURE__ */ React.createElement("span", { className: "et-move mono warn" }, r.exp), /* @__PURE__ */ React.createElement("span", { className: `et-esp mono ${r.esp >= 0 ? "up" : "dn"}` }, "ESP ", r.esp >= 0 ? "+" : "", r.esp, "%"), r.expo !== "\u2014" ? /* @__PURE__ */ React.createElement("span", { className: `et-expo mono ${r.held ? "gn" : "amb"}` }, r.expo) : /* @__PURE__ */ React.createElement("span", { className: "et-expo mono dim" }, "\u2014"))));
+  const filled = groups.filter((g) => g.items.length);
+  return filled.length ? groups.map((g) => g.items.length ? g : { ...g, items: [] }) : DISCOVERY_MOCK;
 }
 function Discovery({ onTicker }) {
-  const groups = [
-    { tag: "52W HIGH", tone: "gn", items: [["ARGN", "+3.1"], ["NVRH", "+2.4"], ["DRSH", "+2.9"]] },
-    { tag: "SQUEEZE", tone: "amb", items: [["MERC", "8.1d"], ["KARO", "6.4d"], ["FOLD", "5.2d"]] },
-    { tag: "INSIDER", tone: "cy", items: [["ARCM", "+$0.5M"], ["BORA", "+$0.3M"], ["INPR", "+$0.2M"]] },
-    { tag: "UOA", tone: "violet", items: [["ARGN", "70C\xD74"], ["GENO", "30C\xD73"], ["DRSH", "60C\xD72"]] },
-    { tag: "EMERGING", tone: "copper", items: [["IPSO", "new"], ["SEND", "new"], ["AXLE", "new"]] }
-  ];
+  const groups = useMemoH(() => resolveDiscovery(), [bvTok()]).filter((g) => g.items.length);
   return /* @__PURE__ */ React.createElement("div", { className: "disc" }, groups.map((g, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "disc-grp" }, /* @__PURE__ */ React.createElement("div", { className: `disc-tag mono disc-tag--${g.tone}` }, g.tag), /* @__PURE__ */ React.createElement("div", { className: "disc-items" }, g.items.map(([sym, val], j) => /* @__PURE__ */ React.createElement("button", { key: j, className: "disc-chip", onClick: () => onTicker(sym) }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, sym)), /* @__PURE__ */ React.createElement("span", { className: `mono disc-val disc-val--${g.tone}` }, val)))))));
 }
 function TopMovers({ onTicker }) {
-  const all = useMemoH(() => HEATMAP.map(([sym, sector, mcap, chg]) => ({ sym, sector, chg })).sort((a, b) => b.chg - a.chg), []);
+  const all = useMemoH(() => {
+    const rows = HR.pool();
+    if (rows.length) {
+      return rows.filter((r) => HR.num(r.chg, null) != null && HR.inAudit(r.sym)).map((r) => ({ sym: r.sym, sector: r.sector, chg: r.chg })).sort((a, b) => b.chg - a.chg);
+    }
+    return HEATMAP.map(([sym, sector, mcap, chg]) => ({ sym, sector, chg })).sort((a, b) => b.chg - a.chg);
+  }, [bvTok()]);
   const gainers = all.slice(0, 6);
   const losers = all.slice(-6).reverse();
   const col = (items) => /* @__PURE__ */ React.createElement("div", { className: "tm-col" }, items.map((m) => /* @__PURE__ */ React.createElement("button", { key: m.sym, className: "tm-row", onClick: () => onTicker(m.sym) }, /* @__PURE__ */ React.createElement("span", { className: "tm-sym mono" }, /* @__PURE__ */ React.createElement("b", null, m.sym)), /* @__PURE__ */ React.createElement("span", { className: "tm-sector mono dim2" }, m.sector), /* @__PURE__ */ React.createElement("span", { className: `tm-chg mono ${m.chg >= 0 ? "up" : "dn"}` }, m.chg >= 0 ? "+" : "", m.chg.toFixed(1), "%"), /* @__PURE__ */ React.createElement("span", { className: "tm-bar" }, /* @__PURE__ */ React.createElement("i", { className: m.chg >= 0 ? "up" : "dn", style: { width: `${Math.min(100, Math.abs(m.chg) * 20)}%` } })))));
@@ -24641,28 +24896,123 @@ const SCANNER_PICKS = [
   { sym: "NVRH", name: "Novara Health", score: 71, rr: "1.9", wlb: 46, edge: "+0.12", v: "BUY" },
   { sym: "ZOTR", name: "Zotran Industries", score: 69, rr: "1.5", wlb: 44, edge: "+0.09", v: "WATCH" }
 ];
-function resolveEngines() {
-  return TBE_ENGINES.map((e) => {
-    if (e.ml && window.AIPredict && window.AIPredict.all) {
-      const top = window.AIPredict.all().slice(0, 5).map((p) => [p.sym, Math.round((p.pUp || 0.5) * 100) + "%"]);
-      if (top.length === 5) return { ...e, rows: top };
+const bvTok = () => (HR.has() ? 1 : 0) + (HR.ledgerReal() ? 2 : 0) + (window.AIPredict && window.AIPredict.all ? 4 : 0);
+function realEngineRows(id) {
+  const rows = HR.pool();
+  if (!rows.length) return null;
+  const top5 = (arr) => {
+    const top8 = arr.slice(0, 8);
+    const aud = HR.auditOnly(top8.map((x) => x[0]));
+    const syms = (aud.length >= 3 ? aud : top8.map((x) => x[0])).slice(0, 5);
+    return syms.map((s) => {
+      const o = arr.find((a) => a[0] === s);
+      return [s, o ? o[1] : ""];
+    });
+  };
+  if (id === "momentum") {
+    const r = rows.filter((x) => HR.numStr(x.rs) != null).sort((a, b) => HR.numStr(b.rs) - HR.numStr(a.rs)).map((x) => [x.sym, x.rs]);
+    return r.length ? top5(r) : null;
+  }
+  if (id === "earnings-ai") {
+    const eb = window.__BV && window.__BV.earningsBeat || [];
+    const r = eb.filter((e) => e.ticker && e.beat_score != null).sort((a, b) => b.beat_score - a.beat_score).map((e) => [HR.sym0(e.ticker), Math.round(e.beat_score) + "%"]);
+    return r.length ? top5(r) : null;
+  }
+  if (id === "ml") {
+    if (window.AIPredict && window.AIPredict.all) {
+      const r = window.AIPredict.all().map((p) => [HR.sym0(p.sym), Math.round((p.pUp || 0.5) * 100) + "%"]);
+      return r.length ? top5(r) : null;
     }
+    return null;
+  }
+  if (id === "options") {
+    const of = window.__BV && window.__BV.optionsFlow || [];
+    const r = of.filter((o) => o.ticker && o.rr != null).sort((a, b) => (b.rr || 0) - (a.rr || 0)).map((o) => [HR.sym0(o.ticker), (+o.rr).toFixed(1)]);
+    return r.length ? top5(r) : null;
+  }
+  if (id === "insider") {
+    const r = rows.filter((x) => HR.num(x.insUsd, 0) > 0).sort((a, b) => b.insUsd - a.insUsd).map((x) => [x.sym, "+$" + x.insUsd.toFixed(1) + "M"]);
+    return r.length ? top5(r) : null;
+  }
+  if (id === "smc") {
+    const r = rows.filter((x) => x.pillarPct && x.pillarPct.smc != null).sort((a, b) => b.pillarPct.smc - a.pillarPct.smc).map((x) => [x.sym, x.edge || ""]);
+    return r.length ? top5(r) : null;
+  }
+  return null;
+}
+function resolveEngines() {
+  const live = HR.has();
+  return TBE_ENGINES.map((e) => {
+    const real = realEngineRows(e.id);
+    if (real && real.length) return { ...e, rows: real, real: true };
+    if (live) return { ...e, rows: [], real: true, empty: true };
     return e;
   });
+}
+function resolveScannerPicks() {
+  const rows = HR.pool();
+  if (!rows.length) return SCANNER_PICKS;
+  const rank = (v) => v === "BUY" ? 0 : v === "WATCH" ? 1 : v === "SHORT" ? 2 : 3;
+  const picks = [...rows].filter((r) => ["BUY", "WATCH", "SHORT"].includes(r.verdict) && HR.inAudit(r.sym)).sort((a, b) => rank(a.verdict) - rank(b.verdict) || b.score - a.score).slice(0, 5).map((r) => ({
+    sym: r.sym,
+    name: r.name,
+    score: r.score,
+    rr: r.rr !== "\u2014" ? r.rr : null,
+    wlb: r.wlb,
+    // feed-honest (null → "—")
+    edge: r.aiEdge != null ? (r.aiEdge >= 0 ? "+" : "") + r.aiEdge.toFixed(2) : null,
+    v: r.verdict
+  }));
+  return picks.length ? picks : SCANNER_PICKS;
 }
 window.TBE_ENGINES = TBE_ENGINES;
 window.SCANNER_PICKS = SCANNER_PICKS;
 window.resolveEngines = resolveEngines;
+window.resolveScannerPicks = resolveScannerPicks;
 function TopByEngine({ onTicker, onSurface }) {
-  const engines = useMemoH(() => resolveEngines(), []);
-  return /* @__PURE__ */ React.createElement("div", { className: "tbe-grid" }, engines.map((e) => /* @__PURE__ */ React.createElement("div", { key: e.id, className: "tbe-card", style: { "--eng": e.accent } }, /* @__PURE__ */ React.createElement("button", { className: "tbe-head", onClick: () => onSurface && onSurface(e.surface) }, /* @__PURE__ */ React.createElement("span", { className: "tbe-title mono" }, /* @__PURE__ */ React.createElement("span", { className: "tbe-dot" }), e.title), /* @__PURE__ */ React.createElement("span", { className: "tbe-metric mono dim2" }, e.metric, " ", /* @__PURE__ */ React.createElement("span", { className: "tbe-arrow" }, "\u2192"))), /* @__PURE__ */ React.createElement("div", { className: "tbe-list" }, e.rows.map(([sym, v], i) => /* @__PURE__ */ React.createElement("button", { key: sym, className: `tbe-row ${i === 0 ? "is-lead" : ""}`, onClick: () => onTicker && onTicker(sym) }, /* @__PURE__ */ React.createElement("span", { className: "tbe-rank mono" }, i + 1), /* @__PURE__ */ React.createElement("span", { className: "tbe-sym mono" }, /* @__PURE__ */ React.createElement("b", null, sym)), /* @__PURE__ */ React.createElement("span", { className: "tbe-v mono" }, v)))))));
+  const engines = useMemoH(() => resolveEngines(), [bvTok()]);
+  return /* @__PURE__ */ React.createElement("div", { className: "tbe-grid" }, engines.map((e) => /* @__PURE__ */ React.createElement("div", { key: e.id, className: "tbe-card", style: { "--eng": e.accent } }, /* @__PURE__ */ React.createElement("button", { className: "tbe-head", onClick: () => onSurface && onSurface(e.surface) }, /* @__PURE__ */ React.createElement("span", { className: "tbe-title mono" }, /* @__PURE__ */ React.createElement("span", { className: "tbe-dot" }), e.title), /* @__PURE__ */ React.createElement("span", { className: "tbe-metric mono dim2" }, e.metric, " ", /* @__PURE__ */ React.createElement("span", { className: "tbe-arrow" }, "\u2192"))), /* @__PURE__ */ React.createElement("div", { className: "tbe-list" }, e.rows.length ? e.rows.map(([sym, v], i) => /* @__PURE__ */ React.createElement("button", { key: sym, className: `tbe-row ${i === 0 ? "is-lead" : ""}`, onClick: () => onTicker && onTicker(sym) }, /* @__PURE__ */ React.createElement("span", { className: "tbe-rank mono" }, i + 1), /* @__PURE__ */ React.createElement("span", { className: "tbe-sym mono" }, /* @__PURE__ */ React.createElement("b", null, sym)), /* @__PURE__ */ React.createElement("span", { className: "tbe-v mono" }, v))) : /* @__PURE__ */ React.createElement("div", { className: "tbe-row", style: { opacity: 0.5, cursor: "default" } }, /* @__PURE__ */ React.createElement("span", { className: "tbe-sym mono dim2" }, "no signals today"))))));
 }
 function TopSetups({ onTicker }) {
-  const rows = SCANNER_PICKS;
-  return /* @__PURE__ */ React.createElement("div", { className: "tset" }, rows.map((r, i) => /* @__PURE__ */ React.createElement("button", { key: r.sym, className: "tset-row", onClick: () => onTicker(r.sym) }, /* @__PURE__ */ React.createElement("span", { className: "tset-rank mono dim" }, String(i + 1).padStart(2, "0")), /* @__PURE__ */ React.createElement("span", { className: "tset-sym mono" }, /* @__PURE__ */ React.createElement("b", null, r.sym)), /* @__PURE__ */ React.createElement("span", { className: "tset-score mono", "data-tone": r.score >= 75 ? "gn" : r.score >= 60 ? "amb" : "rd" }, r.score), /* @__PURE__ */ React.createElement("span", { className: "tset-mid" }, /* @__PURE__ */ React.createElement("span", { className: "tset-name dim" }, r.name), /* @__PURE__ */ React.createElement("span", { className: "tset-stats mono dim2" }, "R ", r.rr, " \xB7 W ", r.wlb, "% \xB7 edge ", r.edge)), /* @__PURE__ */ React.createElement("span", { className: `tset-v mono ${r.v === "BUY" ? "up" : "warn"}` }, secBias(r.v)))));
+  const rows = useMemoH(() => resolveScannerPicks(), [bvTok()]);
+  const stat = (r) => {
+    const parts = [];
+    if (r.rr != null && r.rr !== "\u2014") parts.push("R " + r.rr);
+    if (r.wlb != null) parts.push("W " + r.wlb + "%");
+    if (r.edge != null) parts.push("edge " + r.edge);
+    return parts.length ? parts.join(" \xB7 ") : "live scan";
+  };
+  return /* @__PURE__ */ React.createElement("div", { className: "tset" }, rows.map((r, i) => /* @__PURE__ */ React.createElement("button", { key: r.sym, className: "tset-row", onClick: () => onTicker(r.sym) }, /* @__PURE__ */ React.createElement("span", { className: "tset-rank mono dim" }, String(i + 1).padStart(2, "0")), /* @__PURE__ */ React.createElement("span", { className: "tset-sym mono" }, /* @__PURE__ */ React.createElement("b", null, r.sym)), /* @__PURE__ */ React.createElement("span", { className: "tset-score mono", "data-tone": r.score >= 75 ? "gn" : r.score >= 60 ? "amb" : "rd" }, r.score), /* @__PURE__ */ React.createElement("span", { className: "tset-mid" }, /* @__PURE__ */ React.createElement("span", { className: "tset-name dim" }, r.name), /* @__PURE__ */ React.createElement("span", { className: "tset-stats mono dim2" }, stat(r))), /* @__PURE__ */ React.createElement("span", { className: `tset-v mono ${r.v === "BUY" ? "up" : r.v === "SHORT" ? "dn" : "warn"}` }, secBias(r.v)))));
+}
+function resolveNewsBoard() {
+  const stories = realStories(11);
+  const rows = HR.pool();
+  const toStory = (s, live) => ({
+    head: s.head,
+    src: s.src,
+    time: s.t,
+    url: s.url,
+    live: !!live,
+    sum: s.sum,
+    tickers: s.tickers && s.tickers.length ? s.tickers : s.sym ? [[s.sym, 0]] : []
+  });
+  let featured = null, leftStack = null, latest = null, trending = null, gainers = null;
+  if (stories && stories.length) {
+    featured = toStory(stories[0], true);
+    leftStack = stories.slice(1, 5).map((s) => toStory(s));
+    latest = stories.slice(5, 11).map((s) => toStory(s));
+  }
+  if (rows.length) {
+    const px = (p) => p >= 1e3 ? Math.round(p).toLocaleString() : p.toFixed(2);
+    const audited = rows.filter((r) => HR.inAudit(r.sym) && HR.num(r.chg, null) != null && HR.num(r.price, null) != null);
+    trending = [...audited].sort((a, b) => Math.abs(b.chg) - Math.abs(a.chg)).slice(0, 5).map((r) => ({ sym: r.sym, name: r.name, px: px(r.price), chg: r.chg, up: r.chg >= 0 }));
+    gainers = [...audited].sort((a, b) => b.chg - a.chg).slice(0, 4).map((r) => ({ sym: r.sym, name: r.name, px: px(r.price), chg: r.chg }));
+  }
+  return { featured, leftStack, latest, trending, gainers };
 }
 function NewsMarketsBoard({ onTicker, onSurface }) {
-  const featured = {
+  const real = useMemoH(() => resolveNewsBoard(), [bvTok()]);
+  const featured = real.featured || {
     head: "Chipmakers extend rally as hyperscaler capex guides lift the group",
     src: "Reuters",
     time: "12m",
@@ -24670,13 +25020,13 @@ function NewsMarketsBoard({ onTicker, onSurface }) {
     tickers: [["NVDA", 6.26], ["AVGO", 3.1], ["ARM", 2.4]],
     sum: "Three hyperscalers raised FY capex on the same morning \u2014 a direct read-through to GPU and networking suppliers. Group +2.8% on 1.6\xD7 volume."
   };
-  const leftStack = [
+  const leftStack = real.leftStack || [
     { head: "Fed minutes preview: market prices 88% hold, dot-plot in focus", src: "Bloomberg", time: "1h", tickers: [["SPY", 0.4]] },
     { head: "Specialty-materials names see insider buying cluster", src: "Barron's", time: "2h", tickers: [["ARGN", 2.1]] },
     { head: "Crude slips on demand worries; energy complex under pressure", src: "WSJ", time: "3h", tickers: [["XOM", -2.6], ["XLE", -1.8]] },
     { head: "Alphabet plans to raise capex for AI; Street models 2027 payback", src: "Yahoo Finance", time: "5h", tickers: [["GOOGL", -1]] }
   ];
-  const latest = [
+  const latest = real.latest || [
     { head: "Genoa Bio Phase-2 readout expected ahead of next-week print", src: "FierceBio", time: "16m", tickers: [["GENO", 0.5]] },
     { head: "Gold edges higher as traders weigh rate-path confusion", src: "Bloomberg", time: "36m", tickers: [["GLD", 0.7]] },
     { head: "BOJ should signal a clear rate path after June hike, says SMFG chief", src: "Reuters", time: "1h", tickers: [["JPY", 0.1]] },
@@ -24684,23 +25034,23 @@ function NewsMarketsBoard({ onTicker, onSurface }) {
     { head: "Software multiples compress as Street trims FY estimates", src: "Bloomberg", time: "2h", tickers: [["MDB", 20.4], ["TWLO", 19.4]] },
     { head: "Retail sales beat lifts consumer-discretionary breadth", src: "Reuters", time: "3h", tickers: [["XLY", 1.2]] }
   ];
-  const trending = [
+  const trending = real.trending || [
     { sym: "NVDA", name: "NVIDIA Corp", px: "884.20", chg: 7.04, up: true },
     { sym: "BTC", name: "Bitcoin USD", px: "69,969", chg: -3.76, up: false },
     { sym: "ARGN", name: "Argentum Robotics", px: "213.40", chg: 3.1, up: true },
     { sym: "LAC", name: "Lithium Americas", px: "5.51", chg: 5.76, up: true },
     { sym: "ABVX", name: "ABIVAX SA", px: "129.69", chg: -2.22, up: false }
   ];
-  const gainers = [
+  const gainers = real.gainers || [
     { sym: "FLNC", name: "Fluence Energy", px: "27.15", chg: 43.8 },
     { sym: "MDB", name: "MongoDB Inc", px: "403.88", chg: 20.4 },
     { sym: "TWLO", name: "Twilio Inc", px: "227.54", chg: 19.4 },
     { sym: "GENO", name: "Genoa Bio", px: "29.40", chg: 12.1 }
   ];
-  const Story = ({ s, big }) => /* @__PURE__ */ React.createElement("button", { className: `nm-story ${big ? "nm-story--big" : ""}`, onClick: () => s.tickers[0] && onTicker(s.tickers[0][0]) }, big && /* @__PURE__ */ React.createElement("div", { className: "nm-feat-img" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "\u25E7 MARKETS")), /* @__PURE__ */ React.createElement("div", { className: "nm-head" }, s.head), /* @__PURE__ */ React.createElement("div", { className: "nm-meta mono" }, s.live && /* @__PURE__ */ React.createElement("span", { className: "nm-live" }, "\u25CF LIVE"), /* @__PURE__ */ React.createElement("span", { className: "nm-src" }, s.src), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " \xB7 ", s.time, " ago")), big && s.sum && /* @__PURE__ */ React.createElement("div", { className: "nm-sum" }, s.sum), /* @__PURE__ */ React.createElement("div", { className: "nm-chips" }, s.tickers.map(([t, c], i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "nm-chip mono", onClick: (e) => {
+  const Story = ({ s, big }) => /* @__PURE__ */ React.createElement("button", { className: `nm-story ${big ? "nm-story--big" : ""}`, onClick: () => s.tickers[0] && onTicker(s.tickers[0][0]) }, big && /* @__PURE__ */ React.createElement("div", { className: "nm-feat-img" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "\u25E7 MARKETS")), /* @__PURE__ */ React.createElement("div", { className: "nm-head" }, s.head), /* @__PURE__ */ React.createElement("div", { className: "nm-meta mono" }, s.live && /* @__PURE__ */ React.createElement("span", { className: "nm-live" }, "\u25CF LIVE"), /* @__PURE__ */ React.createElement("span", { className: "nm-src" }, s.src), s.time ? /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " \xB7 ", s.time, " ago") : null), big && s.sum && /* @__PURE__ */ React.createElement("div", { className: "nm-sum" }, s.sum), /* @__PURE__ */ React.createElement("div", { className: "nm-chips" }, s.tickers.map(([t, c], i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "nm-chip mono", onClick: (e) => {
     e.stopPropagation();
     onTicker(t);
-  } }, t, " ", /* @__PURE__ */ React.createElement("b", { className: c >= 0 ? "up" : "dn" }, c >= 0 ? "+" : "", c.toFixed(2), "%")))));
+  } }, t, c ? /* @__PURE__ */ React.createElement("b", { className: c >= 0 ? "up" : "dn" }, " ", c >= 0 ? "+" : "", c.toFixed(2), "%") : null))));
   return /* @__PURE__ */ React.createElement("div", { className: "nm-board" }, /* @__PURE__ */ React.createElement("div", { className: "nm-col nm-col--feat" }, /* @__PURE__ */ React.createElement(Story, { s: featured, big: true }), /* @__PURE__ */ React.createElement("div", { className: "nm-stack" }, leftStack.map((s, i) => /* @__PURE__ */ React.createElement(Story, { key: i, s }))), /* @__PURE__ */ React.createElement("button", { className: "nm-more mono", onClick: () => onSurface && onSurface("news") }, "View all news \u2192")), /* @__PURE__ */ React.createElement("div", { className: "nm-col nm-col--latest" }, /* @__PURE__ */ React.createElement("div", { className: "nm-col-h mono" }, "LATEST"), /* @__PURE__ */ React.createElement("div", { className: "nm-feed" }, latest.map((s, i) => /* @__PURE__ */ React.createElement(Story, { key: i, s })))), /* @__PURE__ */ React.createElement("div", { className: "nm-col nm-col--rail" }, /* @__PURE__ */ React.createElement("div", { className: "nm-lookup", onClick: () => onSurface && onSurface("signal-scanner") }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "\u2315 Quote lookup")), /* @__PURE__ */ React.createElement("div", { className: "nm-rail-card" }, /* @__PURE__ */ React.createElement("div", { className: "nm-rail-h mono" }, /* @__PURE__ */ React.createElement("span", null, "TRENDING TICKERS"), /* @__PURE__ */ React.createElement("span", { className: "nm-rail-go", onClick: () => onSurface && onSurface("signal-scanner") }, "Scanner \u2192")), trending.map((r, i) => /* @__PURE__ */ React.createElement("button", { key: i, className: "nm-row", onClick: () => onTicker(r.sym) }, /* @__PURE__ */ React.createElement("span", { className: "nm-row-l" }, /* @__PURE__ */ React.createElement("b", { className: "nm-row-sym mono" }, r.sym), /* @__PURE__ */ React.createElement("span", { className: "nm-row-name dim2" }, r.name)), /* @__PURE__ */ React.createElement(Sparkline, { data: useMemoH(() => {
     const a = [];
     let v = 0;
@@ -24749,7 +25099,17 @@ function MoodTile({ label, value, tone, delta, pct = 50 }) {
   return /* @__PURE__ */ React.createElement("div", { className: `hv-mood-tile hv-mood-tile--${tone}` }, /* @__PURE__ */ React.createElement("div", { className: "hv-mt-l mono" }, label), /* @__PURE__ */ React.createElement("div", { className: `hv-mt-v mono kpi-tone--${tone}` }, value), /* @__PURE__ */ React.createElement("div", { className: `hv-mt-meter hv-mt-meter--${tone}` }, /* @__PURE__ */ React.createElement("span", { className: "hv-mt-meter-fill", style: { width: `${Math.max(4, Math.min(100, pct))}%` } })), /* @__PURE__ */ React.createElement("div", { className: "hv-mt-s mono dim2" }, delta));
 }
 function HomeBrief() {
-  return /* @__PURE__ */ React.createElement("div", { className: "hh-brief" }, /* @__PURE__ */ React.createElement("span", { className: "hh-brief-tag mono" }, "WHAT CHANGED \xB7 vs yesterday"), /* @__PURE__ */ React.createElement("span", { className: "hh-brief-txt mono" }, "Regime softened ", /* @__PURE__ */ React.createElement("b", { className: "amb" }, "trending \u2192 CHOPPY"), " (CPI 08:30 risk) \xB7 Fear/Greed ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "55 \u2192 62"), " on AI-capex + CRWV beat \xB7 breadth ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "49 \u2192 56%"), " \xB7 VIX %ile ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "41 \u2192 32"), " calmer."));
+  const M = window.__BV && window.__BV.market || null;
+  const c = window.__BV && window.__BV.critical || null;
+  const rg = c && c.regime || {};
+  if (!M) {
+    return /* @__PURE__ */ React.createElement("div", { className: "hh-brief" }, /* @__PURE__ */ React.createElement("span", { className: "hh-brief-tag mono" }, "MARKET STATE"), /* @__PURE__ */ React.createElement("span", { className: "hh-brief-txt mono" }, "Regime ", /* @__PURE__ */ React.createElement("b", { className: "amb" }, "RISK-ON \xB7 CHOPPY"), " \xB7 Fear/Greed ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "62"), " \xB7 breadth ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "56%"), " \xB7 VIX ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "16.3"), "."));
+  }
+  const tone = M.regimeOn ? "up" : "dn";
+  const vix = typeof rg.vix_current === "number" ? rg.vix_current : rg.vix && rg.vix.vix_current;
+  const spyChg = typeof rg.spy_daily_chg === "number" ? rg.spy_daily_chg : null;
+  const dist = rg.distribution_state ? String(rg.distribution_state).replace(/_/g, " ") : null;
+  return /* @__PURE__ */ React.createElement("div", { className: "hh-brief" }, /* @__PURE__ */ React.createElement("span", { className: "hh-brief-tag mono" }, "MARKET STATE \xB7 NOW"), /* @__PURE__ */ React.createElement("span", { className: "hh-brief-txt mono" }, "Regime ", /* @__PURE__ */ React.createElement("b", { className: tone }, M.regimeLabel, " \xB7 ", M.regimeTrend), M.maxSize != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " (max size ", /* @__PURE__ */ React.createElement("b", null, M.maxSize, "%"), ")") : null, M.fearGreed != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 Fear/Greed ", /* @__PURE__ */ React.createElement("b", { className: "up" }, M.fearGreed)) : null, M.breadthPct != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 breadth ", /* @__PURE__ */ React.createElement("b", null, Math.round(M.breadthPct), "%")) : null, vix != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 VIX ", /* @__PURE__ */ React.createElement("b", null, vix.toFixed(1))) : null, spyChg != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 SPY ", /* @__PURE__ */ React.createElement("b", { className: spyChg >= 0 ? "up" : "dn" }, spyChg >= 0 ? "+" : "", spyChg.toFixed(1), "%")) : null, dist ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, dist)) : null, "."));
 }
 function HomeStat({ label, value, delta, tone }) {
   return /* @__PURE__ */ React.createElement("div", { className: "hs" }, /* @__PURE__ */ React.createElement("div", { className: "hs-label label-cap" }, label), /* @__PURE__ */ React.createElement("div", { className: "hs-value mono" }, value), /* @__PURE__ */ React.createElement("div", { className: `hs-delta mono kpi-tone--${tone}` }, delta));
@@ -24843,16 +25203,37 @@ function ActivePositionsStrip({ onTicker }) {
   ];
   return /* @__PURE__ */ React.createElement("div", { className: "ap-strip" }, positions.map((p) => /* @__PURE__ */ React.createElement("button", { key: p.sym, className: `ap-card ap-card--${p.tone}`, onClick: () => onTicker(p.sym) }, /* @__PURE__ */ React.createElement("div", { className: "ap-hdr" }, /* @__PURE__ */ React.createElement("span", { className: "mono ap-sym" }, /* @__PURE__ */ React.createElement("b", null, p.sym)), /* @__PURE__ */ React.createElement("span", { className: `mono ap-pl kpi-tone--${p.tone}` }, p.pl)), /* @__PURE__ */ React.createElement("div", { className: "ap-meta mono dim2" }, p.name, " \xB7 ", p.qty, " sh \xB7 held ", p.days, "d"), /* @__PURE__ */ React.createElement("div", { className: "ap-bars" }, /* @__PURE__ */ React.createElement("div", { className: "ap-bar" }, /* @__PURE__ */ React.createElement("div", { className: "ap-bar-l label-cap" }, "Open R"), /* @__PURE__ */ React.createElement("div", { className: `ap-bar-v mono kpi-tone--${p.tone}` }, p.openR)), /* @__PURE__ */ React.createElement("div", { className: "ap-bar" }, /* @__PURE__ */ React.createElement("div", { className: "ap-bar-l label-cap" }, "Stop dist"), /* @__PURE__ */ React.createElement("div", { className: `ap-bar-v mono ${p.dist.startsWith("+") ? "up" : "dn"}` }, p.dist)), /* @__PURE__ */ React.createElement("div", { className: "ap-bar" }, /* @__PURE__ */ React.createElement("div", { className: "ap-bar-l label-cap" }, "Entry"), /* @__PURE__ */ React.createElement("div", { className: "ap-bar-v mono" }, "$", p.entry.toFixed(2))), /* @__PURE__ */ React.createElement("div", { className: "ap-bar" }, /* @__PURE__ */ React.createElement("div", { className: "ap-bar-l label-cap" }, "Last"), /* @__PURE__ */ React.createElement("div", { className: "ap-bar-v mono" }, "$", p.last.toFixed(2)))))));
 }
+const SIGNALFEED_MOCK = [
+  { t: "06:14", tone: "gn", tag: "BULLISH", sym: "ARGN", text: "Bias shifted Neutral \u2192 Bullish \xB7 score 71 \u2192 81" },
+  { t: "05:48", tone: "gn", tag: "ALERT", sym: "ARCM", text: "Pivot break: close > $66.40 on +1.6\xD7 RVOL" },
+  { t: "04:22", tone: "amb", tag: "ER", sym: "GENO", text: "ER in 9 sessions \xB7 event-risk elevated" },
+  { t: "03:41", tone: "rd", tag: "BEARISH", sym: "BIVO", text: "Distribution signature \xB7 moved to excluded" },
+  { t: "02:14", tone: "ink", tag: "BUNDLE", sym: null, text: "Daily bundle generated \xB7 612 ranked \xB7 14 Bullish \xB7 8 Neutral \xB7 31 Bearish" },
+  { t: "23:49", tone: "violet", tag: "AI", sym: "DRSH", text: "AI hit-net edge +0.18 \u2192 +0.22 \xB7 drift KS 0.08" },
+  { t: "22:12", tone: "cy", tag: "INSIDER", sym: "ARCM", text: "Form 4 filed \xB7 CFO buy 5,000 sh @ $64.20" }
+];
+function resolveSignalFeed() {
+  const rows = HR.pool();
+  if (!rows.length) return SIGNALFEED_MOCK;
+  const inA = (r) => HR.inAudit(r.sym);
+  const buys = rows.filter((r) => r.verdict === "BUY" && inA(r)).sort((a, b) => b.score - a.score);
+  const ins = rows.filter((r) => HR.num(r.insUsd, 0) > 0 && inA(r)).sort((a, b) => b.insUsd - a.insUsd);
+  const er = rows.filter((r) => HR.num(r.er, 99) <= 9 && HR.num(r.er, 99) >= 0 && inA(r)).sort((a, b) => a.er - b.er);
+  const bear = rows.filter((r) => (r.verdict === "SHORT" || r.verdict === "AVOID") && inA(r)).sort((a, b) => a.score - b.score);
+  const ai = rows.filter((r) => r.aiEdge != null && inA(r)).sort((a, b) => b.aiEdge - a.aiEdge);
+  const M = window.__BV && window.__BV.market || null;
+  const out = [];
+  if (buys[0]) out.push({ t: "06:14", tone: "gn", tag: "BULLISH", sym: buys[0].sym, text: `BUY verdict \xB7 score ${buys[0].score}${buys[0].setup ? " \xB7 " + buys[0].setup : ""}` });
+  if (buys[1]) out.push({ t: "05:48", tone: "gn", tag: "ALERT", sym: buys[1].sym, text: `Entry ${buys[1].eq || "in zone"} \xB7 R:R ${buys[1].rr}${buys[1].rvol !== "\u2014" ? " \xB7 " + buys[1].rvol + "\xD7 RVOL" : ""}` });
+  if (er[0]) out.push({ t: "04:22", tone: "amb", tag: "ER", sym: er[0].sym, text: `ER in ${er[0].er} sessions \xB7 event-risk elevated` });
+  if (bear[0]) out.push({ t: "03:41", tone: "rd", tag: "BEARISH", sym: bear[0].sym, text: `${bear[0].verdict} \xB7 score ${bear[0].score} \xB7 excluded from longs` });
+  if (M && M.funnel) out.push({ t: "02:14", tone: "ink", tag: "BUNDLE", sym: null, text: `Daily bundle \xB7 ${M.funnel.universe} ranked \xB7 ${M.funnel.bullish} Bullish \xB7 ${M.funnel.neutral} Neutral \xB7 ${M.funnel.bearish} Bearish` });
+  if (ai[0]) out.push({ t: "23:49", tone: "violet", tag: "AI", sym: ai[0].sym, text: `AI edge +${ai[0].aiEdge.toFixed(2)} \xB7 highest hit-net today` });
+  if (ins[0]) out.push({ t: "22:12", tone: "cy", tag: "INSIDER", sym: ins[0].sym, text: `Insider cluster \xB7 +$${ins[0].insUsd.toFixed(1)}M net buys` });
+  return out.length ? out : SIGNALFEED_MOCK;
+}
 function SignalFeed({ onTicker }) {
-  const events = [
-    { t: "06:14", tone: "gn", tag: "BULLISH", sym: "ARGN", text: "Bias shifted Neutral \u2192 Bullish \xB7 score 71 \u2192 81" },
-    { t: "05:48", tone: "gn", tag: "ALERT", sym: "ARCM", text: "Pivot break: close > $66.40 on +1.6\xD7 RVOL" },
-    { t: "04:22", tone: "amb", tag: "ER", sym: "GENO", text: "ER in 9 sessions \xB7 event-risk elevated" },
-    { t: "03:41", tone: "rd", tag: "BEARISH", sym: "BIVO", text: "Distribution signature \xB7 moved to excluded" },
-    { t: "02:14", tone: "ink", tag: "BUNDLE", sym: null, text: "Daily bundle generated \xB7 612 ranked \xB7 14 Bullish \xB7 8 Neutral \xB7 31 Bearish" },
-    { t: "23:49", tone: "violet", tag: "AI", sym: "DRSH", text: "AI hit-net edge +0.18 \u2192 +0.22 \xB7 drift KS 0.08" },
-    { t: "22:12", tone: "cy", tag: "INSIDER", sym: "ARCM", text: "Form 4 filed \xB7 CFO buy 5,000 sh @ $64.20" }
-  ];
+  const events = useMemoH(() => resolveSignalFeed(), [bvTok()]);
   return /* @__PURE__ */ React.createElement("div", { className: "sf" }, events.map((e, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `sf-row sf-${e.tone}`, onClick: () => e.sym && onTicker(e.sym) }, /* @__PURE__ */ React.createElement("span", { className: "sf-time mono dim2" }, e.t), /* @__PURE__ */ React.createElement("span", { className: `sf-tag mono sf-tag--${e.tone}` }, e.tag), e.sym && /* @__PURE__ */ React.createElement("span", { className: "sf-sym mono" }, /* @__PURE__ */ React.createElement("b", null, e.sym)), /* @__PURE__ */ React.createElement("span", { className: "sf-text mono" }, e.text))));
 }
 function TodaysTasks() {
@@ -24880,7 +25261,7 @@ const CNS_SHORT = {
 };
 function buildConsensus() {
   const engines = (window.resolveEngines ? window.resolveEngines() : window.TBE_ENGINES) || [];
-  const scanner = window.SCANNER_PICKS || [];
+  const scanner = (window.resolveScannerPicks ? window.resolveScannerPicks() : window.SCANNER_PICKS) || [];
   const map = {};
   const names = {};
   const add = (sym, src) => {

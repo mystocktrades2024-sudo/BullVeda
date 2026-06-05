@@ -578,6 +578,9 @@ async def bullveda_boot(auth: HTTPBasicCredentials = Depends(_check_auth)):
     out["crypto"] = _rj("data_crypto.json")
     out["earnings"] = _rj("data_earnings.json")
     out["critical"] = _rj("data.critical.json")
+    # True headline-index quotes (Schwab live indices + EODHD crypto) — fresh,
+    # off-scan-cadence; overrides any stale index_quotes baked into critical.
+    out["index_quotes"] = await _index_quotes_cached()
     # NB: the two heavy feeds (Time table ~2.3MB, Track-Record ledger ~1.7MB) are NOT
     # here — they load async via /api/bullveda-heavy after first paint, so the home +
     # scanner paint fast. The Time column + Track Record fill in when that resolves.
@@ -587,6 +590,33 @@ async def bullveda_boot(auth: HTTPBasicCredentials = Depends(_check_auth)):
         return Response(content=gz, media_type="application/json", headers=_GZH)
     except Exception:
         return out
+
+
+# ── Headline-index quotes (Schwab indices + EODHD crypto), TTL-cached ──
+_INDEX_QUOTES = {"ts": 0.0, "data": None}
+
+async def _index_quotes_cached(ttl: float = 120.0):
+    """Cached headline-index quotes. Runs the sync Schwab/EODHD fetch in a thread
+    so it never blocks the event loop. Returns [] on failure (feed-honest)."""
+    import time as _t
+    if _INDEX_QUOTES["data"] is not None and (_t.time() - _INDEX_QUOTES["ts"]) < ttl:
+        return _INDEX_QUOTES["data"]
+    try:
+        import data_fetcher as _df
+        data = await _asyncio.get_event_loop().run_in_executor(None, _df.get_index_quotes)
+        data = data or []
+    except Exception:
+        data = _INDEX_QUOTES["data"] or []
+    _INDEX_QUOTES["data"] = data; _INDEX_QUOTES["ts"] = _t.time()
+    return data
+
+
+@app.get("/api/index-quotes")
+async def index_quotes_api(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Live headline-index tape — S&P/NASDAQ/DOW/RUSSELL/VIX/10Y (Schwab) + BTC/ETH (EODHD)."""
+    if isinstance(auth, Response):
+        return auth
+    return {"index_quotes": await _index_quotes_cached()}
 
 
 _BV_HEAVY_RESP = {"ts": 0.0, "body": None}

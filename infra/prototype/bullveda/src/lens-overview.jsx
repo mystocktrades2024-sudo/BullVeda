@@ -1283,12 +1283,12 @@ function CompanyValuation({ ticker }) {
         <div className="cs-val-row">
           <div className="cs-val-tile">
             <span className="label-cap">P/E TTM</span>
-            <span className="mono"><b>{ticker.pe.toFixed(1)}</b></span>
+            <span className="mono"><b>{ticker.pe != null ? ticker.pe.toFixed(1) : "—"}</b></span>
             <span className="mono dim2">peers 24.1</span>
           </div>
           <div className="cs-val-tile">
             <span className="label-cap">Fwd P/E</span>
-            <span className="mono up"><b>{ticker.fwdPe.toFixed(1)}</b></span>
+            <span className="mono up"><b>{ticker.fwdPe != null ? ticker.fwdPe.toFixed(1) : "—"}</b></span>
             <span className="mono dim2">peers 21.0</span>
           </div>
           <div className="cs-val-tile">

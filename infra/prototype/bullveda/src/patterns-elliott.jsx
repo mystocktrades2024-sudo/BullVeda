@@ -127,7 +127,7 @@ const EW_INV_FIXTURE = {
 };
 
 // canonical fixture model for standalone showcase / fallback
-const FIXTURE_MODEL = {
+var FIXTURE_MODEL = {
   isReal: false,
   stat: EW_STAT_FIXTURE,
   rules: EW_RULES_FIXTURE,

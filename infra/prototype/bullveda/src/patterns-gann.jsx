@@ -42,7 +42,7 @@ function _buildFixtureLines() {
   ];
 }
 
-const FIXTURE_MODEL = {
+var FIXTURE_MODEL = {
   isReal: false, source: "illustrative",
   bars: null, // filled lazily per-ticker in useGannModel
   fan_lines: _buildFixtureLines(),

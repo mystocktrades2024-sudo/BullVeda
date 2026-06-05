@@ -194,7 +194,7 @@ function DetailHeader({ ticker, mode, sizeCat, focusMode, onToggleFocus }) {
         <div className="dp-quote-extra mono dim">
           <span>VOL <b className="dim2">{(ticker.vol / 1e6).toFixed(2)}M</b></span>
           <span>· AVG <b className="dim2">{(ticker.avgVol / 1e6).toFixed(2)}M</b></span>
-          <span>· RSI <b className="dim2">{ticker.rsi.toFixed(1)}</b></span>
+          <span>· RSI <b className="dim2">{ticker.rsi != null ? ticker.rsi.toFixed(1) : "—"}</b></span>
           <span>· β <b className="dim2">{ticker.beta.toFixed(2)}</b></span>
         </div>
         <div className="dp-hdr-spacer" />

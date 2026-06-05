@@ -113,7 +113,7 @@ const CS_REL_STATIC = [
   { name: "Doji",                 glyph: "doji",     reliability: 0.50, n: 540, ff: "±0.4%", note: "context-only · no edge alone" },
 ];
 
-const FIXTURE_MODEL = {
+var FIXTURE_MODEL = {
   isReal: false,
   source: "illustrative",
   bars: [],             // populated by buildMockBars

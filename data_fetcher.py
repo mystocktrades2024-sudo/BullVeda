@@ -2776,6 +2776,77 @@ def get_stock_info_batch(tickers: list[str], max_workers: int = 6) -> dict[str, 
     return results
 
 
+def get_index_quotes() -> list[dict]:
+    """True headline-index quotes for the Home cross-asset tape.
+
+    Indices + 10Y yield from SCHWAB market-data (live, real index symbols —
+    $SPX/$COMPX/$DJI/$RUT/$VIX/$TNX); crypto (BTC/ETH) from EODHD .CC feed.
+    Schwab is the only source in our (no-new-license) stack that returns the
+    real headline index level (EODHD .INDX returns NA for most; GSPC.INDX works
+    but Schwab is live + batched in one call). $TNX is yield×10 → /10 to %.
+
+    Returns an ordered list of {key, label, value, chg, suffix} — value is a
+    number, chg is daily %, suffix is "%" for yields else "". Failures drop the
+    affected tile rather than break the row (feed-honest).
+    """
+    out: list[dict] = []
+    # ── Schwab indices (one batched call) ──
+    try:
+        import schwab_client as _sc
+        SPEC = [
+            ("$SPX",   "S&P 500", ""),
+            ("$COMPX", "NASDAQ",  ""),
+            ("$DJI",   "DOW",     ""),
+            ("$RUT",   "RUSSELL", ""),
+            ("$VIX",   "VIX",     ""),
+            ("$TNX",   "US 10Y",  "%"),
+        ]
+        blobs = _sc.get_quotes_batch([s for s, _, _ in SPEC]) or {}
+        for sym, label, suffix in SPEC:
+            b = blobs.get(sym) or blobs.get(sym.upper())
+            q = (b or {}).get("quote") or {}
+            last = q.get("lastPrice")
+            chg = q.get("netPercentChange")
+            if last in (None, "", "NA"):
+                continue
+            try:
+                last = float(last)
+            except Exception:
+                continue
+            try:
+                chg = float(chg) if chg not in (None, "", "NA") else None
+            except Exception:
+                chg = None
+            if sym == "$TNX":           # CBOE 10Y yield index is quoted ×10
+                last = round(last / 10.0, 3)
+            out.append({"key": sym.lstrip("$"), "label": label,
+                        "value": round(last, 2) if suffix != "%" else last,
+                        "chg": (round(chg, 2) if chg is not None else None),
+                        "suffix": suffix})
+    except Exception:
+        pass
+    # ── EODHD crypto (Schwab has no crypto) ──
+    try:
+        import eodhd_client as _eod
+        for sym, label in [("BTC-USD.CC", "BTCUSD"), ("ETH-USD.CC", "ETHUSD")]:
+            try:
+                r = _eod.real_time(sym)
+                d = r if isinstance(r, dict) else (r[0] if isinstance(r, list) and r else None)
+                if not d:
+                    continue
+                close, chg = d.get("close"), d.get("change_p")
+                if close in (None, "", "NA"):
+                    continue
+                close = float(close)
+                chg = float(chg) if chg not in (None, "", "NA") else None
+                out.append({"key": label, "label": label, "value": round(close, 2), "chg": (round(chg, 2) if chg is not None else None), "suffix": ""})
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
 def get_market_regime(breadth: dict | None = None) -> dict:
     """
     Assess market regime from SPY + QQQ technicals + VIX + market breadth.

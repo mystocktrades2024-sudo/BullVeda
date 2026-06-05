@@ -387,6 +387,17 @@ def _fetch_bonds_forex() -> dict:
         return {}
 
 
+def _fetch_index_quotes() -> list:
+    """True headline-index tape for Home (Schwab indices + EODHD crypto).
+    Delegates to data_fetcher.get_index_quotes (internally fail-safe → []).
+    Wrapped so a market-data hiccup can never break the bundle build."""
+    try:
+        import data_fetcher as _df
+        return _df.get_index_quotes() or []
+    except Exception:
+        return []
+
+
 def _load_premarket() -> dict:
     """Read cache/premarket.json written by scripts/premarket_scan.py.
     Returns empty payload if missing (frontend tab falls back to market_movers).
@@ -3724,6 +3735,11 @@ def main():
         # proxies via SHY/IEF/TLT/TIP ETFs + EURUSD/USDJPY/GBPUSD/USDCNH/USDCAD
         # + TYX 30Y yield). Live from EODHD real_time.
         "bonds_forex": _fetch_bonds_forex(),
+        # 2026-06-05 · true headline-index tape (Schwab live indices $SPX/$COMPX/
+        # $DJI/$RUT/$VIX/$TNX + EODHD BTC/ETH) for the Home cross-asset strip.
+        # Boot serves a fresher copy via /api/index-quotes; this is the persisted
+        # fallback so the strip is real even on a cold/standalone read.
+        "index_quotes": _fetch_index_quotes(),
         # 2026-05-21 · universe composition breakdown by ticker_source —
         # surfaced in System Status tab so user can see which tier added
         # which slice of the scanned universe.

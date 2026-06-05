@@ -62,7 +62,7 @@ const _FIX_READ = "Context → structure → projection all align. TD flags exha
 const _FIX_INV  = { price: 206.0, note: "Close below $206.00 LPS / VAL (breakout fails) — stand aside." };
 
 // Fixture model assembled in the shape the view consumes
-const FIXTURE_MODEL = {
+var FIXTURE_MODEL = {
   isReal: false, source: "illustrative",
   methods:   _FIX_METHODS,
   composite: _FIX_COMPOSITE,
