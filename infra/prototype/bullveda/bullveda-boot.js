@@ -330,6 +330,50 @@
     ]).then(function (res) { return BV.detailFor(sr, res[0], res[1], null); });
   };
 
+  // ── OFF-UNIVERSE ticker (not in the scan) → build a REAL detail from a live
+  //    quote + fundamentals, instead of falling back to the mock seed ticker.
+  //    Scan-only analytics (verdict/score/levels/pillars/ml/Wilson) are honestly
+  //    absent — neutral/null so the lenses render without inventing a thesis. ──
+  BV.detailLive = function (sym) {
+    var up = String(sym || "").toUpperCase(); var enc = encodeURIComponent(up);
+    return Promise.all([
+      BV.get("/api/fundamentals/" + enc).catch(function () { return null; }),
+      BV.get("/api/ohlcv/" + enc).catch(function () { return null; }),
+    ]).then(function (res) {
+      var fund = res[0], oh = res[1];
+      var candles = (oh && oh.candles) || [];
+      var last = candles.length ? candles[candles.length - 1] : null;
+      var price = last ? num(last.close) : null;
+      if (price == null) return null;  // no real price → caller shows honest empty
+      var prev = candles.length > 1 ? num(candles[candles.length - 2].close) : null;
+      var H = (fund && fund.highlights) || {}, V = (fund && fund.valuation) || {}, S = (fund && fund.shares) || {};
+      var chg = (prev && price) ? +(((price - prev) / prev) * 100).toFixed(2) : 0;
+      var divY = num(H.DividendYield);
+      return {
+        symbol: up, name: (fund && fund.name) || up, exchange: "",
+        sector: BV.normSector((fund && fund.sector) || ""), industry: (fund && fund.industry) || "",
+        price: price, chg: chg, chgAbs: +(price * (chg / 100)).toFixed(2), prev: prev || price,
+        mcap: num(H.MarketCapitalization), beta: num(H.Beta) != null ? +num(H.Beta).toFixed(2) : 1.0,
+        shortFloat: num(S.ShortPercentFloat) != null ? +(S.ShortPercentFloat * 100).toFixed(1) : null,
+        insiderOwn: num(S.PercentInsiders), instOwn: num(S.PercentInstitutions),
+        pe: num(H.PERatio) != null ? num(H.PERatio) : num(V.TrailingPE), fwdPe: num(V.ForwardPE),
+        ps: num(V.PriceSalesTTM), pb: num(V.PriceBookMRQ), evEbitda: num(V.EnterpriseValueEbitda),
+        profitMargin: num(H.ProfitMargin), roe: num(H.ReturnOnEquityTTM), roa: num(H.ReturnOnAssetsTTM), opMargin: num(H.OperatingMarginTTM),
+        revGrowth: num(H.QuarterlyRevenueGrowthYOY), targetPrice: num(H.WallStreetTargetPrice),
+        divYield: divY != null ? +(divY * 100).toFixed(2) : 0, rsi: null,
+        sharesFloat: num(S.SharesFloat), dvol: null, spread: null, rsRank: null, catalystTier: null,
+        earnings: { days: null, date: "" }, earningsHistory: (fund && fund.earnings_history) || null, description: (fund && fund.description) || null,
+        setupFamily: null, holdDays: null, pivot: null, stop: null, t1: null, t2: null, rMultiple: null, trail: "",
+        pillars: { technical: 50, fundamental: 50, catalyst: 50, risk: 50, edge: 50 }, verdict: "WATCH", score: null,
+        ml: { direction: 0.5, hitNet: 0, pT1: null, pStop: null, magnitude: { lo: 0, mid: 0, hi: 0 }, shap: null },
+        setupStats: { n: null, winRate: null, wilsonLB: null, pf: null, medianR: null },
+        decisionsByMode: null, gatesEvaluated: null, rejectReason: null,
+        holders: (fund && fund.holders_institutions) || null, insiderTx: (fund && fund.insider_transactions) || null,
+        _fund: fund || null, _ml: null, _scan: null, _offUniverse: true, _income5y: (fund && fund.income_5y) || null, _cashflow5y: (fund && fund.cashflow_5y) || null,
+      };
+    });
+  };
+
   // ── light per-row Time Anatomy lookup (for the scanner TIME column / HOLD badge) ──
   // Direct cell + 1-level collapse only (O(1)-ish) so it's cheap across ~1000 rows.
   BV._tqCache = {};

@@ -158,9 +158,8 @@ function DetailHeader({ ticker, mode, sizeCat, focusMode, onToggleFocus }) {
           <div className="dp-hdr-meta dim2">
             <span>{ticker.exchange}</span>
             <span>·</span>
-            <span>{ticker.live ? "live quote · limited history" : `${ticker.sector} · ${ticker.industry}`}</span>
-            <span>·</span>
-            <span className="mono">${(ticker.mcap / 1e9).toFixed(2)}B</span>
+            <span>{ticker._loading ? "fetching live quote…" : ticker.live ? "live quote · limited history" : `${ticker.sector} · ${ticker.industry}`}</span>
+            {ticker.mcap != null && <><span>·</span><span className="mono">${(ticker.mcap / 1e9).toFixed(2)}B</span></>}
           </div>
         </div>
         <div className="dp-hdr-actions">
@@ -187,19 +186,23 @@ function DetailHeader({ ticker, mode, sizeCat, focusMode, onToggleFocus }) {
         </div>
       </div>
       <div className="dp-hdr-row dp-hdr-quote">
-        <div className="dp-quote-price mono"><b>${ticker.price.toFixed(2)}</b></div>
-        <div className={`dp-quote-chg mono ${ticker.chg >= 0 ? "up" : "dn"}`}>
-          {ticker.chg >= 0 ? "+" : ""}{ticker.chgAbs.toFixed(2)} ({ticker.chg.toFixed(2)}%)
-        </div>
+        <div className="dp-quote-price mono"><b>{ticker.price != null ? "$" + ticker.price.toFixed(2) : (ticker._loading ? "…" : "—")}</b></div>
+        {ticker.price != null && ticker.chgAbs != null && (
+          <div className={`dp-quote-chg mono ${ticker.chg >= 0 ? "up" : "dn"}`}>
+            {ticker.chg >= 0 ? "+" : ""}{ticker.chgAbs.toFixed(2)} ({ticker.chg.toFixed(2)}%)
+          </div>
+        )}
         <div className="dp-quote-extra mono dim">
-          <span>VOL <b className="dim2">{(ticker.vol / 1e6).toFixed(2)}M</b></span>
-          <span>· AVG <b className="dim2">{(ticker.avgVol / 1e6).toFixed(2)}M</b></span>
+          {ticker.vol != null && <span>VOL <b className="dim2">{(ticker.vol / 1e6).toFixed(2)}M</b></span>}
+          {ticker.avgVol != null && <span>· AVG <b className="dim2">{(ticker.avgVol / 1e6).toFixed(2)}M</b></span>}
           <span>· RSI <b className="dim2">{ticker.rsi != null ? ticker.rsi.toFixed(1) : "—"}</b></span>
-          <span>· β <b className="dim2">{ticker.beta.toFixed(2)}</b></span>
+          <span>· β <b className="dim2">{ticker.beta != null ? ticker.beta.toFixed(2) : "—"}</b></span>
         </div>
         <div className="dp-hdr-spacer" />
         <Pill tone="gn" small dot>LIVE · 14:23:08 ET</Pill>
-        <Pill tone="copper" small>{secBias(ticker.verdict)} · {ticker.score}</Pill>
+        {ticker.score != null
+          ? <Pill tone="copper" small>{secBias(ticker.verdict)} · {ticker.score}</Pill>
+          : ticker._offUniverse ? <Pill tone="slate" small>off-universe · not scanned</Pill> : null}
       </div>
     </div>);
 

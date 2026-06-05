@@ -25,14 +25,38 @@
 // Returns { ok, text }. Lets panels place the button/output wherever they want.
 window.aiComplete = async (base) => {
   const guard = "\n\nWrite PLAIN TEXT ONLY — no markdown, no headings, no # or ** symbols, no bullet characters. Keep it short, simple, and jargon-free. This is informational/educational ONLY — do NOT tell anyone to buy or sell, and add no disclaimer.";
-  if (!(window.claude && window.claude.complete)) {
-    return { ok: false, text: "AI explainer isn't connected in this preview — in production this calls your Kairos / Gemini endpoint. The summary above still applies." };
+  const prompt = String(base || "") + guard;
+  // 1) claude.ai preview hook (only present inside the claude.ai canvas)
+  if (window.claude && window.claude.complete) {
+    try { const t = await window.claude.complete(prompt); return { ok: true, text: (t || "").trim() || "—" }; } catch (e) {}
   }
+  // 2) REAL backend LLM via /api/chat (local Ollama, SSE-streamed token-by-token)
   try {
-    const t = await window.claude.complete(String(base || "") + guard);
-    return { ok: true, text: (t || "").trim() || "—" };
+    const res = await fetch("/api/chat", {
+      method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin",
+      body: JSON.stringify({ message: prompt, ticker: (window.__BV && window.__BV._aiTicker) || null }),
+    });
+    if (res.status === 503) return { ok: false, text: "AI explainer is turned off on this server (AI_CHAT_ENABLED=0)." };
+    if (!res.ok || !res.body) throw new Error("chat " + res.status);
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = "", out = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split("\n\n"); buf = parts.pop();
+      for (const p of parts) {
+        const line = p.trim();
+        if (!line.startsWith("data:")) continue;
+        const js = line.slice(5).trim();
+        if (!js) continue;
+        try { const o = JSON.parse(js); if (o.token) out += o.token; if (o.error) throw new Error(o.error); } catch (e) { if (/error/.test(String(e.message))) throw e; }
+      }
+    }
+    out = out.trim();
+    return out ? { ok: true, text: out } : { ok: false, text: "The AI explainer returned no text — try again." };
   } catch (e) {
-    return { ok: false, text: "The AI explainer is busy right now — try again in a moment." };
+    return { ok: false, text: "AI explainer isn't reachable right now (local model offline). The summary above still applies." };
   }
 };
 

@@ -10863,6 +10863,50 @@ body {
     ]).then(function (res) { return BV.detailFor(sr, res[0], res[1], null); });
   };
 
+  // ── OFF-UNIVERSE ticker (not in the scan) → build a REAL detail from a live
+  //    quote + fundamentals, instead of falling back to the mock seed ticker.
+  //    Scan-only analytics (verdict/score/levels/pillars/ml/Wilson) are honestly
+  //    absent — neutral/null so the lenses render without inventing a thesis. ──
+  BV.detailLive = function (sym) {
+    var up = String(sym || "").toUpperCase(); var enc = encodeURIComponent(up);
+    return Promise.all([
+      BV.get("/api/fundamentals/" + enc).catch(function () { return null; }),
+      BV.get("/api/ohlcv/" + enc).catch(function () { return null; }),
+    ]).then(function (res) {
+      var fund = res[0], oh = res[1];
+      var candles = (oh && oh.candles) || [];
+      var last = candles.length ? candles[candles.length - 1] : null;
+      var price = last ? num(last.close) : null;
+      if (price == null) return null;  // no real price → caller shows honest empty
+      var prev = candles.length > 1 ? num(candles[candles.length - 2].close) : null;
+      var H = (fund && fund.highlights) || {}, V = (fund && fund.valuation) || {}, S = (fund && fund.shares) || {};
+      var chg = (prev && price) ? +(((price - prev) / prev) * 100).toFixed(2) : 0;
+      var divY = num(H.DividendYield);
+      return {
+        symbol: up, name: (fund && fund.name) || up, exchange: "",
+        sector: BV.normSector((fund && fund.sector) || ""), industry: (fund && fund.industry) || "",
+        price: price, chg: chg, chgAbs: +(price * (chg / 100)).toFixed(2), prev: prev || price,
+        mcap: num(H.MarketCapitalization), beta: num(H.Beta) != null ? +num(H.Beta).toFixed(2) : 1.0,
+        shortFloat: num(S.ShortPercentFloat) != null ? +(S.ShortPercentFloat * 100).toFixed(1) : null,
+        insiderOwn: num(S.PercentInsiders), instOwn: num(S.PercentInstitutions),
+        pe: num(H.PERatio) != null ? num(H.PERatio) : num(V.TrailingPE), fwdPe: num(V.ForwardPE),
+        ps: num(V.PriceSalesTTM), pb: num(V.PriceBookMRQ), evEbitda: num(V.EnterpriseValueEbitda),
+        profitMargin: num(H.ProfitMargin), roe: num(H.ReturnOnEquityTTM), roa: num(H.ReturnOnAssetsTTM), opMargin: num(H.OperatingMarginTTM),
+        revGrowth: num(H.QuarterlyRevenueGrowthYOY), targetPrice: num(H.WallStreetTargetPrice),
+        divYield: divY != null ? +(divY * 100).toFixed(2) : 0, rsi: null,
+        sharesFloat: num(S.SharesFloat), dvol: null, spread: null, rsRank: null, catalystTier: null,
+        earnings: { days: null, date: "" }, earningsHistory: (fund && fund.earnings_history) || null, description: (fund && fund.description) || null,
+        setupFamily: null, holdDays: null, pivot: null, stop: null, t1: null, t2: null, rMultiple: null, trail: "",
+        pillars: { technical: 50, fundamental: 50, catalyst: 50, risk: 50, edge: 50 }, verdict: "WATCH", score: null,
+        ml: { direction: 0.5, hitNet: 0, pT1: null, pStop: null, magnitude: { lo: 0, mid: 0, hi: 0 }, shap: null },
+        setupStats: { n: null, winRate: null, wilsonLB: null, pf: null, medianR: null },
+        decisionsByMode: null, gatesEvaluated: null, rejectReason: null,
+        holders: (fund && fund.holders_institutions) || null, insiderTx: (fund && fund.insider_transactions) || null,
+        _fund: fund || null, _ml: null, _scan: null, _offUniverse: true, _income5y: (fund && fund.income_5y) || null, _cashflow5y: (fund && fund.cashflow_5y) || null,
+      };
+    });
+  };
+
   // ── light per-row Time Anatomy lookup (for the scanner TIME column / HOLD badge) ──
   // Direct cell + 1-level collapse only (O(1)-ish) so it's cheap across ~1000 rows.
   BV._tqCache = {};
@@ -12760,14 +12804,49 @@ Object.assign(window, {
 })();
 window.aiComplete = async (base) => {
   const guard = "\n\nWrite PLAIN TEXT ONLY \u2014 no markdown, no headings, no # or ** symbols, no bullet characters. Keep it short, simple, and jargon-free. This is informational/educational ONLY \u2014 do NOT tell anyone to buy or sell, and add no disclaimer.";
-  if (!(window.claude && window.claude.complete)) {
-    return { ok: false, text: "AI explainer isn't connected in this preview \u2014 in production this calls your Kairos / Gemini endpoint. The summary above still applies." };
+  const prompt = String(base || "") + guard;
+  if (window.claude && window.claude.complete) {
+    try {
+      const t = await window.claude.complete(prompt);
+      return { ok: true, text: (t || "").trim() || "\u2014" };
+    } catch (e) {
+    }
   }
   try {
-    const t = await window.claude.complete(String(base || "") + guard);
-    return { ok: true, text: (t || "").trim() || "\u2014" };
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ message: prompt, ticker: window.__BV && window.__BV._aiTicker || null })
+    });
+    if (res.status === 503) return { ok: false, text: "AI explainer is turned off on this server (AI_CHAT_ENABLED=0)." };
+    if (!res.ok || !res.body) throw new Error("chat " + res.status);
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = "", out = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop();
+      for (const p of parts) {
+        const line = p.trim();
+        if (!line.startsWith("data:")) continue;
+        const js = line.slice(5).trim();
+        if (!js) continue;
+        try {
+          const o = JSON.parse(js);
+          if (o.token) out += o.token;
+          if (o.error) throw new Error(o.error);
+        } catch (e) {
+          if (/error/.test(String(e.message))) throw e;
+        }
+      }
+    }
+    out = out.trim();
+    return out ? { ok: true, text: out } : { ok: false, text: "The AI explainer returned no text \u2014 try again." };
   } catch (e) {
-    return { ok: false, text: "The AI explainer is busy right now \u2014 try again in a moment." };
+    return { ok: false, text: "AI explainer isn't reachable right now (local model offline). The summary above still applies." };
   }
 };
 function AiExplain({ build, label = "Explain with AI", tag = "KAIROS" }) {
@@ -12953,7 +13032,7 @@ function DetailHeader({ ticker, mode, sizeCat, focusMode, onToggleFocus }) {
     verdict: ticker.verdict,
     setup: ticker.setupFamily
   });
-  return /* @__PURE__ */ React.createElement("div", { className: "dp-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-row" }, /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-id" }, /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-sym mono" }, /* @__PURE__ */ React.createElement("b", null, ticker.symbol), ticker.live && /* @__PURE__ */ React.createElement("span", { className: "dp-live-badge mono", title: "Not in the seeded universe \u2014 pulled live on-demand" }, "\u26A1 LIVE")), /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-meta dim2" }, /* @__PURE__ */ React.createElement("span", null, ticker.exchange), /* @__PURE__ */ React.createElement("span", null, "\xB7"), /* @__PURE__ */ React.createElement("span", null, ticker.live ? "live quote \xB7 limited history" : `${ticker.sector} \xB7 ${ticker.industry}`), /* @__PURE__ */ React.createElement("span", null, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "$", (ticker.mcap / 1e9).toFixed(2), "B"))), /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-actions" }, /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-modeseg seg" }, ["SWING", "POSITION", "INVESTMENT"].map((m) => /* @__PURE__ */ React.createElement("button", { key: m, className: `seg-btn ${mode === m ? "is-on" : ""}`, onClick: () => window.__setMode && window.__setMode(m), title: `${m} horizon` }, m === "INVESTMENT" ? "INVEST" : m))), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "dp-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-row" }, /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-id" }, /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-sym mono" }, /* @__PURE__ */ React.createElement("b", null, ticker.symbol), ticker.live && /* @__PURE__ */ React.createElement("span", { className: "dp-live-badge mono", title: "Not in the seeded universe \u2014 pulled live on-demand" }, "\u26A1 LIVE")), /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-meta dim2" }, /* @__PURE__ */ React.createElement("span", null, ticker.exchange), /* @__PURE__ */ React.createElement("span", null, "\xB7"), /* @__PURE__ */ React.createElement("span", null, ticker._loading ? "fetching live quote\u2026" : ticker.live ? "live quote \xB7 limited history" : `${ticker.sector} \xB7 ${ticker.industry}`), ticker.mcap != null && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", null, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "$", (ticker.mcap / 1e9).toFixed(2), "B")))), /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-actions" }, /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-modeseg seg" }, ["SWING", "POSITION", "INVESTMENT"].map((m) => /* @__PURE__ */ React.createElement("button", { key: m, className: `seg-btn ${mode === m ? "is-on" : ""}`, onClick: () => window.__setMode && window.__setMode(m), title: `${m} horizon` }, m === "INVESTMENT" ? "INVEST" : m))), /* @__PURE__ */ React.createElement(
     "button",
     {
       className: `btn btn--sm ${onWatch ? "is-watched" : ""}`,
@@ -12969,7 +13048,7 @@ function DetailHeader({ ticker, mode, sizeCat, focusMode, onToggleFocus }) {
       title: focusMode ? "Exit focus mode (show scan list)" : "Focus mode (collapse scan list)"
     },
     focusMode ? "\u25C0 Exit Focus" : "\u25C9 Focus"
-  ))), /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-row dp-hdr-quote" }, /* @__PURE__ */ React.createElement("div", { className: "dp-quote-price mono" }, /* @__PURE__ */ React.createElement("b", null, "$", ticker.price.toFixed(2))), /* @__PURE__ */ React.createElement("div", { className: `dp-quote-chg mono ${ticker.chg >= 0 ? "up" : "dn"}` }, ticker.chg >= 0 ? "+" : "", ticker.chgAbs.toFixed(2), " (", ticker.chg.toFixed(2), "%)"), /* @__PURE__ */ React.createElement("div", { className: "dp-quote-extra mono dim" }, /* @__PURE__ */ React.createElement("span", null, "VOL ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, (ticker.vol / 1e6).toFixed(2), "M")), /* @__PURE__ */ React.createElement("span", null, "\xB7 AVG ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, (ticker.avgVol / 1e6).toFixed(2), "M")), /* @__PURE__ */ React.createElement("span", null, "\xB7 RSI ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, ticker.rsi != null ? ticker.rsi.toFixed(1) : "\u2014")), /* @__PURE__ */ React.createElement("span", null, "\xB7 \u03B2 ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, ticker.beta.toFixed(2)))), /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-spacer" }), /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true, dot: true }, "LIVE \xB7 14:23:08 ET"), /* @__PURE__ */ React.createElement(Pill, { tone: "copper", small: true }, secBias(ticker.verdict), " \xB7 ", ticker.score)));
+  ))), /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-row dp-hdr-quote" }, /* @__PURE__ */ React.createElement("div", { className: "dp-quote-price mono" }, /* @__PURE__ */ React.createElement("b", null, ticker.price != null ? "$" + ticker.price.toFixed(2) : ticker._loading ? "\u2026" : "\u2014")), ticker.price != null && ticker.chgAbs != null && /* @__PURE__ */ React.createElement("div", { className: `dp-quote-chg mono ${ticker.chg >= 0 ? "up" : "dn"}` }, ticker.chg >= 0 ? "+" : "", ticker.chgAbs.toFixed(2), " (", ticker.chg.toFixed(2), "%)"), /* @__PURE__ */ React.createElement("div", { className: "dp-quote-extra mono dim" }, ticker.vol != null && /* @__PURE__ */ React.createElement("span", null, "VOL ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, (ticker.vol / 1e6).toFixed(2), "M")), ticker.avgVol != null && /* @__PURE__ */ React.createElement("span", null, "\xB7 AVG ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, (ticker.avgVol / 1e6).toFixed(2), "M")), /* @__PURE__ */ React.createElement("span", null, "\xB7 RSI ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, ticker.rsi != null ? ticker.rsi.toFixed(1) : "\u2014")), /* @__PURE__ */ React.createElement("span", null, "\xB7 \u03B2 ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, ticker.beta != null ? ticker.beta.toFixed(2) : "\u2014"))), /* @__PURE__ */ React.createElement("div", { className: "dp-hdr-spacer" }), /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true, dot: true }, "LIVE \xB7 14:23:08 ET"), ticker.score != null ? /* @__PURE__ */ React.createElement(Pill, { tone: "copper", small: true }, secBias(ticker.verdict), " \xB7 ", ticker.score) : ticker._offUniverse ? /* @__PURE__ */ React.createElement(Pill, { tone: "slate", small: true }, "off-universe \xB7 not scanned") : null));
 }
 function DetailTabs({ lensId, onLensId, sizeCat, tier = 4, variant = "wrap" }) {
   return /* @__PURE__ */ React.createElement("div", { className: `dp-tabs dp-tabs--${variant}` }, /* @__PURE__ */ React.createElement("div", { className: "dp-tabs-scroll" }, LENSES.map((l, i) => {
@@ -33964,6 +34043,9 @@ function App() {
   const handleTickerClick = (sym, lens) => {
     setLensId(lens || "overview");
     const BV = window.__BV;
+    if (BV) {
+      BV._aiTicker = sym;
+    }
     if (BV && BV.ready) {
       const base = BV.detailBase ? BV.detailBase(sym) : BV.detailSync ? BV.detailSync(sym) : null;
       if (base) {
@@ -33972,6 +34054,27 @@ function App() {
           if (full) setTicker((cur) => cur && cur.symbol === sym ? full : cur);
         }).catch(() => {
         });
+      } else if (BV.detailLive) {
+        setTicker({
+          symbol: sym,
+          name: sym,
+          live: true,
+          _loading: true,
+          _offUniverse: true,
+          _pulledAt: Date.now(),
+          price: null,
+          chg: 0,
+          mcap: null,
+          verdict: "\u2014",
+          score: null,
+          pillars: { technical: 50, fundamental: 50, catalyst: 50, risk: 50, edge: 50 },
+          ml: { direction: 0.5, hitNet: 0, magnitude: { lo: 0, mid: 0, hi: 0 }, shap: null },
+          setupStats: { n: null },
+          earnings: { days: null, date: "" }
+        });
+        BV.detailLive(sym).then((full) => {
+          setTicker((cur) => cur && cur.symbol === sym ? full || { ...cur || {}, _loading: false, _noData: true } : cur);
+        }).catch(() => setTicker((cur) => cur && cur.symbol === sym ? { ...cur || {}, _loading: false, _noData: true } : cur));
       } else {
         setTicker({ ...TICKER, symbol: sym, name: sym, live: true, _pulledAt: Date.now() });
       }

@@ -167,6 +167,7 @@ function App() {
     setLensId(lens || "overview");
     // BULLVEDA: build the full detail from REAL scan row + fundamentals + ML + setup ledger.
     const BV = window.__BV;
+    if (BV) { BV._aiTicker = sym; }
     if (BV && BV.ready) {
       // instant: render the scan-row base immediately (no blocking XHR) …
       const base = BV.detailBase ? BV.detailBase(sym) : (BV.detailSync ? BV.detailSync(sym) : null);
@@ -176,6 +177,19 @@ function App() {
         if (BV.detailEnrich) BV.detailEnrich(sym).then(full => {
           if (full) setTicker(cur => (cur && cur.symbol === sym ? full : cur));
         }).catch(() => {});
+      } else if (BV.detailLive) {
+        // OFF-UNIVERSE: not in the scan → fetch a REAL quote + fundamentals.
+        // Show a neutral loading shell (no fabricated price) until it resolves.
+        setTicker({ symbol: sym, name: sym, live: true, _loading: true, _offUniverse: true, _pulledAt: Date.now(),
+          price: null, chg: 0, mcap: null, verdict: "—", score: null,
+          pillars: { technical: 50, fundamental: 50, catalyst: 50, risk: 50, edge: 50 },
+          ml: { direction: 0.5, hitNet: 0, magnitude: { lo: 0, mid: 0, hi: 0 }, shap: null },
+          setupStats: { n: null }, earnings: { days: null, date: "" } });
+        BV.detailLive(sym).then(full => {
+          setTicker(cur => (cur && cur.symbol === sym
+            ? (full || { ...(cur || {}), _loading: false, _noData: true })
+            : cur));
+        }).catch(() => setTicker(cur => (cur && cur.symbol === sym ? { ...(cur || {}), _loading: false, _noData: true } : cur)));
       } else {
         setTicker({ ...TICKER, symbol: sym, name: sym, live: true, _pulledAt: Date.now() });
       }
