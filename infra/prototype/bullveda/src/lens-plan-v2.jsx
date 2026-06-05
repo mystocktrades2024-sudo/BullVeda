@@ -329,8 +329,9 @@ function TradeBlueprint({ pm, size }) {
   const t1Gain = reward1 * qty;
   const t2Gain = reward2 * qty;
 
-  const W = 900, H = 380, padT = 46, padB = 60, padL = 72, padR = 100;
-  const xMin = stop - 1.5, xMax = t2 + 1.5;
+  const W = 900, H = 408, padT = 56, padB = 78, padL = 72, padR = 108;
+  const span = t2 - stop;
+  const xMin = stop - span * 0.16, xMax = t2 + span * 0.16;   // visible flat shelves: −1R floor + T2 ceiling
   const xRange = xMax - xMin;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
@@ -356,19 +357,34 @@ function TradeBlueprint({ pm, size }) {
     { p: t2,    c: "var(--gn)",     lbl: "T2",    v: `$${t2.toFixed(2)}`,    sub: `+$${t2Gain.toFixed(0)}` },
   ];
 
+  // collision-aware 2-row label layout — STOP/ENTRY/NOW pile up when prices are
+  // close, so stagger overlapping markers onto a second row instead of overprinting.
+  const MIN_GAP = 80;
+  const lab = levels.map((m) => ({ ...m, xPos: x(m.p) }));
+  const lastByRow = [-Infinity, -Infinity];
+  [...lab].sort((a, b) => a.xPos - b.xPos).forEach((m) => {
+    if (m.xPos - lastByRow[0] >= MIN_GAP) { m.row = 0; lastByRow[0] = m.xPos; }
+    else if (m.xPos - lastByRow[1] >= MIN_GAP) { m.row = 1; lastByRow[1] = m.xPos; }
+    else { m.row = 0; lastByRow[0] = m.xPos; }
+  });
+
   return (
     <div className="tbv2">
       <div className="tbv2-metrics">
-        <TbMetric label="R:R · T1" value={`${(reward1/risk).toFixed(2)}R`} sub={`+$${t1Gain.toFixed(0)} @ ${qty} sh`} tone="gn" big />
-        <TbMetric label="R:R · T2" value={`${(reward2/risk).toFixed(2)}R`} sub={`+$${t2Gain.toFixed(0)} @ ${qty} sh`} tone="gn" />
-        <TbMetric label="Risk · 1R" value={`$${risk.toFixed(2)}`} sub={`stop · −$${maxLoss.toFixed(0)} @ ${qty} sh`} tone="rd" />
+        <TbMetric label="R:R · T1" value={`${(reward1/risk).toFixed(2)}R`} sub={`+$${t1Gain.toFixed(0)} @ ${qty} sh`} tone="gn" big primary />
+        <TbMetric label="Risk · 1R" value={`$${risk.toFixed(2)}`} sub={`stop · −$${maxLoss.toFixed(0)} @ ${qty} sh`} tone="rd" primary />
+        <TbMetric label="% to T1" value={`+${(reward1/entry*100).toFixed(2)}%`} sub={`$${t1.toFixed(2)}`} tone="gn" primary />
         <TbMetric label="% to Stop" value={`−${(risk/entry*100).toFixed(2)}%`} sub={`$${stop.toFixed(2)}`} tone="rd" />
-        <TbMetric label="% to T1" value={`+${(reward1/entry*100).toFixed(2)}%`} sub={`$${t1.toFixed(2)}`} tone="gn" />
-        <TbMetric label="% to T2" value={`+${(reward2/entry*100).toFixed(2)}%`} sub={`$${t2.toFixed(2)}`} tone="gn" />
-        <TbMetric label="ATR · est" value={`$${atr.toFixed(2)}`} sub={`${(atr/entry*100).toFixed(1)}% · stop÷1.25`} tone="ink" />
-        <TbMetric label="Wilson WR" value={pm.lb != null ? `${(pm.lb*100).toFixed(1)}%` : "—"} sub={`LB · n=${pm.setupStats.n ?? "—"}`} tone="copper" />
+        <TbMetric label="R:R · T2" value={`${(reward2/risk).toFixed(2)}R`} sub={`+$${t2Gain.toFixed(0)} @ ${qty} sh`} tone="gn" secondary />
+        <TbMetric label="% to T2" value={`+${(reward2/entry*100).toFixed(2)}%`} sub={`$${t2.toFixed(2)}`} tone="gn" secondary />
+        <TbMetric label="ATR · est" value={`$${atr.toFixed(2)}`} sub={`${(atr/entry*100).toFixed(1)}% · stop÷1.25`} tone="ink" secondary />
+        <TbMetric label="Wilson WR" value={pm.lb != null ? `${(pm.lb*100).toFixed(1)}%` : "—"} sub={`LB · n=${pm.setupStats.n ?? "—"}`} tone="copper" secondary />
       </div>
 
+      <div className="tbv2-cap mono">
+        <span>P&amp;L ($) at exit · <b>{qty} sh</b> BUY-STOP bracket</span>
+        <span className="dim2">exit price →</span>
+      </div>
       <div className="tbv2-chart">
         <svg viewBox={`0 0 ${W} ${H}`} className="tbv2-svg" preserveAspectRatio="xMidYMid meet">
           <defs>
@@ -401,34 +417,38 @@ function TradeBlueprint({ pm, size }) {
             <path d={`M ${padL} ${y0} L ${samples.map(s => s.join(",")).join(" L ")} L ${W - padR} ${y0} Z`} fill="url(#tbv2-rd)" />
           </g>
 
-          {levels.map((m, i) => (
+          {lab.map((m, i) => {
+            const yTop = padT - 14 - m.row * 23;          // stagger overlapping pills upward
+            const valY = H - padB + 17 + m.row * 27;       // stagger overlapping axis labels downward
+            return (
             <g key={i}>
-              <line x1={x(m.p)} y1={padT - 4} x2={x(m.p)} y2={H - padB + 4}
-                    stroke={m.c} strokeWidth={m.big ? "1.6" : "1.2"}
-                    strokeDasharray={m.dotted ? "2 3" : "4 4"} opacity="0.7"
+              <line x1={m.xPos} y1={yTop + 6} x2={m.xPos} y2={H - padB + 4}
+                    stroke={m.c} strokeWidth={m.big ? "1.6" : "1.1"}
+                    strokeDasharray={m.dotted ? "2 3" : "4 4"} opacity="0.65"
                     style={{ filter: `drop-shadow(0 0 4px ${m.c})` }} />
-              <g transform={`translate(${x(m.p)}, ${padT - 22})`}>
-                <rect x="-32" y="-12" width="64" height="22" rx="11"
-                      fill="color-mix(in oklab, var(--bg-1) 92%, transparent)"
+              <g transform={`translate(${m.xPos}, ${yTop})`}>
+                <rect x="-30" y="-11" width="60" height="20" rx="10"
+                      fill="color-mix(in oklab, var(--bg-1) 94%, transparent)"
                       stroke={m.c} strokeWidth={m.big ? "1.4" : "0.8"}
                       style={{ filter: m.big ? `drop-shadow(0 0 6px ${m.c})` : "none" }} />
-                <text x="0" y="3" fontSize="11" className="mono" textAnchor="middle" fill={m.c}
-                      fontWeight="600" letterSpacing="0.10em">{m.lbl}</text>
+                <text x="0" y="4" fontSize="10.5" className="mono" textAnchor="middle" fill={m.c}
+                      fontWeight="600" letterSpacing="0.08em">{m.lbl}</text>
               </g>
-              <text x={x(m.p)} y={H - padB + 20} fontSize="11" className="mono" textAnchor="middle"
+              <text x={m.xPos} y={valY} fontSize="11" className="mono" textAnchor="middle"
                     fill={m.c} fontWeight="500">{m.v}</text>
-              <text x={x(m.p)} y={H - padB + 34} fontSize="10" className="mono" textAnchor="middle" fill="var(--ink-3)">
+              <text x={m.xPos} y={valY + 13} fontSize="9.5" className="mono" textAnchor="middle" fill="var(--ink-3)">
                 {m.sub}
               </text>
             </g>
-          ))}
+            );
+          })}
 
           <polyline points={samples.map(s => s.join(",")).join(" ")}
                     stroke="var(--ink)" strokeWidth="2.5" fill="none" strokeLinejoin="round"
                     style={{ filter: "drop-shadow(0 0 6px color-mix(in oklab, var(--copper) 60%, transparent))" }} />
 
-          {levels.map((d, i) => (
-            <circle key={i} cx={x(d.p)} cy={y(pnlAt(d.p))} r={d.big ? 6 : 4.5} fill={d.c}
+          {lab.map((d, i) => (
+            <circle key={i} cx={d.xPos} cy={y(pnlAt(d.p))} r={d.big ? 6 : 4.5} fill={d.c}
                     stroke="var(--bg)" strokeWidth="2"
                     style={{ filter: `drop-shadow(0 0 8px ${d.c})` }} />
           ))}
@@ -452,13 +472,6 @@ function TradeBlueprint({ pm, size }) {
           <text x={W - padR + 8} y={y(-maxLoss) + 3} fontSize="10" className="mono" fill="var(--rd)">
             −1.00R
           </text>
-
-          <text x={padL} y={20} fontSize="11" className="mono" fill="var(--ink-2)" letterSpacing="0.14em">
-            P&L · $ ({qty} sh · BUY-STOP bracket)
-          </text>
-          <text x={W - padR} y={H - 8} fontSize="10.5" className="mono" textAnchor="end" fill="var(--ink-3)">
-            price ($)  →
-          </text>
         </svg>
       </div>
 
@@ -472,9 +485,9 @@ function TradeBlueprint({ pm, size }) {
   );
 }
 
-function TbMetric({ label, value, sub, tone, big }) {
+function TbMetric({ label, value, sub, tone, big, primary, secondary }) {
   return (
-    <div className={`tbv2-metric tbv2-metric--${tone} ${big ? "is-big" : ""}`}>
+    <div className={`tbv2-metric tbv2-metric--${tone} ${big ? "is-big" : ""} ${primary ? "is-primary" : ""} ${secondary ? "is-secondary" : ""}`}>
       <div className="tbv2-metric-l label-cap">{label}</div>
       <div className={`tbv2-metric-v mono kpi-tone--${tone}`}>{value}</div>
       <div className="tbv2-metric-s mono dim2">{sub}</div>
