@@ -39,7 +39,16 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
           sub="payoff geometry · stop / entry / T1 / T2 · R-multiples (size-independent)"
           style={headerStyle} right={<StateToggle name="plv2-1" />} />
         <StateWrap state={s1.value} source="Schwab quotes · ATR est (stop÷1.25)">
-          <div className="lens-pad"><TradeBlueprint pm={pm} size={size} /></div>
+          <div className="lens-pad">
+            <TradeBlueprint pm={pm} size={size} />
+            {mode !== "SWING" && (
+              <div className="tbv2-note mono dim2">
+                {ticker._modeReal
+                  ? <>Stop &amp; horizon are <b className="copper">{mode === "POSITION" ? "position" : "investment"}</b>-specific{ticker.stopBasis ? ` (${ticker.stopBasis})` : ""} from the engine. Targets are the shared structural ladder — horizon-scaled targets arrive with the structural-target engine.</>
+                  : <>No {mode.toLowerCase()}-specific decision in this scan — showing the swing ladder with a {mode.toLowerCase()} horizon (targets not fabricated).</>}
+              </div>
+            )}
+          </div>
         </StateWrap>
       </div>
 
@@ -77,7 +86,7 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
       <div className="lens-2col plan-2col">
       <div className="lens-section">
         <SectionHeader n={5} title="Time Anatomy"
-          sub={`hold ~${ticker.holdDays}d · sessions plotted to scale`}
+          sub={`hold ${ticker.holdLabel ? ticker.holdLabel : "~" + ticker.holdDays + "d"} · sessions plotted to scale`}
           style={headerStyle} right={<StateToggle name="plv2-4" />} />
         <StateWrap state={s4.value} source="planner · setup_stats + calendar">
           <div className="lens-pad"><TimeAnatomyV2 ticker={ticker} pm={pm} /></div>
@@ -144,10 +153,31 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
   );
 }
 
+// POSITION / INVESTMENT levels come from the engine's real per-mode decision
+// (decisions_by_mode: mode-specific stop basis 1.25×/1.75× ATR / −15% DD + horizon).
+// SWING is the base ladder. We NO LONGER fabricate targets by constant multipliers;
+// if the engine has no per-mode decision we keep the swing ladder (honest) and only
+// change the plotted horizon. (Targets aren't horizon-scaled until the structural-
+// target engine ships — see _modeReal note in §1.)
 function modeAdjustP2(ticker, mode) {
-  if (mode === "POSITION") return { ...ticker, stop: ticker.stop * 0.96, t1: ticker.t1 * 1.10, t2: ticker.t2 * 1.18, holdDays: 38, rMultiple: 2.21 };
-  if (mode === "INVESTMENT") return { ...ticker, stop: ticker.stop * 0.84, t1: ticker.t1 * 1.32, t2: ticker.t2 * 1.58, holdDays: 180, rMultiple: 2.94 };
-  return ticker;
+  if (mode !== "POSITION" && mode !== "INVESTMENT") return ticker;
+  const nz = (v, f) => (typeof v === "number" && isFinite(v)) ? v : f;
+  const holdPlot = mode === "POSITION" ? 45 : 120;     // plottable horizon for the §5 ribbon
+  const dm = ticker.decisionsByMode || null;
+  const md = dm ? (dm[mode.toLowerCase()] || dm[mode]) : null;
+  if (md && typeof md === "object") {
+    return { ...ticker,
+      stop: nz(md.stop, ticker.stop),
+      t1: nz(md.t1, ticker.t1),
+      t2: nz(md.t2, ticker.t2),
+      pivot: nz(md.entry_mid, ticker.pivot),
+      holdDays: holdPlot,
+      holdLabel: ((md.rulebook || "").split("·")[1] || "").trim() || null,
+      stopBasis: md.stop_basis || null,
+      _modeReal: true,
+    };
+  }
+  return { ...ticker, holdDays: holdPlot, _modeReal: false };   // no per-mode decision → no fabricated targets
 }
 window.modeAdjust = modeAdjustP2;
 

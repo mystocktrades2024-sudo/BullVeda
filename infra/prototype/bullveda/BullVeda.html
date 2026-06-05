@@ -5172,6 +5172,11 @@ body {
   display: flex; justify-content: space-between; align-items: baseline;
   padding: 0 4px 6px; font-size: 11px; color: var(--ink-2); letter-spacing: 0.04em;
 }
+.tbv2-note {
+  margin-top: 10px; padding: 8px 11px; font-size: 10.5px; line-height: 1.5;
+  background: var(--glass-bg-2); border: 1px solid var(--glass-line);
+  border-left: 3px solid var(--copper); border-radius: var(--r-2);
+}
 
 .tbv2-chart {
   background: var(--glass-bg-1);
@@ -23838,7 +23843,7 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "plv2-1" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s1.value, source: "Schwab quotes \xB7 ATR est (stop\xF71.25)" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(TradeBlueprint, { pm, size })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s1.value, source: "Schwab quotes \xB7 ATR est (stop\xF71.25)" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(TradeBlueprint, { pm, size }), mode !== "SWING" && /* @__PURE__ */ React.createElement("div", { className: "tbv2-note mono dim2" }, ticker._modeReal ? /* @__PURE__ */ React.createElement(React.Fragment, null, "Stop & horizon are ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, mode === "POSITION" ? "position" : "investment"), "-specific", ticker.stopBasis ? ` (${ticker.stopBasis})` : "", " from the engine. Targets are the shared structural ladder \u2014 horizon-scaled targets arrive with the structural-target engine.") : /* @__PURE__ */ React.createElement(React.Fragment, null, "No ", mode.toLowerCase(), "-specific decision in this scan \u2014 showing the swing ladder with a ", mode.toLowerCase(), " horizon (targets not fabricated)."))))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 2,
@@ -23879,7 +23884,7 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
     {
       n: 5,
       title: "Time Anatomy",
-      sub: `hold ~${ticker.holdDays}d \xB7 sessions plotted to scale`,
+      sub: `hold ${ticker.holdLabel ? ticker.holdLabel : "~" + ticker.holdDays + "d"} \xB7 sessions plotted to scale`,
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "plv2-4" })
     }
@@ -23944,9 +23949,25 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
   })()))), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 ", mode), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "BUY-STOP LIMIT ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "$", pm.entry.toFixed(2)), " \xB7 stop ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "$", pm.stop.toFixed(2)), " \xB7 T1 ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "$", pm.t1.toFixed(2)), " \xB7", " ", size.sh, " sh \xB7 max risk ", /* @__PURE__ */ React.createElement("b", null, "$", Math.round(size.maxLoss)), " \xB7 ", size.navPct.toFixed(1), "% NAV \xB7 ", /* @__PURE__ */ React.createElement("b", { className: pm.rr1 >= 2 ? "up" : "warn" }, pm.rr1.toFixed(2), "R"), " to T1.")));
 }
 function modeAdjustP2(ticker, mode) {
-  if (mode === "POSITION") return { ...ticker, stop: ticker.stop * 0.96, t1: ticker.t1 * 1.1, t2: ticker.t2 * 1.18, holdDays: 38, rMultiple: 2.21 };
-  if (mode === "INVESTMENT") return { ...ticker, stop: ticker.stop * 0.84, t1: ticker.t1 * 1.32, t2: ticker.t2 * 1.58, holdDays: 180, rMultiple: 2.94 };
-  return ticker;
+  if (mode !== "POSITION" && mode !== "INVESTMENT") return ticker;
+  const nz = (v, f) => typeof v === "number" && isFinite(v) ? v : f;
+  const holdPlot = mode === "POSITION" ? 45 : 120;
+  const dm = ticker.decisionsByMode || null;
+  const md = dm ? dm[mode.toLowerCase()] || dm[mode] : null;
+  if (md && typeof md === "object") {
+    return {
+      ...ticker,
+      stop: nz(md.stop, ticker.stop),
+      t1: nz(md.t1, ticker.t1),
+      t2: nz(md.t2, ticker.t2),
+      pivot: nz(md.entry_mid, ticker.pivot),
+      holdDays: holdPlot,
+      holdLabel: ((md.rulebook || "").split("\xB7")[1] || "").trim() || null,
+      stopBasis: md.stop_basis || null,
+      _modeReal: true
+    };
+  }
+  return { ...ticker, holdDays: holdPlot, _modeReal: false };
 }
 window.modeAdjust = modeAdjustP2;
 const PLAN_NAV = window.__BV && window.__BV.nav || 108420;
