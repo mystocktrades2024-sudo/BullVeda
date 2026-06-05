@@ -2303,6 +2303,8 @@ def _enrich_cockpit_data(data: dict) -> None:
                 "symbols": (a.get("symbols") or [])[:5],
                 "sentiment": label,
                 "polarity": pol,
+                # blurb for the Home featured/Top-Stories cards (was headline-only)
+                "summary": (a.get("content") or a.get("summary") or "").strip().replace("\n", " ")[:240],
                 "_provider": "eodhd",
             })
         data["market_news"] = market_news

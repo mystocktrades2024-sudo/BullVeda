@@ -2886,18 +2886,22 @@ def get_commodity_quotes() -> list[dict]:
     Stooq (free, no key), with a Schwab commodity-ETF proxy fallback when Stooq
     throttles. Label carries the source: bare name = true futures, "·ETF" suffix
     = proxy. Returns [] on total failure (feed-honest)."""
+    # (stooq_sym, label, etf_proxy, divisor) — divisor normalises Stooq's native
+    # units to conventional dollars: COMEX copper & silver quote in cents → ÷100
+    # ($/lb, $/oz); WTI is already $/bbl and gold $/oz. Divisor is scale-only so the
+    # daily % change is unaffected.
     SPEC = [
-        ("cl.f", "WTI",    "USO"),
-        ("gc.f", "GOLD",   "GLD"),
-        ("hg.f", "COPPER", "CPER"),
-        ("si.f", "SILVER", "SLV"),
+        ("cl.f", "WTI",    "USO",  1.0),
+        ("gc.f", "GOLD",   "GLD",  1.0),
+        ("hg.f", "COPPER", "CPER", 100.0),
+        ("si.f", "SILVER", "SLV",  100.0),
     ]
     out: list[dict] = []
     proxies_needed = []
-    for stq, label, etf in SPEC:
+    for stq, label, etf, div in SPEC:
         q = _stooq_quote(stq)
         if q and q.get("price") is not None:
-            out.append({"key": label, "label": label, "value": q["price"], "chg": q.get("chg"), "suffix": ""})
+            out.append({"key": label, "label": label, "value": round(q["price"] / div, 2), "chg": q.get("chg"), "suffix": ""})
         else:
             proxies_needed.append((label, etf))
     # one batched Schwab call for whatever Stooq couldn't serve

@@ -426,58 +426,6 @@ function TopStories({ onTicker }) {
   );
 }
 
-// ─── Market Sentiment ────────────────────────────────────────────
-function MarketSentiment() {
-  const v = 62; // 0-100 fear→greed
-  const tone = v >= 60 ? "gn" : v >= 45 ? "amb" : "rd";
-  const label = v >= 75 ? "EXTREME GREED" : v >= 55 ? "GREED" : v >= 45 ? "NEUTRAL" : v >= 25 ? "FEAR" : "EXTREME FEAR";
-  return (
-    <div className="ms">
-      <div className="ms-gauge">
-        <svg viewBox="0 0 200 116" width="100%" height="116" style={{ overflow: "visible" }}>
-          <defs>
-            <linearGradient id="ms-arc" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="var(--rd)" /><stop offset="50%" stopColor="var(--amb)" /><stop offset="100%" stopColor="var(--gn)" />
-            </linearGradient>
-          </defs>
-          <path d="M 24 104 A 76 76 0 0 1 176 104" stroke="var(--line)" strokeWidth="13" fill="none" strokeLinecap="round" />
-          <path d="M 24 104 A 76 76 0 0 1 176 104" stroke="url(#ms-arc)" strokeWidth="13" fill="none" strokeLinecap="round"
-                style={{ filter: "drop-shadow(0 0 8px color-mix(in oklab, var(--gn) 35%, transparent))" }} />
-          {(() => {
-            const a = -180 + (v / 100) * 180;
-            const tx = 100 + 66 * Math.cos(a * Math.PI / 180);
-            const ty = 104 + 66 * Math.sin(a * Math.PI / 180);
-            return <>
-              <line x1="100" y1="104" x2={tx} y2={ty} stroke="var(--copper)" strokeWidth="3" strokeLinecap="round"
-                    style={{ filter: "drop-shadow(0 0 8px var(--copper))" }} />
-              <circle cx="100" cy="104" r="7" fill="var(--bg-1)" stroke="var(--copper)" strokeWidth="2.5" />
-            </>;
-          })()}
-          <text x="100" y="92" textAnchor="middle" className="mono" fontSize="30" fontWeight="600" fill={`var(--${tone})`}>{v}</text>
-        </svg>
-        <div className={`ms-label mono kpi-tone--${tone}`}>{label}</div>
-      </div>
-      <div className="ms-rows">
-        <MsRow label="News tone 24h" v="+0.42" tone="gn" pct={71} />
-        <MsRow label="Social buzz" v="+0.31" tone="gn" pct={64} />
-        <MsRow label="Put/Call ratio" v="0.78" tone="gn" pct={58} />
-        <MsRow label="Breadth A/D" v="1.84" tone="gn" pct={66} />
-        <MsRow label="VIX percentile" v="32%" tone="gn" pct={32} />
-      </div>
-    </div>
-  );
-}
-
-function MsRow({ label, v, tone, pct }) {
-  return (
-    <div className="ms-row">
-      <span className="mono dim2 ms-row-l">{label}</span>
-      <div className="ms-bar"><div className={`ms-fill ms-fill--${tone}`} style={{ width: `${pct}%` }} /></div>
-      <span className={`mono kpi-tone--${tone} ms-row-v`}>{v}</span>
-    </div>
-  );
-}
-
 // ─── Earnings Today ──────────────────────────────────────────────
 const EARNINGS_MOCK = [
   { sym: "CRWV", when: "BMO", time: "today", beat: 71, tier: "SOLID",  tone: "amb", held: false },
@@ -846,8 +794,10 @@ function resolveNewsBoard() {
     const audited = rows.filter(r => HR.inAudit(r.sym) && HR.num(r.chg, null) != null && HR.num(r.price, null) != null);
     trending = [...audited].sort((a, b) => Math.abs(b.chg) - Math.abs(a.chg)).slice(0, 5)
       .map(r => ({ sym: r.sym, name: r.name, px: px(r.price), chg: r.chg, up: r.chg >= 0 }));
-    gainers = [...audited].sort((a, b) => b.chg - a.chg).slice(0, 4)
-      .map(r => ({ sym: r.sym, name: r.name, px: px(r.price), chg: r.chg }));
+    // "Most active" by dollar-volume — a distinct metric from the Top-movers card
+    // (which is by %), so the two no longer show the same names.
+    gainers = [...audited].filter(r => HR.num(r.dvol, null) != null).sort((a, b) => b.dvol - a.dvol).slice(0, 4)
+      .map(r => ({ sym: r.sym, name: r.name, px: px(r.price), chg: r.chg, dvol: r.dvol }));
   }
   return { featured, leftStack, latest, trending, gainers };
 }
@@ -926,13 +876,16 @@ function NewsMarketsBoard({ onTicker, onSurface }) {
           ))}
         </div>
         <div className="nm-rail-card">
-          <div className="nm-rail-h mono"><span>TOP GAINERS</span><span className="nm-rail-go" onClick={() => onSurface && onSurface("momentum")}>Movers →</span></div>
-          {gainers.map((r, i) => (
+          <div className="nm-rail-h mono"><span>MOST ACTIVE</span><span className="nm-rail-go" onClick={() => onSurface && onSurface("momentum")}>Movers →</span></div>
+          {gainers.map((r, i) => {
+            const dv = r.dvol != null ? (r.dvol >= 1e9 ? "$" + (r.dvol / 1e9).toFixed(1) + "B" : "$" + Math.round(r.dvol / 1e6) + "M") : null;
+            return (
             <button key={i} className="nm-row nm-row--g" onClick={() => onTicker(r.sym)}>
-              <span className="nm-row-l"><b className="nm-row-sym mono">{r.sym}</b><span className="nm-row-name dim2">{r.name}</span></span>
-              <span className="nm-row-r"><span className="nm-row-px mono">{r.px}</span><span className="nm-row-chg mono up">+{r.chg.toFixed(1)}%</span></span>
+              <span className="nm-row-l"><b className="nm-row-sym mono">{r.sym}</b><span className="nm-row-name dim2">{dv || r.name}</span></span>
+              <span className="nm-row-r"><span className="nm-row-px mono">{r.px}</span><span className={`nm-row-chg mono ${r.chg >= 0 ? "up" : "dn"}`}>{r.chg >= 0 ? "+" : ""}{r.chg.toFixed(1)}%</span></span>
             </button>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
@@ -1021,19 +974,6 @@ function HomeHero({ mode, onSurface }) {
   );
 }
 
-function MoodTile({ label, value, tone, delta, pct = 50 }) {
-  return (
-    <div className={`hv-mood-tile hv-mood-tile--${tone}`}>
-      <div className="hv-mt-l mono">{label}</div>
-      <div className={`hv-mt-v mono kpi-tone--${tone}`}>{value}</div>
-      <div className={`hv-mt-meter hv-mt-meter--${tone}`}>
-        <span className="hv-mt-meter-fill" style={{ width: `${Math.max(4, Math.min(100, pct))}%` }} />
-      </div>
-      <div className="hv-mt-s mono dim2">{delta}</div>
-    </div>
-  );
-}
-
 // Market-state one-liner — REAL regime + breadth + fear/greed + VIX + SPY daily.
 function HomeBrief() {
   const M = (window.__BV && window.__BV.market) || null;
@@ -1069,16 +1009,6 @@ function HomeBrief() {
   );
 }
 
-function HomeStat({ label, value, delta, tone }) {
-  return (
-    <div className="hs">
-      <div className="hs-label label-cap">{label}</div>
-      <div className="hs-value mono">{value}</div>
-      <div className={`hs-delta mono kpi-tone--${tone}`}>{delta}</div>
-    </div>
-  );
-}
-
 // ─── Card wrapper ────────────────────────────────────────────────
 function HomeCard({ title, sub, cta, onCta, children }) {
   return (
@@ -1091,129 +1021,6 @@ function HomeCard({ title, sub, cta, onCta, children }) {
         {cta && <button className="hc-cta mono" onClick={onCta}>{cta}</button>}
       </div>
       <div className="hc-body">{children}</div>
-    </div>
-  );
-}
-
-// ─── Top BUY list ────────────────────────────────────────────────
-function HomeTopList({ items, onTicker }) {
-  return (
-    <div className="htl">
-      {items.map((it, i) => (
-        <button key={it.sym} className="htl-row" onClick={() => onTicker(it.sym)}>
-          <span className="htl-rank mono dim">{String(i + 1).padStart(2, "0")}</span>
-          <span className="htl-sym mono"><b>{it.sym}</b></span>
-          <span className="htl-name dim">{it.name}</span>
-          <span className={`htl-chg mono ${it.chg >= 0 ? "up" : "dn"}`}>
-            {it.chg >= 0 ? "+" : ""}{it.chg.toFixed(2)}%
-          </span>
-          <span className="htl-score mono"><b>{it.score}</b></span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// ─── Macro panel ─────────────────────────────────────────────────
-function HomeMacro() {
-  const indicators = [
-    { k: "QQQ vs 50-DMA",    v: "+3.4%",  tone: "gn" },
-    { k: "SPY vs 200-DMA",   v: "+7.2%",  tone: "gn" },
-    { k: "VIX percentile 1y",v: "32%",    tone: "gn" },
-    { k: "Yield-curve 2s10s",v: "+24bp",  tone: "gn", sub: "un-inverted" },
-    { k: "Credit spreads (HY)",v: "342bp", tone: "amb", sub: "stable" },
-    { k: "Dollar (DXY) z",   v: "+0.4",   tone: "ink" },
-  ];
-  return (
-    <div className="macro-list">
-      {indicators.map((m, i) => (
-        <div key={i} className="macro-row">
-          <span className="mono dim2">{m.k}</span>
-          <span className={`mono kpi-tone--${m.tone}`}>{m.v}</span>
-          {m.sub && <span className="mono dim">{m.sub}</span>}
-        </div>
-      ))}
-      <div className="macro-foot">
-        <Pill tone="gn" dot>BULL · LOW-VIX</Pill>
-        <span className="mono dim2">all 6 gates passing · highest WR regime</span>
-      </div>
-    </div>
-  );
-}
-
-// ─── Movers grid ─────────────────────────────────────────────────
-function HomeMovers({ onTicker }) {
-  const movers = useMemoH(() => {
-    return HEATMAP
-      .map(([sym, sector, mcap, chg]) => ({ sym, sector, mcap, chg }))
-      .sort((a, b) => Math.abs(b.chg) - Math.abs(a.chg))
-      .slice(0, 12);
-  }, []);
-  return (
-    <div className="hm-grid">
-      {movers.map(m => (
-        <button key={m.sym} className="hm-cell" onClick={() => onTicker(m.sym)}>
-          <span className="mono hm-sym"><b>{m.sym}</b></span>
-          <span className={`mono hm-chg ${m.chg >= 0 ? "up" : "dn"}`}>
-            {m.chg >= 0 ? "+" : ""}{m.chg.toFixed(1)}%
-          </span>
-          <span className="mono dim2 hm-sector">{m.sector}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// ─── Calendar ────────────────────────────────────────────────────
-function HomeCalendar() {
-  const events = [
-    { d: "May 29", e: "FOMC minutes · 14:00 ET",            tone: "amb", imp: "high" },
-    { d: "May 30", e: "PCE · 08:30 ET",                     tone: "amb", imp: "high" },
-    { d: "Jun 03", e: "ISM Manufacturing PMI",              tone: "ink", imp: "med" },
-    { d: "Jun 05", e: "ECB rate decision",                  tone: "amb", imp: "high" },
-    { d: "Jun 07", e: "NFP payrolls · 08:30 ET",            tone: "amb", imp: "high" },
-    { d: "Jun 09", e: "ARCM · Q1 ER · BMO",                 tone: "copper", imp: "high" },
-  ];
-  return (
-    <div className="cal-list">
-      {events.map((ev, i) => (
-        <div key={i} className={`cl-row cl-${ev.tone}`}>
-          <span className="mono cl-when">{ev.d}</span>
-          <span className="mono cl-evt">{ev.e}</span>
-          <Pill tone={ev.imp === "high" ? "amb" : "ink"} small>{ev.imp}</Pill>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─── Book summary ────────────────────────────────────────────────
-function HomeBook() {
-  return (
-    <div className="hb">
-      <div className="hb-top">
-        <div className="hb-cell">
-          <div className="label-cap">NAV</div>
-          <div className="mono hb-v">{(window.__BV && window.__BV.navStr()) || "$108,420"}</div>
-        </div>
-        <div className="hb-cell">
-          <div className="label-cap">Today</div>
-          <div className="mono hb-v up">+$1,284 · +1.20%</div>
-        </div>
-        <div className="hb-cell">
-          <div className="label-cap">Cash</div>
-          <div className="mono hb-v">$90,628</div>
-        </div>
-      </div>
-      <div className="hb-bar">
-        <div className="hb-seg hb-cash" style={{ width: "83.6%" }} />
-        <div className="hb-seg hb-pos1" style={{ width: "7.4%" }} title="BORA" />
-        <div className="hb-seg hb-pos2" style={{ width: "5.6%" }} title="FLNX" />
-        <div className="hb-seg hb-pos3" style={{ width: "3.4%" }} title="INPR" />
-      </div>
-      <div className="hb-legend mono dim2">
-        Cash 83.6% · BORA 7.4% · FLNX 5.6% · INPR 3.4% · Sleep score <span className="up">A−</span>
-      </div>
     </div>
   );
 }
@@ -1275,121 +1082,6 @@ window.BookStrip = BookStrip;
 
 window.HomeView = HomeView;
 
-// ─── Performance strip ───────────────────────────────────────────
-function HomePerformanceStrip() {
-  return (
-    <div className="hp-strip">
-      <div className="hp-curve">
-        <div className="hp-curve-hdr">
-          <div className="label-cap">Equity curve · 30d</div>
-          <span className="mono dim2">vs SPY benchmark</span>
-        </div>
-        <HpEquityChart />
-        <div className="hp-curve-foot mono">
-          <span><b className="up">+$1,284</b> today</span>
-          <span className="dim2">·</span>
-          <span><span className="label-cap">Sharpe</span> <b>1.84</b></span>
-          <span className="dim2">·</span>
-          <span><span className="label-cap">Max DD</span> <b className="dn">−2.1%</b></span>
-        </div>
-      </div>
-      <div className="hp-stats">
-        <HpStat label="TODAY"   value="+$1,284" delta="+1.20%" tone="gn" />
-        <HpStat label="WTD"     value="+$2,840" delta="+2.68%" tone="gn" />
-        <HpStat label="MTD"     value="+$4,210" delta="+4.04%" tone="gn" />
-        <HpStat label="YTD"     value="+$11,860"delta="+12.27%"tone="gn" sub="vs SPY +9.42%" />
-        <HpStat label="α YTD"   value="+2.85%"  delta="net of fees" tone="copper" />
-        <HpStat label="VOL"     value="14.2%"   delta="annualized"  tone="ink" />
-      </div>
-    </div>
-  );
-}
-
-function HpStat({ label, value, delta, tone, sub }) {
-  return (
-    <div className={`hp-stat hp-stat--${tone}`}>
-      <div className="hp-stat-l mono">{label}</div>
-      <div className={`hp-stat-v mono kpi-tone--${tone}`}>{value}</div>
-      <div className="hp-stat-s mono dim2">{delta}{sub ? ` · ${sub}` : ""}</div>
-    </div>
-  );
-}
-
-function HpEquityChart() {
-  const w = 460, h = 110, padT = 8, padB = 16, padL = 8, padR = 8;
-  const data = [];
-  const spy = [];
-  let v = 0, s = 0;
-  for (let i = 0; i < 30; i++) {
-    v += 0.4 + (Math.sin(i * 0.4) + Math.cos(i * 0.7)) * 0.4 + (Math.random() - 0.42) * 0.5;
-    s += 0.18 + (Math.random() - 0.5) * 0.5;
-    data.push(v); spy.push(s);
-  }
-  const min = Math.min(...data, ...spy, -1);
-  const max = Math.max(...data, ...spy, 14);
-  const x = i => padL + (i / (data.length - 1)) * (w - padL - padR);
-  const y = vv => padT + (1 - (vv - min) / (max - min)) * (h - padT - padB);
-  const pts = data.map((vv, i) => [x(i), y(vv)]);
-  const spyPts = spy.map((vv, i) => [x(i), y(vv)]);
-  return (
-    <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ overflow: "visible" }}>
-      <defs>
-        <linearGradient id="hp-fill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--gn)" stopOpacity="0.30" />
-          <stop offset="100%" stopColor="var(--gn)" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <line x1={padL} y1={y(0)} x2={w - padR} y2={y(0)} stroke="var(--glass-line)" strokeDasharray="2 3" />
-      <path d={`M ${padL} ${y(0)} L ${pts.map(p => p.join(",")).join(" L ")} L ${w - padR} ${y(0)} Z`} fill="url(#hp-fill)" />
-      <polyline points={spyPts.map(p => p.join(",")).join(" ")} stroke="var(--ink-3)" strokeWidth="1.2" fill="none" />
-      <polyline points={pts.map(p => p.join(",")).join(" ")} stroke="var(--gn)" strokeWidth="1.8" fill="none"
-                style={{ filter: "drop-shadow(0 0 5px var(--gn))" }} />
-      <circle cx={pts[pts.length-1][0]} cy={pts[pts.length-1][1]} r="3.5" fill="var(--gn)"
-              style={{ filter: "drop-shadow(0 0 7px var(--gn))" }} />
-    </svg>
-  );
-}
-
-// ─── Active Positions strip ──────────────────────────────────────
-function ActivePositionsStrip({ onTicker }) {
-  const positions = [
-    { sym: "BORA", name: "Bora Industries",   qty: 240, entry: 28.40, last: 31.10, openR: "+1.30R", pl: "+$648",  dist: "+9.5%", days: 8,  tone: "gn" },
-    { sym: "FLNX", name: "Felinex Tech",      qty: 60,  entry: 162.00, last: 168.40, openR: "+0.71R", pl: "+$384", dist: "+3.9%", days: 12, tone: "gn" },
-    { sym: "INPR", name: "Inpera Capital",    qty: 180, entry: 41.20, last: 39.80, openR: "−0.42R", pl: "−$252", dist: "−3.4%", days: 4,  tone: "rd" },
-  ];
-  return (
-    <div className="ap-strip">
-      {positions.map(p => (
-        <button key={p.sym} className={`ap-card ap-card--${p.tone}`} onClick={() => onTicker(p.sym)}>
-          <div className="ap-hdr">
-            <span className="mono ap-sym"><b>{p.sym}</b></span>
-            <span className={`mono ap-pl kpi-tone--${p.tone}`}>{p.pl}</span>
-          </div>
-          <div className="ap-meta mono dim2">{p.name} · {p.qty} sh · held {p.days}d</div>
-          <div className="ap-bars">
-            <div className="ap-bar">
-              <div className="ap-bar-l label-cap">Open R</div>
-              <div className={`ap-bar-v mono kpi-tone--${p.tone}`}>{p.openR}</div>
-            </div>
-            <div className="ap-bar">
-              <div className="ap-bar-l label-cap">Stop dist</div>
-              <div className={`ap-bar-v mono ${p.dist.startsWith("+") ? "up" : "dn"}`}>{p.dist}</div>
-            </div>
-            <div className="ap-bar">
-              <div className="ap-bar-l label-cap">Entry</div>
-              <div className="ap-bar-v mono">${p.entry.toFixed(2)}</div>
-            </div>
-            <div className="ap-bar">
-              <div className="ap-bar-l label-cap">Last</div>
-              <div className="ap-bar-v mono">${p.last.toFixed(2)}</div>
-            </div>
-          </div>
-        </button>
-      ))}
-    </div>
-  );
-}
-
 // ─── Today's Signal Feed ─────────────────────────────────────────
 const SIGNALFEED_MOCK = [
   { t: "06:14", tone: "gn",  tag: "BULLISH", sym: "ARGN", text: "Bias shifted Neutral → Bullish · score 71 → 81" },
@@ -1412,15 +1104,19 @@ function resolveSignalFeed() {
   const bear = rows.filter(r => (r.verdict === "SHORT" || r.verdict === "AVOID") && inA(r)).sort((a, b) => a.score - b.score);
   const ai = rows.filter(r => r.aiEdge != null && inA(r)).sort((a, b) => b.aiEdge - a.aiEdge);
   const M = (window.__BV && window.__BV.market) || null;
+  // all these signals derive from the latest scan bundle → stamp them with the real
+  // scan time (not fabricated clocks). e.g. "2026-06-05 05:15" → "05:15".
+  const sm = (window.__BV && window.__BV.scanMeta) || null;
+  const scanT = (sm && sm.ts && String(sm.ts).split(" ")[1]) ? String(sm.ts).split(" ")[1].slice(0, 5) : "";
   const out = [];
-  if (buys[0]) out.push({ t: "06:14", tone: "gn", tag: "BULLISH", sym: buys[0].sym, text: `BUY verdict · score ${buys[0].score}${buys[0].setup ? " · " + buys[0].setup : ""}` });
-  if (buys[1]) out.push({ t: "05:48", tone: "gn", tag: "ALERT", sym: buys[1].sym, text: `Entry ${buys[1].eq || "in zone"} · R:R ${buys[1].rr}${buys[1].rvol !== "—" ? " · " + buys[1].rvol + "× RVOL" : ""}` });
-  if (er[0]) out.push({ t: "04:22", tone: "amb", tag: "ER", sym: er[0].sym, text: `ER in ${er[0].er} sessions · event-risk elevated` });
-  if (bear[0]) out.push({ t: "03:41", tone: "rd", tag: "BEARISH", sym: bear[0].sym, text: `${bear[0].verdict} · score ${bear[0].score} · excluded from longs` });
+  if (buys[0]) out.push({ t: scanT, tone: "gn", tag: "BULLISH", sym: buys[0].sym, text: `BUY verdict · score ${buys[0].score}${buys[0].setup ? " · " + buys[0].setup : ""}` });
+  if (buys[1]) out.push({ t: scanT, tone: "gn", tag: "ALERT", sym: buys[1].sym, text: `Entry ${buys[1].eq || "in zone"} · R:R ${buys[1].rr}${buys[1].rvol !== "—" ? " · " + buys[1].rvol + "× RVOL" : ""}` });
+  if (er[0]) out.push({ t: scanT, tone: "amb", tag: "ER", sym: er[0].sym, text: `ER in ${er[0].er} sessions · event-risk elevated` });
+  if (bear[0]) out.push({ t: scanT, tone: "rd", tag: "BEARISH", sym: bear[0].sym, text: `${bear[0].verdict} · score ${bear[0].score} · excluded from longs` });
   const _F = realFunnel(window.__tmode) || (M && M.funnel);
-  if (_F) out.push({ t: "02:14", tone: "ink", tag: "BUNDLE", sym: null, text: `Daily bundle · ${_F.universe} ranked · ${_F.bullish} Bullish · ${_F.neutral} Neutral · ${_F.bearish} Bearish` });
-  if (ai[0]) out.push({ t: "23:49", tone: "violet", tag: "AI", sym: ai[0].sym, text: `AI edge +${ai[0].aiEdge.toFixed(2)} · highest hit-net today` });
-  if (ins[0]) out.push({ t: "22:12", tone: "cy", tag: "INSIDER", sym: ins[0].sym, text: `Insider cluster · +${ins[0].insNet} net open-market buys` });
+  if (_F) out.push({ t: scanT, tone: "ink", tag: "BUNDLE", sym: null, text: `Daily bundle · ${_F.universe} ranked · ${_F.bullish} Bullish · ${_F.neutral} Neutral · ${_F.bearish} Bearish` });
+  if (ai[0]) out.push({ t: scanT, tone: "violet", tag: "AI", sym: ai[0].sym, text: `AI edge +${ai[0].aiEdge.toFixed(2)} · highest hit-net today` });
+  if (ins[0]) out.push({ t: scanT, tone: "cy", tag: "INSIDER", sym: ins[0].sym, text: `Insider cluster · +${ins[0].insNet} net open-market buys` });
   return out.length ? out : SIGNALFEED_MOCK;
 }
 
@@ -1436,32 +1132,6 @@ function SignalFeed({ onTicker }) {
           <span className="sf-text mono">{e.text}</span>
         </div>
       ))}
-    </div>
-  );
-}
-
-// ─── Today's Tasks ────────────────────────────────────────────────
-function TodaysTasks() {
-  const tasks = [
-    { done: true,  tag: "PRE-MARKET", text: "Review overnight signals + pre-market gappers", time: "07:00" },
-    { done: true,  tag: "RISK",        text: "Confirm OCO brackets on BORA, FLNX, INPR", time: "08:15" },
-    { done: false, tag: "BRACKET",     text: "Place BUY-STOP $66.18 ARCM · 110 sh · OCO (self-directed)", time: "now",   tone: "copper" },
-    { done: false, tag: "TRIM",        text: "Trim 25% GENO before ER window (T−2 = May 30)", time: "EOD" },
-    { done: false, tag: "JOURNAL",     text: "Write 1-paragraph thesis for ARCM entry", time: "after fill" },
-    { done: false, tag: "RESEARCH",    text: "Read FOMC minutes (Wed 14:00) · score regime impact", time: "Wed" },
-    { done: false, tag: "ALERT",       text: "Wire alert: XLB < 50-DMA on +1.5σ volume", time: "EOD" },
-  ];
-  return (
-    <div className="tt">
-      {tasks.map((t, i) => (
-        <div key={i} className={`tt-row ${t.done ? "is-done" : ""} ${t.tone ? `tt-${t.tone}` : ""}`}>
-          <span className="tt-check">{t.done ? "✓" : ""}</span>
-          <span className={`tt-tag mono`}>{t.tag}</span>
-          <span className="tt-text">{t.text}</span>
-          <span className="tt-time mono dim2">{t.time}</span>
-        </div>
-      ))}
-      <div className="tt-foot mono dim2">2 of 7 done · 5 pending · 1 priority (copper)</div>
     </div>
   );
 }
