@@ -5177,6 +5177,16 @@ body {
   background: var(--glass-bg-2); border: 1px solid var(--glass-line);
   border-left: 3px solid var(--copper); border-radius: var(--r-2);
 }
+.tbv2-scale {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+  padding: 9px 12px; font-size: 11px; line-height: 1.5;
+  background: var(--glass-bg-1); border: 1px solid var(--glass-line);
+  border-left: 3px solid var(--gn); border-radius: var(--r-2);
+}
+.tbv2-scale .label-cap { color: var(--gn); margin-right: 2px; }
+.tbv2-scale-sep { color: var(--ink-3); }
+.sw-navtag { margin-left: 8px; color: var(--gn); font-weight: 500; }
+.sw-navtag.is-demo { color: var(--amb); }
 
 .tbv2-chart {
   background: var(--glass-bg-1);
@@ -23970,13 +23980,25 @@ function modeAdjustP2(ticker, mode) {
   return { ...ticker, holdDays: holdPlot, _modeReal: false };
 }
 window.modeAdjust = modeAdjustP2;
-const PLAN_NAV = window.__BV && window.__BV.nav || 108420;
+function getPlanNav() {
+  const bv = window.__BV && typeof window.__BV.nav === "number" ? window.__BV.nav : null;
+  if (bv && bv > 0) return { nav: bv, demo: false };
+  try {
+    if (window.MyPF) {
+      const s = window.MyPF.summarize(window.MyPF.combined());
+      if (s && s.totalValue > 0) return { nav: s.totalValue, demo: false };
+    }
+  } catch (e) {
+  }
+  return { nav: 1e5, demo: true };
+}
 function planMath(t) {
   const L = window.coherentLevels ? window.coherentLevels(t) : { price: t.price, pivot: t.pivot, stop: t.stop, t1: t.t1, t2: t.t2 };
   const entry = +(L.pivot * 1.002).toFixed(2);
   const risk = Math.max(0.01, entry - L.stop);
   const rr1 = (L.t1 - entry) / risk;
   const rr2 = (L.t2 - entry) / risk;
+  const { nav: PLAN_NAV, demo: navDemo } = getPlanNav();
   const riskBudget = Math.round(PLAN_NAV * 39e-4);
   const baseShares = Math.max(1, Math.round(riskBudget / risk));
   const ss = t.setupStats || {};
@@ -23997,6 +24019,7 @@ function planMath(t) {
     rr1,
     rr2,
     NAV: PLAN_NAV,
+    navDemo,
     riskBudget,
     baseShares,
     wr,
@@ -24005,6 +24028,10 @@ function planMath(t) {
     kelly,
     atr,
     levelsValid,
+    spread: t.spread,
+    dvol: t.dvol,
+    beta: t.beta,
+    sector: t.sector,
     holdDays: t.holdDays,
     earnings: t.earnings || { days: null, date: "" },
     setupStats: ss
@@ -24027,13 +24054,16 @@ function planSize(pm, sizeMult, kellyFrac) {
 window.planMath = planMath;
 window.planSize = planSize;
 function FillRealism({ pm, size }) {
-  var _a, _b;
   const shares = size.sh;
   const signal = pm.entry;
-  const code = (((_a = pm.symbol) == null ? void 0 : _a.charCodeAt(0)) || 70) + (((_b = pm.symbol) == null ? void 0 : _b.charCodeAt(1)) || 70);
-  const gapBps = 5 + code % 6;
-  const spreadBps = 3 + code % 5;
-  const slipBps = 5 + code % 7;
+  const spreadPct = typeof pm.spread === "number" && pm.spread > 0 ? pm.spread : null;
+  const dvol = typeof pm.dvol === "number" && pm.dvol > 0 ? pm.dvol : null;
+  const beta = typeof pm.beta === "number" && pm.beta > 0 ? pm.beta : 1;
+  const real = spreadPct != null && dvol != null;
+  const participationPct = dvol != null ? size.notional / dvol * 100 : 0.02;
+  const spreadBps = spreadPct != null ? Math.max(1, Math.round(spreadPct * 50)) : 4;
+  const slipBps = Math.max(1, Math.round(10 * Math.sqrt(Math.max(participationPct, 1e-4))));
+  const gapBps = Math.max(2, Math.round(beta * 3));
   const nextOpen = signal * (1 + gapBps / 1e4);
   const halfSpread = signal * spreadBps / 1e4;
   const slip = signal * slipBps / 1e4;
@@ -24041,7 +24071,7 @@ function FillRealism({ pm, size }) {
   const slipCost = Math.round((fill - signal) * shares);
   const slipPct = (fill / signal - 1) * 100;
   const stop = pm.stop;
-  const stopGapBps = 10 + code % 14;
+  const stopGapBps = Math.max(4, Math.round(beta * 6));
   const stopFill = +(stop * (1 - stopGapBps / 1e4)).toFixed(2);
   const stopExtra = Math.round((stop - stopFill) * shares);
   const t1 = pm.t1;
@@ -24055,7 +24085,7 @@ function FillRealism({ pm, size }) {
     { l: "Slippage", v: `+${slipBps}bp`, s: "market impact", tone: "amb", add: true },
     { l: "Realistic fill", v: `$${fill.toFixed(2)}`, s: `${slipPct >= 0 ? "+" : ""}${slipPct.toFixed(2)}%`, tone: "rd", strong: true }
   ];
-  return /* @__PURE__ */ React.createElement("div", { className: "fr" }, /* @__PURE__ */ React.createElement("div", { className: "fr-hd" }, /* @__PURE__ */ React.createElement("span", { className: "fr-tag mono" }, "FILL REALISM \xB7 MODELED"), /* @__PURE__ */ React.createElement("span", { className: "fr-sub mono dim2" }, "modeled friction (bps) \u2014 not the signal price \xB7 live spread/ADV pending")), /* @__PURE__ */ React.createElement("div", { className: "fr-flow" }, steps.map((st, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("div", { className: `fr-step ${st.strong ? "is-strong" : ""}` }, /* @__PURE__ */ React.createElement("span", { className: "fr-step-l mono dim2" }, st.l), /* @__PURE__ */ React.createElement("span", { className: `fr-step-v mono kpi-tone--${st.tone}` }, st.v), /* @__PURE__ */ React.createElement("span", { className: "fr-step-s mono dim2" }, st.s)), i < steps.length - 1 && /* @__PURE__ */ React.createElement("span", { className: "fr-arrow mono" }, steps[i + 1].add ? "+" : "\u2192")))), /* @__PURE__ */ React.createElement("div", { className: "fr-kpis" }, /* @__PURE__ */ React.createElement("div", { className: "fr-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Entry slippage"), /* @__PURE__ */ React.createElement("span", { className: "mono kpi-tone--rd fr-kpi-v" }, "\u2212$", Math.abs(slipCost)), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, slipPct.toFixed(2), "% \xB7 ", shares, " sh")), /* @__PURE__ */ React.createElement("div", { className: "fr-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Stop gap-fill"), /* @__PURE__ */ React.createElement("span", { className: "mono kpi-tone--rd fr-kpi-v" }, "$", stopFill.toFixed(2)), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "\u2212$", stopExtra, " vs $", stop.toFixed(2))), /* @__PURE__ */ React.createElement("div", { className: "fr-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "R:R ideal \u2192 real"), /* @__PURE__ */ React.createElement("span", { className: "mono fr-kpi-v" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, rrIdeal.toFixed(2), "\u2192"), /* @__PURE__ */ React.createElement("b", { className: rrReal >= 2 ? "up" : "warn" }, rrReal.toFixed(2))), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "after fills")), /* @__PURE__ */ React.createElement("div", { className: "fr-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Round-trip friction"), /* @__PURE__ */ React.createElement("span", { className: "mono kpi-tone--amb fr-kpi-v" }, "\u2212$", rtCost), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "in + out"))), /* @__PURE__ */ React.createElement("div", { className: "fr-read mono dim2" }, "A stop-buy fills at the ", /* @__PURE__ */ React.createElement("b", null, "next bar's open + spread + slippage"), ", not your signal price \u2014 so on this ", /* @__PURE__ */ React.createElement("b", null, "modeled"), " friction the entry costs ~", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "\u2212$", Math.abs(slipCost)), " (", slipPct.toFixed(2), "%) and the stop can gap ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "$", stopExtra), " worse, dropping real R:R to ", /* @__PURE__ */ React.createElement("b", { className: rrReal >= 2 ? "up" : "warn" }, rrReal.toFixed(2)), ". These bps are a ", /* @__PURE__ */ React.createElement("b", null, "placeholder model"), " until live spread/ADV is wired \u2014 Paper P&L & Track Record already score actual fills."));
+  return /* @__PURE__ */ React.createElement("div", { className: "fr" }, /* @__PURE__ */ React.createElement("div", { className: "fr-hd" }, /* @__PURE__ */ React.createElement("span", { className: "fr-tag mono" }, "FILL REALISM \xB7 ", real ? "LIVE" : "MODELED"), /* @__PURE__ */ React.createElement("span", { className: "fr-sub mono dim2" }, real ? `spread ${spreadPct.toFixed(2)}% \xB7 ADV $${dvol >= 1e9 ? (dvol / 1e9).toFixed(1) + "B" : (dvol / 1e6).toFixed(0) + "M"} \xB7 \u03B2 ${beta.toFixed(2)} \xB7 ${participationPct < 0.01 ? "<0.01" : participationPct.toFixed(2)}% of daily vol` : "live spread/ADV unavailable \u2014 modeled from \u03B2")), /* @__PURE__ */ React.createElement("div", { className: "fr-flow" }, steps.map((st, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("div", { className: `fr-step ${st.strong ? "is-strong" : ""}` }, /* @__PURE__ */ React.createElement("span", { className: "fr-step-l mono dim2" }, st.l), /* @__PURE__ */ React.createElement("span", { className: `fr-step-v mono kpi-tone--${st.tone}` }, st.v), /* @__PURE__ */ React.createElement("span", { className: "fr-step-s mono dim2" }, st.s)), i < steps.length - 1 && /* @__PURE__ */ React.createElement("span", { className: "fr-arrow mono" }, steps[i + 1].add ? "+" : "\u2192")))), /* @__PURE__ */ React.createElement("div", { className: "fr-kpis" }, /* @__PURE__ */ React.createElement("div", { className: "fr-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Entry slippage"), /* @__PURE__ */ React.createElement("span", { className: "mono kpi-tone--rd fr-kpi-v" }, "\u2212$", Math.abs(slipCost)), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, slipPct.toFixed(2), "% \xB7 ", shares, " sh")), /* @__PURE__ */ React.createElement("div", { className: "fr-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Stop gap-fill"), /* @__PURE__ */ React.createElement("span", { className: "mono kpi-tone--rd fr-kpi-v" }, "$", stopFill.toFixed(2)), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "\u2212$", stopExtra, " vs $", stop.toFixed(2))), /* @__PURE__ */ React.createElement("div", { className: "fr-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "R:R ideal \u2192 real"), /* @__PURE__ */ React.createElement("span", { className: "mono fr-kpi-v" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, rrIdeal.toFixed(2), "\u2192"), /* @__PURE__ */ React.createElement("b", { className: rrReal >= 2 ? "up" : "warn" }, rrReal.toFixed(2))), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "after fills")), /* @__PURE__ */ React.createElement("div", { className: "fr-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Round-trip friction"), /* @__PURE__ */ React.createElement("span", { className: "mono kpi-tone--amb fr-kpi-v" }, "\u2212$", rtCost), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "in + out"))), /* @__PURE__ */ React.createElement("div", { className: "fr-read mono dim2" }, "A stop-buy fills at the ", /* @__PURE__ */ React.createElement("b", null, "next bar's open + spread + slippage"), ", not your signal price \u2014 so the entry costs ~", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "\u2212$", Math.abs(slipCost)), " (", slipPct.toFixed(2), "%) and the stop can gap ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "$", stopExtra), " worse, dropping real R:R to ", /* @__PURE__ */ React.createElement("b", { className: rrReal >= 2 ? "up" : "warn" }, rrReal.toFixed(2)), ". ", real ? /* @__PURE__ */ React.createElement(React.Fragment, null, "Friction is computed from this name's ", /* @__PURE__ */ React.createElement("b", null, "live spread, ADV participation & beta"), ".") : /* @__PURE__ */ React.createElement(React.Fragment, null, "Live spread/ADV is missing here, so friction is ", /* @__PURE__ */ React.createElement("b", null, "modeled from beta"), "."), " Paper P&L & Track Record score actual fills."));
 }
 function PlanActionPanel({ pm, size, mode, sym, family }) {
   const [msg, setMsg] = useStateP2(null);
@@ -24133,6 +24163,10 @@ function TradeBlueprint({ pm, size }) {
   const maxLoss = risk * qty;
   const t1Gain = reward1 * qty;
   const t2Gain = reward2 * qty;
+  const thirdSh = Math.max(1, Math.round(qty / 3));
+  const runnerSh = Math.max(0, qty - thirdSh);
+  const t1Lock = thirdSh * (t1 - entry);
+  const runnerT2 = runnerSh * (t2 - entry);
   const W = 900, H = 408, padT = 56, padB = 78, padL = 72, padR = 108;
   const span = t2 - stop;
   const xMin = stop - span * 0.16, xMax = t2 + span * 0.16;
@@ -24285,7 +24319,7 @@ function TradeBlueprint({ pm, size }) {
     pnl > 0 ? "+" : "",
     "$",
     Math.abs(pnl).toFixed(0)
-  ))), /* @__PURE__ */ React.createElement("text", { x: W - padR + 8, y: y(t2Gain) + 3, fontSize: "10", className: "mono", fill: "var(--gn)" }, "+", (reward2 / risk).toFixed(2), "R"), /* @__PURE__ */ React.createElement("text", { x: W - padR + 8, y: y(t1Gain) + 3, fontSize: "10", className: "mono", fill: "var(--gn)" }, "+", (reward1 / risk).toFixed(2), "R"), /* @__PURE__ */ React.createElement("text", { x: W - padR + 8, y: y(-maxLoss) + 3, fontSize: "10", className: "mono", fill: "var(--rd)" }, "\u22121.00R"))), /* @__PURE__ */ React.createElement("div", { className: "tbv2-legend mono" }, /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "tbv2-leg-dot tbv2-leg-cop" }), " bracket payoff \xB7 stop \u2192 T2 capped"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "tbv2-leg-dot tbv2-leg-gn" }), " profit zone"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "tbv2-leg-dot tbv2-leg-rd" }), " loss zone"), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "price on X \xB7 $ P&L on Y \xB7 R-mult on right axis")));
+  ))), /* @__PURE__ */ React.createElement("text", { x: W - padR + 8, y: y(t2Gain) + 3, fontSize: "10", className: "mono", fill: "var(--gn)" }, "+", (reward2 / risk).toFixed(2), "R"), /* @__PURE__ */ React.createElement("text", { x: W - padR + 8, y: y(t1Gain) + 3, fontSize: "10", className: "mono", fill: "var(--gn)" }, "+", (reward1 / risk).toFixed(2), "R"), /* @__PURE__ */ React.createElement("text", { x: W - padR + 8, y: y(-maxLoss) + 3, fontSize: "10", className: "mono", fill: "var(--rd)" }, "\u22121.00R"))), /* @__PURE__ */ React.createElement("div", { className: "tbv2-legend mono" }, /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "tbv2-leg-dot tbv2-leg-cop" }), " bracket payoff \xB7 stop \u2192 T2 capped"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "tbv2-leg-dot tbv2-leg-gn" }), " profit zone"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "tbv2-leg-dot tbv2-leg-rd" }), " loss zone"), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "price on X \xB7 $ P&L on Y \xB7 R-mult on right axis")), /* @__PURE__ */ React.createElement("div", { className: "tbv2-scale mono" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Scale-out"), /* @__PURE__ */ React.createElement("span", null, "Sell ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "\u2153 (", thirdSh, " sh)"), " at T1 \u2192 ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "+$", Math.round(t1Lock)), " locked, stop\u2192breakeven"), /* @__PURE__ */ React.createElement("span", { className: "tbv2-scale-sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", null, "Runner ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, runnerSh, " sh"), " to T2 \u2192 ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "+$", Math.round(runnerT2))), /* @__PURE__ */ React.createElement("span", { className: "tbv2-scale-sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "after the T1 partial + stop\u2192BE, the runner is ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "risk-free"))));
 }
 function TbMetric({ label, value, sub, tone, big, primary, secondary }) {
   return /* @__PURE__ */ React.createElement("div", { className: `tbv2-metric tbv2-metric--${tone} ${big ? "is-big" : ""} ${primary ? "is-primary" : ""} ${secondary ? "is-secondary" : ""}` }, /* @__PURE__ */ React.createElement("div", { className: "tbv2-metric-l label-cap" }, label), /* @__PURE__ */ React.createElement("div", { className: `tbv2-metric-v mono kpi-tone--${tone}` }, value), /* @__PURE__ */ React.createElement("div", { className: "tbv2-metric-s mono dim2" }, sub));
@@ -24329,7 +24363,7 @@ function SizingWorkbench({ pm, size, sizeMult, onSizeMult, kellyFrac, onKellyFra
       tone: pm.evR == null ? "ink" : pm.evR >= 0 ? "gn" : "rd",
       sub: pm.evR != null ? `${pm.evR.toFixed(2)}R \xD7 ${sh} sh` : "no ledger edge"
     }
-  )), /* @__PURE__ */ React.createElement("div", { className: "sw-gates" }, /* @__PURE__ */ React.createElement("div", { className: "sw-gates-cap label-cap" }, "Live size caps \xB7 recompute as you size \xB7 full go/no-go in \xA73"), /* @__PURE__ */ React.createElement(SwGate, { label: "Max loss \u2264 0.75% NAV", v: lossNavPct.toFixed(2) + "%", pass: lossNavPct <= 0.75 }), /* @__PURE__ */ React.createElement(SwGate, { label: "% NAV \u2264 10%", v: navPct.toFixed(1) + "%", pass: navPct <= 10 }), /* @__PURE__ */ React.createElement(SwGate, { label: "R-mult \u2265 1.5", v: (reward / risk).toFixed(2) + "R", pass: reward / risk >= 1.5 })));
+  )), /* @__PURE__ */ React.createElement("div", { className: "sw-gates" }, /* @__PURE__ */ React.createElement("div", { className: "sw-gates-cap label-cap" }, "Live size caps \xB7 recompute as you size \xB7 full go/no-go in \xA73", pm.navDemo ? /* @__PURE__ */ React.createElement("span", { className: "sw-navtag is-demo" }, " NAV $100k (demo \u2014 connect account)") : /* @__PURE__ */ React.createElement("span", { className: "sw-navtag" }, " NAV $", Math.round(pm.NAV).toLocaleString(), " (live)")), /* @__PURE__ */ React.createElement(SwGate, { label: "Max loss \u2264 0.75% NAV", v: lossNavPct.toFixed(2) + "%", pass: lossNavPct <= 0.75 }), /* @__PURE__ */ React.createElement(SwGate, { label: "% NAV \u2264 10%", v: navPct.toFixed(1) + "%", pass: navPct <= 10 }), /* @__PURE__ */ React.createElement(SwGate, { label: "R-mult \u2265 1.5", v: (reward / risk).toFixed(2) + "R", pass: reward / risk >= 1.5 })));
 }
 function SwTile({ label, value, tone, sub }) {
   return /* @__PURE__ */ React.createElement("div", { className: `sw-tile sw-tile--${tone}` }, /* @__PURE__ */ React.createElement("div", { className: "sw-tile-l label-cap" }, label), /* @__PURE__ */ React.createElement("div", { className: `sw-tile-v mono kpi-tone--${tone}` }, value), sub && /* @__PURE__ */ React.createElement("div", { className: "sw-tile-s mono dim2" }, sub));
@@ -24483,11 +24517,25 @@ function PlaybookTree({ mode, pm }) {
   return /* @__PURE__ */ React.createElement("div", { className: "pbk" }, branches.map((b, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "pbk-branch" }, /* @__PURE__ */ React.createElement("div", { className: "pbk-tag mono" }, b.tag), /* @__PURE__ */ React.createElement("div", { className: "pbk-paths" }, b.scenarios.map((s, j) => /* @__PURE__ */ React.createElement("div", { key: j, className: `pbk-path pbk-${s.tone}` }, /* @__PURE__ */ React.createElement("span", { className: "pbk-cond" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "IF"), " ", s.cond), /* @__PURE__ */ React.createElement("span", { className: "pbk-arrow mono" }, "\u2192"), /* @__PURE__ */ React.createElement("span", { className: "pbk-then" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "THEN"), " ", s.then)))))));
 }
 function AuditLog({ pm, size }) {
+  let bookSub = "book unavailable", bookTxt = "Book concentration check";
+  try {
+    if (window.MyPF) {
+      const pf = window.MyPF.combined();
+      const hold = pf && pf.holdings || [];
+      const n = hold.length;
+      const held = hold.some((h) => (h.sym || "").toUpperCase() === pm.symbol);
+      bookTxt = `Book concentration \xB7 ${n} open position${n === 1 ? "" : "s"}${held ? " \xB7 ALREADY HELD" : ""}`;
+      bookSub = n === 0 ? "book empty \u2014 no concentration risk" : held ? "adding to an existing name" : "no overlap with this name";
+    }
+  } catch (e) {
+  }
+  const beta = typeof pm.beta === "number" && pm.beta > 0 ? pm.beta : 1;
+  const gapMult = 1 + Math.min(1.5, beta * 0.5);
   const items = [
     { phase: "PRE-FILL", item: `OCO bracket constructed \xB7 stop $${pm.stop.toFixed(2)} + T1 $${pm.t1.toFixed(2)} + T2 $${pm.t2.toFixed(2)}`, done: true },
     { phase: "PRE-FILL", item: `Sizing approved \xB7 ${size.sh} sh \xB7 ${size.navPct.toFixed(1)}% NAV \xB7 max risk $${Math.round(size.maxLoss)}`, done: true },
-    { phase: "PRE-FILL", item: "Correlation-to-book check \u2264 0.55", done: true, sub: "est \xB7 live book corr pending" },
-    { phase: "PRE-FILL", item: `Sleep-test \xB7 max-down $${Math.round(size.maxLoss * 1.8)} \u2265 \u2212$${Math.round(size.maxLoss)}`, done: true },
+    { phase: "PRE-FILL", item: bookTxt, done: true, sub: bookSub },
+    { phase: "PRE-FILL", item: `Sleep-test \xB7 \u03B2-gap worst-case \u2212$${Math.round(size.maxLoss * gapMult)} vs \u2212$${Math.round(size.maxLoss)} planned`, done: true, sub: `\u03B2 ${beta.toFixed(2)} overnight gap` },
     { phase: "PRE-FILL", item: pm.earnings.days != null ? `ER alert \xB7 T\u22122 reminder set (ER in ${pm.earnings.days}d)` : "ER alert \xB7 none in hold window", done: true },
     { phase: "FILL", item: "Order acknowledged by Alpaca (paper) \xB7 OCO IDs assigned", done: false, sub: "awaits trigger" },
     { phase: "POST-FILL", item: "Position added to portfolio_state \xB7 risk recompute", done: false },

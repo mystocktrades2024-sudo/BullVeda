@@ -184,14 +184,23 @@ window.modeAdjust = modeAdjustP2;
 // ── planMath — ONE source of truth for levels, geometry, base sizing ──
 // Reads coherentLevels (same as Overview), so the Plan tab can never drift
 // from the chart/ladder. All $ figures derive from a fixed risk budget.
-const PLAN_NAV = (window.__BV && window.__BV.nav) || 108420;
+// Real account NAV: live portfolio equity (__BV.nav) → MyPF rollup → labeled demo.
+function getPlanNav() {
+  const bv = (window.__BV && typeof window.__BV.nav === "number") ? window.__BV.nav : null;
+  if (bv && bv > 0) return { nav: bv, demo: false };
+  try {
+    if (window.MyPF) { const s = window.MyPF.summarize(window.MyPF.combined()); if (s && s.totalValue > 0) return { nav: s.totalValue, demo: false }; }
+  } catch (e) {}
+  return { nav: 100000, demo: true };
+}
 function planMath(t) {
   const L = window.coherentLevels ? window.coherentLevels(t) : { price: t.price, pivot: t.pivot, stop: t.stop, t1: t.t1, t2: t.t2 };
   const entry = +(L.pivot * 1.002).toFixed(2);          // BUY-STOP just over the pivot
   const risk = Math.max(0.01, entry - L.stop);
   const rr1 = (L.t1 - entry) / risk;
   const rr2 = (L.t2 - entry) / risk;
-  const riskBudget = Math.round(PLAN_NAV * 0.0039);     // ≈ $423 · 0.39% NAV per trade
+  const { nav: PLAN_NAV, demo: navDemo } = getPlanNav();
+  const riskBudget = Math.round(PLAN_NAV * 0.0039);     // 0.39% NAV per trade
   const baseShares = Math.max(1, Math.round(riskBudget / risk));
   const ss = t.setupStats || {};
   // never fabricate edge — null when the setup has no ledger history (n<1)
@@ -202,7 +211,8 @@ function planMath(t) {
   const atr = +(risk / 1.25).toFixed(2);                 // ATR est: system stop = 1.25×ATR ⇒ ATR ≈ risk/1.25
   const levelsValid = (L.valid !== false) && L.stop > 0 && entry > L.stop && L.t1 > entry && L.t2 > L.t1;
   return { symbol: t.symbol, price: L.price, entry, stop: L.stop, t1: L.t1, t2: L.t2,
-           risk, rr1, rr2, NAV: PLAN_NAV, riskBudget, baseShares, wr, lb, evR, kelly, atr, levelsValid,
+           risk, rr1, rr2, NAV: PLAN_NAV, navDemo, riskBudget, baseShares, wr, lb, evR, kelly, atr, levelsValid,
+           spread: t.spread, dvol: t.dvol, beta: t.beta, sector: t.sector,
            holdDays: t.holdDays, earnings: t.earnings || { days: null, date: "" }, setupStats: ss };
 }
 // live sizing — scales base shares by the workbench sliders
@@ -219,10 +229,15 @@ window.planMath = planMath; window.planSize = planSize;
 function FillRealism({ pm, size }) {
   const shares = size.sh;
   const signal = pm.entry;                              // the price the plan shows
-  const code = (pm.symbol?.charCodeAt(0) || 70) + (pm.symbol?.charCodeAt(1) || 70);
-  const gapBps = 5 + (code % 6);                        // next-bar open drift (stop-buy fills at open)
-  const spreadBps = 3 + (code % 5);                    // half-spread paid
-  const slipBps = 5 + (code % 7);                      // market-impact slippage
+  // Real frictions from live spread % + ADV participation + beta (square-root impact).
+  const spreadPct = (typeof pm.spread === "number" && pm.spread > 0) ? pm.spread : null;
+  const dvol = (typeof pm.dvol === "number" && pm.dvol > 0) ? pm.dvol : null;
+  const beta = (typeof pm.beta === "number" && pm.beta > 0) ? pm.beta : 1.0;
+  const real = spreadPct != null && dvol != null;
+  const participationPct = dvol != null ? (size.notional / dvol) * 100 : 0.02;  // % of daily $-vol
+  const spreadBps = spreadPct != null ? Math.max(1, Math.round(spreadPct * 50)) : 4;  // half-spread
+  const slipBps = Math.max(1, Math.round(10 * Math.sqrt(Math.max(participationPct, 0.0001))));  // √-impact
+  const gapBps = Math.max(2, Math.round(beta * 3));     // next-bar open drift, scales with beta
   const nextOpen = signal * (1 + gapBps / 1e4);
   const halfSpread = signal * spreadBps / 1e4;
   const slip = signal * slipBps / 1e4;
@@ -230,7 +245,7 @@ function FillRealism({ pm, size }) {
   const slipCost = Math.round((fill - signal) * shares);
   const slipPct = (fill / signal - 1) * 100;
   const stop = pm.stop;
-  const stopGapBps = 10 + (code % 14);                  // stops fill worse on gaps
+  const stopGapBps = Math.max(4, Math.round(beta * 6)); // stops gap worse on adverse moves, scales with beta
   const stopFill = +(stop * (1 - stopGapBps / 1e4)).toFixed(2);
   const stopExtra = Math.round((stop - stopFill) * shares);
   const t1 = pm.t1;
@@ -247,8 +262,12 @@ function FillRealism({ pm, size }) {
   return (
     <div className="fr">
       <div className="fr-hd">
-        <span className="fr-tag mono">FILL REALISM · MODELED</span>
-        <span className="fr-sub mono dim2">modeled friction (bps) — not the signal price · live spread/ADV pending</span>
+        <span className="fr-tag mono">FILL REALISM · {real ? "LIVE" : "MODELED"}</span>
+        <span className="fr-sub mono dim2">
+          {real
+            ? `spread ${spreadPct.toFixed(2)}% · ADV $${dvol >= 1e9 ? (dvol/1e9).toFixed(1)+"B" : (dvol/1e6).toFixed(0)+"M"} · β ${beta.toFixed(2)} · ${participationPct < 0.01 ? "<0.01" : participationPct.toFixed(2)}% of daily vol`
+            : "live spread/ADV unavailable — modeled from β"}
+        </span>
       </div>
       <div className="fr-flow">
         {steps.map((st, i) => (
@@ -269,7 +288,7 @@ function FillRealism({ pm, size }) {
         <div className="fr-kpi"><span className="label-cap">Round-trip friction</span><span className="mono kpi-tone--amb fr-kpi-v">−${rtCost}</span><span className="mono dim2">in + out</span></div>
       </div>
       <div className="fr-read mono dim2">
-        A stop-buy fills at the <b>next bar's open + spread + slippage</b>, not your signal price — so on this <b>modeled</b> friction the entry costs ~<b className="dn">−${Math.abs(slipCost)}</b> ({slipPct.toFixed(2)}%) and the stop can gap <b className="dn">${stopExtra}</b> worse, dropping real R:R to <b className={rrReal >= 2 ? "up" : "warn"}>{rrReal.toFixed(2)}</b>. These bps are a <b>placeholder model</b> until live spread/ADV is wired — Paper P&L &amp; Track Record already score actual fills.
+        A stop-buy fills at the <b>next bar's open + spread + slippage</b>, not your signal price — so the entry costs ~<b className="dn">−${Math.abs(slipCost)}</b> ({slipPct.toFixed(2)}%) and the stop can gap <b className="dn">${stopExtra}</b> worse, dropping real R:R to <b className={rrReal >= 2 ? "up" : "warn"}>{rrReal.toFixed(2)}</b>. {real ? <>Friction is computed from this name's <b>live spread, ADV participation &amp; beta</b>.</> : <>Live spread/ADV is missing here, so friction is <b>modeled from beta</b>.</>} Paper P&L &amp; Track Record score actual fills.
       </div>
     </div>
   );
@@ -358,6 +377,11 @@ function TradeBlueprint({ pm, size }) {
   const maxLoss = risk * qty;
   const t1Gain = reward1 * qty;
   const t2Gain = reward2 * qty;
+  // scale-out plan: sell ⅓ at T1 (lock gain + stop→breakeven), runner to T2
+  const thirdSh = Math.max(1, Math.round(qty / 3));
+  const runnerSh = Math.max(0, qty - thirdSh);
+  const t1Lock = thirdSh * (t1 - entry);
+  const runnerT2 = runnerSh * (t2 - entry);
 
   const W = 900, H = 408, padT = 56, padB = 78, padL = 72, padR = 108;
   const span = t2 - stop;
@@ -511,6 +535,15 @@ function TradeBlueprint({ pm, size }) {
         <span><span className="tbv2-leg-dot tbv2-leg-rd" /> loss zone</span>
         <span className="dim2">price on X · $ P&L on Y · R-mult on right axis</span>
       </div>
+
+      <div className="tbv2-scale mono">
+        <span className="label-cap">Scale-out</span>
+        <span>Sell <b className="copper">⅓ ({thirdSh} sh)</b> at T1 → <b className="up">+${Math.round(t1Lock)}</b> locked, stop→breakeven</span>
+        <span className="tbv2-scale-sep">·</span>
+        <span>Runner <b className="copper">{runnerSh} sh</b> to T2 → <b className="up">+${Math.round(runnerT2)}</b></span>
+        <span className="tbv2-scale-sep">·</span>
+        <span className="dim2">after the T1 partial + stop→BE, the runner is <b className="up">risk-free</b></span>
+      </div>
     </div>
   );
 }
@@ -578,7 +611,12 @@ function SizingWorkbench({ pm, size, sizeMult, onSizeMult, kellyFrac, onKellyFra
                 sub={pm.evR != null ? `${pm.evR.toFixed(2)}R × ${sh} sh` : "no ledger edge"} />
       </div>
       <div className="sw-gates">
-        <div className="sw-gates-cap label-cap">Live size caps · recompute as you size · full go/no-go in §3</div>
+        <div className="sw-gates-cap label-cap">
+          Live size caps · recompute as you size · full go/no-go in §3
+          {pm.navDemo
+            ? <span className="sw-navtag is-demo"> NAV $100k (demo — connect account)</span>
+            : <span className="sw-navtag"> NAV ${Math.round(pm.NAV).toLocaleString()} (live)</span>}
+        </div>
         <SwGate label="Max loss ≤ 0.75% NAV" v={lossNavPct.toFixed(2)+"%"} pass={lossNavPct <= 0.75} />
         <SwGate label="% NAV ≤ 10%"          v={navPct.toFixed(1)+"%"}    pass={navPct <= 10} />
         <SwGate label="R-mult ≥ 1.5"         v={(reward/risk).toFixed(2)+"R"} pass={(reward/risk) >= 1.5} />
@@ -826,11 +864,25 @@ function PlaybookTree({ mode, pm }) {
 
 // ─── §6 Audit Log ──────────────────────────────────────────────
 function AuditLog({ pm, size }) {
+  // real book concentration from the active paper portfolio
+  let bookSub = "book unavailable", bookTxt = "Book concentration check";
+  try {
+    if (window.MyPF) {
+      const pf = window.MyPF.combined();
+      const hold = (pf && pf.holdings) || [];
+      const n = hold.length;
+      const held = hold.some(h => (h.sym || "").toUpperCase() === pm.symbol);
+      bookTxt = `Book concentration · ${n} open position${n === 1 ? "" : "s"}${held ? " · ALREADY HELD" : ""}`;
+      bookSub = n === 0 ? "book empty — no concentration risk" : held ? "adding to an existing name" : "no overlap with this name";
+    }
+  } catch (e) {}
+  const beta = (typeof pm.beta === "number" && pm.beta > 0) ? pm.beta : 1.0;
+  const gapMult = 1 + Math.min(1.5, beta * 0.5);        // beta-scaled overnight gap stress
   const items = [
     { phase: "PRE-FILL", item: `OCO bracket constructed · stop $${pm.stop.toFixed(2)} + T1 $${pm.t1.toFixed(2)} + T2 $${pm.t2.toFixed(2)}`, done: true },
     { phase: "PRE-FILL", item: `Sizing approved · ${size.sh} sh · ${size.navPct.toFixed(1)}% NAV · max risk $${Math.round(size.maxLoss)}`, done: true },
-    { phase: "PRE-FILL", item: "Correlation-to-book check ≤ 0.55", done: true, sub: "est · live book corr pending" },
-    { phase: "PRE-FILL", item: `Sleep-test · max-down $${Math.round(size.maxLoss * 1.8)} ≥ −$${Math.round(size.maxLoss)}`, done: true },
+    { phase: "PRE-FILL", item: bookTxt, done: true, sub: bookSub },
+    { phase: "PRE-FILL", item: `Sleep-test · β-gap worst-case −$${Math.round(size.maxLoss * gapMult)} vs −$${Math.round(size.maxLoss)} planned`, done: true, sub: `β ${beta.toFixed(2)} overnight gap` },
     { phase: "PRE-FILL", item: pm.earnings.days != null ? `ER alert · T−2 reminder set (ER in ${pm.earnings.days}d)` : "ER alert · none in hold window", done: true },
     { phase: "FILL",     item: "Order acknowledged by Alpaca (paper) · OCO IDs assigned",          done: false, sub: "awaits trigger" },
     { phase: "POST-FILL",item: "Position added to portfolio_state · risk recompute",                done: false },
