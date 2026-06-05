@@ -10811,6 +10811,9 @@ body {
         modelN: hit ? num(hit.model_n) : null,
         magnitude: mag ? { lo: +num(mag.q10, 0).toFixed(1), mid: +num(mag.q50, 0).toFixed(1), hi: +num(mag.q90, 0).toFixed(1) }
           : { lo: 0, mid: 0, hi: 0 },
+        // SHAP top drivers — signed feature attributions (what's pushing the model
+        // up/down for THIS name); rendered as a diverging bar chart.
+        shap: (ml && ml.shap && Array.isArray(ml.shap.dir_top)) ? ml.shap.dir_top : null,
       },
       setupStats: ss,
       holders: (fund && fund.holders_institutions) || null,
@@ -22994,7 +22997,15 @@ window.OvSection = OvSection;
   .eo-foot{ font-size:10px; padding-top:5px; border-top:1px solid var(--glass-line); }
   .conf-cell{ position:relative; } .conf-spark{ display:block; height:4px; border-radius:2px; margin-top:4px; background:var(--glass-bg-2); position:relative; overflow:hidden; }
   .conf-spark i{ position:absolute; top:0; height:100%; }
-  .sleeve-rbar{ display:inline-block; height:7px; border-radius:2px; vertical-align:middle; margin-left:6px; }`;
+  .sleeve-rbar{ display:inline-block; height:7px; border-radius:2px; vertical-align:middle; margin-left:6px; }
+  .shp-card{ background:var(--glass-bg-1); border:1px solid var(--glass-line); border-radius:10px; padding:11px 14px; margin-bottom:10px; display:flex; flex-direction:column; gap:6px; }
+  .shp-row{ display:grid; grid-template-columns:152px 1fr 50px; align-items:center; gap:10px; }
+  .shp-k{ font-size:10px; color:var(--ink-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .shp-track{ position:relative; height:12px; background:var(--glass-bg-2); border-radius:3px; }
+  .shp-mid{ position:absolute; left:50%; top:0; width:1px; height:12px; background:var(--ink-3); opacity:.55; }
+  .shp-bar{ position:absolute; top:2px; height:8px; border-radius:2px; }
+  .shp-up{ background:color-mix(in oklab,var(--gn) 72%,transparent); } .shp-dn{ background:color-mix(in oklab,var(--rd) 70%,transparent); }
+  .shp-v{ font-size:11px; text-align:right; }`;
   if (!document.getElementById("eo-css")) {
     const s = document.createElement("style");
     s.id = "eo-css";
@@ -23025,6 +23036,56 @@ function EdgeOdds({ ticker, mode }) {
   const wUp = wr != null && lb != null ? Math.min(1, wr + (wr - lb)) : null;
   const be = rr ? 1 / (1 + rr) : null;
   return /* @__PURE__ */ React.createElement("div", { className: "eo-card" }, /* @__PURE__ */ React.createElement("div", { className: "eo-hd" }, /* @__PURE__ */ React.createElement("span", { className: "eo-tag mono" }, "PROBABILISTIC EDGE"), ml.modelAuc != null ? /* @__PURE__ */ React.createElement("span", { className: "mono dim2", style: { fontSize: 10 } }, "ML AUC ", ml.modelAuc.toFixed(2), ml.modelN ? ` \xB7 n=${ml.modelN.toLocaleString()}` : "") : null), oddsT != null ? /* @__PURE__ */ React.createElement("div", { className: "eo-row" }, /* @__PURE__ */ React.createElement("span", { className: "eo-k mono" }, "P(T1 vs STOP first)"), /* @__PURE__ */ React.createElement("div", { className: "eo-split" }, /* @__PURE__ */ React.createElement("div", { className: "eo-split-g", style: { width: oddsT + "%" } }), /* @__PURE__ */ React.createElement("div", { className: "eo-split-r", style: { width: 100 - oddsT + "%" } })), /* @__PURE__ */ React.createElement("span", { className: "eo-v mono" }, /* @__PURE__ */ React.createElement("b", { className: ml.pT1 >= ml.pStop ? "up" : "dn" }, (ml.pT1 * 100).toFixed(0), "%"), " ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "/ ", (ml.pStop * 100).toFixed(0), "%"))) : null, lo != null && hi != null ? /* @__PURE__ */ React.createElement("div", { className: "eo-row" }, /* @__PURE__ */ React.createElement("span", { className: "eo-k mono" }, "10d RETURN \xB7 Q10\u201390"), /* @__PURE__ */ React.createElement("div", { className: "eo-track" }, /* @__PURE__ */ React.createElement("div", { className: "eo-zero", style: { left: dx(0) + "%" } }), /* @__PURE__ */ React.createElement("div", { className: "eo-band", style: { left: dx(lo) + "%", width: dx(hi) - dx(lo) + "%" } }), mid != null ? /* @__PURE__ */ React.createElement("div", { className: "eo-pt", style: { left: dx(mid) + "%" } }) : null), /* @__PURE__ */ React.createElement("span", { className: `eo-v mono ${mid >= 0 ? "up" : "dn"}` }, mid >= 0 ? "+" : "", mid != null ? mid.toFixed(1) : "\u2014", "%")) : null, wr != null && lb != null ? /* @__PURE__ */ React.createElement("div", { className: "eo-row" }, /* @__PURE__ */ React.createElement("span", { className: "eo-k mono" }, "WIN RATE \xB7 95% CI"), /* @__PURE__ */ React.createElement("div", { className: "eo-track" }, be != null ? /* @__PURE__ */ React.createElement("div", { className: "eo-be", style: { left: _pc(be * 100) + "%" }, title: `breakeven ${(be * 100).toFixed(0)}%` }) : null, /* @__PURE__ */ React.createElement("div", { className: "eo-ci", style: { left: _pc(lb * 100) + "%", width: _pc((wUp - lb) * 100) + "%" } }), /* @__PURE__ */ React.createElement("div", { className: "eo-pt", style: { left: _pc(wr * 100) + "%" } })), /* @__PURE__ */ React.createElement("span", { className: `eo-v mono ${be != null && wr > be ? "up" : "warn"}` }, (wr * 100).toFixed(0), "% ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "LB ", (lb * 100).toFixed(0)))) : null, /* @__PURE__ */ React.createElement("div", { className: "eo-foot mono" }, ml.direction != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, "P(up) ", /* @__PURE__ */ React.createElement("b", { className: ml.direction >= 0.5 ? "up" : "dn" }, (ml.direction * 100).toFixed(0), "%"), " \xB7 ") : "", "ML hit-net ", /* @__PURE__ */ React.createElement("b", { className: ml.hitNet >= 0 ? "up" : "dn" }, ml.hitNet >= 0 ? "+" : "", ml.hitNet), ss.pf != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 setup PF ", /* @__PURE__ */ React.createElement("b", { className: ss.pf >= 1.3 ? "up" : "warn" }, ss.pf.toFixed(2))) : "", ss.n != null && ss.n < 30 ? /* @__PURE__ */ React.createElement("span", { className: "warn" }, " \xB7 n<30 \u26A0") : ""));
+}
+const SHAP_LABELS = {
+  pctrank_ema50_dist: "Dist from EMA50 (%ile)",
+  ema50_dist: "EMA50 distance",
+  ema21_dist: "EMA21 distance",
+  ema200_dist: "EMA200 distance",
+  pctrank_dist_52w_low: "Above 52w low (%ile)",
+  pctrank_dist_52w_high: "Below 52w high (%ile)",
+  dist_52w_low: "52w-low distance",
+  dist_52w_high: "52w-high distance",
+  ret_63d: "63-day return",
+  ret_21d: "21-day return",
+  ret_5d: "5-day return",
+  ret_252d: "1-year return",
+  pctrank_rs_vs_spy_63d: "RS vs SPY 63d (%ile)",
+  rs_vs_spy_63d: "RS vs SPY 63d",
+  rs_rank: "RS rank",
+  rsi: "RSI",
+  rsi_14: "RSI(14)",
+  macd: "MACD",
+  macd_hist: "MACD histogram",
+  adx: "ADX",
+  rvol: "RVOL",
+  atr_pct: "ATR %",
+  obv_slope: "OBV slope",
+  vol_zscore: "Volume z-score",
+  bb_pctb: "Bollinger %B",
+  stochrsi: "StochRSI",
+  mfi: "MFI",
+  cmf: "CMF",
+  beta: "Beta",
+  short_float: "Short float"
+};
+function humanShap(f) {
+  if (SHAP_LABELS[f]) return SHAP_LABELS[f];
+  let s = String(f || "");
+  const pct = /^pctrank_/.test(s);
+  s = s.replace(/^pctrank_/, "");
+  s = s.replace(/_/g, " ").replace(/\bema(\d+)\b/gi, "EMA$1").replace(/\brs\b/gi, "RS").replace(/\bspy\b/gi, "SPY").replace(/\bret\b/gi, "return").replace(/\bdist\b/gi, "distance").replace(/(\d+)d\b/g, "$1d");
+  return s + (pct ? " (%ile)" : "");
+}
+function ShapDrivers({ ticker }) {
+  const sh = ticker.ml && ticker.ml.shap;
+  if (!sh || !sh.length) return null;
+  const max = Math.max(...sh.map((x) => Math.abs(x.shap))) || 1;
+  const upN = sh.filter((x) => x.shap >= 0).length;
+  return /* @__PURE__ */ React.createElement("div", { className: "shp-card" }, /* @__PURE__ */ React.createElement("div", { className: "eo-hd" }, /* @__PURE__ */ React.createElement("span", { className: "eo-tag mono" }, "MODEL DRIVERS \xB7 SHAP"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2", style: { fontSize: 10 } }, upN >= 3 ? "net bullish drivers" : upN <= 1 ? "net bearish drivers" : "mixed drivers")), sh.map((x, i) => {
+    const v = x.shap, up = v >= 0, w = Math.abs(v) / max * 48;
+    return /* @__PURE__ */ React.createElement("div", { key: i, className: "shp-row" }, /* @__PURE__ */ React.createElement("span", { className: "shp-k mono", title: x.feature }, humanShap(x.feature)), /* @__PURE__ */ React.createElement("div", { className: "shp-track" }, /* @__PURE__ */ React.createElement("div", { className: "shp-mid" }), /* @__PURE__ */ React.createElement("div", { className: `shp-bar ${up ? "shp-up" : "shp-dn"}`, style: up ? { left: "50%", width: w + "%" } : { right: "50%", width: w + "%" } })), /* @__PURE__ */ React.createElement("span", { className: `shp-v mono ${up ? "up" : "dn"}` }, up ? "+" : "", v.toFixed(2)));
+  }), /* @__PURE__ */ React.createElement("div", { className: "eo-foot mono dim2" }, "Green pushes the model up \xB7 red down \xB7 bar = |impact|. Top SHAP feature attributions for ", ticker.symbol, "."));
 }
 function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   var _a;
@@ -23066,7 +23127,7 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
     /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } }, (() => {
       const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
       return cv ? /* @__PURE__ */ React.createElement(ConvictionMeter, { cv }) : null;
-    })(), /* @__PURE__ */ React.createElement(EdgeOdds, { ticker, mode }), /* @__PURE__ */ React.createElement(HorizonStrip, { ticker, mode, onMode: (m) => window.__setMode && window.__setMode(m) }), /* @__PURE__ */ React.createElement(RegimeFit, { ticker, mode }), /* @__PURE__ */ React.createElement(SurfacedBy, { ticker }), /* @__PURE__ */ React.createElement(ConfluenceHeatmap, { ticker, mode }))
+    })(), /* @__PURE__ */ React.createElement(EdgeOdds, { ticker, mode }), /* @__PURE__ */ React.createElement(ShapDrivers, { ticker }), /* @__PURE__ */ React.createElement(HorizonStrip, { ticker, mode, onMode: (m) => window.__setMode && window.__setMode(m) }), /* @__PURE__ */ React.createElement(RegimeFit, { ticker, mode }), /* @__PURE__ */ React.createElement(SurfacedBy, { ticker }), /* @__PURE__ */ React.createElement(ConfluenceHeatmap, { ticker, mode }))
   ), /* @__PURE__ */ React.createElement(
     OvSection,
     {

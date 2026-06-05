@@ -278,6 +278,9 @@
         modelN: hit ? num(hit.model_n) : null,
         magnitude: mag ? { lo: +num(mag.q10, 0).toFixed(1), mid: +num(mag.q50, 0).toFixed(1), hi: +num(mag.q90, 0).toFixed(1) }
           : { lo: 0, mid: 0, hi: 0 },
+        // SHAP top drivers — signed feature attributions (what's pushing the model
+        // up/down for THIS name); rendered as a diverging bar chart.
+        shap: (ml && ml.shap && Array.isArray(ml.shap.dir_top)) ? ml.shap.dir_top : null,
       },
       setupStats: ss,
       holders: (fund && fund.holders_institutions) || null,

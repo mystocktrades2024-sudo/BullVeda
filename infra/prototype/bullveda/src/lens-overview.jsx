@@ -946,7 +946,15 @@ window.OvSection = OvSection;
   .eo-foot{ font-size:10px; padding-top:5px; border-top:1px solid var(--glass-line); }
   .conf-cell{ position:relative; } .conf-spark{ display:block; height:4px; border-radius:2px; margin-top:4px; background:var(--glass-bg-2); position:relative; overflow:hidden; }
   .conf-spark i{ position:absolute; top:0; height:100%; }
-  .sleeve-rbar{ display:inline-block; height:7px; border-radius:2px; vertical-align:middle; margin-left:6px; }`;
+  .sleeve-rbar{ display:inline-block; height:7px; border-radius:2px; vertical-align:middle; margin-left:6px; }
+  .shp-card{ background:var(--glass-bg-1); border:1px solid var(--glass-line); border-radius:10px; padding:11px 14px; margin-bottom:10px; display:flex; flex-direction:column; gap:6px; }
+  .shp-row{ display:grid; grid-template-columns:152px 1fr 50px; align-items:center; gap:10px; }
+  .shp-k{ font-size:10px; color:var(--ink-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .shp-track{ position:relative; height:12px; background:var(--glass-bg-2); border-radius:3px; }
+  .shp-mid{ position:absolute; left:50%; top:0; width:1px; height:12px; background:var(--ink-3); opacity:.55; }
+  .shp-bar{ position:absolute; top:2px; height:8px; border-radius:2px; }
+  .shp-up{ background:color-mix(in oklab,var(--gn) 72%,transparent); } .shp-dn{ background:color-mix(in oklab,var(--rd) 70%,transparent); }
+  .shp-v{ font-size:11px; text-align:right; }`;
   if (!document.getElementById("eo-css")) { const s = document.createElement("style"); s.id = "eo-css"; s.textContent = css; document.head.appendChild(s); }
 })();
 const _pc = v => Math.max(0, Math.min(100, v));
@@ -1016,6 +1024,50 @@ function EdgeOdds({ ticker, mode }) {
     </div>
   );
 }
+// humanize ML feature names for the SHAP driver chart
+const SHAP_LABELS = {
+  pctrank_ema50_dist: "Dist from EMA50 (%ile)", ema50_dist: "EMA50 distance", ema21_dist: "EMA21 distance", ema200_dist: "EMA200 distance",
+  pctrank_dist_52w_low: "Above 52w low (%ile)", pctrank_dist_52w_high: "Below 52w high (%ile)", dist_52w_low: "52w-low distance", dist_52w_high: "52w-high distance",
+  ret_63d: "63-day return", ret_21d: "21-day return", ret_5d: "5-day return", ret_252d: "1-year return",
+  pctrank_rs_vs_spy_63d: "RS vs SPY 63d (%ile)", rs_vs_spy_63d: "RS vs SPY 63d", rs_rank: "RS rank",
+  rsi: "RSI", rsi_14: "RSI(14)", macd: "MACD", macd_hist: "MACD histogram", adx: "ADX", rvol: "RVOL",
+  atr_pct: "ATR %", obv_slope: "OBV slope", vol_zscore: "Volume z-score", bb_pctb: "Bollinger %B",
+  stochrsi: "StochRSI", mfi: "MFI", cmf: "CMF", beta: "Beta", short_float: "Short float",
+};
+function humanShap(f) {
+  if (SHAP_LABELS[f]) return SHAP_LABELS[f];
+  let s = String(f || ""); const pct = /^pctrank_/.test(s); s = s.replace(/^pctrank_/, "");
+  s = s.replace(/_/g, " ").replace(/\bema(\d+)\b/gi, "EMA$1").replace(/\brs\b/gi, "RS").replace(/\bspy\b/gi, "SPY").replace(/\bret\b/gi, "return").replace(/\bdist\b/gi, "distance").replace(/(\d+)d\b/g, "$1d");
+  return s + (pct ? " (%ile)" : "");
+}
+function ShapDrivers({ ticker }) {
+  const sh = ticker.ml && ticker.ml.shap;
+  if (!sh || !sh.length) return null;
+  const max = Math.max(...sh.map(x => Math.abs(x.shap))) || 1;
+  const upN = sh.filter(x => x.shap >= 0).length;
+  return (
+    <div className="shp-card">
+      <div className="eo-hd">
+        <span className="eo-tag mono">MODEL DRIVERS · SHAP</span>
+        <span className="mono dim2" style={{ fontSize: 10 }}>{upN >= 3 ? "net bullish drivers" : upN <= 1 ? "net bearish drivers" : "mixed drivers"}</span>
+      </div>
+      {sh.map((x, i) => {
+        const v = x.shap, up = v >= 0, w = Math.abs(v) / max * 48;
+        return (
+          <div key={i} className="shp-row">
+            <span className="shp-k mono" title={x.feature}>{humanShap(x.feature)}</span>
+            <div className="shp-track">
+              <div className="shp-mid" />
+              <div className={`shp-bar ${up ? "shp-up" : "shp-dn"}`} style={up ? { left: "50%", width: w + "%" } : { right: "50%", width: w + "%" }} />
+            </div>
+            <span className={`shp-v mono ${up ? "up" : "dn"}`}>{up ? "+" : ""}{v.toFixed(2)}</span>
+          </div>
+        );
+      })}
+      <div className="eo-foot mono dim2">Green pushes the model up · red down · bar = |impact|. Top SHAP feature attributions for {ticker.symbol}.</div>
+    </div>
+  );
+}
 
 function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const ticker = (window.modeAdjust ? window.modeAdjust(t0, mode) : t0);
@@ -1068,6 +1120,7 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {(() => { const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null; return cv ? <ConvictionMeter cv={cv} /> : null; })()}
           <EdgeOdds ticker={ticker} mode={mode} />
+          <ShapDrivers ticker={ticker} />
           <HorizonStrip ticker={ticker} mode={mode} onMode={(m) => window.__setMode && window.__setMode(m)} />
           <RegimeFit ticker={ticker} mode={mode} />
           <SurfacedBy ticker={ticker} />
