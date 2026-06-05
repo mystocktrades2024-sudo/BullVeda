@@ -168,9 +168,17 @@ function App() {
     // BULLVEDA: build the full detail from REAL scan row + fundamentals + ML + setup ledger.
     const BV = window.__BV;
     if (BV && BV.ready) {
-      const detail = BV.detailSync(sym);
-      if (detail) { setTicker(detail); }
-      else { setTicker({ ...TICKER, symbol: sym, name: sym, live: true, _pulledAt: Date.now() }); }
+      // instant: render the scan-row base immediately (no blocking XHR) …
+      const base = BV.detailBase ? BV.detailBase(sym) : (BV.detailSync ? BV.detailSync(sym) : null);
+      if (base) {
+        setTicker(base);
+        // … then enrich fundamentals + ML in the background, applying only if still on this name
+        if (BV.detailEnrich) BV.detailEnrich(sym).then(full => {
+          if (full) setTicker(cur => (cur && cur.symbol === sym ? full : cur));
+        }).catch(() => {});
+      } else {
+        setTicker({ ...TICKER, symbol: sym, name: sym, live: true, _pulledAt: Date.now() });
+      }
       return;
     }
     // ── offline fallback (mock) ──

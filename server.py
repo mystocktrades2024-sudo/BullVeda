@@ -649,6 +649,55 @@ async def spark_api(syms: str = "", auth: HTTPBasicCredentials = Depends(_check_
     return {"sparks": await _sparks_cached(wanted)}
 
 
+# ── Per-ticker decision history (for the Overview "what changed in 24h" panel) ──
+# Index data/decision_log.jsonl by ticker, mtime-cached (the log appends once/scan).
+_DLOG_CACHE = {"mtime": 0.0, "by_ticker": None}
+
+def _decision_log_index():
+    import os, json as _j
+    p = BASE_DIR / "data" / "decision_log.jsonl"
+    try:
+        mt = os.path.getmtime(p)
+    except Exception:
+        return {}
+    if _DLOG_CACHE["by_ticker"] is not None and _DLOG_CACHE["mtime"] == mt:
+        return _DLOG_CACHE["by_ticker"]
+    by = {}
+    try:
+        with open(p, "r") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = _j.loads(line)
+                except Exception:
+                    continue
+                tk = str(r.get("ticker") or "").upper()
+                if not tk:
+                    continue
+                by.setdefault(tk, []).append(r)
+    except Exception:
+        return _DLOG_CACHE["by_ticker"] or {}
+    _DLOG_CACHE["by_ticker"] = by; _DLOG_CACHE["mtime"] = mt
+    return by
+
+@app.get("/api/ticker-history")
+async def ticker_history_api(t: str = "", n: int = 8, auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Last N decision-log entries for one ticker — date/verdict/score/rs_rank/regime4/
+    rr_ratio/setup_type — so the Overview lens can show REAL 24h deltas (today vs prior)."""
+    if isinstance(auth, Response):
+        return auth
+    tk = (t or "").upper().strip()
+    if not tk:
+        return {"ticker": tk, "history": []}
+    rows = (_decision_log_index().get(tk) or [])[-max(1, min(n, 60)):]
+    keep = ("date", "verdict", "score", "rs_rank", "regime4", "rr_ratio",
+            "setup_type", "direction", "has_catalyst", "reason")
+    out = [{k: r.get(k) for k in keep} for r in rows]
+    return {"ticker": tk, "history": out, "count": len(out)}
+
+
 _BV_HEAVY_RESP = {"ts": 0.0, "body": None}
 
 @app.get("/api/bullveda-heavy")

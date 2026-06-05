@@ -276,6 +276,19 @@
       setupStats: ss,
       holders: (fund && fund.holders_institutions) || null,
       insiderTx: (fund && fund.insider_transactions) || null,
+      // ── Overview-lens enrichment (2026-06-05): liquidity, valuation depth,
+      //    smart-money, rule-engine audit + catalyst — all real, feed-honest nulls ──
+      dvol: sr.dvol,                                  // $ avg daily $-volume (price×ADV)
+      avgDolVol: sr.dvol,
+      spread: sr.spread,                              // bid/ask spread %
+      sharesFloat: num(S.SharesFloat),
+      evEbitda: num(V.EnterpriseValueEbitda),
+      roa: num(H.ReturnOnAssetsTTM),
+      opMargin: num(H.OperatingMarginTTM),
+      rsRank: num(r.rs_rank),
+      catalystTier: num(r.catalyst_tier),
+      gatesEvaluated: Array.isArray(r.gates_evaluated) ? r.gates_evaluated : null,
+      rejectReason: r.reject_reason || null,
       _scan: sr, _fund: fund || null, _ml: ml || null,
     };
   };
@@ -288,6 +301,22 @@
     var fund = syncGet("/api/fundamentals/" + enc);
     var ml = syncGet("/api/ml/" + enc);
     return BV.detailFor(sr, fund, ml, null); // setup stats come from setup_family_stats (real, preloaded)
+  };
+
+  // ── ASYNC ticker-open (2026-06-05): instant base from the scan row (no network),
+  //    then enrich fundamentals + ML in the background so the click never blocks. ──
+  BV.detailBase = function (sym) {
+    var sr = BV.findRow(sym);
+    return sr ? BV.detailFor(sr, null, null, null) : null;  // scan-row only, no XHR
+  };
+  BV.detailEnrich = function (sym) {
+    var sr = BV.findRow(sym);
+    if (!sr) return Promise.resolve(null);
+    var enc = encodeURIComponent(sym);
+    return Promise.all([
+      BV.get("/api/fundamentals/" + enc).catch(function () { return null; }),
+      BV.get("/api/ml/" + enc).catch(function () { return null; }),
+    ]).then(function (res) { return BV.detailFor(sr, res[0], res[1], null); });
   };
 
   // ── light per-row Time Anatomy lookup (for the scanner TIME column / HOLD badge) ──
