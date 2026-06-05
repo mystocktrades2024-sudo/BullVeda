@@ -2840,8 +2840,10 @@ async def ohlcv_api(ticker: str, days: int = 120, tf: str = "1D"):
 # and social sentiment. All reuse existing functions; none touch scan/trading.
 
 @app.get("/api/indicators/{ticker}")
-async def indicators_api(ticker: str, days: int = 200):
-    """Stoch/MFI/CMF/OBV/BollingerB computed from EODHD OHLCV (latest values)."""
+async def indicators_api(ticker: str, days: int = 420):
+    """Full technical suite computed from real EODHD OHLCV: RSI/Stoch/MFI/CMF/OBV/BB
+    + MACD/ADX/ATR/EMA-SMA stack/VWAP/RVOL/52w + swing S-R/divergence/candles.
+    420 calendar days (~290 trading) so SMA200 + a true 52-week high/low compute."""
     ticker = ticker.upper().strip()
     try:
         import numpy as np, pandas as pd
@@ -2870,11 +2872,82 @@ async def indicators_api(ticker: str, days: int = 200):
         ma = c.rolling(20).mean(); sd = c.rolling(20).std()
         ub, lb = ma + 2 * sd, ma - 2 * sd
         pctb = (c - lb) / (ub - lb).replace(0, np.nan)
+        px = last(c)
+        # ── MACD (12/26/9) + cross age ──
+        ema12 = c.ewm(span=12, adjust=False).mean(); ema26 = c.ewm(span=26, adjust=False).mean()
+        macd = ema12 - ema26; macd_sig = macd.ewm(span=9, adjust=False).mean(); macd_hist = macd - macd_sig
+        cross_age = None
+        try:
+            diff_sign = np.sign((macd - macd_sig).dropna().values)
+            for i in range(len(diff_sign) - 1, 0, -1):
+                if diff_sign[i] != diff_sign[i - 1]:
+                    cross_age = len(diff_sign) - 1 - i; break
+        except Exception:
+            cross_age = None
+        # ── ADX / DI (Wilder) ──
+        upm = h.diff(); dnm = -l.diff()
+        plus_dm = upm.where((upm > dnm) & (upm > 0), 0.0)
+        minus_dm = dnm.where((dnm > upm) & (dnm > 0), 0.0)
+        prevc = c.shift(1)
+        tr = pd.concat([(h - l), (h - prevc).abs(), (l - prevc).abs()], axis=1).max(axis=1)
+        atr_s = tr.ewm(alpha=1/14, adjust=False).mean()
+        plus_di = 100 * plus_dm.ewm(alpha=1/14, adjust=False).mean() / atr_s.replace(0, np.nan)
+        minus_di = 100 * minus_dm.ewm(alpha=1/14, adjust=False).mean() / atr_s.replace(0, np.nan)
+        dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+        adx = dx.ewm(alpha=1/14, adjust=False).mean()
+        atr = last(atr_s)
+        # ── MA stack ──
+        def ema(n): return last(c.ewm(span=n, adjust=False).mean())
+        def sma(n): return last(c.rolling(n).mean()) if len(c) >= n else None
+        ema9, ema21, ema100 = ema(9), ema(21), ema(100)
+        sma20, sma50, sma200 = sma(20), sma(50), sma(200)
+        # ── VWAP(20) · RVOL · volume ──
+        tp20 = (h + l + c) / 3
+        vwap20 = last((tp20 * v).rolling(20).sum() / v.rolling(20).sum().replace(0, np.nan))
+        avg_vol20 = last(v.rolling(20).mean()); last_vol = last(v)
+        rvol = round(last_vol / avg_vol20, 2) if (last_vol and avg_vol20) else None
+        # ── 52w + swing S/R ──
+        def hi(n): return round(float(h.tail(n).max()), 2) if len(h) >= 5 else None
+        def lo(n): return round(float(l.tail(n).min()), 2) if len(l) >= 5 else None
+        # ── RSI/price divergence over last ~20 bars (price HH but RSI LH = bearish; vv) ──
+        diverg = None
+        try:
+            n = 20
+            pr = c.tail(n).reset_index(drop=True); rs = rsi.tail(n).reset_index(drop=True)
+            half = n // 2
+            p1, p2 = pr[:half].max(), pr[half:].max(); r1, r2 = rs[:half].max(), rs[half:].max()
+            pl1, pl2 = pr[:half].min(), pr[half:].min(); rl1, rl2 = rs[:half].min(), rs[half:].min()
+            if p2 > p1 and r2 < r1 - 2:
+                diverg = {"type": "bearish", "note": "price made a higher high, RSI a lower high — momentum fading"}
+            elif pl2 < pl1 and rl2 > rl1 + 2:
+                diverg = {"type": "bullish", "note": "price made a lower low, RSI a higher low — reversal building"}
+            else:
+                diverg = {"type": "none", "note": "oscillators confirm price — no divergence"}
+        except Exception:
+            diverg = None
+        # ── recent candles for the real mini-chart (last 60) ──
+        tail = df.tail(60)
+        candles = []
+        for idx, row in tail.iterrows():
+            try:
+                candles.append({"o": round(float(row["Open"]), 2), "h": round(float(row["High"]), 2),
+                                "l": round(float(row["Low"]), 2), "c": round(float(row["Close"]), 2),
+                                "v": int(float(row["Volume"]))})
+            except Exception:
+                pass
         return {"ticker": ticker, "rsi": last(rsi), "stoch_k": last(k), "stoch_d": last(d),
                 "mfi": last(mfi), "cmf": last(cmf),
                 "obv_trend": ("rising" if obv_slope and obv_slope > 0 else "falling" if obv_slope else None),
+                "obv_slope": round(obv_slope, 0) if obv_slope is not None else None,
                 "bb_pctb": last(pctb), "bb_upper": last(ub), "bb_lower": last(lb), "bb_mid": last(ma),
-                "price": last(c)}
+                "macd": last(macd), "macd_signal": last(macd_sig), "macd_hist": last(macd_hist), "macd_cross_bars": cross_age,
+                "adx": last(adx), "plus_di": last(plus_di), "minus_di": last(minus_di),
+                "atr": atr, "atr_pct": round(atr / px * 100, 2) if (atr and px) else None,
+                "ema9": ema9, "ema21": ema21, "ema100": ema100, "sma20": sma20, "sma50": sma50, "sma200": sma200,
+                "vwap20": vwap20, "rvol": rvol, "avg_vol20": avg_vol20, "last_vol": last_vol,
+                "high_52w": hi(252), "low_52w": lo(252), "swing_hi_20": hi(20), "swing_lo_20": lo(20),
+                "swing_hi_60": hi(60), "swing_lo_60": lo(60),
+                "divergence": diverg, "candles": candles, "price": px}
     except HTTPException:
         raise
     except Exception as e:
