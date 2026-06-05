@@ -369,7 +369,7 @@
         setupStats: { n: null, winRate: null, wilsonLB: null, pf: null, medianR: null },
         decisionsByMode: null, gatesEvaluated: null, rejectReason: null,
         holders: (fund && fund.holders_institutions) || null, insiderTx: (fund && fund.insider_transactions) || null,
-        _fund: fund || null, _ml: null, _scan: null, _offUniverse: true, _income5y: (fund && fund.income_5y) || null, _cashflow5y: (fund && fund.cashflow_5y) || null,
+        _fund: fund || null, _ml: null, _scan: null, _offUniverse: true, _income5y: (fund && fund.income_5y) || null, _cashflow5y: (fund && fund.cashflow_5y) || null, _balance5y: (fund && fund.balance_5y) || null,
       };
     });
   };

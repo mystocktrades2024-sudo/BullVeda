@@ -37,6 +37,7 @@ function useInvData(ticker) {
     const fund = ticker._fund || {};
     const inc = (fund.income_5y || ticker._income5y || []);   // [0] = latest
     const cf = (fund.cashflow_5y || ticker._cashflow5y || []);
+    const bs = (fund.balance_5y || ticker._balance5y || []);
     const H = fund.highlights || {}, V = fund.valuation || {}, S = fund.shares || {};
     const price = _P(ticker.price);
     const sharesOut = _P(S.SharesOutstanding) || ((_P(ticker.mcap) && price) ? _P(ticker.mcap) / price : null);
@@ -53,17 +54,42 @@ function useInvData(ticker) {
       if (oldest <= 0 || latest <= 0) return null;
       return Math.pow(latest / oldest, 1 / yrs) - 1;
     };
+    // ── balance sheet (real, from EODHD Balance_Sheet) ──
+    const bs0 = bs[0] || {};
+    const equity = _P(bs0.totalStockholderEquity);
+    const totalDebt = _P(bs0.shortLongTermDebtTotal) != null ? _P(bs0.shortLongTermDebtTotal)
+      : ((_P(bs0.longTermDebt) || 0) + (_P(bs0.shortTermDebt) || 0)) || null;
+    const netDebt = _P(bs0.netDebt) != null ? _P(bs0.netDebt) : ((totalDebt != null && _P(bs0.cash) != null) ? totalDebt - _P(bs0.cash) : null);
+    const curAssets = _P(bs0.totalCurrentAssets), curLiab = _P(bs0.totalCurrentLiabilities);
+    const currentRatio = (curAssets != null && curLiab && curLiab > 0) ? curAssets / curLiab : null;
+    const debtEquity = (totalDebt != null && equity && equity > 0) ? totalDebt / equity : null;
+    const ebitda0 = _P((inc[0] || {}).ebitda) != null ? _P((inc[0] || {}).ebitda) : _P(H.EBITDA);
+    const netDebtEbitda = (netDebt != null && ebitda0 && ebitda0 > 0) ? netDebt / ebitda0 : null;
+    const shareSeries = bs.map(r => _P(r.commonStockSharesOutstanding)).filter(v => v != null);
+    const shareCagr = (shareSeries.length >= 2 && shareSeries[0] > 0 && shareSeries[shareSeries.length - 1] > 0)
+      ? Math.pow(shareSeries[0] / shareSeries[shareSeries.length - 1], 1 / (shareSeries.length - 1)) - 1 : null;
+    const rev0 = _P((inc[0] || {}).totalRevenue);
+    const salesPS = (rev0 && sharesOut) ? rev0 / sharesOut : null;
     return {
       price, sharesOut, pe, fwdPe, pb, eps, fwdEps, bvps, fcf0, fcfPS,
       fcfCagr: cagr(cf, "freeCashFlow"), revCagr: cagr(inc, "totalRevenue"),
       ebitdaCagr: cagr(inc, "ebitda"), niCagr: cagr(inc, "netIncome"),
-      inc, cf, H, V, S, targetPrice: _P(ticker.targetPrice),
+      inc, cf, bs, H, V, S, targetPrice: _P(ticker.targetPrice), beta: _P(ticker.beta),
       roe: _P(H.ReturnOnEquityTTM), roa: _P(H.ReturnOnAssetsTTM),
       opMargin: _P(H.OperatingMarginTTM), profitMargin: _P(H.ProfitMargin),
       revGrowthQ: _P(H.QuarterlyRevenueGrowthYOY), divYield: _P(H.DividendYield),
+      equity, totalDebt, netDebt, currentRatio, debtEquity, ebitda0, netDebtEbitda, shareCagr, salesPS,
+      sector: ticker.sector || fund.sector || "",
       hasFund: !!(inc.length || cf.length || H.MarketCapitalization),
     };
   }, [ticker.symbol, ticker.price, ticker._fund]);
+}
+
+// ── CAPM WACC: risk-free + beta × equity-risk-premium, clamped to a sane band ──
+function _capmWacc(beta) {
+  const rf = 0.043, erp = 0.052;   // ~10y UST + long-run US equity risk premium
+  const b = (beta != null && isFinite(beta)) ? beta : 1.0;
+  return Math.max(0.07, Math.min(0.13, rf + b * erp));
 }
 
 // ── DCF / reverse-DCF (10y explicit FCF/sh, linear fade g→tg, + terminal) ──
@@ -85,30 +111,40 @@ function _impliedGrowth(fcfPS, price, w, tg) {
 function fairValueMethods(d, peers) {
   const out = [];
   const med = (peers && peers.medians) || {};
-  const peerPE = _P(med.pe_ttm);
+  const peerPE = _P(med.pe_ttm), peerFwdPE = _P(med.forward_pe), peerEvEbitda = _P(med.ev_ebitda), peerPS = _P(med.price_sales);
   const peerGrow = _P(med.revenue_growth);
   const ownGrow = d.revCagr != null ? d.revCagr : d.revGrowthQ;
-  // growth-adjust peer-P/E reversion (relative-PEG): a fast grower shouldn't revert to a
+  // growth-adjust peer multiple reversion (relative-PEG): a fast grower shouldn't revert to a
   // mature cohort's multiple. clamp 0.6–1.8× so it tempers, never fabricates, the anchor.
   const growthAdj = (ownGrow != null && peerGrow != null && peerGrow > 0 && ownGrow > 0)
     ? Math.max(0.6, Math.min(1.8, (1 + ownGrow) / (1 + peerGrow))) : 1;
   const adjLbl = growthAdj !== 1 ? ` · growth-adj ${growthAdj.toFixed(2)}×` : "";
   const isGrowth = ownGrow != null && ownGrow >= 0.15;   // Graham's mechanism fails for growth names
+  const isFinancial = /financ|bank|insur|capital market/i.test(d.sector || "");   // enterprise multiples invalid for lenders
+  const wacc = _capmWacc(d.beta);
 
-  if (d.targetPrice) out.push({ key: "pt", m: "Analyst price target", sub: "consensus mean · EODHD", fair: d.targetPrice, w: 0.22, band: 0.08 });
-  if (peerPE && d.eps && d.eps > 0) out.push({ key: "peTrail", m: "Peer P/E · trailing EPS", sub: `cohort ${peerPE.toFixed(1)}× · EPS $${d.eps.toFixed(2)}${adjLbl}`, fair: peerPE * d.eps * growthAdj, w: 0.20, band: 0.12 });
-  if (peerPE && d.fwdEps && d.fwdEps > 0) out.push({ key: "peFwd", m: "Peer P/E · forward EPS", sub: `cohort ${peerPE.toFixed(1)}× · fwd EPS $${d.fwdEps.toFixed(2)}${adjLbl}`, fair: peerPE * d.fwdEps * growthAdj, w: 0.18, band: 0.12 });
+  if (d.targetPrice) out.push({ key: "pt", m: "Analyst price target", sub: "consensus mean · EODHD", fair: d.targetPrice, w: 0.20, band: 0.08 });
+  if (peerPE && d.eps && d.eps > 0) out.push({ key: "peTrail", m: "Peer P/E · trailing EPS", sub: `cohort ${peerPE.toFixed(1)}× · EPS $${d.eps.toFixed(2)}${adjLbl}`, fair: peerPE * d.eps * growthAdj, w: 0.16, band: 0.12 });
+  if (peerFwdPE && d.fwdEps && d.fwdEps > 0) out.push({ key: "peFwd", m: "Peer fwd P/E · forward EPS", sub: `cohort fwd ${peerFwdPE.toFixed(1)}× · fwd EPS $${d.fwdEps.toFixed(2)}${adjLbl}`, fair: peerFwdPE * d.fwdEps * growthAdj, w: 0.16, band: 0.12 });
+  // EV/EBITDA peer reversion → enterprise value, then back out equity per share
+  // (skip for financials — their "net debt" is operating funding, not leverage)
+  if (!isFinancial && peerEvEbitda && d.ebitda0 && d.ebitda0 > 0 && d.sharesOut) {
+    const eqPS = (peerEvEbitda * d.ebitda0 - (d.netDebt || 0)) / d.sharesOut;
+    if (eqPS > 0) out.push({ key: "evEbitda", m: "Peer EV/EBITDA", sub: `cohort ${peerEvEbitda.toFixed(1)}× · EBITDA $${_money(d.ebitda0)} − net debt`, fair: eqPS, w: 0.16, band: 0.13 });
+  }
+  // P/S peer reversion (growth-adjusted) — the workhorse for not-yet-profitable names
+  if (peerPS && d.salesPS && d.salesPS > 0) out.push({ key: "ps", m: "Peer P/S", sub: `cohort ${peerPS.toFixed(1)}× · sales/sh $${d.salesPS.toFixed(2)}${adjLbl}`, fair: peerPS * d.salesPS * growthAdj, w: 0.12, band: 0.15 });
   // Graham number: deep-value floor — only meaningful for sub-15%-growth, asset-relevant names
-  if (!isGrowth && d.eps && d.eps > 0 && d.bvps && d.bvps > 0) out.push({ key: "graham", m: "Graham number", sub: `√(22.5·EPS·BVPS) · BVPS $${d.bvps.toFixed(2)}`, fair: Math.sqrt(22.5 * d.eps * d.bvps), w: 0.12, band: 0.05 });
+  if (!isGrowth && d.eps && d.eps > 0 && d.bvps && d.bvps > 0) out.push({ key: "graham", m: "Graham number", sub: `√(22.5·EPS·BVPS) · BVPS $${d.bvps.toFixed(2)}`, fair: Math.sqrt(22.5 * d.eps * d.bvps), w: 0.10, band: 0.05 });
   if (d.fcfPS && d.fcfPS > 0) {
     const g = Math.max(0.02, Math.min(0.18, d.fcfCagr != null ? d.fcfCagr : (d.revCagr != null ? d.revCagr * 0.8 : 0.08)));
-    const fv = _dcfValue(d.fcfPS, g, 0.09, 0.03);
-    if (fv) out.push({ key: "dcf", m: "Reverse-DCF · base case", sub: `FCF/sh $${d.fcfPS.toFixed(2)} · g ${(g * 100).toFixed(0)}%→3% · WACC 9%`, fair: fv, w: 0.30, band: 0.18, g });
+    const fv = _dcfValue(d.fcfPS, g, wacc, 0.03);
+    if (fv) out.push({ key: "dcf", m: "Reverse-DCF · base case", sub: `FCF/sh $${d.fcfPS.toFixed(2)} · g ${(g * 100).toFixed(0)}%→3% · WACC ${(wacc * 100).toFixed(1)}%`, fair: fv, w: 0.26, band: 0.18, g });
   }
   const tw = out.reduce((s, x) => s + x.w, 0) || 1;
   out.forEach(x => { x.wn = x.w / tw; x.mos = (x.fair / d.price - 1) * 100; });
   const blended = out.length ? out.reduce((s, x) => s + x.fair * x.wn, 0) : null;
-  return { methods: out, blended, blendedMos: blended != null ? (blended / d.price - 1) * 100 : null, growthAdj, isGrowth };
+  return { methods: out, blended, blendedMos: blended != null ? (blended / d.price - 1) * 100 : null, growthAdj, isGrowth, wacc };
 }
 
 function _tone(mos) { return mos == null ? "ink" : mos >= 8 ? "gn" : mos >= -8 ? "amb" : "rd"; }
@@ -144,6 +180,7 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
           style={headerStyle} right={<StateToggle name="iv-1" />} />
         <StateWrap state={s1.value} source="EODHD financials + /api/peers cohort">
           <div className="lens-pad">
+            <PriceFairChannel ticker={ticker} d={d} peers={peers} />
             <FootballField d={d} fv={fv} />
             <div className="iv-split" style={{ marginTop: 14 }}>
               <div className="iv-split-main"><MarginOfSafety d={d} fv={fv} /></div>
@@ -244,6 +281,82 @@ function ValueHero({ ticker, mode, d, fv }) {
             </> : <>Not enough earnings / cash-flow to triangulate fair value — analyst target only.</>}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── §1 · Price vs fair-value channel (real history × earnings multiple) ──
+// FAST-Graphs style: price overlaid on an EPS × [low/normal/high P/E] band built from
+// the real annual EPS series. Gated to names with a positive-earnings history; the
+// football field below covers everyone else. Never seeded — renders null if ineligible.
+function PriceFairChannel({ ticker, d, peers }) {
+  const [hist, setHist] = React.useState(null);
+  React.useEffect(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.get || !ticker.symbol) { setHist(null); return; }
+    let on = true;
+    BV.get("/api/ohlcv/" + encodeURIComponent(ticker.symbol) + "?days=1460").then(r => {
+      if (!on) return; const c = (r && r.candles) || [];
+      setHist(c.length >= 60 ? c : null);
+    }).catch(() => { if (on) setHist(null); });
+    return () => { on = false; };
+  }, [ticker.symbol]);
+  const [ref, w] = useWidth(900);
+  const uid = React.useId();
+
+  // real annual EPS series (netIncome / share-count, matched by year)
+  const epsSeries = React.useMemo(() => {
+    const out = [];
+    (d.inc || []).forEach(r => {
+      const ni = _P(r.netIncome), yr = (r.date || "").slice(0, 4);
+      const bsRow = (d.bs || []).find(b => (b.date || "").slice(0, 4) === yr);
+      const shr = _P((bsRow || {}).commonStockSharesOutstanding) || d.sharesOut;
+      const t = Date.parse(r.date) / 1000;
+      if (ni != null && shr && isFinite(t)) out.push({ t, eps: ni / shr });
+    });
+    return out.sort((a, b) => a.t - b.t);
+  }, [d.inc, d.bs, d.sharesOut]);
+
+  const med = (peers && peers.medians) || {};
+  const normPE = _P(med.pe_ttm) || d.pe;
+  const eligible = hist && epsSeries.length >= 3 && epsSeries.every(e => e.eps > 0) && normPE && normPE > 0;
+  if (!eligible) return null;
+
+  const cand = hist.filter((_, i) => i % Math.max(1, Math.floor(hist.length / 160)) === 0);
+  const epsAt = t => { let e = epsSeries[0].eps; for (const p of epsSeries) { if (p.t <= t) e = p.eps; else break; } return e; };
+  const pts = cand.map(c => { const t = c.time || c.t; const eps = epsAt(t); return { t, px: c.close, mid: eps * normPE, lo: eps * normPE * 0.75, hi: eps * normPE * 1.25 }; });
+  const padL = 4, padR = 46, padT = 10, padB = 18, H = 200;
+  const plotW = Math.max(120, w - padL - padR), plotH = H - padT - padB;
+  const allV = pts.flatMap(p => [p.px, p.lo, p.hi]);
+  const min = Math.min(...allV) * 0.95, max = Math.max(...allV) * 1.05;
+  const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+  const xOf = t => padL + ((t - t0) / (t1 - t0 || 1)) * plotW;
+  const yOf = v => padT + plotH - ((v - min) / (max - min)) * plotH;
+  const line = key => pts.map((p, i) => `${i ? "L" : "M"} ${xOf(p.t).toFixed(1)},${yOf(p[key]).toFixed(1)}`).join(" ");
+  const band = `M ${pts.map(p => `${xOf(p.t).toFixed(1)},${yOf(p.hi).toFixed(1)}`).join(" L ")} L ${pts.slice().reverse().map(p => `${xOf(p.t).toFixed(1)},${yOf(p.lo).toFixed(1)}`).join(" L ")} Z`;
+  const now = pts[pts.length - 1];
+  const richPct = (now.px / now.mid - 1) * 100;
+  const yrTicks = []; const yrsSpan = (t1 - t0) / (365.25 * 86400);
+  for (let i = 0; i <= Math.min(6, Math.ceil(yrsSpan)); i++) { const t = t1 - i * 365.25 * 86400; if (t >= t0) yrTicks.push(t); }
+  return (
+    <div className="iv-bands" ref={ref} style={{ marginBottom: 12 }}>
+      <svg width={w} height={H}>
+        <defs><linearGradient id={`pfc-${uid}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--gn)" stopOpacity="0.13" /><stop offset="100%" stopColor="var(--rd)" stopOpacity="0.13" /></linearGradient></defs>
+        <path d={band} fill={`url(#pfc-${uid})`} />
+        <path d={line("hi")} fill="none" stroke="var(--gn)" strokeWidth="1" strokeDasharray="4 4" opacity="0.6" />
+        <path d={line("mid")} fill="none" stroke="var(--ink-2)" strokeWidth="1.2" strokeDasharray="2 3" opacity="0.75" />
+        <path d={line("lo")} fill="none" stroke="var(--rd)" strokeWidth="1" strokeDasharray="4 4" opacity="0.6" />
+        <path d={line("px")} fill="none" stroke="var(--copper)" strokeWidth="2" style={{ filter: "drop-shadow(0 0 4px color-mix(in oklab, var(--copper) 50%, transparent))" }} />
+        {[["hi", "gn"], ["mid", "ink-2"], ["lo", "rd"]].map(([k, t], i) => <text key={i} x={xOf(now.t) + 5} y={yOf(now[k]) + 3} fontSize="9" className="mono" fill={`var(--${t})`}>${now[k].toFixed(0)}</text>)}
+        <circle cx={xOf(now.t)} cy={yOf(now.px)} r="3.5" fill="var(--copper)" stroke="var(--bg-1)" strokeWidth="1.3" />
+        {yrTicks.map((t, i) => <text key={i} x={xOf(t)} y={H - 5} fontSize="8.5" className="mono" fill="var(--ink-3)" textAnchor="middle">{new Date(t * 1000).getFullYear()}</text>)}
+      </svg>
+      <div className="iv-bands-leg mono dim2">
+        <span><span className="iv-dot" style={{ background: "var(--copper)" }} /> price</span>
+        <span><span className="iv-dot" style={{ background: "var(--ink-2)" }} /> EPS × {normPE.toFixed(0)}× (normal)</span>
+        <span><span className="iv-dot" style={{ background: "var(--gn)" }} /> ×{(normPE * 1.25).toFixed(0)} hi · <span className="iv-dot" style={{ background: "var(--rd)" }} /> ×{(normPE * 0.75).toFixed(0)} lo</span>
+        <span className="iv-bands-read">Price vs its earnings-multiple channel over {yrsSpan.toFixed(1)}y. Now <b className={richPct >= 0 ? "dn" : "up"}>{richPct >= 0 ? "+" : ""}{richPct.toFixed(0)}%</b> vs the normal-multiple line.</span>
       </div>
     </div>
   );
@@ -356,9 +469,11 @@ function ReverseDcf({ d, fv }) {
     <div className="dcf-sens"><div className="label-cap" style={{ marginBottom: 6 }}>Reverse-DCF</div>
       <div className="mono dim2" style={{ fontSize: 11 }}>FCF is not positive on a trailing basis — a cash-flow DCF doesn't apply. Lean on the multiple-reversion methods above.</div></div>
   );
-  const implied = _impliedGrowth(d.fcfPS, d.price, 0.09, 0.03);
+  const wacc = fv.wacc || 0.09;
+  const implied = _impliedGrowth(d.fcfPS, d.price, wacc, 0.03);
   const hist = d.fcfCagr;
-  const waccs = [0.08, 0.09, 0.10, 0.11], grows = [0.02, 0.05, 0.08, 0.12];
+  const w0 = Math.round(wacc * 100);
+  const waccs = [w0 - 1, w0, w0 + 1, w0 + 2].map(x => x / 100), grows = [0.02, 0.05, 0.08, 0.12];
   const tone = mos => mos >= 8 ? "gn" : mos >= -8 ? "amb" : "rd";
   return (
     <div className="dcf-sens">
@@ -366,7 +481,7 @@ function ReverseDcf({ d, fv }) {
       <div className="rdcf-head mono">
         <div><span className="dim2">market is pricing FCF growth of</span> <b className={implied != null && hist != null ? (implied > hist ? "dn" : "up") : ""}>{implied != null ? (implied * 100).toFixed(1) + "%/yr" : "—"}</b></div>
         <div><span className="dim2">you've delivered (5y FCF CAGR)</span> <b>{hist != null ? (hist * 100).toFixed(1) + "%/yr" : "—"}</b></div>
-        <div className="dim2" style={{ fontSize: 10.5, marginTop: 2 }}>{implied != null && hist != null ? (implied > hist ? "Priced-in growth exceeds your track record — the market is optimistic; the thesis needs acceleration." : "Priced-in growth is below your track record — the bar is beatable if history repeats.") : "10y fade to 3% terminal · 9% WACC."}</div>
+        <div className="dim2" style={{ fontSize: 10.5, marginTop: 2 }}>{implied != null && hist != null ? (implied > hist ? "Priced-in growth exceeds your track record — the market is optimistic; the thesis needs acceleration." : "Priced-in growth is below your track record — the bar is beatable if history repeats.") : `10y fade to 3% terminal · ${(wacc * 100).toFixed(1)}% WACC (CAPM, β ${(d.beta != null ? d.beta : 1).toFixed(2)}).`}</div>
       </div>
       <table className="dtable dcf-grid" style={{ marginTop: 8 }}>
         <thead><tr><th className="dim2">WACC ↓ · g →</th>{grows.map(g => <th key={g} className="r">{(g * 100).toFixed(0)}%</th>)}</tr></thead>
@@ -415,7 +530,7 @@ function QualityCard({ d, peers, ticker }) {
   const grossMargin = (_P(inc0.grossProfit) != null && _P(inc0.totalRevenue)) ? _P(inc0.grossProfit) / _P(inc0.totalRevenue) * 100 : null;
   const ebit = _P(inc0.ebit), intExp = _P(inc0.interestExpense);
   const intCover = (ebit != null && intExp && intExp > 0) ? ebit / intExp : null;
-  const de = peers && peers.self ? _P(peers.self.debt_equity) : null;
+  const de = d.debtEquity != null ? d.debtEquity : (peers && peers.self ? _P(peers.self.debt_equity) : null);
   const netMarginNow = d.profitMargin != null ? d.profitMargin * 100 : null;
   const incOld = d.inc[d.inc.length - 1] || {};
   const netMarginOld = (_P(incOld.netIncome) != null && _P(incOld.totalRevenue)) ? _P(incOld.netIncome) / _P(incOld.totalRevenue) * 100 : null;
@@ -426,7 +541,7 @@ function QualityCard({ d, peers, ticker }) {
 
   // grades from real numbers
   const bizScore = [d.roe != null ? Math.min(100, Math.max(0, d.roe * 100 * 4)) : null, grossMargin != null ? Math.min(100, grossMargin * 1.5) : null, d.opMargin != null ? Math.min(100, Math.max(0, d.opMargin * 100 * 4)) : null].filter(x => x != null);
-  const balScore = [intCover != null ? Math.min(100, intCover * 8) : null, de != null ? Math.max(0, 100 - de * 40) : null].filter(x => x != null);
+  const balScore = [intCover != null ? Math.min(100, intCover * 8) : null, de != null ? Math.max(0, 100 - de * 40) : null, d.currentRatio != null ? Math.min(100, d.currentRatio * 40) : null, d.netDebtEbitda != null ? Math.max(0, 100 - Math.max(0, d.netDebtEbitda) * 22) : null].filter(x => x != null);
   const trendScore = [d.revCagr != null ? Math.min(100, Math.max(0, 50 + d.revCagr * 200)) : null, d.fcfCagr != null ? Math.min(100, Math.max(0, 50 + d.fcfCagr * 150)) : null, marginTrend != null ? Math.min(100, Math.max(0, 50 + marginTrend * 5)) : null].filter(x => x != null);
   const avg = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
 
@@ -438,12 +553,13 @@ function QualityCard({ d, peers, ticker }) {
     ] },
     { cat: "Balance", grade: avg(balScore), metrics: [
       { k: "Debt / equity", v: de == null ? "—" : de.toFixed(2), tone: de == null ? "ink" : tn(2 - de, 1.2, 0.5) },
+      { k: "Net debt / EBITDA", v: d.netDebtEbitda == null ? "—" : d.netDebtEbitda.toFixed(2) + "×", tone: d.netDebtEbitda == null ? "ink" : tn(4 - d.netDebtEbitda, 2.5, 0.5) },
+      { k: "Current ratio", v: d.currentRatio == null ? "—" : d.currentRatio.toFixed(2), tone: tn(d.currentRatio, 1.5, 1) },
       { k: "Interest cover", v: v(intCover, "×"), tone: tn(intCover, 6, 2) },
-      { k: "ROA (TTM)", v: v(d.roa != null ? d.roa * 100 : null, "%"), tone: tn(d.roa != null ? d.roa * 100 : null, 8, 2) },
     ] },
-    { cat: "Operator", grade: insider != null ? Math.min(100, 40 + insider * 6) : null, metrics: [
+    { cat: "Operator", grade: avg([insider != null ? Math.min(100, 40 + insider * 6) : null, d.shareCagr != null ? Math.max(0, Math.min(100, 60 - d.shareCagr * 600)) : null].filter(x => x != null)), metrics: [
       { k: "Insider own", v: v(insider, "%"), tone: tn(insider, 5, 1) },
-      { k: "Inst. own", v: v(_P(ticker.instOwn), "%"), tone: "ink" },
+      { k: "Share count 5y", v: d.shareCagr == null ? "—" : (d.shareCagr >= 0 ? "+" : "") + (d.shareCagr * 100).toFixed(1) + "%/yr", tone: d.shareCagr == null ? "ink" : tn(-d.shareCagr * 100, 0, -3) },
       { k: "Div yield", v: d.divYield != null ? (d.divYield * 100).toFixed(2) + "%" : "0.00%", tone: "ink" },
     ] },
     { cat: "Trend", grade: avg(trendScore), metrics: [
@@ -510,18 +626,20 @@ function PeerCohort({ ticker, peers }) {
 function Statements({ d }) {
   const inc = d.inc.slice().reverse();   // chronological
   const cf = d.cf.slice().reverse();
+  const bs = d.bs.slice().reverse();
   if (!inc.length) return <div className="mono dim2" style={{ padding: 12 }}>No income-statement history.</div>;
   const yrs = inc.map(r => (r.date || "").slice(0, 4));
   const series = (arr, key) => arr.map(r => _P(r[key]));
   const buyback = cf.map(r => { const v = _P(r.salePurchaseOfStock); return v != null ? Math.max(0, -v) : null; });   // negative = repurchase
   const rows = [
-    { line: "Revenue", vals: series(inc, "totalRevenue"), tone: "ink" },
-    { line: "Gross Pft", vals: series(inc, "grossProfit"), tone: "ink" },
-    { line: "EBITDA", vals: series(inc, "ebitda"), tone: "ink" },
-    { line: "Net Inc", vals: series(inc, "netIncome"), tone: "ink" },
-    { line: "FCF", vals: series(cf, "freeCashFlow"), tone: "gn" },
-    { line: "CapEx", vals: series(cf, "capitalExpenditures").map(v => v == null ? null : Math.abs(v)), tone: "ink" },
-    { line: "Buyback", vals: buyback, tone: "copper" },
+    { line: "Revenue", vals: series(inc, "totalRevenue"), kind: "money" },
+    { line: "Gross Pft", vals: series(inc, "grossProfit"), kind: "money" },
+    { line: "EBITDA", vals: series(inc, "ebitda"), kind: "money" },
+    { line: "Net Inc", vals: series(inc, "netIncome"), kind: "money" },
+    { line: "FCF", vals: series(cf, "freeCashFlow"), kind: "money" },
+    { line: "CapEx", vals: series(cf, "capitalExpenditures").map(v => v == null ? null : Math.abs(v)), kind: "money" },
+    { line: "Buyback", vals: buyback, kind: "money" },
+    { line: "Sh out", vals: series(bs, "commonStockSharesOutstanding"), kind: "shares", inv: true },   // fewer shares = good
   ];
   const cagr = vals => {
     const v = vals.filter(x => x != null);
@@ -530,16 +648,17 @@ function Statements({ d }) {
   };
   return (
     <table className="dtable statements">
-      <thead><tr><th>Line ($M)</th>{yrs.map((y, i) => <th key={i} className="r">{y}</th>)}<th>Trend</th><th className="r">CAGR</th></tr></thead>
+      <thead><tr><th>Line</th>{yrs.map((y, i) => <th key={i} className="r">{y}</th>)}<th>Trend</th><th className="r">CAGR</th></tr></thead>
       <tbody>
         {rows.map((r, i) => {
           const cg = cagr(r.vals);
-          const good = cg == null ? null : cg > 0;
+          const good = cg == null ? null : (r.inv ? cg < 0 : cg > 0);
           const clean = r.vals.filter(x => x != null);
+          if (!clean.length) return null;
           return (
             <tr key={i}>
               <td className="mono">{r.line}</td>
-              {r.vals.map((v, j) => <td key={j} className="r mono tabular">{v == null ? "—" : _money(v)}</td>)}
+              {r.vals.map((v, j) => <td key={j} className="r mono tabular">{v == null ? "—" : r.kind === "shares" ? (v / 1e6).toFixed(0) + "M" : _money(v)}</td>)}
               <td>{clean.length >= 2 ? <Sparkline data={clean} color={`var(--${good ? "gn" : "rd"})`} w={60} h={18} /> : <span className="dim2">—</span>}</td>
               <td className={`r mono tabular ${good == null ? "dim2" : good ? "up" : "dn"}`}>{cg == null ? "—" : (cg >= 0 ? "+" : "") + cg.toFixed(1) + "%"}</td>
             </tr>
@@ -565,7 +684,7 @@ function CapAlloc({ d }) {
     { use: "Buybacks", amt: buyback, tone: "copper" },
     { use: "Dividends", amt: dividends, tone: "ink" },
     { use: "Debt paydown", amt: debtPaid, tone: "ink" },
-    { use: "Investing / M&A", amt: invest, tone: "amb" },
+    { use: "Investing (net)", amt: invest, tone: "amb" },
   ].filter(x => x.amt > 0);
   const total = raw.reduce((s, x) => s + x.amt, 0) || 1;
   raw.forEach(x => x.pct = x.amt / total);
@@ -635,8 +754,20 @@ function CatCal({ ticker }) {
   const upcoming = hist.filter(e => e.epsActual == null && e.reportDate).slice(-2).reverse();
   const past = hist.filter(e => e.epsActual != null).slice(0, 4);
   const surprise = e => (e.epsEstimate && e.epsActual != null) ? ((e.epsActual - e.epsEstimate) / Math.abs(e.epsEstimate) * 100) : (e.surprisePercent != null ? _P(e.surprisePercent) : null);
+  // real beat-rate + average surprise across the reported quarters
+  const surps = past.map(surprise).filter(s => s != null);
+  const beats = surps.filter(s => s >= 0).length;
+  const avgSurp = surps.length ? surps.reduce((a, b) => a + b, 0) / surps.length : null;
+  const nextEst = upcoming.length ? _P(upcoming[0].epsEstimate) : null;
   return (
     <div className="catcal">
+      {surps.length >= 2 && (
+        <div className="cat-summary mono dim2" style={{ display: "flex", gap: 14, flexWrap: "wrap", padding: "2px 2px 8px", fontSize: 11.5 }}>
+          <span>Track record · <b className={beats >= surps.length * 0.6 ? "up" : "dn"}>beat {beats} of {surps.length}</b></span>
+          {avgSurp != null && <span>· avg surprise <b className={avgSurp >= 0 ? "up" : "dn"}>{avgSurp >= 0 ? "+" : ""}{avgSurp.toFixed(1)}%</b></span>}
+          {nextEst != null && <span>· next est EPS <b>${nextEst.toFixed(2)}</b></span>}
+        </div>
+      )}
       {upcoming.map((e, i) => (
         <div key={"u" + i} className="cat-row cat-amb">
           <span className="cat-when mono">{(e.reportDate || "").slice(0, 10)}</span>

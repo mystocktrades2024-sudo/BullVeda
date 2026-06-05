@@ -2933,6 +2933,7 @@ async def fundamentals_api(ticker: str):
             "earnings_history": earnings_hist,
             "income_5y": _yr(Fin.get("Income_Statement")),
             "cashflow_5y": _yr(Fin.get("Cash_Flow")),
+            "balance_5y": _yr(Fin.get("Balance_Sheet")),
             "holders_institutions": list((Hold.get("Institutions", {}) or {}).values())[:15],   # 13F
             "insider_transactions": list((Ins or {}).values())[:15] if isinstance(Ins, dict) else (Ins or [])[:15],  # Form-4
         }
@@ -2984,12 +2985,35 @@ async def peers_api(ticker: str):
         peers.sort(key=lambda p: abs((p["market_cap"] or 0) - mcap) if mcap else 0)
         peers = peers[:5]
         cohort = [meD] + peers
+        # enrich each cohort member with forward P/E + EV/EBITDA from EODHD fundamentals
+        # (cached — repeat reads are quota-free) so the lens gets real peer multiples the
+        # local DB doesn't store. Failures degrade silently to the DB row.
+        try:
+            import eodhd_client as _eod
+            def _f(v):
+                try:
+                    x = float(v); return x if x == x and x not in (float("inf"), float("-inf")) else None
+                except Exception:
+                    return None
+            for p in cohort:
+                try:
+                    ff = _eod.fundamentals(p["ticker"]) or {}
+                    V = ff.get("Valuation", {}) or {}
+                    if p.get("forward_pe") is None:
+                        p["forward_pe"] = _f(V.get("ForwardPE"))
+                    p["ev_ebitda"] = _f(V.get("EnterpriseValueEbitda"))
+                    p["price_sales"] = _f(V.get("PriceSalesTTM"))
+                except Exception:
+                    p.setdefault("ev_ebitda", None); p.setdefault("price_sales", None)
+        except Exception:
+            pass
         def _med(key, lo=None, hi=None):
             vals = [p[key] for p in cohort if p.get(key) is not None
                     and (lo is None or p[key] > lo) and (hi is None or p[key] < hi)]
             return round(statistics.median(vals), 4) if vals else None
         medians = {
             "pe_ttm": _med("pe_ttm", lo=0, hi=200), "forward_pe": _med("forward_pe", lo=0, hi=200),
+            "ev_ebitda": _med("ev_ebitda", lo=0, hi=80), "price_sales": _med("price_sales", lo=0, hi=60),
             "revenue_growth": _med("revenue_growth"), "gross_margin": _med("gross_margin"),
             "operating_margin": _med("operating_margin"), "profit_margin": _med("profit_margin"),
             "debt_equity": _med("debt_equity", lo=-1), "n": len(cohort),
