@@ -272,8 +272,29 @@ function SetupChart({ L, sym, view = "full" }) {
   const wrap = React.useRef(null);
   const refs = React.useRef({});
 
-  // deterministic seeded series — base → VCP contraction → breakout to live price
-  const d = React.useMemo(() => {
+  // REAL daily candles from /api/ohlcv (with the plan price-lines drawn on the axis);
+  // the seeded series below is the offline/standalone fallback only.
+  const [real, setReal] = React.useState(null);
+  React.useEffect(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.get || !sym) { setReal(null); return; }
+    let alive = true;
+    BV.get("/api/ohlcv/" + encodeURIComponent(sym)).then(res => {
+      if (!alive) return;
+      const candles = (res && res.candles) || [];
+      if (candles.length < 5) { setReal(null); return; }
+      const volArr = (res && res.volume) || [];
+      const bars = candles.map((c, i) => {
+        const vv = volArr[i]; const v = (vv && typeof vv === "object") ? (vv.value || 0) : (typeof vv === "number" ? vv : 0);
+        return { time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, value: v };
+      });
+      const ema = per => { const k = 2 / (per + 1); let pr = bars[0].close; return bars.map((b, i) => { pr = i === 0 ? b.close : b.close * k + pr * (1 - k); return { time: b.time, value: +pr.toFixed(2) }; }); };
+      setReal({ bars, e9: ema(9), e21: ema(21) });
+    }).catch(() => { if (alive) setReal(null); });
+    return () => { alive = false; };
+  }, [sym]);
+  // deterministic seeded series — offline fallback (base → VCP contraction → live)
+  const seeded = React.useMemo(() => {
     const str = sym || "ARCM"; let s = 0;
     for (let i = 0; i < str.length; i++) s += str.charCodeAt(i) * (i + 7);
     const rng = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
@@ -310,6 +331,7 @@ function SetupChart({ L, sym, view = "full" }) {
     const ema = per => { const k = 2 / (per + 1); let pr = bars[0].close; return bars.map((b, i) => { pr = i === 0 ? b.close : b.close * k + pr * (1 - k); return { time: b.time, value: +pr.toFixed(2) }; }); };
     return { bars, e9: ema(9), e21: ema(21) };
   }, [sym, L.pivot, L.stop, L.price, L.t1, L.t2]);
+  const d = real || seeded;   // real candles when loaded, seeded fallback otherwise
 
   // create chart once
   React.useEffect(() => {
@@ -395,11 +417,16 @@ function SetupChart({ L, sym, view = "full" }) {
   React.useEffect(() => {
     const r = refs.current; if (!r.chart) return;
     const lows = d.bars.map(b => b.low), highs = d.bars.map(b => b.high);
+    const bLo = Math.min(...lows), bHi = Math.max(...highs);
     const mk = (price, color, title, w = 2, style = 0) => r.candle.createPriceLine({ price, color, lineWidth: w, lineStyle: style, axisLabelVisible: true, title });
     r.lines.forEach(l => r.candle.removePriceLine(l));
-    if (view === "action") {
-      // tight frame — candles read big; targets live in the ladder beside the chart
-      r.range = { min: Math.min(L.stop, ...lows) * 0.994, max: Math.max(L.price, ...highs) * 1.02 };
+    if (!L.valid) {
+      // no plan → frame purely on the real bars, no plan price-lines
+      r.range = { min: bLo * 0.99, max: bHi * 1.01 };
+      r.zones = []; r.lines = [];
+    } else if (view === "action") {
+      // tight frame — include recent bars AND the plan stop/trigger
+      r.range = { min: Math.min(L.stop, bLo) * 0.994, max: Math.max(L.price, bHi) * 1.02 };
       r.zones = [
         { top: r.range.max, bot: L.pivot, fill: "#34d399", op: 0.06 },
         { top: L.pivot, bot: Math.max(L.stop, r.range.min), fill: "#f87171", op: 0.09 },
@@ -409,8 +436,8 @@ function SetupChart({ L, sym, view = "full" }) {
         mk(L.stop, "#f87171", `STOP ${L.stop.toFixed(2)}`),
       ];
     } else {
-      // full trade — frame stop → T1 so the targets sit on the chart
-      r.range = { min: Math.min(L.stop, ...lows) * 0.994, max: L.t1 * 1.012 };
+      // full trade — frame to encompass stop → T2 AND the real bars
+      r.range = { min: Math.min(L.stop, bLo) * 0.994, max: Math.max(L.t1, bHi) * 1.012 };
       r.zones = [
         { top: L.t1, bot: L.pivot, fill: "#34d399", op: 0.06 },                          // reward runway → T1
         { top: L.pivot, bot: Math.max(L.stop, r.range.min), fill: "#f87171", op: 0.09 },  // risk band → stop
