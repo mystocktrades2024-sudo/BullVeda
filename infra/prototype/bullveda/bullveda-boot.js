@@ -289,6 +289,8 @@
       catalystTier: num(r.catalyst_tier),
       gatesEvaluated: Array.isArray(r.gates_evaluated) ? r.gates_evaluated : null,
       rejectReason: r.reject_reason || null,
+      description: (fund && fund.description) || null,
+      earningsHistory: (fund && fund.earnings_history) || null,
       _scan: sr, _fund: fund || null, _ml: ml || null,
     };
   };

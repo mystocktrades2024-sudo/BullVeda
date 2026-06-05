@@ -10822,6 +10822,8 @@ body {
       catalystTier: num(r.catalyst_tier),
       gatesEvaluated: Array.isArray(r.gates_evaluated) ? r.gates_evaluated : null,
       rejectReason: r.reject_reason || null,
+      description: (fund && fund.description) || null,
+      earningsHistory: (fund && fund.earnings_history) || null,
       _scan: sr, _fund: fund || null, _ml: ml || null,
     };
   };
@@ -22285,33 +22287,32 @@ window.coherentLevels = function(t) {
   return { price, pivot, stop, t1, t2 };
 };
 function discoveryFootprint(ticker) {
-  const sym = (ticker.symbol || "ARGN").toUpperCase();
-  let h = 0;
-  for (let i = 0; i < sym.length; i++) h = h * 31 + sym.charCodeAt(i) >>> 0;
-  const rnd = (n) => {
-    h = h * 1103515245 + 12345 >>> 0;
-    return h % n;
+  const sym = (ticker.symbol || "").toUpperCase();
+  const BV = window.__BV || {};
+  const sc = ticker._scan || {};
+  const n = (v) => typeof v === "number" && isFinite(v) ? v : null;
+  const sym0 = (s) => String(s || "").split(".")[0].toUpperCase();
+  const engines = (window.resolveEngines ? window.resolveEngines() : []) || [];
+  const rankIn = (id) => {
+    const e = engines.find((x) => x.id === id);
+    if (!e || !e.rows) return null;
+    const i = e.rows.findIndex((r) => sym0(r[0]) === sym);
+    return i >= 0 ? i + 1 : null;
   };
-  const defs = [
-    { id: "momentum", label: "Momentum", surf: "momentum", sub: "rel-strength rank", metric: () => `RS ${80 + rnd(20)}` },
-    { id: "ai-predict", label: "ML Predictions", surf: "ai-predict", sub: "model edge", metric: () => `P(up) 0.${62 + rnd(33)}` },
-    { id: "earnings", label: "Earnings AI", surf: "earnings-cal", sub: "surprise prediction", metric: () => `ESP +${(1 + rnd(50) / 10).toFixed(1)}%` },
-    { id: "options-flow", label: "Options Flow", surf: "options-flow", sub: "unusual activity", metric: () => ["call sweep", "UOA", "put-sale"][rnd(3)] },
-    { id: "insider", label: "Insider", surf: "insider", sub: "Form-4 cluster", metric: () => ["CFO+COO buy", "CEO buy", "3-insider cluster"][rnd(3)] },
-    { id: "smc", label: "SMC \xB7 Patterns", lens: "patterns", sub: "structure", metric: () => ["VCP base", "OB + BoS", "flag \xB7 B2"][rnd(3)] }
-  ];
-  const out = defs.map((e) => {
-    const hit = rnd(100) > 32;
-    const rank = hit ? 1 + rnd(38) : null;
-    const m = e.metric();
-    const tone = !hit ? "off" : rank <= 10 ? "gn" : rank <= 25 ? "cy" : "amb";
-    return { ...e, hit, rank, tone, m };
-  });
-  if (out.filter((e) => e.hit).length < 2) {
-    out[0].hit = true;
-    out[0].rank = out[0].rank || 3 + rnd(8);
-    out[0].tone = "gn";
-  }
+  const tone3 = (hit, strong) => !hit ? "off" : strong ? "gn" : "cy";
+  const out = [];
+  const rs = n(ticker.rsRank) != null ? n(ticker.rsRank) : sc.rs && sc.rs !== "\u2014" ? parseFloat(sc.rs) : null;
+  if (rs != null) out.push({ id: "momentum", label: "Momentum", surf: "momentum", sub: "rel-strength", hit: rs >= 70, rank: rankIn("momentum"), m: `RS ${Math.round(rs)}`, tone: tone3(rs >= 70, rs >= 85) });
+  const pUp = ticker.ml && n(ticker.ml.direction) != null ? n(ticker.ml.direction) : null;
+  if (pUp != null) out.push({ id: "ai-predict", label: "ML Predictions", surf: "ai-predict", sub: "model edge", hit: pUp >= 0.55, rank: rankIn("ml"), m: `P(up) ${Math.round(pUp * 100)}%`, tone: tone3(pUp >= 0.55, pUp >= 0.65) });
+  const eb = (BV.earningsBeat || []).find((x) => sym0(x.ticker) === sym);
+  out.push({ id: "earnings", label: "Earnings AI", surf: "earnings-ai", sub: "beat prediction", hit: !!eb, rank: rankIn("earnings-ai"), m: eb ? `beat ${Math.round(eb.beat_score || 0)}` : "no print", tone: tone3(!!eb, eb && (eb.beat_score || 0) >= 70) });
+  const of = (BV.optionsFlow || []).find((x) => sym0(x.ticker) === sym);
+  out.push({ id: "options-flow", label: "Options Flow", surf: "options", sub: "unusual activity", hit: !!of, rank: rankIn("options"), m: of ? of.status || "UOA" : "no UOA", tone: tone3(!!of, of && of.status === "STRONG") });
+  const ie = window.insiderEdge ? window.insiderEdge(sym) : null;
+  out.push({ id: "insider", label: "Insider", surf: "insider", sub: "Form-4", hit: !!(ie && ie.buyers > 0), rank: rankIn("insider"), m: ie && ie.buyers ? `${ie.buyers} buyer${ie.buyers === 1 ? "" : "s"}` : "none", tone: tone3(!!(ie && ie.buyers), ie && ie.cluster) });
+  const smc = sc.pillarPct ? n(sc.pillarPct.smc) : null;
+  if (smc != null) out.push({ id: "smc", label: "SMC \xB7 Patterns", lens: "patterns", sub: "structure", hit: smc >= 55, rank: rankIn("smc"), m: `SMC ${Math.round(smc)}`, tone: tone3(smc >= 55, smc >= 70) });
   return out;
 }
 function HorizonStrip({ ticker, mode, onMode }) {
@@ -22709,15 +22710,41 @@ window.ThesisCard = ThesisCard;
     document.head.appendChild(s);
   }
 })();
+function ncAge(dateStr) {
+  if (!dateStr) return "";
+  const then = Date.parse(String(dateStr).replace(" ", "T"));
+  if (!isFinite(then)) return "";
+  const h = (Date.now() - then) / 36e5;
+  if (h < 1) return Math.max(0, Math.round(h * 60)) + "m";
+  if (h < 24) return Math.round(h) + "h";
+  const d = Math.round(h / 24);
+  return d <= 9 ? d + "d" : "9d+";
+}
 function NewsCatalysts({ ticker }) {
   const [ai, setAi] = React.useState(null);
-  const sec = ticker.sector || "sector";
-  const heads = [
-    { t: "08:42", h: `Analyst reiterates Buy on ${ticker.symbol}, raises price target`, type: "RATING", mat: "med", fresh: "first report" },
-    { t: "06:15", h: `${sec} flows turn positive on macro print`, type: "MACRO", mat: "low", fresh: "follow-on" },
-    { t: "Yest", h: `${sec} peer guides above consensus \u2014 read-through`, type: "GUIDANCE", mat: "high", fresh: "first report" },
-    { t: "2d", h: `Insider cluster buy disclosed (Form 4)`, type: "INSIDER", mat: "high", fresh: "first report" }
-  ];
+  const [news, setNews] = React.useState(null);
+  React.useEffect(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.get || !ticker.symbol) {
+      setNews([]);
+      return;
+    }
+    let alive = true;
+    BV.get("/api/news?t=" + encodeURIComponent(ticker.symbol) + "&limit=6").then((d) => {
+      if (alive) setNews(d && d.articles || []);
+    }).catch(() => {
+      if (alive) setNews([]);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [ticker.symbol]);
+  const heads = (news || []).map((a) => {
+    const s = typeof a.sent === "number" ? a.sent : 0;
+    const mat = Math.abs(s) >= 0.5 ? "high" : Math.abs(s) >= 0.2 ? "med" : "low";
+    const type = s >= 0.15 ? "POSITIVE" : s <= -0.15 ? "NEGATIVE" : "NEUTRAL";
+    return { t: ncAge(a.date), h: a.title, type, mat, src: a.source || "", url: a.url || "", sent: s };
+  });
   const classify = async () => {
     setAi("loading");
     const prompt = `You are a news catalyst classifier for a stock trader following ${ticker.symbol}. For EACH headline below, give one short line: catalyst type, how material it is (high/med/low), and whether it's tradeable now or already priced in. Be concise.
@@ -22725,7 +22752,7 @@ function NewsCatalysts({ ticker }) {
     const r = await window.aiComplete(prompt);
     setAi(r.text);
   };
-  return /* @__PURE__ */ React.createElement("div", { className: "nc" }, /* @__PURE__ */ React.createElement("div", { className: "nc-head" }, /* @__PURE__ */ React.createElement("div", { className: "nc-head-l" }, /* @__PURE__ */ React.createElement("span", { className: "nc-tag mono" }, "NEWS CATALYSTS"), /* @__PURE__ */ React.createElement("span", { className: "nc-sub mono dim2" }, "classified by type \xB7 materiality \xB7 freshness")), /* @__PURE__ */ React.createElement("button", { className: "aix-btn mono", onClick: classify, disabled: ai === "loading" }, ai === "loading" ? "\u2726 thinking\u2026" : "\u2726 Classify catalysts")), heads.map((n, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `nc-row nc-row--${n.mat}` }, /* @__PURE__ */ React.createElement("span", { className: "nc-time" }, n.t), /* @__PURE__ */ React.createElement("span", { className: "nc-type" }, n.type), /* @__PURE__ */ React.createElement("span", { className: `nc-mat nc-mat--${n.mat}` }, n.mat === "high" ? "MATERIAL" : n.mat === "med" ? "MODERATE" : "LOW"), /* @__PURE__ */ React.createElement("span", { className: "nc-h" }, n.h, " ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 ", n.fresh)))), ai && ai !== "loading" && /* @__PURE__ */ React.createElement("div", { className: "aix-out mono", style: { width: "100%" } }, /* @__PURE__ */ React.createElement("span", { className: "aix-tag" }, "\u2726 KAIROS \xB7 CATALYST READ"), /* @__PURE__ */ React.createElement("span", { className: "aix-txt" }, ai)), /* @__PURE__ */ React.createElement("div", { className: "nc-foot mono dim2" }, "Headlines from the news feed (EODHD in production) \xB7 type/materiality classified by the LLM. Informational only \u2014 not advice."));
+  return /* @__PURE__ */ React.createElement("div", { className: "nc" }, /* @__PURE__ */ React.createElement("div", { className: "nc-head" }, /* @__PURE__ */ React.createElement("div", { className: "nc-head-l" }, /* @__PURE__ */ React.createElement("span", { className: "nc-tag mono" }, "NEWS CATALYSTS"), /* @__PURE__ */ React.createElement("span", { className: "nc-sub mono dim2" }, "live headlines \xB7 sentiment-scored")), /* @__PURE__ */ React.createElement("button", { className: "aix-btn mono", onClick: classify, disabled: ai === "loading" || !heads.length }, ai === "loading" ? "\u2726 thinking\u2026" : "\u2726 Classify catalysts")), news === null ? /* @__PURE__ */ React.createElement("div", { className: "nc-row" }, /* @__PURE__ */ React.createElement("span", { className: "nc-h dim2" }, "Loading headlines\u2026")) : heads.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "nc-row" }, /* @__PURE__ */ React.createElement("span", { className: "nc-h dim2" }, "No recent news for ", ticker.symbol, ".")) : heads.map((n, i) => /* @__PURE__ */ React.createElement("a", { key: i, className: `nc-row nc-row--${n.mat}`, href: n.url || void 0, target: "_blank", rel: "noreferrer", style: { textDecoration: "none", cursor: n.url ? "pointer" : "default" } }, /* @__PURE__ */ React.createElement("span", { className: "nc-time" }, n.t), /* @__PURE__ */ React.createElement("span", { className: "nc-type", style: { color: n.type === "POSITIVE" ? "var(--gn)" : n.type === "NEGATIVE" ? "var(--rd)" : "var(--ink-3)" } }, n.type), /* @__PURE__ */ React.createElement("span", { className: `nc-mat nc-mat--${n.mat}` }, n.mat === "high" ? "MATERIAL" : n.mat === "med" ? "MODERATE" : "LOW"), /* @__PURE__ */ React.createElement("span", { className: "nc-h" }, n.h, n.src ? /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " \xB7 ", n.src) : null))), ai && ai !== "loading" && /* @__PURE__ */ React.createElement("div", { className: "aix-out mono", style: { width: "100%" } }, /* @__PURE__ */ React.createElement("span", { className: "aix-tag" }, "\u2726 KAIROS \xB7 CATALYST READ"), /* @__PURE__ */ React.createElement("span", { className: "aix-txt" }, ai)), /* @__PURE__ */ React.createElement("div", { className: "nc-foot mono dim2" }, "Live EODHD headlines, sentiment-scored \xB7 type/materiality classified by the LLM. Informational only \u2014 not advice."));
 }
 window.NewsCatalysts = NewsCatalysts;
 (function() {
@@ -22886,7 +22913,7 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
       headerStyle
     },
     /* @__PURE__ */ React.createElement(BuyChecklist, { ticker, mode }),
-    ((_a = window.__tier) != null ? _a : 4) >= 3 && /* @__PURE__ */ React.createElement("details", { className: "ov-more" }, /* @__PURE__ */ React.createElement("summary", { className: "ov-more-sum mono" }, "Show the full 10-gate rule-engine audit \xB7 how 612 ranked \u2192 ", window.secBias ? window.secBias(window.compositeVerdict ? window.compositeVerdict(ticker, mode).verdict : "BUY") : "Bullish", " \xB7 PRO+"), /* @__PURE__ */ React.createElement("div", { className: "ov-more-body" }, /* @__PURE__ */ React.createElement(GateCascade, null)))
+    ((_a = window.__tier) != null ? _a : 4) >= 3 && /* @__PURE__ */ React.createElement("details", { className: "ov-more" }, /* @__PURE__ */ React.createElement("summary", { className: "ov-more-sum mono" }, "Show the full 10-gate rule-engine audit \xB7 how 612 ranked \u2192 ", window.secBias ? window.secBias(window.compositeVerdict ? window.compositeVerdict(ticker, mode).verdict : "BUY") : "Bullish", " \xB7 PRO+"), /* @__PURE__ */ React.createElement("div", { className: "ov-more-body" }, /* @__PURE__ */ React.createElement(GateCascade, { ticker })))
   ), /* @__PURE__ */ React.createElement(
     OvSection,
     {
@@ -22895,7 +22922,7 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
       sub: "every discipline's read \xB7 click any tile to open that lens",
       headerStyle
     },
-    /* @__PURE__ */ React.createElement(ConfluenceHeatmap, null)
+    /* @__PURE__ */ React.createElement(ConfluenceHeatmap, { ticker, mode })
   ), /* @__PURE__ */ React.createElement(
     OvSection,
     {
@@ -22915,71 +22942,155 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
       defaultOpen: true,
       teaser: "4 pre-mortem triggers \xB7 your note \xB7 6 24h deltas \xB7 sleeve mechanism"
     },
-    /* @__PURE__ */ React.createElement("div", { className: "ov-honest-3col" }, /* @__PURE__ */ React.createElement("div", { className: "ov-honest-block" }, /* @__PURE__ */ React.createElement("div", { className: "ov-honest-sub label-cap" }, "\u25BC What would make this wrong \xB7 pre-mortem"), /* @__PURE__ */ React.createElement("div", { className: "premortem" }, /* @__PURE__ */ React.createElement("div", { className: "premortem-row" }, /* @__PURE__ */ React.createElement("span", { className: "pm-num mono" }, "1"), /* @__PURE__ */ React.createElement("span", { className: "pm-text" }, "Loses VWAP intraday AND closes below $", (window.coherentLevels ? window.coherentLevels(ticker).pivot * 0.9837 : ticker.pivot * 0.9837).toFixed(2), " \u2014 invalidation cascade."), /* @__PURE__ */ React.createElement(Pill, { tone: "rd", small: true }, "HARD")), (mode === "INVESTMENT" ? [["2", "ROIC falls below WACC \u2014 capital destruction.", "FUNDAMENTAL", "rd"], ["3", "Operating cash flow diverges below reported EPS \u2014 accrual risk.", "QUALITY", "amb"], ["4", "Price exceeds 90% of DCF fair value \u2014 margin of safety gone.", "VALUATION", "amb"]] : mode === "POSITION" ? [["2", "Sector RS rank drops below 50th pct for 2 weeks \u2014 leadership lost.", "MACRO", "rd"], ["3", "Regime flips to Risk-Off Trending \u2014 thesis backdrop gone.", "MACRO", "amb"], ["4", "13F shows institutions distributing \u2014 smart money exits.", "FUNDAMENTAL", "rd"]] : [["2", "Sector ETF (XLB) breaks 50-DMA on +1.5\u03C3 volume \u2014 regime flip.", "MEDIUM", "amb"], ["3", "CPI prints >0.4% MoM next Wed \u2014 risk-off reset.", "MACRO", "amb"], ["4", "Top-2 customer (31% of revenue) cuts guidance on Q1 call.", "FUNDAMENTAL", "rd"]]).map(([n, t, tag, tone]) => /* @__PURE__ */ React.createElement("div", { key: n, className: "premortem-row" }, /* @__PURE__ */ React.createElement("span", { className: "pm-num mono" }, n), /* @__PURE__ */ React.createElement("span", { className: "pm-text" }, t), /* @__PURE__ */ React.createElement(Pill, { tone, small: true }, tag)))), /* @__PURE__ */ React.createElement(PreMortemNote, { symbol: ticker.symbol })), /* @__PURE__ */ React.createElement("div", { className: "ov-honest-block" }, /* @__PURE__ */ React.createElement("div", { className: "ov-honest-sub label-cap" }, "\u2197 What changed \xB7 last 24h"), /* @__PURE__ */ React.createElement(WhatChanged, null)), /* @__PURE__ */ React.createElement("div", { className: "ov-honest-block" }, /* @__PURE__ */ React.createElement("div", { className: "ov-honest-sub label-cap" }, "\u2699 Why the edge exists \xB7 mechanism"), /* @__PURE__ */ React.createElement(SleeveAttribution, { ticker })))
+    /* @__PURE__ */ React.createElement("div", { className: "ov-honest-3col" }, /* @__PURE__ */ React.createElement("div", { className: "ov-honest-block" }, /* @__PURE__ */ React.createElement("div", { className: "ov-honest-sub label-cap" }, "\u25BC What would make this wrong \xB7 pre-mortem"), /* @__PURE__ */ React.createElement("div", { className: "premortem" }, (() => {
+      const L = window.coherentLevels ? window.coherentLevels(ticker) : ticker;
+      const reg = String(window.__BV && window.__BV.market && window.__BV.market.regime4 || ticker._scan && ticker._scan._raw && ticker._scan._raw.regime4 || "the current regime").replace(/_/g, " ");
+      const rs = ticker.rsRank;
+      const er = ticker.earnings && ticker.earnings.days;
+      const stopV = L && L.stop || ticker.stop || 0;
+      const rows = [];
+      rows.push(["1", `Closes below the stop $${stopV.toFixed(2)} \u2014 hard invalidation, exit on the close.`, "HARD", "rd"]);
+      rows.push(["2", `Regime flips out of ${reg} \u2014 the setup's backdrop is gone (re-check the regime gate).`, "MACRO", "amb"]);
+      if (rs != null) rows.push(["3", `RS rank falls below 40 (now ${Math.round(rs)}) \u2014 relative leadership lost.`, "MOMENTUM", rs < 50 ? "rd" : "amb"]);
+      else rows.push(["3", "Sector relative strength rolls over \u2014 relative leadership lost.", "MOMENTUM", "amb"]);
+      if (er != null && er >= 0 && er <= 30) rows.push(["4", `Earnings in ${er}d \u2014 binary event; trim or exit before the print unless the thesis confirms.`, "CATALYST", "rd"]);
+      else if (mode === "INVESTMENT") rows.push(["4", "ROE / operating margins deteriorate, or price exceeds fair value \u2014 margin of safety gone.", "FUNDAMENTAL", "amb"]);
+      else rows.push(["4", "Distribution-day cluster (heavy down-volume on no news) \u2014 institutions exiting.", "FUNDAMENTAL", "rd"]);
+      return rows.map(([n, t, tag, tone]) => /* @__PURE__ */ React.createElement("div", { key: n, className: "premortem-row" }, /* @__PURE__ */ React.createElement("span", { className: "pm-num mono" }, n), /* @__PURE__ */ React.createElement("span", { className: "pm-text" }, t), /* @__PURE__ */ React.createElement(Pill, { tone, small: true }, tag)));
+    })()), /* @__PURE__ */ React.createElement(PreMortemNote, { symbol: ticker.symbol })), /* @__PURE__ */ React.createElement("div", { className: "ov-honest-block" }, /* @__PURE__ */ React.createElement("div", { className: "ov-honest-sub label-cap" }, "\u2197 What changed \xB7 vs prior scan"), /* @__PURE__ */ React.createElement(WhatChanged, { ticker })), /* @__PURE__ */ React.createElement("div", { className: "ov-honest-block" }, /* @__PURE__ */ React.createElement("div", { className: "ov-honest-sub label-cap" }, "\u2699 Why the edge exists \xB7 mechanism"), /* @__PURE__ */ React.createElement(SleeveAttribution, { ticker })))
   ), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 ", mode), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "A breakout above ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "$", (window.coherentLevels ? window.coherentLevels(ticker).pivot : ticker.pivot).toFixed(2)), " confirms the setup \xB7 half-Kelly sizing reference \xB7 9 of 10 gates pass \xB7 Wilson LB ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "47.7%"), " \xB7 expectancy ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "+0.51R"), " \xB7", /* @__PURE__ */ React.createElement("b", { className: "warn" }, " size \u221225% into ER."))));
 }
-function ConfluenceHeatmap() {
-  const cells = [
-    { lens: "Overview", v: "Bullish", tone: "gn", note: "score 78" },
-    { lens: "Plan", v: "READY", tone: "gn", note: "R 1.74" },
-    { lens: "Chart", v: "TREND+", tone: "gn", note: "stacked-bull" },
-    { lens: "Technicals", v: "PASS", tone: "gn", note: "RSI 64" },
-    { lens: "Patterns", v: "VCP\xB7B2", tone: "gn", note: "conf 74%" },
-    { lens: "SMC", v: "OB+BoS", tone: "gn", note: "spring held" },
-    { lens: "Value", v: "MARG.", tone: "amb", note: "MoS 6%" },
-    { lens: "Risk", v: "OK", tone: "gn", note: "VaR \u22122.1%" },
-    { lens: "Earnings", v: "11d", tone: "amb", note: "event risk pre-ER" },
-    { lens: "Options", v: "RICH", tone: "amb", note: "IV/HV 1.42" },
-    { lens: "Portfolio", v: "FIT", tone: "gn", note: "correl 0.34" },
-    { lens: "Tape", v: "+12 INS", tone: "gn", note: "rising sent." },
-    { lens: "Track Rec.", v: "EDGE", tone: "gn", note: "Wilson 47.7" },
-    { lens: "AI Edge", v: "+0.18", tone: "gn", note: "hit-net pos." }
-  ];
+function ConfluenceHeatmap({ ticker, mode }) {
+  const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
+  if (!cv || !cv.lenses) return /* @__PURE__ */ React.createElement("div", { className: "conf-grid" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2", style: { padding: 8 } }, "Lens confluence unavailable for this name."));
+  const lensId = { "Overview": "overview", "AI Edge": "mledge", "Technicals": "technicals", "Patterns": "patterns", "SMC": "smc", "Value": "investment", "Risk": "risk", "Track Rec.": "mledge", "Plan": "plan", "Earnings": "earnings", "Options": "options", "Insider": "tape" };
+  const cells = cv.lenses.slice().sort((a, b) => b.v - a.v);
+  const dis = cv.fail >= 3 ? ["elevated", "warn", "mixed signals \u2014 verify the dissent before acting"] : cv.fail >= 1 ? ["some", "amb", "mostly aligned with a few cautions"] : ["low", "up", "clean confluence across the lenses"];
   return /* @__PURE__ */ React.createElement("div", { className: "conf-grid" }, cells.map((c, i) => {
-    const map = { "Overview": "overview", "Plan": "plan", "Chart": "chart", "Technicals": "technicals", "Patterns": "patterns", "SMC": "smc", "Value": "investment", "Risk": "risk", "Earnings": "earnings", "Options": "options", "Portfolio": "tape", "Tape": "tape", "Track Rec.": "mledge", "AI Edge": "mledge" };
+    const tone = c.tone || (c.v >= 62 ? "gn" : c.v >= 46 ? "amb" : "rd");
     const go = () => {
-      if (window.__setLens && map[c.lens]) window.__setLens(map[c.lens]);
+      if (window.__setLens && lensId[c.k]) window.__setLens(lensId[c.k]);
     };
-    return /* @__PURE__ */ React.createElement("button", { key: i, className: `conf-cell conf-${c.tone}`, onClick: go, title: `open ${c.lens}` }, /* @__PURE__ */ React.createElement("div", { className: "conf-lens mono" }, c.lens), /* @__PURE__ */ React.createElement("div", { className: `conf-v mono kpi-tone--${c.tone}` }, c.v), /* @__PURE__ */ React.createElement("div", { className: "conf-note mono dim2" }, c.note));
-  }), /* @__PURE__ */ React.createElement("div", { className: "conf-summary" }, /* @__PURE__ */ React.createElement(Pill, { tone: "gn", dot: true }, "10 PASS"), /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "3 CAUTION"), /* @__PURE__ */ React.createElement(Pill, { tone: "rd", small: true }, "0 FAIL"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2", style: { marginLeft: 12 } }, "Disagreement score: ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "low"), " \u2014 clean confluence; act on the bracket.")));
+    return /* @__PURE__ */ React.createElement("button", { key: i, className: `conf-cell conf-${tone}`, onClick: go, title: `open ${c.k} \xB7 weight ${(c.w * 100).toFixed(0)}%` }, /* @__PURE__ */ React.createElement("div", { className: "conf-lens mono" }, c.k), /* @__PURE__ */ React.createElement("div", { className: `conf-v mono kpi-tone--${tone}` }, c.v), /* @__PURE__ */ React.createElement("div", { className: "conf-note mono dim2" }, c.why));
+  }), /* @__PURE__ */ React.createElement("div", { className: "conf-summary" }, /* @__PURE__ */ React.createElement(Pill, { tone: "gn", dot: true }, cv.agree, " PASS"), /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, cv.caution, " CAUTION"), /* @__PURE__ */ React.createElement(Pill, { tone: "rd", small: true }, cv.fail, " FAIL"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2", style: { marginLeft: 12 } }, "Disagreement: ", /* @__PURE__ */ React.createElement("b", { className: dis[1] === "warn" ? "warn" : dis[1] === "amb" ? "warn" : "up" }, dis[0]), " \u2014 ", dis[2], ".")));
 }
+const SLEEVE_MECH = {
+  "Breakout Expansion": /* @__PURE__ */ React.createElement(React.Fragment, null, "Post-base breakout on volume expansion. ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "Alpha:"), " supply absorption before markup. ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "Works when"), " accumulation is observable pre-breakout (VCP / 52wk)."),
+  "Trend Continuation": /* @__PURE__ */ React.createElement(React.Fragment, null, "Pullback to value (EMA / support) in an uptrend. ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "Alpha:"), " institutional re-add at the mean. ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "Works in"), " trending / choppy-up regimes."),
+  "Impulse Catalyst": /* @__PURE__ */ React.createElement(React.Fragment, null, "Post-catalyst drift (PEAD / UOA / gap). ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "Alpha:"), " under-reaction to fresh information. ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "Works in"), " the 1\u20135d window after the print."),
+  "Special Situation": /* @__PURE__ */ React.createElement(React.Fragment, null, "Insider cluster / float rotation / squeeze. ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "Alpha:"), " informed buying or forced covering. ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "Works"), " across regimes.")
+};
 function SleeveAttribution({ ticker }) {
-  return /* @__PURE__ */ React.createElement("div", { className: "sleeve" }, /* @__PURE__ */ React.createElement("div", { className: "sleeve-row" }, /* @__PURE__ */ React.createElement("span", { className: "sleeve-lbl mono" }, "SLEEVE"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(Pill, { tone: "copper" }, "CONTINUATION BREAKOUT \xB7 base #2"), " ", /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "\xB7 2 of 11 active sleeves \xB7 12% of current book"))), /* @__PURE__ */ React.createElement("div", { className: "sleeve-row" }, /* @__PURE__ */ React.createElement("span", { className: "sleeve-lbl mono" }, "MECHANISM"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "Post-base breakout on dry-volume pullback. ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "Alpha source:"), " liquidity withdrawal then demand absorption at pivot.", /* @__PURE__ */ React.createElement("b", { className: "copper" }, " Why it works:"), " regime where institutional accumulation is observable but not yet priced.")), /* @__PURE__ */ React.createElement("div", { className: "sleeve-row" }, /* @__PURE__ */ React.createElement("span", { className: "sleeve-lbl mono" }, "WILSON"), /* @__PURE__ */ React.createElement(WilsonPill, { n: 47, winRate: 0.617, lb: 0.477 })), /* @__PURE__ */ React.createElement("div", { className: "sleeve-row" }, /* @__PURE__ */ React.createElement("span", { className: "sleeve-lbl mono" }, "LAST 5"), /* @__PURE__ */ React.createElement("div", { className: "sleeve-recent" }, [
-    { sym: "ARGN", date: "Apr 22", out: "+1.84R", tone: "gn" },
-    { sym: "BORA", date: "Apr 04", out: "+0.72R", tone: "gn" },
-    { sym: "VLCT", date: "Mar 18", out: "\u22121.0R", tone: "rd" },
-    { sym: "ZOTR", date: "Feb 27", out: "+2.10R", tone: "gn" },
-    { sym: "NVRH", date: "Feb 06", out: "+0.41R", tone: "amb" }
-  ].map((s, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "sleeve-rec" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, s.sym)), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, s.date), /* @__PURE__ */ React.createElement("span", { className: `mono kpi-tone--${s.tone}` }, s.out))))));
+  const fam = ticker.setupFamily || "\u2014";
+  const ss = ticker.setupStats || {};
+  const SL = window.SigLedger;
+  const recent = React.useMemo(() => {
+    if (!SL || !SL.SIGNALS || !SL.SIGNALS.length) return [];
+    const fkey = String(fam).toLowerCase();
+    const toks = fkey.split(/\s+/).filter((w) => w.length > 3);
+    const match = (st) => {
+      st = String(st || "").toLowerCase();
+      if (toks.some((t) => st.includes(t))) return true;
+      if (/breakout/.test(fkey) && /breakout|vcp|52wk|pivot|rs new/.test(st)) return true;
+      if (/(continuation|trend)/.test(fkey) && /(continuation|ema|pullback|bounce|week)/.test(st)) return true;
+      if (/(impulse|catalyst)/.test(fkey) && /(gap|pead|breakout|pivot)/.test(st)) return true;
+      if (/(special|situation)/.test(fkey) && /(insider|cluster|squeeze)/.test(st)) return true;
+      return false;
+    };
+    return SL.SIGNALS.filter((s) => match(s.setup)).map((s) => {
+      const ret = s.ret || {};
+      let r = null;
+      for (const h of ["W2", "W1", "D5", "D3", "W4", "M1"]) if (ret[h] != null) {
+        r = ret[h];
+        break;
+      }
+      if (r == null) {
+        const ks = Object.keys(ret).filter((k) => ret[k] != null);
+        if (ks.length) r = ret[ks[ks.length - 1]];
+      }
+      return { sym: s.sym, age: s.age, date: s.date, ret: r != null ? s.dir === "short" ? -r : r : null };
+    }).filter((x) => x.ret != null).sort((a, b) => a.age - b.age).slice(0, 5);
+  }, [fam, SL && SL.real, SL && SL.SIGNALS && SL.SIGNALS.length]);
+  const pf = window.__BV && window.__BV.portfolio || null;
+  const heldInFam = pf && pf.positions ? pf.positions.filter((p) => String(p.setup_type || "").toLowerCase().includes(String(fam).toLowerCase().split(" ")[0])).length : 0;
+  return /* @__PURE__ */ React.createElement("div", { className: "sleeve" }, /* @__PURE__ */ React.createElement("div", { className: "sleeve-row" }, /* @__PURE__ */ React.createElement("span", { className: "sleeve-lbl mono" }, "SLEEVE"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(Pill, { tone: "copper" }, String(fam).toUpperCase()), " ", /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "\xB7 ", ss.n != null ? `n=${ss.n} sample` : "no ledger sample", heldInFam ? ` \xB7 ${heldInFam} held in book` : ""))), /* @__PURE__ */ React.createElement("div", { className: "sleeve-row" }, /* @__PURE__ */ React.createElement("span", { className: "sleeve-lbl mono" }, "MECHANISM"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, SLEEVE_MECH[fam] || /* @__PURE__ */ React.createElement(React.Fragment, null, "Edge from a ", String(fam).toLowerCase(), " setup \u2014 see the Plan lens for the full mechanism + falsification."))), /* @__PURE__ */ React.createElement("div", { className: "sleeve-row" }, /* @__PURE__ */ React.createElement("span", { className: "sleeve-lbl mono" }, "WILSON"), ss.n != null && ss.winRate != null && ss.wilsonLB != null ? /* @__PURE__ */ React.createElement(WilsonPill, { n: ss.n, winRate: ss.winRate, lb: ss.wilsonLB }) : /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "no per-setup track record yet (n=0)")), /* @__PURE__ */ React.createElement("div", { className: "sleeve-row" }, /* @__PURE__ */ React.createElement("span", { className: "sleeve-lbl mono" }, "LAST 5"), recent.length ? /* @__PURE__ */ React.createElement("div", { className: "sleeve-recent" }, recent.map((s, i) => {
+    const tone = s.ret >= 1 ? "gn" : s.ret <= -1 ? "rd" : "amb";
+    return /* @__PURE__ */ React.createElement("div", { key: i, className: "sleeve-rec" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, s.sym)), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, s.age, "d ago"), /* @__PURE__ */ React.createElement("span", { className: `mono kpi-tone--${tone}` }, s.ret >= 0 ? "+" : "", s.ret.toFixed(1), "%"));
+  })) : /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "no recent same-setup trades in the ledger")));
 }
-function GateCascade() {
-  const gates = [
-    { n: 1, label: "Universe \xB7 mcap \u2265 $100M \xB7 ADV \u2265 500k", v: "612 / 1402", tone: "gn" },
-    { n: 2, label: "Liquidity \xB7 spread \u2264 10bp \xB7 L1 \u2265 1000", v: "PASS", tone: "gn" },
-    { n: 3, label: "Trend \xB7 close > 50-DMA \xB7 200-DMA rising", v: "PASS", tone: "gn" },
-    { n: 4, label: "Setup detected \xB7 pattern conf \u2265 0.60", v: "VCP 0.74", tone: "gn" },
-    { n: 5, label: "Wilson LB \u2265 45% \xB7 per setup family", v: "47.7%", tone: "gn" },
-    { n: 6, label: "R-multiple \u2265 1.5 \xB7 entry/stop/T1 valid", v: "1.74R", tone: "gn" },
-    { n: 7, label: "Risk \xB7 max loss \u2264 0.75% NAV", v: "0.39%", tone: "gn" },
-    { n: 8, label: "Correl-to-book \u2264 0.55", v: "0.34", tone: "gn" },
-    { n: 9, label: "ER not in T1 window (T+14d > ER date)", v: "ER in 11d", tone: "amb", warn: true },
-    { n: 10, label: "ML hit-net \u2265 +0.05", v: "+0.18", tone: "gn" }
-  ];
-  return /* @__PURE__ */ React.createElement("div", { className: "gates" }, gates.map((g) => /* @__PURE__ */ React.createElement("div", { key: g.n, className: `gate-row gate-${g.tone}` }, /* @__PURE__ */ React.createElement("span", { className: "gate-n mono" }, String(g.n).padStart(2, "0")), /* @__PURE__ */ React.createElement("span", { className: "gate-mark mono" }, g.warn ? "!" : "\u2713"), /* @__PURE__ */ React.createElement("span", { className: "gate-lbl" }, g.label), /* @__PURE__ */ React.createElement("span", { className: `gate-result mono kpi-tone--${g.tone}` }, g.v))), /* @__PURE__ */ React.createElement("div", { className: "gates-summary mono" }, /* @__PURE__ */ React.createElement("b", { className: "up" }, "9 of 10 gates pass \xB7 1 caution (ER in window)."), " Recommendation: take bracket with ", /* @__PURE__ */ React.createElement("b", null, "25% size cut"), " + full exit T\u22122 sessions pre-ER unless thesis confirms."));
+function GateCascade({ ticker }) {
+  const ge = ticker && ticker.gatesEvaluated || null;
+  if (!ge || !ge.length) return /* @__PURE__ */ React.createElement("div", { className: "gates" }, /* @__PURE__ */ React.createElement("div", { className: "gates-summary mono dim2" }, "No rule-engine audit trail recorded for this name."));
+  const LABELS = {
+    system_circuit_breaker: "System circuit breaker",
+    macro_blackout: "Macro event blackout",
+    liquidity: "Liquidity \xB7 spread / ADV",
+    earnings_blackout: "Earnings blackout window",
+    regime_gate: "Regime gate",
+    fund_adequacy: "Fundamental adequacy",
+    entry_quality: "Entry quality \xB7 value zone",
+    decision_state: "Decision state",
+    tail_loss_filter: "Tail-loss filter \xB7 tier_zero",
+    setup_score_band: "Setup score band",
+    rr_floor: "R:R floor",
+    score_floor: "Composite score floor",
+    signal_filter: "Signal whitelist"
+  };
+  const pass = ge.filter((g) => g.passed).length, total = ge.length;
+  return /* @__PURE__ */ React.createElement("div", { className: "gates" }, ge.map((g, i) => {
+    const tone = g.passed ? "gn" : "rd";
+    return /* @__PURE__ */ React.createElement("div", { key: i, className: `gate-row gate-${tone}`, title: g.reason || "" }, /* @__PURE__ */ React.createElement("span", { className: "gate-n mono" }, String(i + 1).padStart(2, "0")), /* @__PURE__ */ React.createElement("span", { className: "gate-mark mono" }, g.passed ? "\u2713" : "\u2715"), /* @__PURE__ */ React.createElement("span", { className: "gate-lbl" }, LABELS[g.name] || String(g.name || "gate").replace(/_/g, " ")), /* @__PURE__ */ React.createElement("span", { className: `gate-result mono kpi-tone--${tone}`, style: { maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, g.passed ? "PASS" : g.reason || "BLOCKED"));
+  }), /* @__PURE__ */ React.createElement("div", { className: "gates-summary mono" }, /* @__PURE__ */ React.createElement("b", { className: pass === total ? "up" : "warn" }, pass, " of ", total, " gate", total === 1 ? "" : "s", " pass", pass < total ? ` \xB7 ${total - pass} blocked` : "", "."), ticker.rejectReason ? /* @__PURE__ */ React.createElement(React.Fragment, null, " Blocking reason: ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, ticker.rejectReason), ".") : " Clear to act per the plan."));
 }
 function MacroDrill() {
   return /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(3, 1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "Regime \xB7 MULTI-FACTOR", value: "BULL \xB7 LOW-VIX", tone: "gn", sub: "highest WR regime \xB7 71% historical" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "XLB \xB7 50-DMA", value: "+3.4%", tone: "gn", sub: "rising \xB7 sector tailwind" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "VIX percentile 1y", value: "32%", tone: "gn", sub: "below median \xB7 risk-on" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "US10Y \xB7 5d delta", value: "\u221214bp", tone: "gn", sub: "rates easing \xB7 duration friendly" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Breadth \xB7 A/D NYSE", value: "1.84", tone: "gn", sub: "participation broad" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "HY spread \xB7 5d", value: "\u22126bp", tone: "gn", sub: "risk appetite holding" }));
 }
-function WhatChanged() {
-  const items = [
-    { label: "Composite score", old: "74", now: "78", tone: "gn", note: "+4 \xB7 drove Bullish shift" },
-    { label: "Technical pillar", old: "78", now: "82", tone: "gn", note: "MACD+ \xB7 VWAP reclaim" },
-    { label: "Catalyst pillar", old: "62", now: "58", tone: "amb", note: "\u22124 \xB7 ER proximity weight" },
-    { label: "ML hit-net", old: "0.14", now: "0.18", tone: "gn", note: "+4pt edge improvement" },
-    { label: "Insider activity (90d net)", old: "+8", now: "+12", tone: "gn", note: "CFO + COO buys May 18-22" },
-    { label: "Sector ETF (XLB)", old: "+0.6%", now: "+1.2%", tone: "gn", note: "sector confirming" }
-  ];
-  return /* @__PURE__ */ React.createElement("div", { className: "wc" }, items.map((it, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "wc-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono wc-lbl" }, it.label), /* @__PURE__ */ React.createElement("span", { className: "mono dim2 wc-old" }, it.old), /* @__PURE__ */ React.createElement("span", { className: "mono dim" }, "\u2192"), /* @__PURE__ */ React.createElement("span", { className: `mono wc-new kpi-tone--${it.tone}` }, /* @__PURE__ */ React.createElement("b", null, it.now)), /* @__PURE__ */ React.createElement("span", { className: "mono dim wc-note" }, it.note))));
+function WhatChanged({ ticker }) {
+  const [hist, setHist] = React.useState(null);
+  React.useEffect(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.get || !ticker.symbol) {
+      setHist([]);
+      return;
+    }
+    let alive = true;
+    BV.get("/api/ticker-history?t=" + encodeURIComponent(ticker.symbol) + "&n=30").then((d) => {
+      if (alive) setHist(d && d.history || []);
+    }).catch(() => {
+      if (alive) setHist([]);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [ticker.symbol]);
+  if (hist === null) return /* @__PURE__ */ React.createElement("div", { className: "wc" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "Loading change history\u2026"));
+  const byDate = {};
+  (hist || []).forEach((h) => {
+    if (h.date) byDate[h.date] = h;
+  });
+  const dates = Object.keys(byDate).sort();
+  const cur = dates.length ? byDate[dates[dates.length - 1]] : null;
+  const prev = dates.length > 1 ? byDate[dates[dates.length - 2]] : null;
+  if (!cur || !prev) return /* @__PURE__ */ React.createElement("div", { className: "wc" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "First appearance \u2014 no prior scan to diff against."));
+  const n = (v) => typeof v === "number" && isFinite(v) ? v : null;
+  const vtone = (v) => /BUY/i.test(v) ? "gn" : /AVOID|SELL|SHORT/i.test(v) ? "rd" : "amb";
+  const items = [];
+  const numRow = (label, o, nw, fmt, betterUp = true) => {
+    o = n(o);
+    nw = n(nw);
+    if (o == null || nw == null || o === nw) return;
+    const up = nw > o, good = betterUp ? up : !up;
+    items.push({ label, old: fmt(o), now: fmt(nw), tone: good ? "gn" : "rd", note: (up ? "+" : "") + fmt(nw - o) });
+  };
+  if (prev.verdict !== cur.verdict) items.push({ label: "Verdict", old: prev.verdict, now: cur.verdict, tone: vtone(cur.verdict), note: "changed" });
+  numRow("Composite score", prev.score, cur.score, (v) => Math.round(v));
+  numRow("RS rank", prev.rs_rank, cur.rs_rank, (v) => Math.round(v));
+  numRow("R:R", prev.rr_ratio, cur.rr_ratio, (v) => v.toFixed(2));
+  if (prev.regime4 !== cur.regime4) items.push({ label: "Regime", old: String(prev.regime4 || "\u2014").replace(/_/g, " "), now: String(cur.regime4 || "\u2014").replace(/_/g, " "), tone: "amb", note: "shifted" });
+  if (prev.setup_type !== cur.setup_type) items.push({ label: "Setup", old: prev.setup_type || "\u2014", now: cur.setup_type || "\u2014", tone: "amb", note: "re-classified" });
+  if (!prev.has_catalyst && cur.has_catalyst) items.push({ label: "Catalyst", old: "none", now: "active", tone: "gn", note: "appeared" });
+  if (!items.length) return /* @__PURE__ */ React.createElement("div", { className: "wc" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "No material change vs ", prev.date, " \u2014 score/verdict/RS/regime steady."));
+  return /* @__PURE__ */ React.createElement("div", { className: "wc" }, /* @__PURE__ */ React.createElement("div", { className: "wc-row", style: { opacity: 0.7 } }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2", style: { fontSize: 10 } }, prev.date, " \u2192 ", cur.date)), items.map((it, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "wc-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono wc-lbl" }, it.label), /* @__PURE__ */ React.createElement("span", { className: "mono dim2 wc-old" }, it.old), /* @__PURE__ */ React.createElement("span", { className: "mono dim" }, "\u2192"), /* @__PURE__ */ React.createElement("span", { className: `mono wc-new kpi-tone--${it.tone}` }, /* @__PURE__ */ React.createElement("b", null, it.now)), /* @__PURE__ */ React.createElement("span", { className: "mono dim wc-note" }, it.note))));
 }
 function StressSnapshot() {
   const scenarios = [
@@ -23005,10 +23116,27 @@ function DrCell({ label, value, tone, tip }) {
   return /* @__PURE__ */ React.createElement("div", { className: `dr-cell dr-cell--${tone}`, title: tip }, /* @__PURE__ */ React.createElement("div", { className: "dr-cell-l mono" }, label), /* @__PURE__ */ React.createElement("div", { className: `dr-cell-v mono kpi-tone--${tone}` }, value));
 }
 function CompanySnapshot({ ticker }) {
-  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "cs-card cs-card--who" }, /* @__PURE__ */ React.createElement("div", { className: "cs-card-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "WHO \xB7 ", ticker.symbol), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, ticker.exchange, " \xB7 ", ticker.sector, " \xB7 ", ticker.industry)), /* @__PURE__ */ React.createElement("div", { className: "cs-name mono" }, ticker.name), /* @__PURE__ */ React.createElement("div", { className: "cs-blurb mono dim" }, "Mid-cap specialty-materials operator \xB7 70% specialty coatings / 30% adjacent chemicals \xB7 top-2 customers = 31% of revenue \xB7 Akron capacity expansion ships H2 (+18% volume)."), /* @__PURE__ */ React.createElement("div", { className: "cs-meta" }, /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "mcap"), " ", /* @__PURE__ */ React.createElement("b", null, "$", (ticker.mcap / 1e9).toFixed(2), "B")), /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\u03B2"), " ", /* @__PURE__ */ React.createElement("b", null, ticker.beta.toFixed(2))), /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "float"), " ", /* @__PURE__ */ React.createElement("b", null, "76.4M")), /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "short"), " ", /* @__PURE__ */ React.createElement("b", null, ticker.shortFloat.toFixed(1), "%")), /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "insider own"), " ", /* @__PURE__ */ React.createElement("b", null, ticker.insiderOwn.toFixed(1), "%")), /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "ADV 20d"), " ", /* @__PURE__ */ React.createElement("b", null, (ticker.avgVol / 1e6).toFixed(2), "M sh")), /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "spread"), " ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "2 bp")), /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "opt OI"), " ", /* @__PURE__ */ React.createElement("b", null, "48k")))), /* @__PURE__ */ React.createElement("div", { className: "cs-card cs-card--er" }, /* @__PURE__ */ React.createElement("div", { className: "cs-card-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "EARNINGS \xB7 NEXT CATALYST"), /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "T\u2212", ticker.earnings.days, "d")), /* @__PURE__ */ React.createElement("div", { className: "cs-er-big" }, /* @__PURE__ */ React.createElement("div", { className: "cs-er-num mono" }, ticker.earnings.days), /* @__PURE__ */ React.createElement("div", { className: "cs-er-meta" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "days to print"), /* @__PURE__ */ React.createElement("div", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, ticker.earnings.date), " \xB7 BMO \xB7 Wed"))), /* @__PURE__ */ React.createElement("div", { className: "cs-er-tiles" }, /* @__PURE__ */ React.createElement("div", { className: "cs-er-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "ESP"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "+4.1%"))), /* @__PURE__ */ React.createElement("div", { className: "cs-er-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "EPS est."), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, "$0.97"))), /* @__PURE__ */ React.createElement("div", { className: "cs-er-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Beat rate"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "6 / 8 Q"))), /* @__PURE__ */ React.createElement("div", { className: "cs-er-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Implied move"), /* @__PURE__ */ React.createElement("span", { className: "mono warn" }, /* @__PURE__ */ React.createElement("b", null, "\xB16.4%")))), /* @__PURE__ */ React.createElement("div", { className: "cs-er-history mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "last 8Q:"), [5.2, 3.1, -6.2, 2.4, 0.6, 2.8, -1.4, 3.9].map((r, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: r >= 0 ? "up" : "dn" }, r >= 0 ? "\u25B2" : "\u25BC", Math.abs(r).toFixed(1))))));
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "cs-card cs-card--who" }, /* @__PURE__ */ React.createElement("div", { className: "cs-card-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "WHO \xB7 ", ticker.symbol), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, ticker.exchange, " \xB7 ", ticker.sector, " \xB7 ", ticker.industry)), /* @__PURE__ */ React.createElement("div", { className: "cs-name mono" }, ticker.name), /* @__PURE__ */ React.createElement("div", { className: "cs-blurb mono dim" }, ticker.description ? ticker.description.length > 230 ? ticker.description.slice(0, 230) + "\u2026" : ticker.description : `${ticker.name} \u2014 ${ticker.sector || "\u2014"}${ticker.industry ? " \xB7 " + ticker.industry : ""}.`), /* @__PURE__ */ React.createElement("div", { className: "cs-meta" }, ticker.mcap ? /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "mcap"), " ", /* @__PURE__ */ React.createElement("b", null, "$", (ticker.mcap / 1e9).toFixed(2), "B")) : null, ticker.beta != null ? /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\u03B2"), " ", /* @__PURE__ */ React.createElement("b", null, ticker.beta.toFixed(2))) : null, ticker.sharesFloat != null ? /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "float"), " ", /* @__PURE__ */ React.createElement("b", null, (ticker.sharesFloat / 1e6).toFixed(1), "M")) : null, ticker.shortFloat != null ? /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "short"), " ", /* @__PURE__ */ React.createElement("b", { className: ticker.shortFloat >= 15 ? "dn" : "" }, ticker.shortFloat.toFixed(1), "%")) : null, ticker.insiderOwn != null ? /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "insider own"), " ", /* @__PURE__ */ React.createElement("b", null, ticker.insiderOwn.toFixed(1), "%")) : null, ticker.instOwn != null ? /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "inst own"), " ", /* @__PURE__ */ React.createElement("b", null, ticker.instOwn.toFixed(0), "%")) : null, ticker.avgVol ? /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "ADV"), " ", /* @__PURE__ */ React.createElement("b", null, (ticker.avgVol / 1e6).toFixed(2), "M sh")) : null, ticker.dvol ? /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "$ ADV"), " ", /* @__PURE__ */ React.createElement("b", null, "$", (ticker.dvol / 1e6).toFixed(0), "M")) : null, ticker.spread != null ? /* @__PURE__ */ React.createElement("span", { className: "cs-chip mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "spread"), " ", /* @__PURE__ */ React.createElement("b", { className: ticker.spread <= 0.1 ? "up" : ticker.spread >= 0.5 ? "dn" : "" }, ticker.spread.toFixed(2), "%")) : null)), (() => {
+    const eb = (window.__BV && window.__BV.earningsBeat || []).find((e) => String(e.ticker || "").split(".")[0].toUpperCase() === ticker.symbol);
+    const eh = ticker.earningsHistory || [];
+    const days = ticker.earnings && ticker.earnings.days;
+    const future = eh.filter((x) => x.epsActual == null && x.reportDate).sort((a, b) => String(a.reportDate).localeCompare(String(b.reportDate)));
+    const nextDate = eb && eb.report_date || future[0] && future[0].reportDate || null;
+    const bd = eb && eb.breakdown || {};
+    const hist = bd.historical || {};
+    const imp = bd.implied_move && bd.implied_move.implied_move_pct;
+    const past = eh.filter((x) => typeof x.surprisePercent === "number").slice(-8);
+    const eps = future[0] && future[0].epsEstimate;
+    return /* @__PURE__ */ React.createElement("div", { className: "cs-card cs-card--er" }, /* @__PURE__ */ React.createElement("div", { className: "cs-card-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "EARNINGS \xB7 NEXT CATALYST"), days != null ? /* @__PURE__ */ React.createElement(Pill, { tone: days <= 7 ? "rd" : "amb", small: true }, "T\u2212", days, "d") : /* @__PURE__ */ React.createElement(Pill, { tone: "ink", small: true }, "\u2014")), /* @__PURE__ */ React.createElement("div", { className: "cs-er-big" }, /* @__PURE__ */ React.createElement("div", { className: "cs-er-num mono" }, days != null ? days : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "cs-er-meta" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "days to print"), /* @__PURE__ */ React.createElement("div", { className: "mono" }, nextDate ? /* @__PURE__ */ React.createElement("b", null, nextDate) : /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "date TBD"), eb && eb.before_after ? " \xB7 " + (/before/i.test(eb.before_after) ? "BMO" : "AMC") : ""))), /* @__PURE__ */ React.createElement("div", { className: "cs-er-tiles" }, /* @__PURE__ */ React.createElement("div", { className: "cs-er-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Beat score"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, eb && eb.beat_score != null ? Math.round(eb.beat_score) : "\u2014"))), /* @__PURE__ */ React.createElement("div", { className: "cs-er-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Beat rate"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, hist.rate != null ? Math.round(hist.rate) + "%" : "\u2014"))), /* @__PURE__ */ React.createElement("div", { className: "cs-er-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "EPS est."), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, eps != null ? "$" + (+eps).toFixed(2) : "\u2014"))), /* @__PURE__ */ React.createElement("div", { className: "cs-er-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Implied move"), /* @__PURE__ */ React.createElement("span", { className: "mono warn" }, /* @__PURE__ */ React.createElement("b", null, imp != null ? "\xB1" + (+imp).toFixed(1) + "%" : "\u2014")))), past.length ? /* @__PURE__ */ React.createElement("div", { className: "cs-er-history mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "recent surprises:"), past.map((q, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: q.surprisePercent >= 0 ? "up" : "dn" }, q.surprisePercent >= 0 ? "\u25B2" : "\u25BC", Math.abs(q.surprisePercent).toFixed(1)))) : null);
+  })());
 }
 function CompanyValuation({ ticker }) {
-  return /* @__PURE__ */ React.createElement("div", { className: "cs-card cs-card--val" }, /* @__PURE__ */ React.createElement("div", { className: "cs-card-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "VALUATION \xB7 QUALITY"), /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "MoS 6%")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-row" }, /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "P/E TTM"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, ticker.pe != null ? ticker.pe.toFixed(1) : "\u2014")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "peers 24.1")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Fwd P/E"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, ticker.fwdPe != null ? ticker.fwdPe.toFixed(1) : "\u2014")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "peers 21.0")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "P/S TTM"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, "4.6")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "peers 5.2")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "EV/EBITDA"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "14.8")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "peers 17.4"))), /* @__PURE__ */ React.createElement("div", { className: "cs-val-row" }, /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "ROIC 5y"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "18.2%")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "A \xB7 top quartile")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Op margin"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "16.4%")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "stable 3Q")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Net debt/EBITDA"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "0.81\xD7")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "low leverage")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "FCF yield"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, /* @__PURE__ */ React.createElement("b", null, "4.8%")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "vs UST 4.32%"))));
+  const n = (v) => typeof v === "number" && isFinite(v) ? v : null;
+  const pct = (v) => v == null ? "\u2014" : (v * 100).toFixed(1) + "%";
+  const rat = (v, dp = 1) => v == null ? "\u2014" : v.toFixed(dp);
+  const roe = n(ticker.roe), opm = n(ticker.opMargin), pm = n(ticker.profitMargin), roa = n(ticker.roa);
+  const Tile = ({ label, val, tone }) => /* @__PURE__ */ React.createElement("div", { className: "cs-val-tile" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, label), /* @__PURE__ */ React.createElement("span", { className: `mono ${tone || ""}` }, /* @__PURE__ */ React.createElement("b", null, val)));
+  return /* @__PURE__ */ React.createElement("div", { className: "cs-card cs-card--val" }, /* @__PURE__ */ React.createElement("div", { className: "cs-card-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "VALUATION \xB7 QUALITY"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2", style: { fontSize: 10 } }, "real \xB7 EODHD fundamentals")), /* @__PURE__ */ React.createElement("div", { className: "cs-val-row" }, /* @__PURE__ */ React.createElement(Tile, { label: "P/E TTM", val: ticker.pe != null ? ticker.pe.toFixed(1) : "\u2014" }), /* @__PURE__ */ React.createElement(Tile, { label: "Fwd P/E", val: ticker.fwdPe != null ? ticker.fwdPe.toFixed(1) : "\u2014" }), /* @__PURE__ */ React.createElement(Tile, { label: "P/S TTM", val: rat(n(ticker.ps), 2) }), /* @__PURE__ */ React.createElement(Tile, { label: "EV/EBITDA", val: rat(n(ticker.evEbitda), 1) })), /* @__PURE__ */ React.createElement("div", { className: "cs-val-row" }, /* @__PURE__ */ React.createElement(Tile, { label: "ROE TTM", val: pct(roe), tone: roe != null ? roe >= 0.15 ? "up" : roe < 0 ? "dn" : "" : "" }), /* @__PURE__ */ React.createElement(Tile, { label: "ROA TTM", val: pct(roa), tone: roa != null ? roa >= 0.08 ? "up" : roa < 0 ? "dn" : "" : "" }), /* @__PURE__ */ React.createElement(Tile, { label: "Op margin", val: pct(opm), tone: opm != null ? opm >= 0.15 ? "up" : opm < 0 ? "dn" : "" : "" }), /* @__PURE__ */ React.createElement(Tile, { label: "Profit margin", val: pct(pm), tone: pm != null ? pm >= 0.1 ? "up" : pm < 0 ? "dn" : "" : "" })));
 }
 window.CompanyValuation = CompanyValuation;
 </script>

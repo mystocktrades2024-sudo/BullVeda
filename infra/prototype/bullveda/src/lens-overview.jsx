@@ -186,29 +186,38 @@ window.coherentLevels = function (t) {
   return { price, pivot, stop, t1, t2 };
 };
 
-// ─── discoveryFootprint — which screen engines surfaced this name ───
-// Deterministic per-symbol. In production, read each engine's ranked
-// output (momentum/ML/earnings/options/insider/SMC) and report hits.
+// ─── discoveryFootprint — which screen engines REALLY surfaced this name ───
+// Reads each engine's live signal for this ticker from real data: RS rank, ML
+// P(up), earnings-beat list, options UOA list, insider Form-4 edge, SMC pillar.
+// rank (when shown) comes from the engine's actual top-N ordering (resolveEngines).
 function discoveryFootprint(ticker) {
-  const sym = (ticker.symbol || "ARGN").toUpperCase();
-  let h = 0; for (let i = 0; i < sym.length; i++) h = (h * 31 + sym.charCodeAt(i)) >>> 0;
-  const rnd = (n) => { h = (h * 1103515245 + 12345) >>> 0; return h % n; };
-  const defs = [
-    { id: "momentum",     label: "Momentum",       surf: "momentum",     sub: "rel-strength rank",   metric: () => `RS ${80 + rnd(20)}` },
-    { id: "ai-predict",   label: "ML Predictions", surf: "ai-predict",   sub: "model edge",          metric: () => `P(up) 0.${62 + rnd(33)}` },
-    { id: "earnings",     label: "Earnings AI",    surf: "earnings-cal", sub: "surprise prediction", metric: () => `ESP +${(1 + rnd(50) / 10).toFixed(1)}%` },
-    { id: "options-flow", label: "Options Flow",   surf: "options-flow", sub: "unusual activity",    metric: () => ["call sweep", "UOA", "put-sale"][rnd(3)] },
-    { id: "insider",      label: "Insider",        surf: "insider",      sub: "Form-4 cluster",      metric: () => ["CFO+COO buy", "CEO buy", "3-insider cluster"][rnd(3)] },
-    { id: "smc",          label: "SMC · Patterns", lens: "patterns",     sub: "structure",           metric: () => ["VCP base", "OB + BoS", "flag · B2"][rnd(3)] },
-  ];
-  const out = defs.map(e => {
-    const hit = rnd(100) > 32;            // ~68% each → ~4 of 6
-    const rank = hit ? 1 + rnd(38) : null;
-    const m = e.metric();
-    const tone = !hit ? "off" : rank <= 10 ? "gn" : rank <= 25 ? "cy" : "amb";
-    return { ...e, hit, rank, tone, m };
-  });
-  if (out.filter(e => e.hit).length < 2) { out[0].hit = true; out[0].rank = out[0].rank || (3 + rnd(8)); out[0].tone = "gn"; }
+  const sym = (ticker.symbol || "").toUpperCase();
+  const BV = window.__BV || {};
+  const sc = ticker._scan || {};
+  const n = (v) => (typeof v === "number" && isFinite(v)) ? v : null;
+  const sym0 = (s) => String(s || "").split(".")[0].toUpperCase();
+  const engines = (window.resolveEngines ? window.resolveEngines() : []) || [];
+  const rankIn = (id) => { const e = engines.find(x => x.id === id); if (!e || !e.rows) return null; const i = e.rows.findIndex(r => sym0(r[0]) === sym); return i >= 0 ? i + 1 : null; };
+  const tone3 = (hit, strong) => !hit ? "off" : strong ? "gn" : "cy";
+  const out = [];
+  // Momentum — relative-strength rank
+  const rs = n(ticker.rsRank) != null ? n(ticker.rsRank) : (sc.rs && sc.rs !== "—" ? parseFloat(sc.rs) : null);
+  if (rs != null) out.push({ id: "momentum", label: "Momentum", surf: "momentum", sub: "rel-strength", hit: rs >= 70, rank: rankIn("momentum"), m: `RS ${Math.round(rs)}`, tone: tone3(rs >= 70, rs >= 85) });
+  // ML — P(up)
+  const pUp = ticker.ml && n(ticker.ml.direction) != null ? n(ticker.ml.direction) : null;
+  if (pUp != null) out.push({ id: "ai-predict", label: "ML Predictions", surf: "ai-predict", sub: "model edge", hit: pUp >= 0.55, rank: rankIn("ml"), m: `P(up) ${Math.round(pUp * 100)}%`, tone: tone3(pUp >= 0.55, pUp >= 0.65) });
+  // Earnings AI — present in the beat-prediction list
+  const eb = (BV.earningsBeat || []).find(x => sym0(x.ticker) === sym);
+  out.push({ id: "earnings", label: "Earnings AI", surf: "earnings-ai", sub: "beat prediction", hit: !!eb, rank: rankIn("earnings-ai"), m: eb ? `beat ${Math.round(eb.beat_score || 0)}` : "no print", tone: tone3(!!eb, eb && (eb.beat_score || 0) >= 70) });
+  // Options Flow — present in the UOA list
+  const of = (BV.optionsFlow || []).find(x => sym0(x.ticker) === sym);
+  out.push({ id: "options-flow", label: "Options Flow", surf: "options", sub: "unusual activity", hit: !!of, rank: rankIn("options"), m: of ? (of.status || "UOA") : "no UOA", tone: tone3(!!of, of && of.status === "STRONG") });
+  // Insider — Form-4 edge
+  const ie = window.insiderEdge ? window.insiderEdge(sym) : null;
+  out.push({ id: "insider", label: "Insider", surf: "insider", sub: "Form-4", hit: !!(ie && ie.buyers > 0), rank: rankIn("insider"), m: ie && ie.buyers ? `${ie.buyers} buyer${ie.buyers === 1 ? "" : "s"}` : "none", tone: tone3(!!(ie && ie.buyers), ie && ie.cluster) });
+  // SMC · Patterns — smart-money pillar
+  const smc = sc.pillarPct ? n(sc.pillarPct.smc) : null;
+  if (smc != null) out.push({ id: "smc", label: "SMC · Patterns", lens: "patterns", sub: "structure", hit: smc >= 55, rank: rankIn("smc"), m: `SMC ${Math.round(smc)}`, tone: tone3(smc >= 55, smc >= 70) });
   return out;
 }
 
@@ -729,15 +738,34 @@ window.ThesisCard = ThesisCard;
   if (!document.getElementById("nc-css")) { const s = document.createElement("style"); s.id = "nc-css"; s.textContent = css; document.head.appendChild(s); }
 })();
 
+function ncAge(dateStr) {
+  if (!dateStr) return "";
+  const then = Date.parse(String(dateStr).replace(" ", "T"));
+  if (!isFinite(then)) return "";
+  const h = (Date.now() - then) / 3600000;
+  if (h < 1) return Math.max(0, Math.round(h * 60)) + "m";
+  if (h < 24) return Math.round(h) + "h";
+  const d = Math.round(h / 24);
+  return d <= 9 ? d + "d" : "9d+";
+}
 function NewsCatalysts({ ticker }) {
   const [ai, setAi] = React.useState(null);
-  const sec = ticker.sector || "sector";
-  const heads = [
-    { t: "08:42", h: `Analyst reiterates Buy on ${ticker.symbol}, raises price target`, type: "RATING", mat: "med", fresh: "first report" },
-    { t: "06:15", h: `${sec} flows turn positive on macro print`, type: "MACRO", mat: "low", fresh: "follow-on" },
-    { t: "Yest", h: `${sec} peer guides above consensus — read-through`, type: "GUIDANCE", mat: "high", fresh: "first report" },
-    { t: "2d", h: `Insider cluster buy disclosed (Form 4)`, type: "INSIDER", mat: "high", fresh: "first report" },
-  ];
+  const [news, setNews] = React.useState(null);  // null=loading · []=none · [..]=real
+  React.useEffect(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.get || !ticker.symbol) { setNews([]); return; }
+    let alive = true;
+    BV.get("/api/news?t=" + encodeURIComponent(ticker.symbol) + "&limit=6")
+      .then(d => { if (alive) setNews((d && d.articles) || []); })
+      .catch(() => { if (alive) setNews([]); });
+    return () => { alive = false; };
+  }, [ticker.symbol]);
+  const heads = (news || []).map(a => {
+    const s = typeof a.sent === "number" ? a.sent : 0;
+    const mat = Math.abs(s) >= 0.5 ? "high" : Math.abs(s) >= 0.2 ? "med" : "low";
+    const type = s >= 0.15 ? "POSITIVE" : s <= -0.15 ? "NEGATIVE" : "NEUTRAL";
+    return { t: ncAge(a.date), h: a.title, type, mat, src: a.source || "", url: a.url || "", sent: s };
+  });
   const classify = async () => {
     setAi("loading");
     const prompt = `You are a news catalyst classifier for a stock trader following ${ticker.symbol}. For EACH headline below, give one short line: catalyst type, how material it is (high/med/low), and whether it's tradeable now or already priced in. Be concise.\n` + heads.map(h => `- ${h.h}`).join("\n");
@@ -749,25 +777,29 @@ function NewsCatalysts({ ticker }) {
       <div className="nc-head">
         <div className="nc-head-l">
           <span className="nc-tag mono">NEWS CATALYSTS</span>
-          <span className="nc-sub mono dim2">classified by type · materiality · freshness</span>
+          <span className="nc-sub mono dim2">live headlines · sentiment-scored</span>
         </div>
-        <button className="aix-btn mono" onClick={classify} disabled={ai === "loading"}>{ai === "loading" ? "✦ thinking…" : "✦ Classify catalysts"}</button>
+        <button className="aix-btn mono" onClick={classify} disabled={ai === "loading" || !heads.length}>{ai === "loading" ? "✦ thinking…" : "✦ Classify catalysts"}</button>
       </div>
-      {heads.map((n, i) => (
-        <div key={i} className={`nc-row nc-row--${n.mat}`}>
-          <span className="nc-time">{n.t}</span>
-          <span className="nc-type">{n.type}</span>
-          <span className={`nc-mat nc-mat--${n.mat}`}>{n.mat === "high" ? "MATERIAL" : n.mat === "med" ? "MODERATE" : "LOW"}</span>
-          <span className="nc-h">{n.h} <span className="dim2">· {n.fresh}</span></span>
-        </div>
-      ))}
+      {news === null
+        ? <div className="nc-row"><span className="nc-h dim2">Loading headlines…</span></div>
+        : heads.length === 0
+        ? <div className="nc-row"><span className="nc-h dim2">No recent news for {ticker.symbol}.</span></div>
+        : heads.map((n, i) => (
+          <a key={i} className={`nc-row nc-row--${n.mat}`} href={n.url || undefined} target="_blank" rel="noreferrer" style={{ textDecoration: "none", cursor: n.url ? "pointer" : "default" }}>
+            <span className="nc-time">{n.t}</span>
+            <span className="nc-type" style={{ color: n.type === "POSITIVE" ? "var(--gn)" : n.type === "NEGATIVE" ? "var(--rd)" : "var(--ink-3)" }}>{n.type}</span>
+            <span className={`nc-mat nc-mat--${n.mat}`}>{n.mat === "high" ? "MATERIAL" : n.mat === "med" ? "MODERATE" : "LOW"}</span>
+            <span className="nc-h">{n.h}{n.src ? <span className="dim2"> · {n.src}</span> : null}</span>
+          </a>
+        ))}
       {ai && ai !== "loading" && (
         <div className="aix-out mono" style={{ width: "100%" }}>
           <span className="aix-tag">✦ KAIROS · CATALYST READ</span>
           <span className="aix-txt">{ai}</span>
         </div>
       )}
-      <div className="nc-foot mono dim2">Headlines from the news feed (EODHD in production) · type/materiality classified by the LLM. Informational only — not advice.</div>
+      <div className="nc-foot mono dim2">Live EODHD headlines, sentiment-scored · type/materiality classified by the LLM. Informational only — not advice.</div>
     </div>
   );
 }
@@ -930,7 +962,7 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
         {(window.__tier ?? 4) >= 3 && (
           <details className="ov-more">
             <summary className="ov-more-sum mono">Show the full 10-gate rule-engine audit · how 612 ranked → {window.secBias ? window.secBias((window.compositeVerdict ? window.compositeVerdict(ticker, mode).verdict : "BUY")) : "Bullish"} · PRO+</summary>
-            <div className="ov-more-body"><GateCascade /></div>
+            <div className="ov-more-body"><GateCascade ticker={ticker} /></div>
           </details>
         )}
       </OvSection>
@@ -938,7 +970,7 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
       {/* ── 3 · LENS CONFLUENCE · the ONE evidence grid + launchpad ── */}
       <OvSection n={3} title="Lens Confluence · The Evidence"
         sub="every discipline's read · click any tile to open that lens" headerStyle={headerStyle}>
-        <ConfluenceHeatmap />
+        <ConfluenceHeatmap ticker={ticker} mode={mode} />
       </OvSection>
 
       {/* ── 4 · THE CASE · bull vs bear, synthesized once ── */}
@@ -956,22 +988,31 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
         <div className="ov-honest-block">
         <div className="ov-honest-sub label-cap">▼ What would make this wrong · pre-mortem</div>
         <div className="premortem">
-          <div className="premortem-row"><span className="pm-num mono">1</span><span className="pm-text">Loses VWAP intraday AND closes below ${(window.coherentLevels ? window.coherentLevels(ticker).pivot * 0.9837 : ticker.pivot * 0.9837).toFixed(2)} — invalidation cascade.</span><Pill tone="rd" small>HARD</Pill></div>
-          {(mode === "INVESTMENT"
-            ? [["2", "ROIC falls below WACC — capital destruction.", "FUNDAMENTAL", "rd"], ["3", "Operating cash flow diverges below reported EPS — accrual risk.", "QUALITY", "amb"], ["4", "Price exceeds 90% of DCF fair value — margin of safety gone.", "VALUATION", "amb"]]
-            : mode === "POSITION"
-            ? [["2", "Sector RS rank drops below 50th pct for 2 weeks — leadership lost.", "MACRO", "rd"], ["3", "Regime flips to Risk-Off Trending — thesis backdrop gone.", "MACRO", "amb"], ["4", "13F shows institutions distributing — smart money exits.", "FUNDAMENTAL", "rd"]]
-            : [["2", "Sector ETF (XLB) breaks 50-DMA on +1.5σ volume — regime flip.", "MEDIUM", "amb"], ["3", "CPI prints >0.4% MoM next Wed — risk-off reset.", "MACRO", "amb"], ["4", "Top-2 customer (31% of revenue) cuts guidance on Q1 call.", "FUNDAMENTAL", "rd"]]
-          ).map(([n, t, tag, tone]) => (
-            <div key={n} className="premortem-row"><span className="pm-num mono">{n}</span><span className="pm-text">{t}</span><Pill tone={tone} small>{tag}</Pill></div>
-          ))}
+          {(() => {
+            const L = window.coherentLevels ? window.coherentLevels(ticker) : ticker;
+            const reg = String((window.__BV && window.__BV.market && window.__BV.market.regime4) || (ticker._scan && ticker._scan._raw && ticker._scan._raw.regime4) || "the current regime").replace(/_/g, " ");
+            const rs = ticker.rsRank;
+            const er = ticker.earnings && ticker.earnings.days;
+            const stopV = (L && L.stop) || ticker.stop || 0;
+            const rows = [];
+            rows.push(["1", `Closes below the stop $${stopV.toFixed(2)} — hard invalidation, exit on the close.`, "HARD", "rd"]);
+            rows.push(["2", `Regime flips out of ${reg} — the setup's backdrop is gone (re-check the regime gate).`, "MACRO", "amb"]);
+            if (rs != null) rows.push(["3", `RS rank falls below 40 (now ${Math.round(rs)}) — relative leadership lost.`, "MOMENTUM", rs < 50 ? "rd" : "amb"]);
+            else rows.push(["3", "Sector relative strength rolls over — relative leadership lost.", "MOMENTUM", "amb"]);
+            if (er != null && er >= 0 && er <= 30) rows.push(["4", `Earnings in ${er}d — binary event; trim or exit before the print unless the thesis confirms.`, "CATALYST", "rd"]);
+            else if (mode === "INVESTMENT") rows.push(["4", "ROE / operating margins deteriorate, or price exceeds fair value — margin of safety gone.", "FUNDAMENTAL", "amb"]);
+            else rows.push(["4", "Distribution-day cluster (heavy down-volume on no news) — institutions exiting.", "FUNDAMENTAL", "rd"]);
+            return rows.map(([n, t, tag, tone]) => (
+              <div key={n} className="premortem-row"><span className="pm-num mono">{n}</span><span className="pm-text">{t}</span><Pill tone={tone} small>{tag}</Pill></div>
+            ));
+          })()}
         </div>
         <PreMortemNote symbol={ticker.symbol} />
         </div>
 
           <div className="ov-honest-block">
-            <div className="ov-honest-sub label-cap">↗ What changed · last 24h</div>
-            <WhatChanged />
+            <div className="ov-honest-sub label-cap">↗ What changed · vs prior scan</div>
+            <WhatChanged ticker={ticker} />
           </div>
           <div className="ov-honest-block">
             <div className="ov-honest-sub label-cap">⚙ Why the edge exists · mechanism</div>
@@ -992,113 +1033,137 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
   );
 }
 
-function ConfluenceHeatmap() {
-  const cells = [
-    { lens: "Overview", v: "Bullish", tone: "gn",  note: "score 78" },
-    { lens: "Plan",     v: "READY",   tone: "gn",  note: "R 1.74" },
-    { lens: "Chart",    v: "TREND+",  tone: "gn",  note: "stacked-bull" },
-    { lens: "Technicals",v:"PASS",    tone: "gn",  note: "RSI 64" },
-    { lens: "Patterns", v: "VCP·B2",  tone: "gn",  note: "conf 74%" },
-    { lens: "SMC",      v: "OB+BoS",  tone: "gn",  note: "spring held" },
-    { lens: "Value",    v: "MARG.",   tone: "amb", note: "MoS 6%" },
-    { lens: "Risk",     v: "OK",      tone: "gn",  note: "VaR −2.1%" },
-    { lens: "Earnings", v: "11d",     tone: "amb", note: "event risk pre-ER" },
-    { lens: "Options",  v: "RICH",    tone: "amb", note: "IV/HV 1.42" },
-    { lens: "Portfolio",v: "FIT",     tone: "gn",  note: "correl 0.34" },
-    { lens: "Tape",     v: "+12 INS", tone: "gn",  note: "rising sent." },
-    { lens: "Track Rec.",v:"EDGE",    tone: "gn",  note: "Wilson 47.7" },
-    { lens: "AI Edge",  v: "+0.18",   tone: "gn",  note: "hit-net pos." },
-  ];
+function ConfluenceHeatmap({ ticker, mode }) {
+  const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
+  if (!cv || !cv.lenses) return <div className="conf-grid"><span className="mono dim2" style={{ padding: 8 }}>Lens confluence unavailable for this name.</span></div>;
+  const lensId = { "Overview": "overview", "AI Edge": "mledge", "Technicals": "technicals", "Patterns": "patterns", "SMC": "smc", "Value": "investment", "Risk": "risk", "Track Rec.": "mledge", "Plan": "plan", "Earnings": "earnings", "Options": "options", "Insider": "tape" };
+  const cells = cv.lenses.slice().sort((a, b) => b.v - a.v);
+  const dis = cv.fail >= 3 ? ["elevated", "warn", "mixed signals — verify the dissent before acting"]
+    : cv.fail >= 1 ? ["some", "amb", "mostly aligned with a few cautions"]
+    : ["low", "up", "clean confluence across the lenses"];
   return (
     <div className="conf-grid">
       {cells.map((c, i) => {
-        const map = { "Overview": "overview", "Plan": "plan", "Chart": "chart", "Technicals": "technicals", "Patterns": "patterns", "SMC": "smc", "Value": "investment", "Risk": "risk", "Earnings": "earnings", "Options": "options", "Portfolio": "tape", "Tape": "tape", "Track Rec.": "mledge", "AI Edge": "mledge" };
-        const go = () => { if (window.__setLens && map[c.lens]) window.__setLens(map[c.lens]); };
+        const tone = c.tone || (c.v >= 62 ? "gn" : c.v >= 46 ? "amb" : "rd");
+        const go = () => { if (window.__setLens && lensId[c.k]) window.__setLens(lensId[c.k]); };
         return (
-          <button key={i} className={`conf-cell conf-${c.tone}`} onClick={go} title={`open ${c.lens}`}>
-            <div className="conf-lens mono">{c.lens}</div>
-            <div className={`conf-v mono kpi-tone--${c.tone}`}>{c.v}</div>
-            <div className="conf-note mono dim2">{c.note}</div>
+          <button key={i} className={`conf-cell conf-${tone}`} onClick={go} title={`open ${c.k} · weight ${(c.w * 100).toFixed(0)}%`}>
+            <div className="conf-lens mono">{c.k}</div>
+            <div className={`conf-v mono kpi-tone--${tone}`}>{c.v}</div>
+            <div className="conf-note mono dim2">{c.why}</div>
           </button>
         );
       })}
       <div className="conf-summary">
-        <Pill tone="gn" dot>10 PASS</Pill>
-        <Pill tone="amb" small>3 CAUTION</Pill>
-        <Pill tone="rd" small>0 FAIL</Pill>
+        <Pill tone="gn" dot>{cv.agree} PASS</Pill>
+        <Pill tone="amb" small>{cv.caution} CAUTION</Pill>
+        <Pill tone="rd" small>{cv.fail} FAIL</Pill>
         <span className="mono dim2" style={{ marginLeft: 12 }}>
-          Disagreement score: <b className="warn">low</b> — clean confluence; act on the bracket.
+          Disagreement: <b className={dis[1] === "warn" ? "warn" : dis[1] === "amb" ? "warn" : "up"}>{dis[0]}</b> — {dis[2]}.
         </span>
       </div>
     </div>
   );
 }
 
+const SLEEVE_MECH = {
+  "Breakout Expansion": <>Post-base breakout on volume expansion. <b className="copper">Alpha:</b> supply absorption before markup. <b className="copper">Works when</b> accumulation is observable pre-breakout (VCP / 52wk).</>,
+  "Trend Continuation": <>Pullback to value (EMA / support) in an uptrend. <b className="copper">Alpha:</b> institutional re-add at the mean. <b className="copper">Works in</b> trending / choppy-up regimes.</>,
+  "Impulse Catalyst": <>Post-catalyst drift (PEAD / UOA / gap). <b className="copper">Alpha:</b> under-reaction to fresh information. <b className="copper">Works in</b> the 1–5d window after the print.</>,
+  "Special Situation": <>Insider cluster / float rotation / squeeze. <b className="copper">Alpha:</b> informed buying or forced covering. <b className="copper">Works</b> across regimes.</>,
+};
 function SleeveAttribution({ ticker }) {
+  const fam = ticker.setupFamily || "—";
+  const ss = ticker.setupStats || {};
+  const SL = window.SigLedger;
+  // real recent trades of the same / closest setup, from the forward-scored ledger
+  const recent = React.useMemo(() => {
+    if (!SL || !SL.SIGNALS || !SL.SIGNALS.length) return [];
+    const fkey = String(fam).toLowerCase();
+    const toks = fkey.split(/\s+/).filter(w => w.length > 3);
+    const match = (st) => {
+      st = String(st || "").toLowerCase();
+      if (toks.some(t => st.includes(t))) return true;
+      if (/breakout/.test(fkey) && /breakout|vcp|52wk|pivot|rs new/.test(st)) return true;
+      if (/(continuation|trend)/.test(fkey) && /(continuation|ema|pullback|bounce|week)/.test(st)) return true;
+      if (/(impulse|catalyst)/.test(fkey) && /(gap|pead|breakout|pivot)/.test(st)) return true;
+      if (/(special|situation)/.test(fkey) && /(insider|cluster|squeeze)/.test(st)) return true;
+      return false;
+    };
+    return SL.SIGNALS.filter(s => match(s.setup)).map(s => {
+      const ret = s.ret || {}; let r = null;
+      for (const h of ["W2", "W1", "D5", "D3", "W4", "M1"]) if (ret[h] != null) { r = ret[h]; break; }
+      if (r == null) { const ks = Object.keys(ret).filter(k => ret[k] != null); if (ks.length) r = ret[ks[ks.length - 1]]; }
+      return { sym: s.sym, age: s.age, date: s.date, ret: r != null ? (s.dir === "short" ? -r : r) : null };
+    }).filter(x => x.ret != null).sort((a, b) => a.age - b.age).slice(0, 5);
+  }, [fam, SL && SL.real, SL && SL.SIGNALS && SL.SIGNALS.length]);
+  const pf = (window.__BV && window.__BV.portfolio) || null;
+  const heldInFam = pf && pf.positions ? pf.positions.filter(p => String(p.setup_type || "").toLowerCase().includes(String(fam).toLowerCase().split(" ")[0])).length : 0;
   return (
     <div className="sleeve">
       <div className="sleeve-row">
         <span className="sleeve-lbl mono">SLEEVE</span>
-        <div><Pill tone="copper">CONTINUATION BREAKOUT · base #2</Pill> <span className="mono dim2">· 2 of 11 active sleeves · 12% of current book</span></div>
+        <div><Pill tone="copper">{String(fam).toUpperCase()}</Pill> <span className="mono dim2">· {ss.n != null ? `n=${ss.n} sample` : "no ledger sample"}{heldInFam ? ` · ${heldInFam} held in book` : ""}</span></div>
       </div>
       <div className="sleeve-row">
         <span className="sleeve-lbl mono">MECHANISM</span>
-        <span className="mono">
-          Post-base breakout on dry-volume pullback. <b className="copper">Alpha source:</b> liquidity withdrawal then demand absorption at pivot.
-          <b className="copper"> Why it works:</b> regime where institutional accumulation is observable but not yet priced.
-        </span>
+        <span className="mono">{SLEEVE_MECH[fam] || <>Edge from a {String(fam).toLowerCase()} setup — see the Plan lens for the full mechanism + falsification.</>}</span>
       </div>
       <div className="sleeve-row">
         <span className="sleeve-lbl mono">WILSON</span>
-        <WilsonPill n={47} winRate={0.617} lb={0.477} />
+        {ss.n != null && ss.winRate != null && ss.wilsonLB != null
+          ? <WilsonPill n={ss.n} winRate={ss.winRate} lb={ss.wilsonLB} />
+          : <span className="mono dim2">no per-setup track record yet (n=0)</span>}
       </div>
       <div className="sleeve-row">
         <span className="sleeve-lbl mono">LAST 5</span>
-        <div className="sleeve-recent">
-          {[
-            { sym: "ARGN", date: "Apr 22", out: "+1.84R", tone: "gn" },
-            { sym: "BORA", date: "Apr 04", out: "+0.72R", tone: "gn" },
-            { sym: "VLCT", date: "Mar 18", out: "−1.0R",  tone: "rd" },
-            { sym: "ZOTR", date: "Feb 27", out: "+2.10R", tone: "gn" },
-            { sym: "NVRH", date: "Feb 06", out: "+0.41R", tone: "amb" },
-          ].map((s, i) => (
-            <div key={i} className="sleeve-rec">
-              <span className="mono"><b>{s.sym}</b></span>
-              <span className="mono dim2">{s.date}</span>
-              <span className={`mono kpi-tone--${s.tone}`}>{s.out}</span>
-            </div>
-          ))}
-        </div>
+        {recent.length ? (
+          <div className="sleeve-recent">
+            {recent.map((s, i) => {
+              const tone = s.ret >= 1 ? "gn" : s.ret <= -1 ? "rd" : "amb";
+              return (
+                <div key={i} className="sleeve-rec">
+                  <span className="mono"><b>{s.sym}</b></span>
+                  <span className="mono dim2">{s.age}d ago</span>
+                  <span className={`mono kpi-tone--${tone}`}>{s.ret >= 0 ? "+" : ""}{s.ret.toFixed(1)}%</span>
+                </div>
+              );
+            })}
+          </div>
+        ) : <span className="mono dim2">no recent same-setup trades in the ledger</span>}
       </div>
     </div>
   );
 }
 
-function GateCascade() {
-  const gates = [
-    { n: 1, label: "Universe · mcap ≥ $100M · ADV ≥ 500k",       v: "612 / 1402", tone: "gn" },
-    { n: 2, label: "Liquidity · spread ≤ 10bp · L1 ≥ 1000",      v: "PASS",       tone: "gn" },
-    { n: 3, label: "Trend · close > 50-DMA · 200-DMA rising",    v: "PASS",       tone: "gn" },
-    { n: 4, label: "Setup detected · pattern conf ≥ 0.60",       v: "VCP 0.74",   tone: "gn" },
-    { n: 5, label: "Wilson LB ≥ 45% · per setup family",         v: "47.7%",      tone: "gn" },
-    { n: 6, label: "R-multiple ≥ 1.5 · entry/stop/T1 valid",     v: "1.74R",      tone: "gn" },
-    { n: 7, label: "Risk · max loss ≤ 0.75% NAV",                v: "0.39%",      tone: "gn" },
-    { n: 8, label: "Correl-to-book ≤ 0.55",                      v: "0.34",       tone: "gn" },
-    { n: 9, label: "ER not in T1 window (T+14d > ER date)",      v: "ER in 11d",  tone: "amb", warn: true },
-    { n: 10,label: "ML hit-net ≥ +0.05",                         v: "+0.18",      tone: "gn" },
-  ];
+function GateCascade({ ticker }) {
+  const ge = (ticker && ticker.gatesEvaluated) || null;
+  if (!ge || !ge.length) return <div className="gates"><div className="gates-summary mono dim2">No rule-engine audit trail recorded for this name.</div></div>;
+  const LABELS = {
+    system_circuit_breaker: "System circuit breaker", macro_blackout: "Macro event blackout",
+    liquidity: "Liquidity · spread / ADV", earnings_blackout: "Earnings blackout window",
+    regime_gate: "Regime gate", fund_adequacy: "Fundamental adequacy",
+    entry_quality: "Entry quality · value zone", decision_state: "Decision state",
+    tail_loss_filter: "Tail-loss filter · tier_zero", setup_score_band: "Setup score band",
+    rr_floor: "R:R floor", score_floor: "Composite score floor", signal_filter: "Signal whitelist",
+  };
+  const pass = ge.filter(g => g.passed).length, total = ge.length;
   return (
     <div className="gates">
-      {gates.map(g => (
-        <div key={g.n} className={`gate-row gate-${g.tone}`}>
-          <span className="gate-n mono">{String(g.n).padStart(2,"0")}</span>
-          <span className="gate-mark mono">{g.warn ? "!" : "✓"}</span>
-          <span className="gate-lbl">{g.label}</span>
-          <span className={`gate-result mono kpi-tone--${g.tone}`}>{g.v}</span>
-        </div>
-      ))}
+      {ge.map((g, i) => {
+        const tone = g.passed ? "gn" : "rd";
+        return (
+          <div key={i} className={`gate-row gate-${tone}`} title={g.reason || ""}>
+            <span className="gate-n mono">{String(i + 1).padStart(2, "0")}</span>
+            <span className="gate-mark mono">{g.passed ? "✓" : "✕"}</span>
+            <span className="gate-lbl">{LABELS[g.name] || String(g.name || "gate").replace(/_/g, " ")}</span>
+            <span className={`gate-result mono kpi-tone--${tone}`} style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.passed ? "PASS" : (g.reason || "BLOCKED")}</span>
+          </div>
+        );
+      })}
       <div className="gates-summary mono">
-        <b className="up">9 of 10 gates pass · 1 caution (ER in window).</b> Recommendation: take bracket with <b>25% size cut</b> + full exit T−2 sessions pre-ER unless thesis confirms.
+        <b className={pass === total ? "up" : "warn"}>{pass} of {total} gate{total === 1 ? "" : "s"} pass{pass < total ? ` · ${total - pass} blocked` : ""}.</b>
+        {ticker.rejectReason ? <> Blocking reason: <b className="dn">{ticker.rejectReason}</b>.</> : " Clear to act per the plan."}
       </div>
     </div>
   );
@@ -1117,17 +1182,43 @@ function MacroDrill() {
   );
 }
 
-function WhatChanged() {
-  const items = [
-    { label: "Composite score",           old: "74",   now: "78",   tone: "gn",  note: "+4 · drove Bullish shift" },
-    { label: "Technical pillar",          old: "78",   now: "82",   tone: "gn",  note: "MACD+ · VWAP reclaim" },
-    { label: "Catalyst pillar",           old: "62",   now: "58",   tone: "amb", note: "−4 · ER proximity weight" },
-    { label: "ML hit-net",                old: "0.14", now: "0.18", tone: "gn",  note: "+4pt edge improvement" },
-    { label: "Insider activity (90d net)",old: "+8",   now: "+12",  tone: "gn",  note: "CFO + COO buys May 18-22" },
-    { label: "Sector ETF (XLB)",          old: "+0.6%",now: "+1.2%",tone: "gn",  note: "sector confirming" },
-  ];
+function WhatChanged({ ticker }) {
+  const [hist, setHist] = React.useState(null);
+  React.useEffect(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.get || !ticker.symbol) { setHist([]); return; }
+    let alive = true;
+    BV.get("/api/ticker-history?t=" + encodeURIComponent(ticker.symbol) + "&n=30")
+      .then(d => { if (alive) setHist((d && d.history) || []); })
+      .catch(() => { if (alive) setHist([]); });
+    return () => { alive = false; };
+  }, [ticker.symbol]);
+  if (hist === null) return <div className="wc"><span className="mono dim2">Loading change history…</span></div>;
+  // one entry per date (keep the last of the day), diff the two most recent dates
+  const byDate = {}; (hist || []).forEach(h => { if (h.date) byDate[h.date] = h; });
+  const dates = Object.keys(byDate).sort();
+  const cur = dates.length ? byDate[dates[dates.length - 1]] : null;
+  const prev = dates.length > 1 ? byDate[dates[dates.length - 2]] : null;
+  if (!cur || !prev) return <div className="wc"><span className="mono dim2">First appearance — no prior scan to diff against.</span></div>;
+  const n = v => (typeof v === "number" && isFinite(v)) ? v : null;
+  const vtone = v => /BUY/i.test(v) ? "gn" : /AVOID|SELL|SHORT/i.test(v) ? "rd" : "amb";
+  const items = [];
+  const numRow = (label, o, nw, fmt, betterUp = true) => {
+    o = n(o); nw = n(nw); if (o == null || nw == null || o === nw) return;
+    const up = nw > o, good = betterUp ? up : !up;
+    items.push({ label, old: fmt(o), now: fmt(nw), tone: good ? "gn" : "rd", note: (up ? "+" : "") + fmt(nw - o) });
+  };
+  if (prev.verdict !== cur.verdict) items.push({ label: "Verdict", old: prev.verdict, now: cur.verdict, tone: vtone(cur.verdict), note: "changed" });
+  numRow("Composite score", prev.score, cur.score, v => Math.round(v));
+  numRow("RS rank", prev.rs_rank, cur.rs_rank, v => Math.round(v));
+  numRow("R:R", prev.rr_ratio, cur.rr_ratio, v => v.toFixed(2));
+  if (prev.regime4 !== cur.regime4) items.push({ label: "Regime", old: String(prev.regime4 || "—").replace(/_/g, " "), now: String(cur.regime4 || "—").replace(/_/g, " "), tone: "amb", note: "shifted" });
+  if (prev.setup_type !== cur.setup_type) items.push({ label: "Setup", old: prev.setup_type || "—", now: cur.setup_type || "—", tone: "amb", note: "re-classified" });
+  if (!prev.has_catalyst && cur.has_catalyst) items.push({ label: "Catalyst", old: "none", now: "active", tone: "gn", note: "appeared" });
+  if (!items.length) return <div className="wc"><span className="mono dim2">No material change vs {prev.date} — score/verdict/RS/regime steady.</span></div>;
   return (
     <div className="wc">
+      <div className="wc-row" style={{ opacity: .7 }}><span className="mono dim2" style={{ fontSize: 10 }}>{prev.date} → {cur.date}</span></div>
       {items.map((it, i) => (
         <div key={i} className="wc-row">
           <span className="mono wc-lbl">{it.label}</span>
@@ -1216,113 +1307,91 @@ function CompanySnapshot({ ticker }) {
         </div>
         <div className="cs-name mono">{ticker.name}</div>
         <div className="cs-blurb mono dim">
-          Mid-cap specialty-materials operator · 70% specialty coatings / 30% adjacent chemicals ·
-          top-2 customers = 31% of revenue · Akron capacity expansion ships H2 (+18% volume).
+          {ticker.description ? (ticker.description.length > 230 ? ticker.description.slice(0, 230) + "…" : ticker.description)
+            : `${ticker.name} — ${ticker.sector || "—"}${ticker.industry ? " · " + ticker.industry : ""}.`}
         </div>
         <div className="cs-meta">
-          <span className="cs-chip mono"><span className="dim2">mcap</span> <b>${(ticker.mcap/1e9).toFixed(2)}B</b></span>
-          <span className="cs-chip mono"><span className="dim2">β</span> <b>{ticker.beta.toFixed(2)}</b></span>
-          <span className="cs-chip mono"><span className="dim2">float</span> <b>76.4M</b></span>
-          <span className="cs-chip mono"><span className="dim2">short</span> <b>{ticker.shortFloat.toFixed(1)}%</b></span>
-          <span className="cs-chip mono"><span className="dim2">insider own</span> <b>{ticker.insiderOwn.toFixed(1)}%</b></span>
-          <span className="cs-chip mono"><span className="dim2">ADV 20d</span> <b>{(ticker.avgVol/1e6).toFixed(2)}M sh</b></span>
-          <span className="cs-chip mono"><span className="dim2">spread</span> <b className="up">2 bp</b></span>
-          <span className="cs-chip mono"><span className="dim2">opt OI</span> <b>48k</b></span>
+          {ticker.mcap ? <span className="cs-chip mono"><span className="dim2">mcap</span> <b>${(ticker.mcap / 1e9).toFixed(2)}B</b></span> : null}
+          {ticker.beta != null ? <span className="cs-chip mono"><span className="dim2">β</span> <b>{ticker.beta.toFixed(2)}</b></span> : null}
+          {ticker.sharesFloat != null ? <span className="cs-chip mono"><span className="dim2">float</span> <b>{(ticker.sharesFloat / 1e6).toFixed(1)}M</b></span> : null}
+          {ticker.shortFloat != null ? <span className="cs-chip mono"><span className="dim2">short</span> <b className={ticker.shortFloat >= 15 ? "dn" : ""}>{ticker.shortFloat.toFixed(1)}%</b></span> : null}
+          {ticker.insiderOwn != null ? <span className="cs-chip mono"><span className="dim2">insider own</span> <b>{ticker.insiderOwn.toFixed(1)}%</b></span> : null}
+          {ticker.instOwn != null ? <span className="cs-chip mono"><span className="dim2">inst own</span> <b>{ticker.instOwn.toFixed(0)}%</b></span> : null}
+          {ticker.avgVol ? <span className="cs-chip mono"><span className="dim2">ADV</span> <b>{(ticker.avgVol / 1e6).toFixed(2)}M sh</b></span> : null}
+          {ticker.dvol ? <span className="cs-chip mono"><span className="dim2">$ ADV</span> <b>${(ticker.dvol / 1e6).toFixed(0)}M</b></span> : null}
+          {ticker.spread != null ? <span className="cs-chip mono"><span className="dim2">spread</span> <b className={ticker.spread <= 0.1 ? "up" : ticker.spread >= 0.5 ? "dn" : ""}>{ticker.spread.toFixed(2)}%</b></span> : null}
         </div>
       </div>
 
-      <div className="cs-card cs-card--er">
-        <div className="cs-card-hdr">
-          <div className="label-cap">EARNINGS · NEXT CATALYST</div>
-          <Pill tone="amb" small>T−{ticker.earnings.days}d</Pill>
+      {(() => {
+        const eb = ((window.__BV && window.__BV.earningsBeat) || []).find(e => String(e.ticker || "").split(".")[0].toUpperCase() === ticker.symbol);
+        const eh = ticker.earningsHistory || [];
+        const days = ticker.earnings && ticker.earnings.days;
+        const future = eh.filter(x => x.epsActual == null && x.reportDate).sort((a, b) => String(a.reportDate).localeCompare(String(b.reportDate)));
+        const nextDate = (eb && eb.report_date) || (future[0] && future[0].reportDate) || null;
+        const bd = (eb && eb.breakdown) || {};
+        const hist = bd.historical || {};
+        const imp = bd.implied_move && bd.implied_move.implied_move_pct;
+        const past = eh.filter(x => typeof x.surprisePercent === "number").slice(-8);
+        const eps = future[0] && future[0].epsEstimate;
+        return (
+        <div className="cs-card cs-card--er">
+          <div className="cs-card-hdr">
+            <div className="label-cap">EARNINGS · NEXT CATALYST</div>
+            {days != null ? <Pill tone={days <= 7 ? "rd" : "amb"} small>T−{days}d</Pill> : <Pill tone="ink" small>—</Pill>}
+          </div>
+          <div className="cs-er-big">
+            <div className="cs-er-num mono">{days != null ? days : "—"}</div>
+            <div className="cs-er-meta">
+              <div className="mono dim2">days to print</div>
+              <div className="mono">{nextDate ? <b>{nextDate}</b> : <span className="dim2">date TBD</span>}{eb && eb.before_after ? " · " + (/before/i.test(eb.before_after) ? "BMO" : "AMC") : ""}</div>
+            </div>
+          </div>
+          <div className="cs-er-tiles">
+            <div className="cs-er-tile"><span className="label-cap">Beat score</span><span className="mono"><b>{eb && eb.beat_score != null ? Math.round(eb.beat_score) : "—"}</b></span></div>
+            <div className="cs-er-tile"><span className="label-cap">Beat rate</span><span className="mono up"><b>{hist.rate != null ? Math.round(hist.rate) + "%" : "—"}</b></span></div>
+            <div className="cs-er-tile"><span className="label-cap">EPS est.</span><span className="mono"><b>{eps != null ? "$" + (+eps).toFixed(2) : "—"}</b></span></div>
+            <div className="cs-er-tile"><span className="label-cap">Implied move</span><span className="mono warn"><b>{imp != null ? "±" + (+imp).toFixed(1) + "%" : "—"}</b></span></div>
+          </div>
+          {past.length ? (
+            <div className="cs-er-history mono">
+              <span className="dim2">recent surprises:</span>
+              {past.map((q, i) => <span key={i} className={q.surprisePercent >= 0 ? "up" : "dn"}>{q.surprisePercent >= 0 ? "▲" : "▼"}{Math.abs(q.surprisePercent).toFixed(1)}</span>)}
+            </div>
+          ) : null}
         </div>
-        <div className="cs-er-big">
-          <div className="cs-er-num mono">{ticker.earnings.days}</div>
-          <div className="cs-er-meta">
-            <div className="mono dim2">days to print</div>
-            <div className="mono"><b>{ticker.earnings.date}</b> · BMO · Wed</div>
-          </div>
-        </div>
-        <div className="cs-er-tiles">
-          <div className="cs-er-tile">
-            <span className="label-cap">ESP</span>
-            <span className="mono up"><b>+4.1%</b></span>
-          </div>
-          <div className="cs-er-tile">
-            <span className="label-cap">EPS est.</span>
-            <span className="mono"><b>$0.97</b></span>
-          </div>
-          <div className="cs-er-tile">
-            <span className="label-cap">Beat rate</span>
-            <span className="mono up"><b>6 / 8 Q</b></span>
-          </div>
-          <div className="cs-er-tile">
-            <span className="label-cap">Implied move</span>
-            <span className="mono warn"><b>±6.4%</b></span>
-          </div>
-        </div>
-        <div className="cs-er-history mono">
-          <span className="dim2">last 8Q:</span>
-          {[+5.2,+3.1,-6.2,+2.4,+0.6,+2.8,-1.4,+3.9].map((r, i) => (
-            <span key={i} className={r >= 0 ? "up" : "dn"}>{r >= 0 ? "▲" : "▼"}{Math.abs(r).toFixed(1)}</span>
-          ))}
-        </div>
-      </div>
+        );
+      })()}
     </React.Fragment>
   );
 }
 
 // Valuation card pulled out so §4 can show it beside News in a 2-col row.
 function CompanyValuation({ ticker }) {
+  const n = v => (typeof v === "number" && isFinite(v)) ? v : null;
+  const pct = v => v == null ? "—" : (v * 100).toFixed(1) + "%";
+  const rat = (v, dp = 1) => v == null ? "—" : v.toFixed(dp);
+  const roe = n(ticker.roe), opm = n(ticker.opMargin), pm = n(ticker.profitMargin), roa = n(ticker.roa);
+  const Tile = ({ label, val, tone }) => (
+    <div className="cs-val-tile"><span className="label-cap">{label}</span><span className={`mono ${tone || ""}`}><b>{val}</b></span></div>
+  );
   return (
       <div className="cs-card cs-card--val">
         <div className="cs-card-hdr">
           <div className="label-cap">VALUATION · QUALITY</div>
-          <Pill tone="amb" small>MoS 6%</Pill>
+          <span className="mono dim2" style={{ fontSize: 10 }}>real · EODHD fundamentals</span>
         </div>
         <div className="cs-val-row">
-          <div className="cs-val-tile">
-            <span className="label-cap">P/E TTM</span>
-            <span className="mono"><b>{ticker.pe != null ? ticker.pe.toFixed(1) : "—"}</b></span>
-            <span className="mono dim2">peers 24.1</span>
-          </div>
-          <div className="cs-val-tile">
-            <span className="label-cap">Fwd P/E</span>
-            <span className="mono up"><b>{ticker.fwdPe != null ? ticker.fwdPe.toFixed(1) : "—"}</b></span>
-            <span className="mono dim2">peers 21.0</span>
-          </div>
-          <div className="cs-val-tile">
-            <span className="label-cap">P/S TTM</span>
-            <span className="mono"><b>4.6</b></span>
-            <span className="mono dim2">peers 5.2</span>
-          </div>
-          <div className="cs-val-tile">
-            <span className="label-cap">EV/EBITDA</span>
-            <span className="mono up"><b>14.8</b></span>
-            <span className="mono dim2">peers 17.4</span>
-          </div>
+          <Tile label="P/E TTM" val={ticker.pe != null ? ticker.pe.toFixed(1) : "—"} />
+          <Tile label="Fwd P/E" val={ticker.fwdPe != null ? ticker.fwdPe.toFixed(1) : "—"} />
+          <Tile label="P/S TTM" val={rat(n(ticker.ps), 2)} />
+          <Tile label="EV/EBITDA" val={rat(n(ticker.evEbitda), 1)} />
         </div>
         <div className="cs-val-row">
-          <div className="cs-val-tile">
-            <span className="label-cap">ROIC 5y</span>
-            <span className="mono up"><b>18.2%</b></span>
-            <span className="mono dim2">A · top quartile</span>
-          </div>
-          <div className="cs-val-tile">
-            <span className="label-cap">Op margin</span>
-            <span className="mono up"><b>16.4%</b></span>
-            <span className="mono dim2">stable 3Q</span>
-          </div>
-          <div className="cs-val-tile">
-            <span className="label-cap">Net debt/EBITDA</span>
-            <span className="mono up"><b>0.81×</b></span>
-            <span className="mono dim2">low leverage</span>
-          </div>
-          <div className="cs-val-tile">
-            <span className="label-cap">FCF yield</span>
-            <span className="mono up"><b>4.8%</b></span>
-            <span className="mono dim2">vs UST 4.32%</span>
-          </div>
+          <Tile label="ROE TTM" val={pct(roe)} tone={roe != null ? (roe >= 0.15 ? "up" : roe < 0 ? "dn" : "") : ""} />
+          <Tile label="ROA TTM" val={pct(roa)} tone={roa != null ? (roa >= 0.08 ? "up" : roa < 0 ? "dn" : "") : ""} />
+          <Tile label="Op margin" val={pct(opm)} tone={opm != null ? (opm >= 0.15 ? "up" : opm < 0 ? "dn" : "") : ""} />
+          <Tile label="Profit margin" val={pct(pm)} tone={pm != null ? (pm >= 0.10 ? "up" : pm < 0 ? "dn" : "") : ""} />
         </div>
       </div>
   );
