@@ -38,7 +38,7 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
         <SectionHeader n={1} title="Trade Blueprint"
           sub="payoff geometry · stop / entry / T1 / T2 · R-multiples (size-independent)"
           style={headerStyle} right={<StateToggle name="plv2-1" />} />
-        <StateWrap state={s1.value} source="Schwab quotes · ATR computed">
+        <StateWrap state={s1.value} source="Schwab quotes · ATR est (stop÷1.25)">
           <div className="lens-pad"><TradeBlueprint pm={pm} size={size} /></div>
         </StateWrap>
       </div>
@@ -68,8 +68,8 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={4} title="Fill Realism · honest paper fills"
-          sub="what you'd actually fill at — next-bar open + spread + slippage"
+        <SectionHeader n={4} title="Fill Realism · modeled fills"
+          sub="what you'd likely fill at — modeled next-bar open + spread + slippage (live spread/ADV pending)"
           style={headerStyle} />
         <div className="lens-pad"><FillRealism pm={pm} size={size} /></div>
       </div>
@@ -113,7 +113,7 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
             const erD = ticker.earnings && ticker.earnings.days != null ? ticker.earnings.days : null;
             const t1Days = Math.max(1, Math.floor((pm.holdDays || 10) * 0.35));
             const ss = ticker.setupStats || {};
-            const planReady = pm.rr1 >= 1.5 && (pm.kelly == null || pm.kelly > 0);
+            const planReady = pm.rr1 >= 1.5 && size.lossNavPct <= 0.75 && size.navPct <= 10 && (pm.kelly == null || pm.kelly > 0);
             return <CrossLens lead="copper" cells={[
               { lens: "Plan",       verdict: planReady ? "READY" : "REVIEW", tone: planReady ? "gn" : "amb",
                 note: `R ${pm.rr1.toFixed(2)} · ${pm.kelly != null ? (pm.kelly * 100).toFixed(0) + "% Kelly" : "no ledger edge"}` },
@@ -185,7 +185,7 @@ function planSize(pm, sizeMult, kellyFrac) {
 }
 window.planMath = planMath; window.planSize = planSize;
 
-// ─── Fill Realism — honest paper fills (next-bar open + spread + slippage)
+// ─── Fill Realism — modeled fills (next-bar open + spread + slippage placeholder)
 function FillRealism({ pm, size }) {
   const shares = size.sh;
   const signal = pm.entry;                              // the price the plan shows
@@ -239,7 +239,7 @@ function FillRealism({ pm, size }) {
         <div className="fr-kpi"><span className="label-cap">Round-trip friction</span><span className="mono kpi-tone--amb fr-kpi-v">−${rtCost}</span><span className="mono dim2">in + out</span></div>
       </div>
       <div className="fr-read mono dim2">
-        A stop-buy fills at the <b>next bar's open + spread + slippage</b>, not your signal price — so this entry really costs <b className="dn">−${Math.abs(slipCost)}</b> ({slipPct.toFixed(2)}%) and the stop can gap <b className="dn">${stopExtra}</b> worse, dropping real R:R to <b className={rrReal >= 2 ? "up" : "warn"}>{rrReal.toFixed(2)}</b>. Paper P&L &amp; Track Record score these <b>realistic fills</b>, so the numbers stay honest.
+        A stop-buy fills at the <b>next bar's open + spread + slippage</b>, not your signal price — so on this <b>modeled</b> friction the entry costs ~<b className="dn">−${Math.abs(slipCost)}</b> ({slipPct.toFixed(2)}%) and the stop can gap <b className="dn">${stopExtra}</b> worse, dropping real R:R to <b className={rrReal >= 2 ? "up" : "warn"}>{rrReal.toFixed(2)}</b>. These bps are a <b>placeholder model</b> until live spread/ADV is wired — Paper P&L &amp; Track Record already score actual fills.
       </div>
     </div>
   );
@@ -542,8 +542,8 @@ function DecisionGates({ pm, size, ticker }) {
       g("ATR ≥ 0.5% of price", atrPct >= 0.005 ? "pass" : "warn", `${(atrPct * 100).toFixed(2)}%`),
     ]},
     { stage: "EDGE", gates: [
-      g("Wilson LB ≥ 45%", ss.n == null ? "na" : (pm.lb >= 0.45 ? "pass" : "fail"),
-        ss.n == null ? "no ledger" : `${(pm.lb * 100).toFixed(0)}% · n=${ss.n}`),
+      g("Wilson LB ≥ 45%", (ss.n == null || pm.lb == null) ? "na" : (pm.lb >= 0.45 ? "pass" : "fail"),
+        (ss.n == null || pm.lb == null) ? "no ledger" : `${(pm.lb * 100).toFixed(0)}% · n=${ss.n}`),
       g("Profit factor ≥ 1.2", ss.pf == null ? "na" : (ss.pf >= 1.2 ? "pass" : "fail"),
         ss.pf == null ? "no ledger" : ss.pf.toFixed(2)),
       g("Expectancy > 0", pm.evR == null ? "na" : (pm.evR > 0 ? "pass" : "fail"),
@@ -704,8 +704,8 @@ function AuditLog({ pm, size }) {
     { phase: "PRE-FILL", item: `Sizing approved · ${size.sh} sh · ${size.navPct.toFixed(1)}% NAV · max risk $${Math.round(size.maxLoss)}`, done: true },
     { phase: "PRE-FILL", item: "Correlation-to-book check ≤ 0.55", done: true, sub: "est · live book corr pending" },
     { phase: "PRE-FILL", item: `Sleep-test · max-down $${Math.round(size.maxLoss * 1.8)} ≥ −$${Math.round(size.maxLoss)}`, done: true },
-    { phase: "PRE-FILL", item: `ER alert · T−2 reminder set (ER in ${pm.earnings.days}d)`,          done: true },
-    { phase: "FILL",     item: "Order acknowledged by Schwab · venue NSDQ · OCO IDs assigned",     done: false, sub: "awaits trigger" },
+    { phase: "PRE-FILL", item: pm.earnings.days != null ? `ER alert · T−2 reminder set (ER in ${pm.earnings.days}d)` : "ER alert · none in hold window", done: true },
+    { phase: "FILL",     item: "Order acknowledged by Alpaca (paper) · OCO IDs assigned",          done: false, sub: "awaits trigger" },
     { phase: "POST-FILL",item: "Position added to portfolio_state · risk recompute",                done: false },
     { phase: "POST-FILL",item: "Journal entry written · 1-paragraph thesis",                        done: false },
     { phase: "POST-FILL",item: "Alert wired · trail stop to breakeven at T+0.5R",                   done: false },
