@@ -73,6 +73,14 @@ function HomeView({ onTicker, onSurface, mode, surface }) {
       <HomeHero mode={mode} onSurface={onSurface} />
       <IndexStrip />
 
+      {/* TIER 1.6 · YOUR BOOK — live open positions marked to market (real Alpaca paper) */}
+      {(window.__BV && window.__BV.portfolio && (window.__BV.portfolio.positions || []).length > 0) && (
+        <>
+          <div className="home-sec-label"><span className="mono">YOUR BOOK · LIVE P&L</span><span className="mono dim2">open positions marked to market · click to open ticket</span></div>
+          <BookStrip onTicker={onTicker} />
+        </>
+      )}
+
       {/* TIER 1.5 · MARKET CONTEXT — the daily top-down briefing (regime · pre-market · calendar) */}
       <div className="home-sec-label"><span className="mono">MARKET CONTEXT · BEFORE YOU TRADE</span><span className="mono dim2">top-down read · regime gates your size · click any card to go deeper</span></div>
       <MarketBriefing onSurface={onSurface} onTicker={onTicker} />
@@ -544,9 +552,11 @@ function resolveDiscovery() {
   const hi = rows.filter(r => r.off52 != null && r.off52 >= -3 && HR.num(r.chg, null) != null)
     .sort((a, b) => b.off52 - a.off52).map(r => [r.sym, (r.chg >= 0 ? "+" : "") + r.chg.toFixed(1)]);
   const sq = rows.filter(r => r.sqRank >= 1).sort((a, b) => b.sqRank - a.sqRank || b.score - a.score)
-    .map(r => [r.sym, r.squeeze]);
-  const ins = rows.filter(r => HR.num(r.insUsd, 0) > 0).sort((a, b) => b.insUsd - a.insUsd)
-    .map(r => [r.sym, "+$" + r.insUsd.toFixed(1) + "M"]);
+    .map(r => [r.sym, String(r.squeeze).toUpperCase()]);
+  // insider $-value (total_buy_value) is never populated by the feed — the real
+  // signal is the net buy count (insider_net = buys − sells), which IS populated.
+  const ins = rows.filter(r => HR.num(r.insNet, 0) > 0).sort((a, b) => b.insNet - a.insNet)
+    .map(r => [r.sym, "+" + r.insNet + " net"]);
   const of = (window.__BV && window.__BV.optionsFlow) || [];
   const uoa = of.filter(o => o.ticker).sort((a, b) => (b.uoa_calls || 0) - (a.uoa_calls || 0))
     .map(o => [HR.sym0(o.ticker), o.status || "UOA"]);
@@ -653,6 +663,26 @@ const SCANNER_PICKS = [
 // available — used as a memo dependency so Home re-derives real rows post-load.
 const bvTok = () => (HR.has() ? 1 : 0) + (HR.ledgerReal() ? 2 : 0) + (window.AIPredict && window.AIPredict.all ? 4 : 0);
 
+// Scan funnel computed from the SAME per-mode engine verdicts the scanner/TopSetups
+// read (decisions_by_mode), so the hero funnel can't disagree with the rest of Home.
+// (critical.buy_count drifts from the per-row verdicts — e.g. says "9 bullish" while
+// every row's swing verdict is WATCH/AVOID.) Falls back to BV.market.funnel.
+function realFunnel(mode) {
+  const rows = HR.rows();
+  if (!rows.length) return null;
+  const m = String(mode || window.__tmode || "swing").toLowerCase();
+  const key = m.indexOf("pos") === 0 ? "position" : m.indexOf("inv") === 0 ? "investment" : "swing";
+  let bull = 0, neu = 0, bear = 0;
+  rows.forEach(r => {
+    const dbm = (r._raw && r._raw.decisions_by_mode) || null;
+    const v = String((dbm && dbm[key] && dbm[key].verdict) || r.verdict || "").toUpperCase();
+    if (v === "BUY") bull++;
+    else if (v === "SHORT" || v === "AVOID" || v === "SELL") bear++;
+    else neu++;
+  });
+  return { universe: rows.length, bullish: bull, neutral: neu, bearish: bear };
+}
+
 // Build each engine's top-5 from the REAL scan universe (audit-log intersected).
 // Returns null when no live universe is present → caller keeps the curated rows.
 function realEngineRows(id) {
@@ -691,8 +721,8 @@ function realEngineRows(id) {
     return r.length ? top5(r) : null;
   }
   if (id === "insider") {
-    const r = rows.filter(x => HR.num(x.insUsd, 0) > 0).sort((a, b) => b.insUsd - a.insUsd)
-      .map(x => [x.sym, "+$" + x.insUsd.toFixed(1) + "M"]);
+    const r = rows.filter(x => HR.num(x.insNet, 0) > 0).sort((a, b) => b.insNet - a.insNet)
+      .map(x => [x.sym, "+" + x.insNet]);
     return r.length ? top5(r) : null;
   }
   if (id === "smc") {
@@ -913,8 +943,11 @@ function HomeHero({ mode, onSurface }) {
   const go = (id) => () => onSurface && onSurface(id);
   const scan = (f) => () => { window.__scanFilter = f; go("signal-scanner")(); };
   const M = (window.__BV && window.__BV.market) || null;
-  const buy = M ? M.funnel.bullish : 14, watch = M ? M.funnel.neutral : 8, avoid = M ? M.funnel.bearish : 31;
-  const universe = M ? M.funnel.universe : 612;
+  // funnel from the live per-mode verdicts (consistent with TopSetups/Discovery);
+  // falls back to the critical funnel only when no live universe is loaded.
+  const F = realFunnel(mode) || (M ? M.funnel : null);
+  const buy = F ? F.bullish : 14, watch = F ? F.neutral : 8, avoid = F ? F.bearish : 31;
+  const universe = F ? F.universe : 612;
   const flagged = buy + watch + avoid || 1;
   const seg = (n) => `${(n / flagged) * 100}%`;
   const mood = [
@@ -1185,6 +1218,61 @@ function HomeBook() {
   );
 }
 
+// ─── Your Book — REAL open positions (Alpaca paper) marked to market ─────
+function BookStrip({ onTicker }) {
+  const pf = (window.__BV && window.__BV.portfolio) || null;
+  if (!pf) return null;
+  const positions = (pf.positions || []).slice();
+  const num = (v) => (typeof v === "number" && isFinite(v)) ? v : (parseFloat(v) || 0);
+  const money = (v) => (v < 0 ? "−$" : "$") + Math.abs(Math.round(num(v))).toLocaleString();
+  const openPnl = positions.reduce((a, p) => a + num(p.unrealized_pnl_dollars), 0);
+  const equity = num(pf.equity), cash = num(pf.cash);
+  const openPct = equity ? (openPnl / equity) * 100 : null;
+  const tone = openPnl >= 0 ? "gn" : "rd";
+  positions.sort((a, b) => Math.abs(num(b.unrealized_pnl_dollars)) - Math.abs(num(a.unrealized_pnl_dollars)));
+  return (
+    <div className="ap-strip">
+      {/* book summary tile */}
+      <div className="ap-card ap-card--ink">
+        <div className="ap-hdr">
+          <span className="mono ap-sym"><b>NAV</b></span>
+          <span className={`mono ap-pl kpi-tone--${tone}`}>{openPnl >= 0 ? "+" : ""}{money(openPnl)}</span>
+        </div>
+        <div className="ap-meta mono dim2">{positions.length} open · {pf.config_label || "Alpaca paper"}</div>
+        <div className="ap-bars">
+          <div className="ap-bar"><div className="ap-bar-l label-cap">Equity</div><div className="ap-bar-v mono">{money(equity)}</div></div>
+          <div className="ap-bar"><div className="ap-bar-l label-cap">Open P&L</div><div className={`ap-bar-v mono kpi-tone--${tone}`}>{openPct != null ? (openPct >= 0 ? "+" : "") + openPct.toFixed(2) + "%" : "—"}</div></div>
+          <div className="ap-bar"><div className="ap-bar-l label-cap">Cash</div><div className="ap-bar-v mono">{money(cash)}</div></div>
+          <div className="ap-bar"><div className="ap-bar-l label-cap">Slots</div><div className="ap-bar-v mono">{pf.open_count != null ? pf.open_count : positions.length}/{pf.max_positions != null ? pf.max_positions : "—"}</div></div>
+        </div>
+      </div>
+      {positions.map(p => {
+        const pnl = num(p.unrealized_pnl_dollars), pct = num(p.unrealized_pnl_pct);
+        const t = pnl >= 0 ? "gn" : "rd";
+        const short = String(p.direction || "").toLowerCase() === "short" || num(p.signed_qty) < 0;
+        const last = num(p.current_price), entry = num(p.entry_price), stop = num(p.stop);
+        const stopDist = (last && stop) ? ((short ? (stop - last) : (last - stop)) / last) * 100 : null;
+        return (
+          <button key={p.ticker} className={`ap-card ap-card--${t}`} onClick={() => onTicker && onTicker(p.ticker)}>
+            <div className="ap-hdr">
+              <span className="mono ap-sym"><b>{p.ticker}</b> <span className={`mono ${short ? "dn" : "up"}`} style={{ fontSize: 10 }}>{short ? "SHORT" : "LONG"}</span></span>
+              <span className={`mono ap-pl kpi-tone--${t}`}>{pnl >= 0 ? "+" : ""}{money(pnl)}</span>
+            </div>
+            <div className="ap-meta mono dim2">{Math.abs(num(p.shares))} sh · {p.days_held != null ? "held " + p.days_held + "d" : (p.setup_type || "")}</div>
+            <div className="ap-bars">
+              <div className="ap-bar"><div className="ap-bar-l label-cap">Open %</div><div className={`ap-bar-v mono kpi-tone--${t}`}>{pct ? (pct >= 0 ? "+" : "") + pct.toFixed(1) + "%" : "—"}</div></div>
+              <div className="ap-bar"><div className="ap-bar-l label-cap">Stop dist</div><div className={`ap-bar-v mono ${stopDist != null && stopDist >= 0 ? "up" : "dn"}`}>{stopDist != null ? (stopDist >= 0 ? "+" : "") + stopDist.toFixed(1) + "%" : "—"}</div></div>
+              <div className="ap-bar"><div className="ap-bar-l label-cap">Entry</div><div className="ap-bar-v mono">{entry ? "$" + entry.toFixed(2) : "—"}</div></div>
+              <div className="ap-bar"><div className="ap-bar-l label-cap">Last</div><div className="ap-bar-v mono">{last ? "$" + last.toFixed(2) : "—"}</div></div>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+window.BookStrip = BookStrip;
+
 window.HomeView = HomeView;
 
 // ─── Performance strip ───────────────────────────────────────────
@@ -1319,7 +1407,7 @@ function resolveSignalFeed() {
   if (!rows.length) return SIGNALFEED_MOCK;
   const inA = (r) => HR.inAudit(r.sym);
   const buys = rows.filter(r => r.verdict === "BUY" && inA(r)).sort((a, b) => b.score - a.score);
-  const ins = rows.filter(r => HR.num(r.insUsd, 0) > 0 && inA(r)).sort((a, b) => b.insUsd - a.insUsd);
+  const ins = rows.filter(r => HR.num(r.insNet, 0) > 0 && inA(r)).sort((a, b) => b.insNet - a.insNet);
   const er = rows.filter(r => HR.num(r.er, 99) <= 9 && HR.num(r.er, 99) >= 0 && inA(r)).sort((a, b) => a.er - b.er);
   const bear = rows.filter(r => (r.verdict === "SHORT" || r.verdict === "AVOID") && inA(r)).sort((a, b) => a.score - b.score);
   const ai = rows.filter(r => r.aiEdge != null && inA(r)).sort((a, b) => b.aiEdge - a.aiEdge);
@@ -1329,9 +1417,10 @@ function resolveSignalFeed() {
   if (buys[1]) out.push({ t: "05:48", tone: "gn", tag: "ALERT", sym: buys[1].sym, text: `Entry ${buys[1].eq || "in zone"} · R:R ${buys[1].rr}${buys[1].rvol !== "—" ? " · " + buys[1].rvol + "× RVOL" : ""}` });
   if (er[0]) out.push({ t: "04:22", tone: "amb", tag: "ER", sym: er[0].sym, text: `ER in ${er[0].er} sessions · event-risk elevated` });
   if (bear[0]) out.push({ t: "03:41", tone: "rd", tag: "BEARISH", sym: bear[0].sym, text: `${bear[0].verdict} · score ${bear[0].score} · excluded from longs` });
-  if (M && M.funnel) out.push({ t: "02:14", tone: "ink", tag: "BUNDLE", sym: null, text: `Daily bundle · ${M.funnel.universe} ranked · ${M.funnel.bullish} Bullish · ${M.funnel.neutral} Neutral · ${M.funnel.bearish} Bearish` });
+  const _F = realFunnel(window.__tmode) || (M && M.funnel);
+  if (_F) out.push({ t: "02:14", tone: "ink", tag: "BUNDLE", sym: null, text: `Daily bundle · ${_F.universe} ranked · ${_F.bullish} Bullish · ${_F.neutral} Neutral · ${_F.bearish} Bearish` });
   if (ai[0]) out.push({ t: "23:49", tone: "violet", tag: "AI", sym: ai[0].sym, text: `AI edge +${ai[0].aiEdge.toFixed(2)} · highest hit-net today` });
-  if (ins[0]) out.push({ t: "22:12", tone: "cy", tag: "INSIDER", sym: ins[0].sym, text: `Insider cluster · +$${ins[0].insUsd.toFixed(1)}M net buys` });
+  if (ins[0]) out.push({ t: "22:12", tone: "cy", tag: "INSIDER", sym: ins[0].sym, text: `Insider cluster · +${ins[0].insNet} net open-market buys` });
   return out.length ? out : SIGNALFEED_MOCK;
 }
 

@@ -3126,6 +3126,7 @@ async def universe_api(limit: int = 0):
         # T·F·S·N pillars (score + max) for the scanner dots
         T = r.get("technicals") or {}; F = r.get("fundamentals") or {}
         S = r.get("smc") or {}; N = r.get("sentiment") or {}
+        _ind = (T.get("indicators") or {})  # 52w high/low live here, not top-level
         return {
             "ticker": r.get("ticker"), "name": r.get("name") or r.get("ticker"),
             "sector": r.get("sector"), "industry": r.get("industry"),
@@ -3158,7 +3159,14 @@ async def universe_api(limit: int = 0):
                           if (r.get("finviz_elite") or {}).get("perf_week_pct") is not None else r.get("perf_week")),
             "perf_month": ((r.get("finviz_elite") or {}).get("perf_month_pct")
                            if (r.get("finviz_elite") or {}).get("perf_month_pct") is not None else r.get("perf_month")),
-            "star_rating": r.get("star_rating"), "week52_high": r.get("week52_high"), "week52_low": r.get("week52_low"),
+            "star_rating": r.get("star_rating"),
+            # 52w high/low live in technicals.indicators.{high_52w,low_52w} on the
+            # bundle row (top-level week52_high is always null) — read the real path
+            # so the scanner's off-52w-high + Discovery "52W HIGH" group populate.
+            "week52_high": _ind.get("high_52w") if _ind.get("high_52w") is not None else r.get("week52_high"),
+            "week52_low":  _ind.get("low_52w")  if _ind.get("low_52w")  is not None else r.get("week52_low"),
+            "pct_from_52w_high": _ind.get("pct_from_52w_high"),
+            "at_52w_breakout": bool(_ind.get("at_52w_breakout")) if _ind.get("at_52w_breakout") is not None else None,
             "above_50ema": bool(((r.get("technicals") or {}).get("indicators") or {}).get("above_50ema")) if ((r.get("technicals") or {}).get("indicators") or {}).get("above_50ema") is not None else r.get("above_50ema"),
             "above_200sma": bool(((r.get("technicals") or {}).get("indicators") or {}).get("above_200sma")) if ((r.get("technicals") or {}).get("indicators") or {}).get("above_200sma") is not None else r.get("above_200sma"),
             "adx": (((r.get("technicals") or {}).get("indicators") or {}).get("adx")

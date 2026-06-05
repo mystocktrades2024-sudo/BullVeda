@@ -140,8 +140,13 @@
                  num(r.rsi, 0) >= 45, (num(r.earn_days, 99) || 99) > 14].filter(Boolean).length;
     var off52 = (r.week52_high && price) ? ((price - r.week52_high) / r.week52_high) * 100 : null;
     var vwapPct = (r.vwap20 && price) ? ((price - r.vwap20) / r.vwap20) * 100 : null;
+    // squeeze_flag.level is "low"/"medium"/"high" (compression tier) OR "ON"/"FIRED"
+    // on some rows — map both vocabularies to a rank so the Squeeze group surfaces.
     var squeeze = (r.squeeze || "OFF");
-    var sqRank = squeeze === "FIRED" ? 2 : squeeze === "ON" ? 1 : 0;
+    var _sqU = String(squeeze).toUpperCase();
+    var sqRank = (_sqU === "FIRED" || _sqU === "HIGH") ? 3
+               : (_sqU === "ON" || _sqU.indexOf("MED") === 0) ? 2
+               : (_sqU === "LOW") ? 1 : 0;
     var signals = [];
     if ((rvol || 0) >= 1.5) signals.push("🔥");
     if (r.catalyst_tier === 1 || squeeze === "FIRED") signals.push("⚡");
