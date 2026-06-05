@@ -1,11 +1,53 @@
 // lens-smc.jsx + lens-risk.jsx — Smart Money Concepts and Risk lenses
 
-const { useMemo: useMemoSR } = React;
+const { useMemo: useMemoSR, useState: useStateSMC, useEffect: useEffSMC } = React;
+
+// Real SMC model from the server engine (engines/smc.py) via /api/pattern/smc.
+// Mode-aware (SWING=daily, POSITION=weekly, INVEST=monthly). No mock fallback —
+// when the feed has no usable structure the sections render honest empty states.
+function useSmcModel(ticker, mode) {
+  const sym = (ticker && ticker.symbol) || "";
+  const md = (mode || "SWING").toUpperCase();
+  const key = "smc|" + sym + "|" + md;
+  const read = () => { try { return (window.__BV && window.__BV.patternCached && window.__BV.patternCached("smc", sym, md)) || null; } catch (e) { return null; } };
+  const [real, setReal] = useStateSMC(read);
+  useEffSMC(() => {
+    let alive = true;
+    setReal(read());
+    try { if (window.__BV && window.__BV.fetchPattern && sym) window.__BV.fetchPattern("smc", sym, md).then(d => { if (alive) setReal(d); }); } catch (e) {}
+    return () => { alive = false; };
+  }, [key]);
+  let st = "mock";
+  if (real && typeof real === "object" && ("ok" in real)) st = "loaded";
+  else if (real === null && window.__BV && window.__BV.fetchPattern) st = "loading";
+  return { m: real, state: st };
+}
+
+const _smcUsable = (m) => !!(m && m.ok);
+function SmcEmpty({ state, what }) {
+  const msg = state === "loading" ? "loading live bars…"
+    : state === "loaded" ? `no ${what || "structure"} computed from this timeframe's bars`
+    : "connect to :7432 for live data";
+  return <div className="smc-empty mono dim2">— {msg}</div>;
+}
+function smcMoney(v) { return (typeof v === "number" && isFinite(v)) ? "$" + v.toFixed(2) : "—"; }
+function smcTone(state) { return state === "fresh" ? "ink" : state === "held" ? "gn" : state === "mitigated" ? "amb" : "cy"; }
 
 // ────────────────────────────────────────────────────────────
 // SMC — order blocks, FVG, BoS/CHoCH, liquidity sweeps
 // ────────────────────────────────────────────────────────────
 function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
+  const { m, state } = useSmcModel(ticker, mode);
+  const ok = _smcUsable(m);
+  const bias = ok ? m.bias : null;
+  const biasTone = bias === "bull" ? "gn" : bias === "bear" ? "rd" : "amb";
+  const zone = ok ? m.range.zone : null;
+  const zoneTone = zone === "discount" ? "gn" : zone === "premium" ? "rd" : "amb";
+  const draw = ok ? m.draw_on_liquidity : null;
+  const obs = ok ? m.order_blocks : [];
+  const nUnmit = obs.filter(o => o.state !== "mitigated").length;
+  const nFVGu = ok ? m.fvgs.filter(g => g.state === "unfilled").length : 0;
+  const lastEvt = ok && m.structure.events.length ? m.structure.events[m.structure.events.length - 1] : null;
   const s1 = useStateToggle("sm-1"); const s2 = useStateToggle("sm-2");
   const s3 = useStateToggle("sm-3"); const s4 = useStateToggle("sm-4");
   const s0 = useStateToggle("sm-0"); const s5 = useStateToggle("sm-5");
@@ -17,38 +59,41 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
 
   return (
     <div className="lens lens--smc">
-      {window.LensSummaryBar && <LensSummaryBar ticker={ticker} mode={mode} kind="smc" />}
+      {window.LensSummaryBar && <LensSummaryBar ticker={ticker} mode={mode} kind="smc" smc={m} />}
       <div className="hero smc-hero">
         <div className="th-left">
-          <div className="label-cap">SMC structure read · {mode}</div>
+          <div className="label-cap">SMC structure read · {mode}{ok ? " · " + m.tf : ""}</div>
           <div className="th-score">
-            <div className="th-score-num mono">PASS</div>
-            <Pill tone="cy" dot>BoS + OB held</Pill>
-            <Pill tone="gn" small>HTF bull</Pill>
+            <div className="th-score-num mono">{ok ? (m.smc_score >= 66 ? "PASS" : m.smc_score >= 50 ? "MIXED" : "WEAK") : "—"}</div>
+            {ok && <Pill tone={biasTone} dot>{m.headline}</Pill>}
+            {ok && <Pill tone={zoneTone} small>{zone}</Pill>}
           </div>
           <div className="th-pill-row">
-            <Pill tone="gn" small>4 OB · 2 mitigated</Pill>
-            <Pill tone="cy" small>3 FVG · 1 filled</Pill>
-            <Pill tone="amb" small>liquidity above $70.40</Pill>
-            <Pill tone="gn" small>VWAP reclaimed</Pill>
+            {ok ? <>
+              <Pill tone="gn" small>{obs.length} OB · {nUnmit} unmitigated</Pill>
+              <Pill tone="cy" small>{nFVGu} FVG unfilled</Pill>
+              {draw && <Pill tone="amb" small>draw {draw.side} {smcMoney(draw.price)}</Pill>}
+              <Pill tone={biasTone} small>SMC {m.smc_score}</Pill>
+            </> : <Pill tone="amb" small>{state === "loading" ? "loading live bars…" : "no live structure"}</Pill>}
           </div>
         </div>
         <div className="th-right">
-          <SMCMicroChart />
+          <SMCMicroChart m={m} />
         </div>
       </div>
 
       <div className="lens-section">
-        <SectionHeader title="Cross-Discipline Confluence"
-          sub="how SMC lines up with the other theories on this name" style="minimal" />
+        <SectionHeader title="SMC Snapshot"
+          sub="bias · structure · range · draw · score — all computed from live bars" style="minimal" />
         <div className="lens-pad">
-          <CrossLens lead="cy" cells={[
-            { lens: "SMC", verdict: "BULL BOS", tone: "gn", note: "OB held · liquidity above $70.40" },
-            { lens: "Wyckoff", verdict: "PHASE D", tone: "gn", note: "spring + SOS · accumulating" },
-            { lens: "Elliott", verdict: "WAVE 3", tone: "gn", note: "impulse · 1.618 ext target" },
-            { lens: "Volume Profile", verdict: "ABOVE VAH", tone: "gn", note: "value migrating up · POC support" },
-            { lens: "Verdict", verdict: "STACKED", tone: "gn", note: "structure + flow + value aligned" },
-          ]} />
+          {ok ? <CrossLens lead="cy" cells={[
+            { lens: "Bias", verdict: m.bias.toUpperCase(), tone: biasTone, note: m.headline },
+            { lens: "Structure", verdict: lastEvt ? lastEvt.evt : "—", tone: lastEvt ? (lastEvt.dir === "up" ? "gn" : "rd") : "amb",
+              note: lastEvt ? `${lastEvt.dir} @ ${smcMoney(lastEvt.price)} · ${lastEvt.date}` : "no break of structure" },
+            { lens: "Range", verdict: zone.toUpperCase(), tone: zoneTone, note: `${m.range.pct}% of ${smcMoney(m.range.lo)}–${smcMoney(m.range.hi)}` },
+            { lens: "Draw", verdict: draw ? smcMoney(draw.price) : "—", tone: "cy", note: draw ? draw.side + " liquidity" : "none in bias direction" },
+            { lens: "Score", verdict: String(m.smc_score), tone: biasTone, note: "composite · bar-derived" },
+          ]} /> : <SmcEmpty state={state} what="SMC structure" />}
         </div>
       </div>
 
@@ -57,7 +102,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           sub="draw on liquidity · HTF bias · premium/discount · daily/weekly levels"
           style={headerStyle} right={<StateToggle name="sm-0" />} />
         <StateWrap state={s0.value} source="MTF structure · D/W/M levels · session liquidity">
-          <div className="lens-pad"><SMCMacro /></div>
+          <div className="lens-pad"><SMCMacro m={m} state={state} /></div>
         </StateWrap>
       </div>
 
@@ -66,7 +111,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           sub="last 6 unmitigated demand/supply zones · institutional footprints"
           style={headerStyle} right={<StateToggle name="sm-1" />} />
         <StateWrap state={s1.value} source="bespoke detector · candle structure">
-          <div className="lens-pad"><OBTable /></div>
+          <div className="lens-pad"><OBTable m={m} state={state} /></div>
         </StateWrap>
       </div>
 
@@ -75,7 +120,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           sub="structural shifts · break-of-structure log"
           style={headerStyle} right={<StateToggle name="sm-2" />} />
         <StateWrap state={s2.value} source="structure aggregator">
-          <div className="lens-pad"><StructureLog /></div>
+          <div className="lens-pad"><StructureLog m={m} state={state} /></div>
         </StateWrap>
       </div>
 
@@ -84,7 +129,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           sub="stop-hunts above prior highs / below prior lows · resting liquidity"
           style={headerStyle} right={<StateToggle name="sm-3" />} />
         <StateWrap state={s3.value} source="sweep detector · 30 sessions">
-          <div className="lens-pad"><LiquiditySweeps /></div>
+          <div className="lens-pad"><LiquiditySweeps m={m} state={state} /></div>
         </StateWrap>
       </div>
 
@@ -93,7 +138,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           sub="dealing-range zones · where to buy vs sell"
           style={headerStyle} right={<StateToggle name="sm-5" />} />
         <StateWrap state={s5.value} source="dealing range · trailing extremes">
-          <div className="lens-pad"><SMCZones /></div>
+          <div className="lens-pad"><SMCZones m={m} state={state} /></div>
         </StateWrap>
       </div>
 
@@ -102,7 +147,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           sub="confluence across 1H · 4H · D · W"
           style={headerStyle} right={<StateToggle name="sm-4" />} />
         <StateWrap state={s4.value} source="MTF aggregator · 1H/4H/D/W structure">
-          <div className="lens-pad"><MTFScreener /></div>
+          <div className="lens-pad"><MTFScreener m={m} state={state} /></div>
         </StateWrap>
       </div>
 
@@ -111,7 +156,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           sub="the trap before the move · minor liquidity swept first"
           style={headerStyle} right={<StateToggle name="sm-6" />} />
         <StateWrap state={s6b.value} source="inducement detector · sub-pivot sweeps">
-          <div className="lens-pad"><SMCInducement /></div>
+          <div className="lens-pad"><SMCInducement m={m} state={state} /></div>
         </StateWrap>
       </div>
 
@@ -120,7 +165,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           sub="failed OBs that flip polarity · revisited origins"
           style={headerStyle} right={<StateToggle name="sm-7" />} />
         <StateWrap state={s7b.value} source="polarity-flip detector">
-          <div className="lens-pad"><SMCBreakers /></div>
+          <div className="lens-pad"><SMCBreakers m={m} state={state} /></div>
         </StateWrap>
       </div>
 
@@ -129,7 +174,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           sub="inefficiencies · momentum leg · optimal trade entry 62–79%"
           style={headerStyle} right={<StateToggle name="sm-8" />} />
         <StateWrap state={s8b.value} source="displacement + fib OTE engine">
-          <div className="lens-pad"><SMCVoidOTE /></div>
+          <div className="lens-pad"><SMCVoidOTE m={m} state={state} /></div>
         </StateWrap>
       </div>
 
@@ -138,7 +183,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           sub="session timing edge · correlated-pair divergence"
           style={headerStyle} right={<StateToggle name="sm-9" />} />
         <StateWrap state={s9b.value} source="session clock + SMT vs sector ETF">
-          <div className="lens-pad"><SMCKillSMT /></div>
+          <div className="lens-pad"><SMCKillSMT m={m} state={state} /></div>
         </StateWrap>
       </div>
 
@@ -147,7 +192,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           sub="sweep → CHoCH → FVG → OB · step tracker + A–F grade"
           style={headerStyle} right={<StateToggle name="sm-10" />} />
         <StateWrap state={s10b.value} source="entry-model state machine">
-          <div className="lens-pad"><SMCEntryModel /></div>
+          <div className="lens-pad"><SMCEntryModel m={m} state={state} /></div>
         </StateWrap>
       </div>
 
@@ -156,7 +201,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           sub="persistent CHoCH/BoS regime across timeframes"
           style={headerStyle} right={<StateToggle name="sm-11" />} />
         <StateWrap state={s11b.value} source="structure state machine">
-          <div className="lens-pad"><SMCTrendState /></div>
+          <div className="lens-pad"><SMCTrendState m={m} state={state} /></div>
         </StateWrap>
       </div>
 
@@ -165,7 +210,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           sub="OB + FVG + OTE + HTF level + liquidity aligned"
           style={headerStyle} right={<StateToggle name="sm-12" />} />
         <StateWrap state={s12b.value} source="confluence scorer">
-          <div className="lens-pad"><SMCConfluence /></div>
+          <div className="lens-pad"><SMCConfluence m={m} state={state} /></div>
         </StateWrap>
       </div>
 
@@ -174,7 +219,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           sub="zone respect history + resting liquidity density"
           style={headerStyle} right={<StateToggle name="sm-13" />} />
         <StateWrap state={s13b.value} source="zone tracker + liquidity density">
-          <div className="lens-pad"><SMCMitigationHeat /></div>
+          <div className="lens-pad"><SMCMitigationHeat m={m} state={state} /></div>
         </StateWrap>
       </div>
 
@@ -183,96 +228,111 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           sub="price-entering-OB · FVG fill · liquidity sweep triggers"
           style={headerStyle} right={<StateToggle name="sm-14" />} />
         <StateWrap state={s14b.value} source="alert engine · SMC conditions">
-          <div className="lens-pad"><SMCAlerts /></div>
+          <div className="lens-pad"><SMCAlerts m={m} state={state} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
         <SectionHeader n={6} title="Cross-Lens Confluence" style={headerStyle} />
         <div className="lens-pad">
-          <CrossLens lead="cy" cells={[
-            { lens: "SMC",        verdict: "PASS",  tone: "gn",  note: "BoS + OB held · liquidity above" },
-            { lens: "Macro",      verdict: "BULL",  tone: "gn",  note: "HTF D/W aligned · risk-on" },
-            { lens: "Technicals", verdict: "PASS",  tone: "gn",  note: "RSI 64 · stacked MAs" },
-            { lens: "Volume",     verdict: "DRY",   tone: "amb", note: "below avg on pullback" },
-            { lens: "Risk",       verdict: "OK",    tone: "gn",  note: "stop below last OB" },
-          ]} />
+          {ok ? (() => {
+            const px = ticker.pillars || {};
+            const tech = px.technical;
+            const mtfH = m.mtf && m.mtf.length > 1 ? m.mtf[1] : null;
+            return <CrossLens lead="cy" cells={[
+              { lens: "SMC", verdict: m.smc_score >= 66 ? "PASS" : m.smc_score >= 50 ? "MIXED" : "WEAK", tone: biasTone, note: m.headline },
+              { lens: "HTF", verdict: mtfH ? mtfH.bias : "—", tone: mtfH && mtfH.bias === "BULL" ? "gn" : mtfH && mtfH.bias === "BEAR" ? "rd" : "amb", note: mtfH ? mtfH.tf + " timeframe" : "single TF" },
+              { lens: "Range", verdict: zone.toUpperCase(), tone: zoneTone, note: `${m.range.pct}% of range` },
+              { lens: "Technicals", verdict: tech == null ? "—" : tech >= 60 ? "STRONG" : tech >= 45 ? "OK" : "WEAK", tone: tech == null ? "amb" : tech >= 60 ? "gn" : tech >= 45 ? "amb" : "rd", note: tech == null ? "open Technicals lens" : `pillar ${Math.round(tech)}` },
+              { lens: "Draw", verdict: draw ? smcMoney(draw.price) : "—", tone: "cy", note: draw ? draw.side : "none" },
+            ]} />;
+          })() : <SmcEmpty state={state} what="confluence" />}
         </div>
       </div>
 
       <div className="lens-call">
         <span className="label-cap">The Read · SMC</span>
-        <span className="mono">
-          HTF bullish + price in discount · OB at <b className="copper">$63.20–$63.80</b> held the spring ·
-          draw on liquidity rests above <b className="up">$70.40</b>. Long from discount toward buy-side liquidity.
-        </span>
+        {ok ? (() => {
+          const ob = obs.find(o => o.state !== "mitigated") || obs[0];
+          const longBias = m.bias === "bull";
+          return <span className="mono">
+            {m.bias.toUpperCase()} structure · price in <b className={zoneTone === "gn" ? "up" : zoneTone === "rd" ? "dn" : "warn"}>{zone}</b> ({m.range.pct}% of range)
+            {ob ? <> · {ob.type} OB at <b className="copper">{smcMoney(ob.lo)}–{smcMoney(ob.hi)}</b> ({ob.state})</> : null}
+            {draw ? <> · draw on liquidity {draw.side} at <b className={longBias ? "up" : "dn"}>{smcMoney(draw.price)}</b>.</> : "."}
+            {" "}{longBias ? "Favor longs from discount toward buy-side liquidity." : m.bias === "bear" ? "Favor shorts from premium toward sell-side liquidity." : "Range-bound — fade the edges, no committed bias."}
+          </span>;
+        })() : <span className="mono dim2">No SMC structure computed for {(ticker && ticker.symbol) || "this name"} on the {mode} timeframe — the feed returned no usable bars.</span>}
       </div>
     </div>
   );
 }
 
 // Macro / HTF context for SMC
-function SMCMacro() {
+function SMCMacro({ m, state }) {
+  if (!_smcUsable(m)) return <SmcEmpty state={state} what="macro context" />;
+  const r = m.range, draw = m.draw_on_liquidity;
+  const bTone = m.bias === "bull" ? "gn" : m.bias === "bear" ? "rd" : "amb";
+  const zTone = r.zone === "discount" ? "gn" : r.zone === "premium" ? "rd" : "amb";
   return (
     <div className="smc-macro">
       <div className="smc-macro-grid">
-        <div className="smc-mc smc-mc--gn">
-          <div className="label-cap">HTF BIAS · D / W / M</div>
-          <div className="mono smc-mc-v up">BULLISH</div>
-          <div className="mono dim2">Daily BoS↑ · Weekly HH/HL · Monthly up</div>
+        <div className={`smc-mc smc-mc--${bTone}`}>
+          <div className="label-cap">HTF BIAS · {m.tf}</div>
+          <div className={`mono smc-mc-v ${m.bias === "bull" ? "up" : m.bias === "bear" ? "dn" : "warn"}`}>{m.bias.toUpperCase()}</div>
+          <div className="mono dim2">{m.headline}</div>
         </div>
         <div className="smc-mc smc-mc--cy">
           <div className="label-cap">DRAW ON LIQUIDITY</div>
-          <div className="mono smc-mc-v cy">$70.40 ↑</div>
-          <div className="mono dim2">buy-side · equal highs magnet</div>
+          <div className="mono smc-mc-v cy">{draw ? smcMoney(draw.price) : "—"}</div>
+          <div className="mono dim2">{draw ? draw.side + " · nearest untapped" : "none in bias direction"}</div>
         </div>
-        <div className="smc-mc smc-mc--gn">
+        <div className={`smc-mc smc-mc--${zTone}`}>
           <div className="label-cap">DEALING RANGE</div>
-          <div className="mono smc-mc-v">DISCOUNT</div>
-          <div className="mono dim2">price below 50% equilibrium $66.25</div>
+          <div className="mono smc-mc-v">{r.zone.toUpperCase()}</div>
+          <div className="mono dim2">{r.pct}% of range · eq {smcMoney(r.eq)}</div>
         </div>
-        <div className="smc-mc smc-mc--amb">
-          <div className="label-cap">SESSION</div>
-          <div className="mono smc-mc-v warn">NY AM</div>
-          <div className="mono dim2">London high swept · NY continuation</div>
+        <div className={`smc-mc smc-mc--${r.ote_active ? "gn" : "amb"}`}>
+          <div className="label-cap">OTE ZONE</div>
+          <div className={`mono smc-mc-v ${r.ote_active ? "up" : ""}`}>{smcMoney(r.ote_lo)}–{smcMoney(r.ote_hi)}</div>
+          <div className="mono dim2">{r.ote_active ? "price in OTE now" : "0.62–0.79 retrace"}</div>
         </div>
       </div>
-      <table className="dtable">
-        <thead><tr><th>HTF Level</th><th className="r">Price</th><th>Type</th><th>Status</th></tr></thead>
-        <tbody>
-          {[
-            ["PWH · prior week high","$70.40","buy-side liq","untapped","cy"],
-            ["PDH · prior day high","$68.10","buy-side liq","untapped","cy"],
-            ["Daily OB","$63.20–63.80","HTF demand","holding","gn"],
-            ["Weekly FVG","$61.10–62.40","HTF imbalance","unfilled","violet"],
-            ["PWL · prior week low","$58.40","sell-side liq","swept","rd"],
-            ["Monthly 50%","$56.20","equilibrium","below","ink"],
-          ].map((r,i)=>(
-            <tr key={i}>
-              <td className="mono">{r[0]}</td>
-              <td className="r mono">{r[1]}</td>
-              <td className="mono dim">{r[2]}</td>
-              <td><Pill tone={r[4]} small>{r[3]}</Pill></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="mono dim" style={{fontSize:11}}>
-        Macro read: HTF bullish with price in <b className="up">discount</b> below equilibrium — institutional
-        accumulation zone. Draw on liquidity is buy-side ($70.40 equal highs). Long bias from discount OB toward the magnet.
+      {m.htf_levels && m.htf_levels.length ? (
+        <table className="dtable">
+          <thead><tr><th>HTF Level</th><th className="r">Price</th><th>Type</th><th>Status</th></tr></thead>
+          <tbody>
+            {m.htf_levels.map((lv, i) => (
+              <tr key={i}>
+                <td className="mono">{lv.label}</td>
+                <td className="r mono">{smcMoney(lv.price)}</td>
+                <td className="mono dim">{lv.type}</td>
+                <td><Pill tone={lv.state === "swept" ? "rd" : "cy"} small>{lv.state}</Pill></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
+      <div className="mono dim" style={{ fontSize: 11 }}>
+        Macro read: {m.tf} structure is <b className={m.bias === "bull" ? "up" : m.bias === "bear" ? "dn" : "warn"}>{m.bias}</b>, price in <b className={zTone === "gn" ? "up" : zTone === "rd" ? "dn" : "warn"}>{r.zone}</b> ({r.pct}% of the {smcMoney(r.lo)}–{smcMoney(r.hi)} dealing range).
+        {draw ? <> Draw on liquidity is {draw.side} at {smcMoney(draw.price)}.</> : null}
       </div>
     </div>
   );
 }
 
 // Premium / Discount / Equilibrium zones
-function SMCZones() {
-  const hi=70.40, lo=58.40, eq=(hi+lo)/2, spot=67.42;
-  const q75=lo+(hi-lo)*0.75, q25=lo+(hi-lo)*0.25;
-  const obTop=63.80, obBot=63.20;
+function SMCZones({ m, state }) {
+  if (!_smcUsable(m)) return <SmcEmpty state={state} what="dealing range" />;
+  const r = m.range;
+  const hi = r.hi, lo = r.lo, eq = r.eq, spot = m.cur_close;
+  const span = Math.max(hi - lo, 1e-6);
+  const q75 = lo + span * 0.75, q25 = lo + span * 0.25;
+  const ob = (m.order_blocks || []).filter(o => o.type === "demand" && o.hi >= lo && o.lo <= hi)
+    .sort((a, b) => Math.abs((a.lo + a.hi) / 2 - spot) - Math.abs((b.lo + b.hi) / 2 - spot))[0];
+  const zTone = r.zone === "discount" ? "gn" : r.zone === "premium" ? "rd" : "amb";
   const W=520, H=240, padT=18, padB=18, axisX=150, barX=176, barW=120;
-  const y=p=> padT + (1-(p-lo)/(hi-lo))*(H-padT-padB);
-  const pct=((spot-lo)/(hi-lo)*100);
+  const y=p=> padT + (1-(p-lo)/span)*(H-padT-padB);
+  const pct = r.pct;
   return (
     <div className="smc-zones2">
       <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" className="smc-zsvg">
@@ -280,28 +340,21 @@ function SMCZones() {
           <linearGradient id="smc-prem" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--rd)" stopOpacity="0.30"/><stop offset="100%" stopColor="var(--rd)" stopOpacity="0.06"/></linearGradient>
           <linearGradient id="smc-disc" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--gn)" stopOpacity="0.06"/><stop offset="100%" stopColor="var(--gn)" stopOpacity="0.30"/></linearGradient>
         </defs>
-        {/* zone fills */}
         <rect x={barX} y={y(hi)} width={barW} height={y(eq)-y(hi)} fill="url(#smc-prem)"/>
         <rect x={barX} y={y(eq)} width={barW} height={y(lo)-y(eq)} fill="url(#smc-disc)"/>
-        {/* equilibrium band */}
         <rect x={barX} y={y(eq)-1} width={barW} height="2" fill="var(--amb)"/>
-        {/* OB band inside */}
-        <rect x={barX} y={y(obTop)} width={barW} height={Math.max(3,y(obBot)-y(obTop))} fill="var(--cy)" opacity="0.4"/>
+        {ob && <rect x={barX} y={y(ob.hi)} width={barW} height={Math.max(3,y(ob.lo)-y(ob.hi))} fill="var(--cy)" opacity="0.4"/>}
         <rect x={barX} y={y(hi)} width={barW} height={y(lo)-y(hi)} fill="none" stroke="var(--glass-line)"/>
-        {/* level ticks + labels (left) */}
-        {[["PWH · buy-side liq",hi,"var(--cy)"],["75% premium",q75,"var(--ink-3)"],["EQ 50% · fair value",eq,"var(--amb)"],["25% discount",q25,"var(--ink-3)"],["PWL · swept",lo,"var(--rd)"]].map((r,i)=>(
+        {[["range high · liq",hi,"var(--cy)"],["75% premium",q75,"var(--ink-3)"],["EQ 50% · fair value",eq,"var(--amb)"],["25% discount",q25,"var(--ink-3)"],["range low · liq",lo,"var(--rd)"]].map((rw,i)=>(
           <g key={i}>
-            <line x1={axisX} y1={y(r[1])} x2={barX} y2={y(r[1])} stroke={r[2]} strokeWidth="1" opacity="0.5"/>
-            <text x={axisX-6} y={y(r[1])+3} fontSize="9.5" className="mono" textAnchor="end" fill={r[2]}>{r[0]}</text>
-            <text x={barX+barW+6} y={y(r[1])+3} fontSize="9.5" className="mono" fill={r[2]}>${r[1].toFixed(2)}</text>
+            <line x1={axisX} y1={y(rw[1])} x2={barX} y2={y(rw[1])} stroke={rw[2]} strokeWidth="1" opacity="0.5"/>
+            <text x={axisX-6} y={y(rw[1])+3} fontSize="9.5" className="mono" textAnchor="end" fill={rw[2]}>{rw[0]}</text>
+            <text x={barX+barW+6} y={y(rw[1])+3} fontSize="9.5" className="mono" fill={rw[2]}>${rw[1].toFixed(2)}</text>
           </g>
         ))}
-        {/* OB label */}
-        <text x={barX+barW/2} y={y((obTop+obBot)/2)+3} fontSize="8.5" className="mono" textAnchor="middle" fill="var(--cy)">OB $63.2–63.8</text>
-        {/* zone captions */}
+        {ob && <text x={barX+barW/2} y={y((ob.hi+ob.lo)/2)+3} fontSize="8.5" className="mono" textAnchor="middle" fill="var(--cy)">OB {smcMoney(ob.lo)}–{smcMoney(ob.hi)}</text>}
         <text x={barX+8} y={y((hi+eq)/2)} fontSize="10" className="mono" fill="var(--rd)" opacity="0.7" transform={`rotate(-90 ${barX+8} ${y((hi+eq)/2)})`}>PREMIUM · sell</text>
         <text x={barX+8} y={y((eq+lo)/2)} fontSize="10" className="mono" fill="var(--gn)" opacity="0.7" transform={`rotate(-90 ${barX+8} ${y((eq+lo)/2)})`}>DISCOUNT · buy</text>
-        {/* spot marker */}
         <line x1={barX-6} y1={y(spot)} x2={barX+barW+6} y2={y(spot)} stroke="var(--copper)" strokeWidth="2" style={{filter:"drop-shadow(0 0 4px var(--copper))"}}/>
         <circle cx={barX+barW} cy={y(spot)} r="4" fill="var(--copper)" style={{filter:"drop-shadow(0 0 6px var(--copper))"}}/>
         <rect x={barX+barW+34} y={y(spot)-9} width="74" height="18" rx="9" fill="color-mix(in oklab,var(--copper) 18%,transparent)" stroke="var(--copper)" strokeWidth="0.8"/>
@@ -309,124 +362,140 @@ function SMCZones() {
       </svg>
       <div className="smc-zone-read">
         <div className="kpi-row" style={{gridTemplateColumns:"repeat(3,1fr)"}}>
-          <KpiTile label="Dealing range" value={`$${lo.toFixed(0)}–$${hi.toFixed(0)}`} tone="ink" sub="swing low → high" />
-          <KpiTile label="Equilibrium" value={`$${eq.toFixed(2)}`} tone="amb" sub="50% · fair value" />
-          <KpiTile label="Current zone" value={pct<50?"DISCOUNT":"PREMIUM"} tone={pct<50?"gn":"rd"} sub={`${pct.toFixed(0)}% of range`} />
+          <KpiTile label="Dealing range" value={`${smcMoney(lo)}–${smcMoney(hi)}`} tone="ink" sub="swing low → high" />
+          <KpiTile label="Equilibrium" value={smcMoney(eq)} tone="amb" sub="50% · fair value" />
+          <KpiTile label="Current zone" value={r.zone.toUpperCase()} tone={zTone} sub={`${pct}% of range`} />
         </div>
         <div className="mono dim" style={{fontSize:11,marginTop:8}}>
-          Price sits at <b>{pct.toFixed(0)}%</b> of range — marginal premium. Ideal SMC longs fill in discount (&lt;50%);
-          favor a pullback into the <b className="cy">$63–64 OB</b> rather than chasing here.
+          Price sits at <b>{pct}%</b> of the dealing range — <b className={zTone==="gn"?"up":zTone==="rd"?"dn":"warn"}>{r.zone}</b>. SMC longs favor discount (&lt;45%)
+          {ob ? <>; nearest demand OB is <b className="cy">{smcMoney(ob.lo)}–{smcMoney(ob.hi)}</b> ({ob.state}).</> : "."}
         </div>
       </div>
     </div>
   );
 }
 
-function SMCMicroChart() {
+function SMCMicroChart({ m }) {
+  const W = 280, H = 110, padX = 8, padY = 10;
+  if (!_smcUsable(m) || !Array.isArray(m.spark) || m.spark.length < 4) {
+    return <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}><text x={W/2} y={H/2} fontSize="9" className="mono" textAnchor="middle" fill="var(--ink-3)">no live bars</text></svg>;
+  }
+  const s = m.spark;
+  const draw = m.draw_on_liquidity;
+  const ob = (m.order_blocks || []).filter(o => o.type === "demand")[0];
+  const lvls = [m.range.lo, m.range.hi, m.cur_close].concat(draw ? [draw.price] : []).concat(ob ? [ob.lo, ob.hi] : []);
+  const lo = Math.min(Math.min(...s), ...lvls);
+  const hi = Math.max(Math.max(...s), ...lvls);
+  const span = Math.max(hi - lo, 1e-6);
+  const x = i => padX + (i / (s.length - 1)) * (W - padX * 2);
+  const y = p => padY + (1 - (p - lo) / span) * (H - padY * 2);
+  const pts = s.map((c, i) => `${x(i).toFixed(1)},${y(c).toFixed(1)}`).join(" ");
   return (
-    <svg viewBox="0 0 280 110" width="280" height="110" preserveAspectRatio="xMidYMid meet">
-      {/* OB zone */}
-      <rect x="40" y="68" width="220" height="14" fill="var(--cy)" opacity="0.20" />
-      <text x="46" y="78" fontSize="9" className="mono" fill="var(--cy)">OB · $63.80</text>
-      {/* FVG */}
-      <rect x="170" y="40" width="60" height="10" fill="var(--violet)" opacity="0.25" />
-      <text x="174" y="48" fontSize="8" className="mono" fill="var(--violet)">FVG</text>
-      {/* Price line */}
-      <polyline fill="none" stroke="var(--copper)" strokeWidth="1.5"
-                points="10,90 30,75 50,82 70,72 100,76 130,60 160,50 190,55 220,38 260,22" />
-      {/* BoS label */}
-      <line x1="155" y1="50" x2="155" y2="62" stroke="var(--gn)" strokeWidth="1" strokeDasharray="2 2" />
-      <text x="158" y="58" fontSize="8" className="mono" fill="var(--gn)">BoS</text>
-      {/* Liquidity zone */}
-      <line x1="0" y1="22" x2="280" y2="22" stroke="var(--amb)" strokeDasharray="3 3" opacity="0.6" />
-      <text x="4" y="20" fontSize="8" className="mono" fill="var(--amb)">LIQUIDITY</text>
+    <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} preserveAspectRatio="xMidYMid meet">
+      {ob && <rect x={padX} y={y(ob.hi)} width={W - padX * 2} height={Math.max(2, y(ob.lo) - y(ob.hi))} fill="var(--cy)" opacity="0.18" />}
+      {ob && <text x={padX + 2} y={y(ob.hi) - 2} fontSize="8" className="mono" fill="var(--cy)">OB {smcMoney(ob.lo)}</text>}
+      {draw && <><line x1="0" y1={y(draw.price)} x2={W} y2={y(draw.price)} stroke="var(--amb)" strokeDasharray="3 3" opacity="0.6" /><text x="4" y={y(draw.price) - 2} fontSize="8" className="mono" fill="var(--amb)">DRAW {smcMoney(draw.price)}</text></>}
+      <polyline fill="none" stroke="var(--copper)" strokeWidth="1.5" points={pts} />
+      <circle cx={x(s.length - 1)} cy={y(s[s.length - 1])} r="2.5" fill="var(--copper)" />
     </svg>
   );
 }
 
-function OBTable() {
-  const rows = [
-    { px: "$70.10–$70.80", type: "SUPPLY", state: "Unmitigated", note: "high-vol gap-fill zone", tone: "rd" },
-    { px: "$67.40–$67.80", type: "DEMAND", state: "Held",        note: "intraday flip · weak",   tone: "amb" },
-    { px: "$66.10–$66.60", type: "DEMAND", state: "Mitigated",   note: "current pivot floor",   tone: "gn"  },
-    { px: "$63.20–$63.80", type: "DEMAND", state: "Held",        note: "spring · stop below",   tone: "gn"  },
-    { px: "$60.40–$60.90", type: "DEMAND", state: "Unmitigated", note: "deep pullback target",  tone: "ink" },
-    { px: "$56.10–$57.00", type: "DEMAND", state: "Unmitigated", note: "earnings-gap origin",   tone: "ink" },
-  ];
+function OBTable({ m, state }) {
+  if (!_smcUsable(m) || !m.order_blocks.length) return <SmcEmpty state={state} what="order blocks" />;
+  const cur = m.cur_close;
   return (
     <table className="dtable">
       <thead>
-        <tr>
-          <th>Zone</th><th>Type</th><th>State</th><th>Note</th>
-        </tr>
+        <tr><th>Zone</th><th>Type</th><th>State</th><th>Distance</th></tr>
       </thead>
       <tbody>
-        {rows.map((r, i) => (
-          <tr key={i}>
-            <td className="mono">{r.px}</td>
-            <td><Pill tone={r.type === "DEMAND" ? "gn" : "rd"} small>{r.type}</Pill></td>
-            <td><span className={`ob-mit ob-mit--${r.state === "Unmitigated" ? "fresh" : r.state === "Held" ? "tapped" : "spent"}`}><span className="ob-mit-dot" />{r.state === "Unmitigated" ? "Fresh" : r.state === "Held" ? "Tapped · held" : "Mitigated · spent"}</span></td>
-            <td className="mono dim">{r.note}</td>
-          </tr>
-        ))}
+        {m.order_blocks.map((r, i) => {
+          const mid = (r.lo + r.hi) / 2;
+          const dist = ((mid - cur) / cur * 100);
+          return (
+            <tr key={i}>
+              <td className="mono">{smcMoney(r.lo)}–{smcMoney(r.hi)}</td>
+              <td><Pill tone={r.type === "demand" ? "gn" : "rd"} small>{r.type.toUpperCase()}</Pill></td>
+              <td><span className={`ob-mit ob-mit--${r.state === "fresh" ? "fresh" : r.state === "held" ? "tapped" : "spent"}`}><span className="ob-mit-dot" />{r.state === "fresh" ? "Fresh" : r.state === "held" ? "Tapped · held" : "Mitigated"}</span></td>
+              <td className="mono dim">{dist >= 0 ? "+" : ""}{dist.toFixed(1)}% · {r.date}</td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
 }
 
-function StructureLog() {
-  const events = [
-    { when: "May 22", evt: "BoS · 4H", px: "$66.10", impact: "trend continuation up", tone: "gn" },
-    { when: "May 19", evt: "FVG filled · D", px: "$64.30", impact: "demand confirmed", tone: "gn" },
-    { when: "May 12", evt: "CHoCH · 1H", px: "$63.20", impact: "minor correction end", tone: "amb" },
-    { when: "May 06", evt: "BoS · D", px: "$65.40", impact: "macro structure flipped bullish", tone: "gn" },
-    { when: "Apr 22", evt: "Spring · D", px: "$62.10", impact: "swept Apr lows, reversed", tone: "cy" },
-  ];
+function StructureLog({ m, state }) {
+  if (!_smcUsable(m)) return <SmcEmpty state={state} what="structure" />;
+  const evts = (m.structure.events || []).slice().reverse();
+  const fvgs = m.fvgs || [];
   return (
-    <div className="struct-log">
-      {events.map((e, i) => (
-        <div key={i} className={`sl-row sl-${e.tone}`}>
-          <span className="mono dim2 sl-when">{e.when}</span>
-          <span className="mono sl-evt">{e.evt}</span>
-          <span className="mono copper sl-px">{e.px}</span>
-          <span className="mono dim sl-impact">{e.impact}</span>
-        </div>
-      ))}
+    <div>
+      <div className="struct-log">
+        {evts.length ? evts.map((e, i) => (
+          <div key={i} className={`sl-row sl-${e.dir === "up" ? "gn" : "rd"}`}>
+            <span className="mono dim2 sl-when">{e.date}</span>
+            <span className="mono sl-evt">{e.evt} · {e.dir === "up" ? "↑" : "↓"} {e.tf}</span>
+            <span className="mono copper sl-px">{smcMoney(e.price)}</span>
+            <span className="mono dim sl-impact">{e.evt === "CHoCH" ? "character change" : "continuation"}</span>
+          </div>
+        )) : <div className="smc-empty mono dim2">— no break-of-structure in this window</div>}
+      </div>
+      <div className="label-cap" style={{ marginTop: 12, marginBottom: 4 }}>Fair Value Gaps</div>
+      {fvgs.length ? (
+        <table className="dtable">
+          <thead><tr><th>Gap</th><th>Type</th><th>State</th><th>Date</th></tr></thead>
+          <tbody>{fvgs.map((g, i) => (
+            <tr key={i}>
+              <td className="mono">{smcMoney(g.lo)}–{smcMoney(g.hi)}</td>
+              <td><Pill tone={g.type === "bull" ? "gn" : "rd"} small>{g.type.toUpperCase()}</Pill></td>
+              <td><Pill tone={g.state === "unfilled" ? "cy" : "ink"} small>{g.state}</Pill></td>
+              <td className="mono dim">{g.date}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      ) : <div className="smc-empty mono dim2">— no fair-value gaps detected</div>}
     </div>
   );
 }
 
-function LiquiditySweeps() {
+function LiquiditySweeps({ m, state }) {
+  if (!_smcUsable(m)) return <SmcEmpty state={state} what="liquidity" />;
+  const L = m.liquidity;
+  const buy = (L.buyside || [])[0];
+  const sell = (L.sellside || [])[0];
+  const eqh = (L.equal_highs || [])[L.equal_highs ? L.equal_highs.length - 1 : 0];
   return (
     <div className="kpi-row" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
-      <KpiTile label="Sell-side · prior lows" value="$62.10" tone="amb" sub="swept Apr 22 · reversed" />
-      <KpiTile label="Buy-side · prior highs" value="$70.40" tone="copper" sub="untaken · target above" />
-      <KpiTile label="Equal highs · resting liq" value="$74.20" tone="amb" sub="3-touch · magnet" />
+      <KpiTile label="Sell-side · prior lows" value={sell ? smcMoney(sell.price) : "—"} tone="amb" sub={sell ? "resting below price" : "none below"} />
+      <KpiTile label="Buy-side · prior highs" value={buy ? smcMoney(buy.price) : "—"} tone="copper" sub={buy ? ((buy.state || "untapped") + " · target above") : "none above"} />
+      <KpiTile label="Equal highs · resting liq" value={eqh ? smcMoney(eqh.price) : "—"} tone="amb" sub={eqh ? `${eqh.touches}-touch · magnet` : "none clustered"} />
     </div>
   );
 }
 
-function MTFScreener() {
-  const rows = [
-    { tf: "1H",  bias: "BULL", trend: "↑", note: "above EMA stack, BoS intact",       tone: "gn" },
-    { tf: "4H",  bias: "BULL", trend: "↑", note: "above OB $63.20, BoS confirmed",   tone: "gn" },
-    { tf: "1D",  bias: "BULL", trend: "↑", note: "macro structure flipped bullish",   tone: "gn" },
-    { tf: "1W",  bias: "NEUT", trend: "→", note: "range $58–$74, awaiting break",     tone: "amb" },
-  ];
+function MTFScreener({ m, state }) {
+  if (!_smcUsable(m) || !m.mtf || !m.mtf.length) return <SmcEmpty state={state} what="MTF bias" />;
   return (
     <table className="dtable">
       <thead>
         <tr><th>TF</th><th>Bias</th><th>Trend</th><th>Read</th></tr>
       </thead>
       <tbody>
-        {rows.map((r, i) => (
-          <tr key={i}>
-            <td className="mono"><b>{r.tf}</b></td>
-            <td><Pill tone={r.tone} small>{r.bias}</Pill></td>
-            <td className={`mono ${r.tone === "gn" ? "up" : "warn"}`}>{r.trend}</td>
-            <td className="mono dim">{r.note}</td>
-          </tr>
-        ))}
+        {m.mtf.map((r, i) => {
+          const t = r.bias === "BULL" ? "gn" : r.bias === "BEAR" ? "rd" : "amb";
+          const tr = r.bias === "BULL" ? "↑" : r.bias === "BEAR" ? "↓" : "→";
+          return (
+            <tr key={i}>
+              <td className="mono"><b>{r.tf}</b></td>
+              <td><Pill tone={t} small>{r.bias}</Pill></td>
+              <td className={`mono ${t === "gn" ? "up" : t === "rd" ? "dn" : "warn"}`}>{tr}</td>
+              <td className="mono dim">{r.note}</td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
@@ -655,75 +724,104 @@ window.LensSMC = LensSMC;
 window.LensRisk = LensRisk;
 
 // Trend-state machine across timeframes
-function SMCTrendState() {
-  const rows=[
-    ["1H","BULLISH","BoS ↑","2 bars ago","gn"],
-    ["4H","BULLISH","CHoCH→BoS","6 bars ago","gn"],
-    ["1D","BULLISH","BoS ↑","3 sessions","gn"],
-    ["1W","NEUTRAL","range","no break","amb"],
-  ];
+function SMCTrendState({ m, state }) {
+  if (!_smcUsable(m)) return <SmcEmpty state={state} what="trend state" />;
+  const rows = m.mtf || [];
+  const flip = m.structure.last_bos ? m.structure.last_bos.price : null;
+  const bull = rows.filter(r => r.bias === "BULL").length;
   return (
     <div className="smc-sub">
       <div className="smc-ts-strip">
-        {rows.map((r,i)=>(
-          <div key={i} className={`smc-ts smc-ts--${r[4]}`}>
-            <span className="mono smc-ts-tf">{r[0]}</span>
-            <span className={`mono smc-ts-bias kpi-tone--${r[4]==="gn"?"gn":"amb"}`}>{r[1]}</span>
-            <span className="mono dim2">{r[2]} · {r[3]}</span>
-          </div>
-        ))}
+        {rows.map((r, i) => {
+          const t = r.bias === "BULL" ? "gn" : r.bias === "BEAR" ? "rd" : "amb";
+          return (
+            <div key={i} className={`smc-ts smc-ts--${t}`}>
+              <span className="mono smc-ts-tf">{r.tf}</span>
+              <span className={`mono smc-ts-bias kpi-tone--${t}`}>{r.bias}</span>
+              <span className="mono dim2">{r.note}</span>
+            </div>
+          );
+        })}
       </div>
-      <div className="mono dim" style={{fontSize:11}}>Aligned bullish 1H→1D; weekly still ranging. State machine flips to bearish only on a 4H CHoCH below $63.20. Current regime: <b className="up">BULLISH (3 of 4 TF)</b>.</div>
+      <div className="mono dim" style={{ fontSize: 11 }}>{m.tf} regime: <b className={m.bias === "bull" ? "up" : m.bias === "bear" ? "dn" : "warn"}>{m.bias.toUpperCase()}</b> ({bull}/{rows.length} TF bullish).{flip ? <> Flips on a close {m.bias === "bull" ? "below" : "above"} <b>{smcMoney(flip)}</b>.</> : null}</div>
     </div>
   );
 }
 
 // Confluence stacking — A+ zones where multiple SMC factors align
-function SMCConfluence() {
-  const zones=[
-    { px:"$63.9–64.6", factors:["OB+","FVG","OTE 70.5%","HTF demand","unswept liq"], grade:"A+", tone:"gn" },
-    { px:"$66.1–66.6", factors:["OB+","pivot floor"], grade:"B", tone:"amb" },
-    { px:"$70.0–70.8", factors:["OB−","buy-side liq","premium"], grade:"C", tone:"rd" },
-  ];
+function SMCConfluence({ m, state }) {
+  if (!_smcUsable(m) || !m.order_blocks.length) return <SmcEmpty state={state} what="confluence zones" />;
+  const r = m.range, fvgs = m.fvgs || [], atr = m.atr || 1;
+  const zones = m.order_blocks.slice(0, 4).map(ob => {
+    const mid = (ob.lo + ob.hi) / 2;
+    const factors = [ob.type === "demand" ? "OB+" : "OB−"];
+    if (ob.state !== "mitigated") factors.push("unmitigated");
+    if (fvgs.some(g => g.hi >= ob.lo && g.lo <= ob.hi)) factors.push("FVG");
+    if (mid >= r.ote_lo && mid <= r.ote_hi) factors.push("OTE");
+    factors.push(mid < r.eq ? "discount" : "premium");
+    if ((m.htf_levels || []).some(lv => Math.abs(lv.price - mid) < atr * 0.6)) factors.push("HTF lvl");
+    const n = factors.length;
+    const grade = n >= 5 ? "A+" : n >= 4 ? "A" : n >= 3 ? "B" : "C";
+    const tone = grade[0] === "A" ? "gn" : grade === "B" ? "amb" : "rd";
+    return { px: `${smcMoney(ob.lo)}–${smcMoney(ob.hi)}`, factors, grade, tone, n };
+  }).sort((a, b) => b.n - a.n);
+  const best = zones[0];
   return (
     <div className="smc-sub">
-      {zones.map((z,i)=>(
+      {zones.map((z, i) => (
         <div key={i} className={`smc-conf smc-conf--${z.tone}`}>
           <div className="smc-conf-grade">{z.grade}</div>
           <div className="smc-conf-body">
             <div className="mono smc-conf-px"><b>{z.px}</b> <span className="dim2">· {z.factors.length} factors</span></div>
-            <div className="smc-conf-tags">{z.factors.map((f,j)=><span key={j} className="smc-conf-tag mono">{f}</span>)}</div>
+            <div className="smc-conf-tags">{z.factors.map((f, j) => <span key={j} className="smc-conf-tag mono">{f}</span>)}</div>
           </div>
         </div>
       ))}
-      <div className="mono dim" style={{fontSize:11}}>The $63.9–64.6 zone stacks 5 factors (OB+ · FVG · OTE · HTF demand · unswept liquidity) → <b className="up">A+ entry</b>. Highest-probability long if price retraces there.</div>
+      {best && <div className="mono dim" style={{ fontSize: 11 }}>The {best.px} zone stacks {best.n} factors ({best.factors.join(" · ")}) → <b className={best.tone === "gn" ? "up" : "warn"}>{best.grade}</b>. Highest-confluence zone on this timeframe.</div>}
     </div>
   );
 }
 
 // Mitigation hit-rate + liquidity heatmap
-function SMCMitigationHeat() {
+function SMCMitigationHeat({ m, state }) {
+  if (!_smcUsable(m)) return <SmcEmpty state={state} what="liquidity density" />;
+  const obs = m.order_blocks || [];
+  const counts = {
+    demandFresh: obs.filter(o => o.type === "demand" && o.state !== "mitigated").length,
+    demandMit: obs.filter(o => o.type === "demand" && o.state === "mitigated").length,
+    supplyFresh: obs.filter(o => o.type === "supply" && o.state !== "mitigated").length,
+    fvgUnfilled: (m.fvgs || []).filter(g => g.state === "unfilled").length,
+  };
+  // resting-liquidity density: each pool weighted by proximity to price + equal-touch count
+  const L = m.liquidity, cur = m.cur_close;
+  const pools = []
+    .concat((L.buyside || []).map(b => ({ price: b.price, side: "buy", w: (b.equal || 1) })))
+    .concat((L.sellside || []).map(s => ({ price: s.price, side: "sell", w: 1 })))
+    .concat([{ price: cur, side: "spot", w: 0 }]);
+  const maxw = Math.max(1, ...pools.map(p => p.w));
+  pools.sort((a, b) => b.price - a.price);
   return (
     <div className="smc-2col">
       <div>
-        <div className="label-cap" style={{marginBottom:6}}>ZONE RESPECT · last 90d</div>
+        <div className="label-cap" style={{ marginBottom: 6 }}>ZONE INVENTORY · this timeframe</div>
         <table className="dtable">
-          <thead><tr><th>Zone type</th><th className="r">Tested</th><th className="r">Respected</th><th className="r">Rate</th></tr></thead>
+          <thead><tr><th>Zone type</th><th className="r">Unmitigated</th><th className="r">Mitigated</th></tr></thead>
           <tbody>
-            {[["Bullish OB",14,11,"79%","gn"],["Bearish OB",9,6,"67%","amb"],["FVG fill",22,15,"68%","amb"],["Liq sweep→rev",8,7,"88%","gn"]].map((r,i)=>(
-              <tr key={i}><td className="mono">{r[0]}</td><td className="r mono">{r[1]}</td><td className="r mono">{r[2]}</td><td className={`r mono kpi-tone--${r[4]}`}>{r[3]}</td></tr>
-            ))}
+            <tr><td className="mono">Demand OB</td><td className="r mono kpi-tone--gn">{counts.demandFresh}</td><td className="r mono dim">{counts.demandMit}</td></tr>
+            <tr><td className="mono">Supply OB</td><td className="r mono kpi-tone--rd">{counts.supplyFresh}</td><td className="r mono dim">{obs.filter(o=>o.type==="supply"&&o.state==="mitigated").length}</td></tr>
+            <tr><td className="mono">FVG</td><td className="r mono kpi-tone--cy">{counts.fvgUnfilled}</td><td className="r mono dim">{(m.fvgs||[]).filter(g=>g.state==="filled").length}</td></tr>
           </tbody>
         </table>
+        <div className="mono dim2" style={{ fontSize: 10, marginTop: 6 }}>Per-zone respect hit-rate needs a trade-outcome backtest (not computed here) — counts above are live structure only.</div>
       </div>
       <div>
-        <div className="label-cap" style={{marginBottom:6}}>RESTING LIQUIDITY · density</div>
+        <div className="label-cap" style={{ marginBottom: 6 }}>RESTING LIQUIDITY · density</div>
         <div className="smc-heat">
-          {[["$70.40",90,"buy","cy"],["$68.10",55,"buy","cy"],["$67.42",10,"spot","ink"],["$64.30",35,"sell","rd"],["$62.10",70,"sell","rd"],["$58.40",80,"sell","rd"]].map((r,i)=>(
+          {pools.map((p, i) => (
             <div key={i} className="smc-heat-row">
-              <span className="mono smc-heat-px">{r[0]}</span>
-              <div className="smc-heat-bar"><div className={`smc-heat-fill smc-heat--${r[3]}`} style={{width:`${r[1]}%`}}/></div>
-              <span className="mono dim2">{r[2]}</span>
+              <span className="mono smc-heat-px">{smcMoney(p.price)}</span>
+              <div className="smc-heat-bar"><div className={`smc-heat-fill smc-heat--${p.side === "buy" ? "buy" : p.side === "sell" ? "sell" : "spot"}`} style={{ width: `${p.side === "spot" ? 8 : 25 + (p.w / maxw) * 65}%` }} /></div>
+              <span className="mono dim2">{p.side}</span>
             </div>
           ))}
         </div>
@@ -733,14 +831,21 @@ function SMCMitigationHeat() {
 }
 
 // SMC alerts
-function SMCAlerts() {
-  const alerts=[
-    ["price entering OB $63.2–63.8","armed","gn"],
-    ["FVG fill $64.3–64.9","armed","cy"],
-    ["liquidity sweep < $58.40","armed","amb"],
-    ["4H CHoCH < $63.20 (invalidation)","armed","rd"],
-    ["buy-side liq tap $70.40","armed","cy"],
-  ];
+function SMCAlerts({ m, state }) {
+  if (!_smcUsable(m)) return <SmcEmpty state={state} what="alert conditions" />;
+  const obFresh = (m.order_blocks || []).find(o => o.state !== "mitigated");
+  const fvgU = (m.fvgs || []).find(g => g.state === "unfilled");
+  const sell = (m.liquidity.sellside || [])[0];
+  const buy = (m.liquidity.buyside || [])[0];
+  const flip = m.structure.last_bos ? m.structure.last_bos.price : null;
+  const alerts = [
+    obFresh && [`price entering ${obFresh.type} OB ${smcMoney(obFresh.lo)}–${smcMoney(obFresh.hi)}`, "armed", obFresh.type === "demand" ? "gn" : "rd"],
+    fvgU && [`FVG fill ${smcMoney(fvgU.lo)}–${smcMoney(fvgU.hi)}`, "armed", "cy"],
+    sell && [`liquidity sweep < ${smcMoney(sell.price)}`, "armed", "amb"],
+    flip && [`CHoCH ${m.bias === "bull" ? "<" : ">"} ${smcMoney(flip)} (invalidation)`, "armed", "rd"],
+    buy && [`buy-side liq tap ${smcMoney(buy.price)}`, "armed", "cy"],
+  ].filter(Boolean);
+  if (!alerts.length) return <SmcEmpty state={state} what="alert conditions" />;
   return (
     <div className="smc-sub">
       <div className="smc-alert-list">
@@ -760,21 +865,21 @@ function SMCAlerts() {
 
 // ── New SMC building-block components ──
 // Annotated structure map: where OB+ (demand), OB− (supply), FVG sit vs price
-function SMCStructureMap() {
+function SMCStructureMap({ m, state }) {
+  if (!_smcUsable(m) || !Array.isArray(m.spark) || m.spark.length < 4) return <SmcEmpty state={state} what="structure map" />;
   const W=900,H=340,padT=20,padB=26,padL=14,padR=150;
-  const lo=60, hi=72, y=p=>padT+(1-(p-lo)/(hi-lo))*(H-padT-padB);
-  const zones=[
-    { top:70.8, bot:70.0, type:"OB−", tone:"rd", note:"supply · unmitigated" },
-    { top:67.8, bot:67.4, type:"FVG", tone:"violet", note:"bullish imbalance" },
-    { top:66.6, bot:66.1, type:"OB+", tone:"gn", note:"demand · pivot floor" },
-    { top:64.3, bot:63.9, type:"FVG", tone:"violet", note:"unfilled gap" },
-    { top:63.8, bot:63.2, type:"OB+", tone:"gn", note:"demand · spring held" },
-    { top:62.4, bot:61.1, type:"FVG", tone:"violet", note:"weekly imbalance" },
-  ];
-  const spot=67.42;
-  // synth candles trending down into demand then reversing up
-  const cl=[67.0,68.4,69.2,68.1,66.4,64.9,63.6,63.9,64.8,65.6,66.2,65.4,66.1,66.9,67.42];
-  const candles=cl.map((c,i)=>{ const o=i===0?66.6:cl[i-1]; const hi2=Math.max(o,c)+0.3; const lo2=Math.min(o,c)-0.3; return {o,c,hi:hi2,lo:lo2}; });
+  const zones = []
+    .concat((m.order_blocks || []).slice(0, 4).map(o => ({
+      top: o.hi, bot: o.lo, type: o.type === "demand" ? "OB+" : "OB−",
+      tone: o.type === "demand" ? "gn" : "rd", note: `${o.type} · ${o.state}` })))
+    .concat((m.fvgs || []).filter(g => g.state === "unfilled").slice(0, 3).map(g => ({
+      top: g.hi, bot: g.lo, type: "FVG", tone: "violet", note: `${g.type} · unfilled` })));
+  const spot = m.cur_close;
+  const cl = m.spark.slice(-16);
+  const allP = cl.concat(zones.flatMap(z => [z.top, z.bot])).concat([spot]);
+  const lo = Math.min(...allP) * 0.998, hi = Math.max(...allP) * 1.002;
+  const y=p=>padT+(1-(p-lo)/(hi-lo))*(H-padT-padB);
+  const candles=cl.map((c,i)=>{ const o=i===0?cl[0]:cl[i-1]; const hi2=Math.max(o,c)*1.002; const lo2=Math.min(o,c)*0.998; return {o,c,hi:hi2,lo:lo2}; });
   const cw=(W-padL-padR)/candles.length;
   const cx=i=>padL+i*cw+cw/2;
   return (
@@ -823,84 +928,119 @@ function SMCStructureMap() {
   );
 }
 
-function SMCInducement() {
+function SMCInducement({ m, state }) {
+  if (!_smcUsable(m)) return <SmcEmpty state={state} what="inducement" />;
+  const sell = m.liquidity.sellside || [];
+  const sweep = sell[0] || null;
+  const induce = sell[1] || null;
+  const draw = m.draw_on_liquidity;
   return (
     <div className="smc-sub">
-      <SMCStructureMap />
+      <SMCStructureMap m={m} state={state} />
       <div className="smc-sub-rows">
-        <div className="smc-row smc-row--amb"><span className="mono">Inducement low</span><span className="mono">$65.10</span><span className="mono dim2">minor liq · trap before sweep</span></div>
-        <div className="smc-row smc-row--rd"><span className="mono">Engineered sweep</span><span className="mono">$62.10</span><span className="mono dim2">stops grabbed → reversal</span></div>
-        <div className="smc-row smc-row--gn"><span className="mono">True intent</span><span className="mono">↑ $70.40</span><span className="mono dim2">real draw on liquidity</span></div>
+        {induce && <div className="smc-row smc-row--amb"><span className="mono">Inducement low</span><span className="mono">{smcMoney(induce.price)}</span><span className="mono dim2">minor liq · trap before the deeper sweep</span></div>}
+        {sweep && <div className="smc-row smc-row--rd"><span className="mono">Resting liquidity</span><span className="mono">{smcMoney(sweep.price)}</span><span className="mono dim2">stops below · likely sweep target</span></div>}
+        {draw && <div className="smc-row smc-row--gn"><span className="mono">True intent</span><span className="mono">{m.bias === "bull" ? "↑" : "↓"} {smcMoney(draw.price)}</span><span className="mono dim2">{draw.side} draw on liquidity</span></div>}
+        {!sweep && !draw && <div className="smc-empty mono dim2">— no clear engineered-liquidity setup on this timeframe</div>}
       </div>
-      <div className="mono dim" style={{fontSize:11}}>Read: minor low at $65.10 induced breakout-sellers; price swept $62.10 stops then reversed — classic liquidity engineering. Intent is up toward $70.40.</div>
+      <div className="mono dim" style={{ fontSize: 11 }}>
+        {sweep ? `Resting liquidity at ${smcMoney(sweep.price)} below price is a likely sweep target before the real move. ` : ""}
+        {draw ? `Intent is ${m.bias === "bull" ? "up" : "down"} toward ${smcMoney(draw.price)} (${draw.side}).` : "No draw on liquidity in the bias direction."}
+      </div>
     </div>
   );
 }
 
-function SMCBreakers() {
+function SMCBreakers({ m, state }) {
+  if (!_smcUsable(m)) return <SmcEmpty state={state} what="breaker / mitigation blocks" />;
+  const cur = m.cur_close;
+  const rows = (m.order_blocks || []).filter(o => o.state !== "fresh").map(o => {
+    const flipped = (o.type === "supply" && cur > o.hi) || (o.type === "demand" && cur < o.lo);
+    const block = flipped ? "Breaker" : "Mitigation";
+    const polarity = o.type === "supply"
+      ? (cur > o.hi ? "flipped → support" : "supply on retest")
+      : (cur < o.lo ? "flipped → resistance" : "support on retest");
+    const status = flipped ? "active" : o.state;
+    const tone = flipped ? (o.type === "supply" ? "gn" : "rd") : "amb";
+    return { block, zone: `${smcMoney(o.lo)}–${smcMoney(o.hi)}`, origin: `${o.type} OB`, polarity, status, tone };
+  });
+  if (!rows.length) return <SmcEmpty state={state} what="breaker / mitigation blocks" />;
   return (
     <table className="dtable">
       <thead><tr><th>Block</th><th className="r">Zone</th><th>Origin</th><th>Polarity</th><th>Status</th></tr></thead>
       <tbody>
-        {[
-          ["Breaker","$65.10–65.40","failed bull OB","now resistance","active","rd"],
-          ["Mitigation","$63.20–63.80","last down candle","support on retest","holding","gn"],
-          ["Breaker","$60.40–60.90","failed bear OB","now support","untested","cy"],
-        ].map((r,i)=>(
-          <tr key={i}><td className="mono"><b>{r[0]}</b></td><td className="r mono">{r[1]}</td><td className="mono dim">{r[2]}</td><td className="mono">{r[3]}</td><td><Pill tone={r[5]} small>{r[4]}</Pill></td></tr>
+        {rows.map((r, i) => (
+          <tr key={i}><td className="mono"><b>{r.block}</b></td><td className="r mono">{r.zone}</td><td className="mono dim">{r.origin}</td><td className="mono">{r.polarity}</td><td><Pill tone={r.tone} small>{r.status}</Pill></td></tr>
         ))}
       </tbody>
     </table>
   );
 }
 
-function SMCVoidOTE() {
+function SMCVoidOTE({ m, state }) {
+  if (!_smcUsable(m)) return <SmcEmpty state={state} what="OTE / voids" />;
+  const r = m.range, s = m.spark || [];
+  let disp = null;
+  if (s.length >= 6) {
+    let lo = s[0], loi = 0;
+    for (let i = 0; i < s.length; i++) if (s[i] < lo) { lo = s[i]; loi = i; }
+    let hi = lo, hii = loi;
+    for (let i = loi; i < s.length; i++) if (s[i] > hi) { hi = s[i]; hii = i; }
+    if (hi > lo && hii > loi) disp = { lo, hi, pct: (hi - lo) / lo * 100, bars: hii - loi };
+  }
+  const v = (m.fvgs || []).find(g => g.state === "unfilled");
   return (
     <div className="smc-sub">
-      <div className="kpi-row" style={{gridTemplateColumns:"repeat(4,1fr)"}}>
-        <KpiTile label="Displacement leg" value="+5.8%" tone="gn" sub="$62.10 → $66.80 · 4 bars" />
-        <KpiTile label="Liquidity void" value="$64.3–64.9" tone="violet" sub="single-candle · unfilled" />
-        <KpiTile label="OTE 62–79%" value="$63.9–64.6" tone="copper" sub="optimal entry zone" />
-        <KpiTile label="OTE 70.5%" value="$64.18" tone="amb" sub="sweet spot" />
+      <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
+        <KpiTile label="Displacement leg" value={disp ? `+${disp.pct.toFixed(1)}%` : "—"} tone="gn" sub={disp ? `${smcMoney(disp.lo)} → ${smcMoney(disp.hi)} · ${disp.bars} bars` : "no clear leg"} />
+        <KpiTile label="Liquidity void" value={v ? `${smcMoney(v.lo)}–${smcMoney(v.hi)}` : "—"} tone="violet" sub={v ? `${v.type} FVG · unfilled` : "none unfilled"} />
+        <KpiTile label="OTE 62–79%" value={`${smcMoney(r.ote_lo)}–${smcMoney(r.ote_hi)}`} tone="copper" sub="optimal entry zone" />
+        <KpiTile label="In OTE now?" value={r.ote_active ? "YES" : "NO"} tone={r.ote_active ? "gn" : "amb"} sub={`${r.pct}% of range`} />
       </div>
-      <div className="mono dim" style={{fontSize:11}}>Displacement confirms intent (impulsive 4-bar leg). Best entries retrace into OTE 62–79% of that leg — $63.9–64.6 — which also overlaps the $63.2–63.8 OB. High-confluence pullback zone.</div>
+      <div className="mono dim" style={{ fontSize: 11 }}>OTE (0.62–0.79 retrace of the dealing range) sits at <b className="copper">{smcMoney(r.ote_lo)}–{smcMoney(r.ote_hi)}</b>. {r.ote_active ? "Price is in the OTE zone now." : "Await a retrace into OTE for the highest-confluence entry."}</div>
     </div>
   );
 }
 
-function SMCKillSMT() {
+function SMCKillSMT({ m, state }) {
+  // Kill-zones need intraday session timestamps and SMT needs a correlated-pair
+  // feed — neither is available to this daily/weekly engine. Show honest status
+  // rather than fabricated session times / divergence.
   return (
     <div className="smc-sub smc-2col">
       <div>
-        <div className="label-cap" style={{marginBottom:6}}>KILL ZONES · session edge</div>
-        {[["London open","02:00–05:00","done · swept high","ink"],["NY AM","08:30–11:00","ACTIVE · continuation","gn"],["NY PM","13:30–16:00","upcoming","amb"]].map((r,i)=>(
-          <div key={i} className={`smc-row smc-row--${r[3]}`}><span className="mono">{r[0]}</span><span className="mono dim2">{r[1]}</span><span className={`mono ${r[3]==="gn"?"up":"dim2"}`}>{r[2]}</span></div>
-        ))}
+        <div className="label-cap" style={{ marginBottom: 6 }}>KILL ZONES · session edge</div>
+        <div className="smc-empty mono dim2">— session-timing kill-zones need intraday (1H) bars; this engine runs on {(_smcUsable(m) && m.tf) || "higher-timeframe"} candles. Use the intraday chart for session edge.</div>
       </div>
       <div>
-        <div className="label-cap" style={{marginBottom:6}}>SMT DIVERGENCE · vs XLB</div>
-        <div className="smc-row smc-row--gn"><span className="mono">ARCM</span><span className="mono up">higher low ✓</span></div>
-        <div className="smc-row smc-row--rd"><span className="mono">XLB (sector)</span><span className="mono dn">lower low</span></div>
-        <div className="mono dim" style={{fontSize:11,marginTop:6}}>Bullish SMT: ARCM held a higher low while the sector ETF made a lower low — relative strength, smart-money accumulation signal.</div>
+        <div className="label-cap" style={{ marginBottom: 6 }}>SMT DIVERGENCE</div>
+        <div className="smc-empty mono dim2">— SMT needs a synced correlated-pair / sector-ETF feed (not wired). Compare relative strength on the Technicals lens for now.</div>
       </div>
     </div>
   );
 }
 
-function SMCEntryModel() {
-  const steps=[
-    { s:"1 · Liquidity sweep", done:true, note:"$62.10 stops grabbed" },
-    { s:"2 · CHoCH / BoS", done:true, note:"4H break of structure ↑" },
-    { s:"3 · FVG / imbalance", done:true, note:"$64.3–64.9 formed" },
-    { s:"4 · OB / OTE entry", done:false, note:"awaiting retrace to $63.9–64.6" },
-    { s:"5 · Confirmation", done:false, note:"LTF CHoCH on entry tap" },
+function SMCEntryModel({ m, state }) {
+  if (!_smcUsable(m)) return <SmcEmpty state={state} what="entry model" />;
+  const sell = (m.liquidity.sellside || [])[0];
+  const bos = m.structure.last_bos;
+  const fvgU = (m.fvgs || []).find(g => g.state === "unfilled");
+  const obFresh = (m.order_blocks || []).find(o => o.state !== "mitigated");
+  const inOte = m.range.ote_active;
+  const steps = [
+    { s: "1 · Liquidity sweep", done: !!sell, note: sell ? `sell-side resting ${smcMoney(sell.price)}` : "no resting liquidity below" },
+    { s: "2 · CHoCH / BoS", done: !!bos, note: bos ? `${bos.evt} ${bos.dir} @ ${smcMoney(bos.price)}` : "no structure break" },
+    { s: "3 · FVG / imbalance", done: !!fvgU, note: fvgU ? `${smcMoney(fvgU.lo)}–${smcMoney(fvgU.hi)} unfilled` : "no unfilled FVG" },
+    { s: "4 · OB / OTE entry", done: !!(obFresh && inOte), note: inOte ? "price in OTE now" : obFresh ? `unmitigated OB ${smcMoney(obFresh.lo)} · await OTE` : "no fresh OB" },
+    { s: "5 · Confirmation", done: false, note: "LTF confirm on entry tap (manual)" },
   ];
-  const grade="B+";
+  const n = steps.filter(x => x.done).length;
+  const grade = n >= 4 ? "A" : n >= 3 ? "B+" : n >= 2 ? "B" : "C";
   return (
     <div className="smc-sub">
       <div className="smc-grade-row">
         <div className="smc-grade">{grade}</div>
-        <div className="smc-grade-meta mono dim2">3 of 5 steps · OB at HTF level + unswept liquidity above = high confluence. Waiting on retrace + LTF confirm.</div>
+        <div className="smc-grade-meta mono dim2">{n} of 5 steps complete · {m.bias} bias. {n >= 4 ? "High-confluence setup — await final confirmation." : n >= 2 ? "Partial setup — needs the remaining steps before entry." : "Setup not yet formed."}</div>
       </div>
       <div className="smc-steps">
         {steps.map((st,i)=>(

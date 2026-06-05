@@ -3,22 +3,35 @@
 // sections stay below. Derives per-ticker from pillars + composite engine.
 const { useMemo: useMemoLS } = React;
 
-function lensSummary(ticker, mode, kind, techData) {
+function lensSummary(ticker, mode, kind, techData, smc) {
   const P = ticker.pillars || {};
   const cl = v => Math.round(Math.max(2, Math.min(99, v)));
   const tone = v => v >= 62 ? "gn" : v >= 46 ? "amb" : "rd";
   const tech = P.technical ?? 60, cat = P.catalyst ?? 55, edge = P.edge ?? 60, fund = P.fundamental ?? 55;
+  const money = v => (typeof v === "number" && isFinite(v)) ? "$" + v.toFixed(2) : "—";
   let score, label, verdict, bullets;
   if (kind === "smc") {
-    score = cl(tech * 0.65 + cat * 0.35);
-    const grade = score >= 80 ? "A" : score >= 70 ? "B+" : score >= 60 ? "B" : score >= 50 ? "C" : "D";
     label = "SMC Entry Grade";
-    verdict = grade;
-    bullets = [
-      ["Structure", score >= 60 ? "bullish BoS · OB holding" : "no clean shift", score >= 60 ? "gn" : "amb"],
-      ["Liquidity", "buy-side swept · resting above", "gn"],
-      ["OTE / zone", score >= 55 ? "in discount 62–79%" : "premium — wait", score >= 55 ? "gn" : "amb"],
-    ];
+    if (smc && smc.ok) {   // real engine model
+      score = cl(smc.smc_score);
+      verdict = score >= 80 ? "A" : score >= 70 ? "B+" : score >= 60 ? "B" : score >= 50 ? "C" : "D";
+      const ev = smc.structure && smc.structure.events && smc.structure.events.length ? smc.structure.events[smc.structure.events.length - 1] : null;
+      const r = smc.range, draw = smc.draw_on_liquidity;
+      const zTone = r.zone === "discount" ? "gn" : r.zone === "premium" ? "rd" : "amb";
+      bullets = [
+        ["Structure", ev ? `${ev.evt} ${ev.dir} @ ${money(ev.price)}` : `${smc.bias} · no break`, smc.bias === "bull" ? "gn" : smc.bias === "bear" ? "rd" : "amb"],
+        ["Draw", draw ? `${draw.side} ${money(draw.price)}` : "none in bias dir", draw ? "cy" : "amb"],
+        ["Zone", `${r.zone} · ${r.pct}% of range`, zTone],
+      ];
+    } else {   // no live model yet — honest, not fabricated
+      score = cl(tech * 0.65 + cat * 0.35);
+      verdict = score >= 70 ? "B+" : score >= 60 ? "B" : score >= 50 ? "C" : "D";
+      bullets = [
+        ["Structure", "— loading live bars", "ink"],
+        ["Draw", "—", "ink"],
+        ["Zone", "—", "ink"],
+      ];
+    }
   } else if (kind === "patterns") {
     score = cl(tech * 0.6 + edge * 0.4);
     label = "Pattern Confluence";
@@ -45,8 +58,8 @@ function lensSummary(ticker, mode, kind, techData) {
   return { label, verdict, score, tone: tone(score), bullets };
 }
 
-function LensSummaryBar({ ticker, mode, kind, tech }) {
-  const s = useMemoLS(() => lensSummary(ticker, mode, kind, tech), [ticker, mode, kind, ticker && ticker.symbol, tech && tech.rsi, tech && tech.rvol]);
+function LensSummaryBar({ ticker, mode, kind, tech, smc }) {
+  const s = useMemoLS(() => lensSummary(ticker, mode, kind, tech, smc), [ticker, mode, kind, ticker && ticker.symbol, tech && tech.rsi, tech && tech.rvol, smc && smc.ok, smc && smc.smc_score]);
   return (
     <div className={`lsum lsum--${s.tone}`}>
       <div className="lsum-l">
