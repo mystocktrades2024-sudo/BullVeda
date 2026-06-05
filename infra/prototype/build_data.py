@@ -387,6 +387,20 @@ def _fetch_bonds_forex() -> dict:
         return {}
 
 
+def _clean_news_blurb(text: str) -> str:
+    """Strip common EODHD/aggregator boilerplate from a news body so the Home cards
+    show a real summary, not subscription cruft. Returns up to ~220 chars."""
+    import re as _re
+    t = (text or "").replace("\n", " ").replace("\r", " ")
+    t = _re.sub(r"\s+", " ", t).strip()
+    # drop leading "You can find (the )?original article here <Publisher>." preamble
+    t = _re.sub(r"^You can find (the )?original article here[^.]*\.\s*", "", t, flags=_re.I)
+    # drop "Subscribe to our ... newsletters." / "Sign up for ..." sentences anywhere
+    t = _re.sub(r"(Subscribe to|Sign up for|Get the)[^.]*\.\s*", "", t, flags=_re.I)
+    t = _re.sub(r"\s+", " ", t).strip()
+    return t[:220]
+
+
 def _fetch_index_quotes() -> list:
     """True headline-index tape for Home (Schwab indices + EODHD crypto).
     Delegates to data_fetcher.get_index_quotes (internally fail-safe → []).
@@ -2303,8 +2317,9 @@ def _enrich_cockpit_data(data: dict) -> None:
                 "symbols": (a.get("symbols") or [])[:5],
                 "sentiment": label,
                 "polarity": pol,
-                # blurb for the Home featured/Top-Stories cards (was headline-only)
-                "summary": (a.get("content") or a.get("summary") or "").strip().replace("\n", " ")[:240],
+                # blurb for the Home featured/Top-Stories cards (was headline-only),
+                # with publisher/subscription boilerplate stripped
+                "summary": _clean_news_blurb(a.get("content") or a.get("summary") or ""),
                 "_provider": "eodhd",
             })
         data["market_news"] = market_news

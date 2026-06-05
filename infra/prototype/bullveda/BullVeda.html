@@ -24458,7 +24458,16 @@ const HR = /* @__PURE__ */ (function() {
     const BV = window.__BV, h = BV && BV.realHoldings && BV.realHoldings();
     return new Set((h || []).map((p) => sym0(p.sym)));
   }
-  return { num, numStr, sym0, rows, pool, ledgerSet, ledgerReal, auditOnly, inAudit, findRow, held, has: () => rows().length > 0 };
+  function modeKey(mode) {
+    const m = String(mode || window.__tmode || "swing").toLowerCase();
+    return m.indexOf("pos") === 0 ? "position" : m.indexOf("inv") === 0 ? "investment" : "swing";
+  }
+  function vmode(row, mode) {
+    const dbm = row && row._raw && row._raw.decisions_by_mode;
+    const v = dbm && dbm[modeKey(mode)] && dbm[modeKey(mode)].verdict;
+    return String(v || row && row.verdict || "").toUpperCase();
+  }
+  return { num, numStr, sym0, rows, pool, ledgerSet, ledgerReal, auditOnly, inAudit, findRow, held, modeKey, vmode, has: () => rows().length > 0 };
 })();
 function HomeView({ onTicker, onSurface, mode, surface }) {
   const uni = window.__BV && window.__BV.market && window.__BV.market.funnel && window.__BV.market.funnel.universe || null;
@@ -24473,54 +24482,80 @@ const IDXSTRIP_MOCK = [
   { s: "DXY", v: "103.4", c: 0.1 },
   { s: "GOLD", v: "2,418", c: 0.34 }
 ];
-function resolveIndexStrip() {
+function resolveIndexStrip(liveIq) {
   const BV = window.__BV;
   const n = (v) => typeof v === "number" && isFinite(v) ? v : null;
   const fmt = (v, dp = 2) => v == null ? "\u2014" : v >= 1e3 ? Math.round(v).toLocaleString() : v.toFixed(dp);
   const out = [];
   const have = /* @__PURE__ */ new Set();
-  const push = (s, v, c2) => {
+  const push = (s, v, c2, spark) => {
     if (v != null && v !== "\u2014" && !have.has(s)) {
-      out.push({ s, v, c: c2 });
+      out.push({ s, v, c: c2, spark: spark || null });
       have.add(s);
     }
   };
-  const iq = BV && BV.indexQuotes || null;
+  const iq = liveIq || BV && BV.indexQuotes || null;
   if (iq && iq.length) {
     iq.forEach((q) => {
       if (!q || q.value == null) return;
       const v = q.suffix === "%" ? q.value.toFixed(2) + "%" : fmt(q.value);
-      push(q.label, v, q.chg != null ? q.chg : null);
+      push(q.label, v, q.chg != null ? q.chg : null, q.spark_sym);
     });
   }
   const c = BV && BV.critical || null;
   if (c) {
-    const mac = c.macro_signals || {}, bf = c.bonds_forex || {};
+    const bf = c.bonds_forex || {};
     const bfc = (k) => bf[k] ? n(bf[k].change_p) : null;
-    if (mac.dxy) push("DXY\xB7UUP", fmt(n(mac.dxy.price)), n(mac.dxy.chg5d));
-    if (bf["TYX.INDX"]) push("US 30Y", n(bf["TYX.INDX"].price) != null ? n(bf["TYX.INDX"].price).toFixed(2) + "%" : null, bfc("TYX.INDX"));
-    if (bf["EURUSD.FOREX"]) push("EUR/USD", fmt(n(bf["EURUSD.FOREX"].price), 4), bfc("EURUSD.FOREX"));
-    if (bf["USDJPY.FOREX"]) push("USD/JPY", fmt(n(bf["USDJPY.FOREX"].price), 2), bfc("USDJPY.FOREX"));
-    if (mac.hyg) push("HY\xB7HYG", fmt(n(mac.hyg.price)), n(mac.hyg.chg5d));
+    if (bf["EURUSD.FOREX"]) push("EUR/USD", fmt(n(bf["EURUSD.FOREX"].price), 4), bfc("EURUSD.FOREX"), "EURUSD.FOREX");
+    if (bf["USDJPY.FOREX"]) push("USD/JPY", fmt(n(bf["USDJPY.FOREX"].price), 2), bfc("USDJPY.FOREX"), "USDJPY.FOREX");
   }
-  return out.length >= 4 ? out : IDXSTRIP_MOCK;
+  return out.length >= 4 ? out : IDXSTRIP_MOCK.map((m) => ({ ...m, spark: null }));
 }
 function IndexStrip() {
-  const idx = useMemoH(() => resolveIndexStrip(), [bvTok()]);
-  return /* @__PURE__ */ React.createElement("div", { className: "ix-strip" }, idx.map((i, k) => /* @__PURE__ */ React.createElement("div", { key: k, className: `ix ix--${i.c == null ? "ink" : i.c >= 0 ? "gn" : "rd"}` }, /* @__PURE__ */ React.createElement("span", { className: "ix-s mono" }, i.s), /* @__PURE__ */ React.createElement("span", { className: "ix-v mono" }, i.v), i.c != null ? /* @__PURE__ */ React.createElement("span", { className: `ix-c mono ${i.c >= 0 ? "up" : "dn"}` }, i.c >= 0 ? "+" : "", i.c.toFixed(2), "%") : /* @__PURE__ */ React.createElement("span", { className: "ix-c mono dim2" }, "\u2014"), /* @__PURE__ */ React.createElement(Spark, { sym: i.s, up: i.c == null ? true : i.c >= 0 }))));
-}
-function Spark({ sym, up }) {
-  const data = useMemoH(() => {
-    const code = (sym.charCodeAt(0) || 65) + (sym.charCodeAt(2) || 65);
-    const a = [];
-    let v = 0;
-    for (let i = 0; i < 18; i++) {
-      v += (Math.sin(i * 0.6 + code) + (up ? 0.18 : -0.14)) * 0.5;
-      a.push(v);
-    }
-    return a;
-  }, [sym, up]);
-  return /* @__PURE__ */ React.createElement(Sparkline, { data, color: `var(--${up ? "gn" : "rd"})`, w: 48, h: 20 });
+  const { useState: uS, useEffect: uE } = React;
+  const [liveIq, setLiveIq] = uS(null);
+  const [sparks, setSparks] = uS({});
+  const [age, setAge] = uS(0);
+  const idx = useMemoH(() => resolveIndexStrip(liveIq), [bvTok(), liveIq]);
+  const sparkKey = idx.map((i) => i.spark).filter(Boolean).join(",");
+  uE(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.get) return;
+    let alive = true, tLast = Date.now();
+    const tick = () => BV.get("/api/index-quotes").then((d) => {
+      if (alive && d && d.index_quotes && d.index_quotes.length) {
+        setLiveIq(d.index_quotes);
+        tLast = Date.now();
+      }
+    }).catch(() => {
+    });
+    const iv = setInterval(tick, 6e4);
+    const ageIv = setInterval(() => {
+      if (alive) setAge(Math.round((Date.now() - tLast) / 1e3));
+    }, 5e3);
+    return () => {
+      alive = false;
+      clearInterval(iv);
+      clearInterval(ageIv);
+    };
+  }, []);
+  uE(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.get || !sparkKey) return;
+    let alive = true;
+    BV.get("/api/spark?syms=" + encodeURIComponent(sparkKey)).then((d) => {
+      if (alive && d && d.sparks) setSparks((s) => ({ ...s, ...d.sparks }));
+    }).catch(() => {
+    });
+    return () => {
+      alive = false;
+    };
+  }, [sparkKey]);
+  return /* @__PURE__ */ React.createElement("div", { className: "ix-strip" }, /* @__PURE__ */ React.createElement("div", { className: "ix ix--ink", title: `Live tape \xB7 refreshed ${age < 5 ? "now" : age + "s ago"}` }, /* @__PURE__ */ React.createElement("span", { className: "ix-s mono", style: { color: "var(--gn)" } }, "\u25CF LIVE"), /* @__PURE__ */ React.createElement("span", { className: "ix-v mono dim2" }, age < 90 ? "tape" : "delayed")), idx.map((i, k) => {
+    const series = i.spark ? sparks[i.spark] : null;
+    const up = i.c == null ? true : i.c >= 0;
+    return /* @__PURE__ */ React.createElement("div", { key: k, className: `ix ix--${i.c == null ? "ink" : up ? "gn" : "rd"}` }, /* @__PURE__ */ React.createElement("span", { className: "ix-s mono" }, i.s), /* @__PURE__ */ React.createElement("span", { className: "ix-v mono" }, i.v), i.c != null ? /* @__PURE__ */ React.createElement("span", { className: `ix-c mono ${up ? "up" : "dn"}` }, i.c >= 0 ? "+" : "", i.c.toFixed(2), "%") : /* @__PURE__ */ React.createElement("span", { className: "ix-c mono dim2" }, "\u2014"), series && series.length >= 3 ? /* @__PURE__ */ React.createElement(Sparkline, { data: series, color: `var(--${up ? "gn" : "rd"})`, w: 48, h: 20 }) : /* @__PURE__ */ React.createElement("span", { style: { width: 48, height: 20, display: "inline-block" } }));
+  }));
 }
 function MarketBriefing({ onSurface, onTicker }) {
   const go = (id) => onSurface && onSurface(id);
@@ -24775,7 +24810,7 @@ function resolveDiscovery() {
   const ins = rows.filter((r) => HR.num(r.insNet, 0) > 0).sort((a, b) => b.insNet - a.insNet).map((r) => [r.sym, "+" + r.insNet + " net"]);
   const of = window.__BV && window.__BV.optionsFlow || [];
   const uoa = of.filter((o) => o.ticker).sort((a, b) => (b.uoa_calls || 0) - (a.uoa_calls || 0)).map((o) => [HR.sym0(o.ticker), o.status || "UOA"]);
-  const emg = rows.filter((r) => r.verdict === "WATCH" && r.score >= 55).sort((a, b) => b.score - a.score).map((r) => [r.sym, "watch"]);
+  const emg = rows.filter((r) => HR.vmode(r) === "WATCH" && r.score >= 55).sort((a, b) => b.score - a.score).map((r) => [r.sym, "watch"]);
   const groups = [
     { tag: "52W HIGH", tone: "gn", items: pick(hi, 3) },
     { tag: "SQUEEZE", tone: "amb", items: pick(sq, 3) },
@@ -24864,7 +24899,7 @@ const SCANNER_PICKS = [
   { sym: "NVRH", name: "Novara Health", score: 71, rr: "1.9", wlb: 46, edge: "+0.12", v: "BUY" },
   { sym: "ZOTR", name: "Zotran Industries", score: 69, rr: "1.5", wlb: 44, edge: "+0.09", v: "WATCH" }
 ];
-const bvTok = () => (HR.has() ? 1 : 0) + (HR.ledgerReal() ? 2 : 0) + (window.AIPredict && window.AIPredict.all ? 4 : 0);
+const bvTok = () => (HR.has() ? 1 : 0) + (HR.ledgerReal() ? 2 : 0) + (window.AIPredict && window.AIPredict.all ? 4 : 0) + (window.__tmode === "position" ? 100 : window.__tmode === "investment" ? 200 : 0);
 function realFunnel(mode) {
   const rows = HR.rows();
   if (!rows.length) return null;
@@ -24936,7 +24971,7 @@ function resolveScannerPicks() {
   const rows = HR.pool();
   if (!rows.length) return SCANNER_PICKS;
   const rank = (v) => v === "BUY" ? 0 : v === "WATCH" ? 1 : v === "SHORT" ? 2 : 3;
-  const picks = [...rows].filter((r) => ["BUY", "WATCH", "SHORT"].includes(r.verdict) && HR.inAudit(r.sym)).sort((a, b) => rank(a.verdict) - rank(b.verdict) || b.score - a.score).slice(0, 5).map((r) => ({
+  const picks = [...rows].map((r) => ({ r, vm: HR.vmode(r) })).filter((x) => ["BUY", "WATCH", "SHORT"].includes(x.vm) && HR.inAudit(x.r.sym)).sort((a, b) => rank(a.vm) - rank(b.vm) || b.r.score - a.r.score).slice(0, 5).map(({ r, vm }) => ({
     sym: r.sym,
     name: r.name,
     score: r.score,
@@ -24944,7 +24979,7 @@ function resolveScannerPicks() {
     wlb: r.wlb,
     // feed-honest (null → "—")
     edge: r.aiEdge != null ? (r.aiEdge >= 0 ? "+" : "") + r.aiEdge.toFixed(2) : null,
-    v: r.verdict
+    v: vm
   }));
   return picks.length ? picks : SCANNER_PICKS;
 }
@@ -24965,7 +25000,8 @@ function TopSetups({ onTicker }) {
     if (r.edge != null) parts.push("edge " + r.edge);
     return parts.length ? parts.join(" \xB7 ") : "live scan";
   };
-  return /* @__PURE__ */ React.createElement("div", { className: "tset" }, rows.map((r, i) => /* @__PURE__ */ React.createElement("button", { key: r.sym, className: "tset-row", onClick: () => onTicker(r.sym) }, /* @__PURE__ */ React.createElement("span", { className: "tset-rank mono dim" }, String(i + 1).padStart(2, "0")), /* @__PURE__ */ React.createElement("span", { className: "tset-sym mono" }, /* @__PURE__ */ React.createElement("b", null, r.sym)), /* @__PURE__ */ React.createElement("span", { className: "tset-score mono", "data-tone": r.score >= 75 ? "gn" : r.score >= 60 ? "amb" : "rd" }, r.score), /* @__PURE__ */ React.createElement("span", { className: "tset-mid" }, /* @__PURE__ */ React.createElement("span", { className: "tset-name dim" }, r.name), /* @__PURE__ */ React.createElement("span", { className: "tset-stats mono dim2" }, stat(r))), /* @__PURE__ */ React.createElement("span", { className: `tset-v mono ${r.v === "BUY" ? "up" : r.v === "SHORT" ? "dn" : "warn"}` }, secBias(r.v)))));
+  const anyBuy = rows.some((r) => r.v === "BUY");
+  return /* @__PURE__ */ React.createElement("div", { className: "tset" }, !anyBuy && HR.has() && /* @__PURE__ */ React.createElement("div", { className: "tset-note mono dim2", style: { padding: "4px 8px", fontSize: 11, opacity: 0.75 } }, "No fresh BUYs in ", String(window.__tmode || "swing").toLowerCase(), " \u2014 every name is extended past its value zone. Top watchlist by score:"), rows.map((r, i) => /* @__PURE__ */ React.createElement("button", { key: r.sym, className: "tset-row", onClick: () => onTicker(r.sym) }, /* @__PURE__ */ React.createElement("span", { className: "tset-rank mono dim" }, String(i + 1).padStart(2, "0")), /* @__PURE__ */ React.createElement("span", { className: "tset-sym mono" }, /* @__PURE__ */ React.createElement("b", null, r.sym)), /* @__PURE__ */ React.createElement("span", { className: "tset-score mono", "data-tone": r.score >= 75 ? "gn" : r.score >= 60 ? "amb" : "rd" }, r.score), /* @__PURE__ */ React.createElement("span", { className: "tset-mid" }, /* @__PURE__ */ React.createElement("span", { className: "tset-name dim" }, r.name), /* @__PURE__ */ React.createElement("span", { className: "tset-stats mono dim2" }, stat(r))), /* @__PURE__ */ React.createElement("span", { className: `tset-v mono ${r.v === "BUY" ? "up" : r.v === "SHORT" ? "dn" : "warn"}` }, secBias(r.v)))));
 }
 function resolveNewsBoard() {
   const stories = realStories(11);
@@ -24995,6 +25031,7 @@ function resolveNewsBoard() {
 }
 function NewsMarketsBoard({ onTicker, onSurface }) {
   const real = useMemoH(() => resolveNewsBoard(), [bvTok()]);
+  const [trendSparks, setTrendSparks] = React.useState({});
   const featured = real.featured || {
     head: "Chipmakers extend rally as hyperscaler capex guides lift the group",
     src: "Reuters",
@@ -25030,19 +25067,27 @@ function NewsMarketsBoard({ onTicker, onSurface }) {
     { sym: "TWLO", name: "Twilio Inc", px: "227.54", chg: 19.4 },
     { sym: "GENO", name: "Genoa Bio", px: "29.40", chg: 12.1 }
   ];
+  const trendKey = trending.map((r) => r.sym).join(",");
+  React.useEffect(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.get || !trendKey) return;
+    let alive = true;
+    BV.get("/api/spark?syms=" + encodeURIComponent(trendKey)).then((d) => {
+      if (alive && d && d.sparks) setTrendSparks((s) => ({ ...s, ...d.sparks }));
+    }).catch(() => {
+    });
+    return () => {
+      alive = false;
+    };
+  }, [trendKey]);
   const Story = ({ s, big }) => /* @__PURE__ */ React.createElement("button", { className: `nm-story ${big ? "nm-story--big" : ""}`, onClick: () => s.tickers[0] && onTicker(s.tickers[0][0]) }, big && /* @__PURE__ */ React.createElement("div", { className: "nm-feat-img" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "\u25E7 MARKETS")), /* @__PURE__ */ React.createElement("div", { className: "nm-head" }, s.head), /* @__PURE__ */ React.createElement("div", { className: "nm-meta mono" }, s.live && /* @__PURE__ */ React.createElement("span", { className: "nm-live" }, "\u25CF LIVE"), /* @__PURE__ */ React.createElement("span", { className: "nm-src" }, s.src), s.time ? /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " \xB7 ", s.time, " ago") : null), big && s.sum && /* @__PURE__ */ React.createElement("div", { className: "nm-sum" }, s.sum), /* @__PURE__ */ React.createElement("div", { className: "nm-chips" }, s.tickers.map(([t, c], i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "nm-chip mono", onClick: (e) => {
     e.stopPropagation();
     onTicker(t);
   } }, t, c ? /* @__PURE__ */ React.createElement("b", { className: c >= 0 ? "up" : "dn" }, " ", c >= 0 ? "+" : "", c.toFixed(2), "%") : null))));
-  return /* @__PURE__ */ React.createElement("div", { className: "nm-board" }, /* @__PURE__ */ React.createElement("div", { className: "nm-col nm-col--feat" }, /* @__PURE__ */ React.createElement(Story, { s: featured, big: true }), /* @__PURE__ */ React.createElement("div", { className: "nm-stack" }, leftStack.map((s, i) => /* @__PURE__ */ React.createElement(Story, { key: i, s }))), /* @__PURE__ */ React.createElement("button", { className: "nm-more mono", onClick: () => onSurface && onSurface("news") }, "View all news \u2192")), /* @__PURE__ */ React.createElement("div", { className: "nm-col nm-col--latest" }, /* @__PURE__ */ React.createElement("div", { className: "nm-col-h mono" }, "LATEST"), /* @__PURE__ */ React.createElement("div", { className: "nm-feed" }, latest.map((s, i) => /* @__PURE__ */ React.createElement(Story, { key: i, s })))), /* @__PURE__ */ React.createElement("div", { className: "nm-col nm-col--rail" }, /* @__PURE__ */ React.createElement("div", { className: "nm-lookup", onClick: () => onSurface && onSurface("signal-scanner") }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "\u2315 Quote lookup")), /* @__PURE__ */ React.createElement("div", { className: "nm-rail-card" }, /* @__PURE__ */ React.createElement("div", { className: "nm-rail-h mono" }, /* @__PURE__ */ React.createElement("span", null, "TRENDING TICKERS"), /* @__PURE__ */ React.createElement("span", { className: "nm-rail-go", onClick: () => onSurface && onSurface("signal-scanner") }, "Scanner \u2192")), trending.map((r, i) => /* @__PURE__ */ React.createElement("button", { key: i, className: "nm-row", onClick: () => onTicker(r.sym) }, /* @__PURE__ */ React.createElement("span", { className: "nm-row-l" }, /* @__PURE__ */ React.createElement("b", { className: "nm-row-sym mono" }, r.sym), /* @__PURE__ */ React.createElement("span", { className: "nm-row-name dim2" }, r.name)), /* @__PURE__ */ React.createElement(Sparkline, { data: useMemoH(() => {
-    const a = [];
-    let v = 0;
-    for (let j = 0; j < 16; j++) {
-      v += (Math.sin(j * 0.7 + r.sym.charCodeAt(0)) + (r.up ? 0.2 : -0.18)) * 0.5;
-      a.push(v);
-    }
-    return a;
-  }, [r.sym]), color: `var(--${r.up ? "gn" : "rd"})`, w: 52, h: 20 }), /* @__PURE__ */ React.createElement("span", { className: "nm-row-r" }, /* @__PURE__ */ React.createElement("span", { className: "nm-row-px mono" }, r.px), /* @__PURE__ */ React.createElement("span", { className: `nm-row-chg mono ${r.chg >= 0 ? "up" : "dn"}` }, r.chg >= 0 ? "+" : "", r.chg.toFixed(2), "%"))))), /* @__PURE__ */ React.createElement("div", { className: "nm-rail-card" }, /* @__PURE__ */ React.createElement("div", { className: "nm-rail-h mono" }, /* @__PURE__ */ React.createElement("span", null, "MOST ACTIVE"), /* @__PURE__ */ React.createElement("span", { className: "nm-rail-go", onClick: () => onSurface && onSurface("momentum") }, "Movers \u2192")), gainers.map((r, i) => {
+  return /* @__PURE__ */ React.createElement("div", { className: "nm-board" }, /* @__PURE__ */ React.createElement("div", { className: "nm-col nm-col--feat" }, /* @__PURE__ */ React.createElement(Story, { s: featured, big: true }), /* @__PURE__ */ React.createElement("div", { className: "nm-stack" }, leftStack.map((s, i) => /* @__PURE__ */ React.createElement(Story, { key: i, s }))), /* @__PURE__ */ React.createElement("button", { className: "nm-more mono", onClick: () => onSurface && onSurface("news") }, "View all news \u2192")), /* @__PURE__ */ React.createElement("div", { className: "nm-col nm-col--latest" }, /* @__PURE__ */ React.createElement("div", { className: "nm-col-h mono" }, "LATEST"), /* @__PURE__ */ React.createElement("div", { className: "nm-feed" }, latest.map((s, i) => /* @__PURE__ */ React.createElement(Story, { key: i, s })))), /* @__PURE__ */ React.createElement("div", { className: "nm-col nm-col--rail" }, /* @__PURE__ */ React.createElement("div", { className: "nm-lookup", onClick: () => onSurface && onSurface("signal-scanner") }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "\u2315 Quote lookup")), /* @__PURE__ */ React.createElement("div", { className: "nm-rail-card" }, /* @__PURE__ */ React.createElement("div", { className: "nm-rail-h mono" }, /* @__PURE__ */ React.createElement("span", null, "TRENDING TICKERS"), /* @__PURE__ */ React.createElement("span", { className: "nm-rail-go", onClick: () => onSurface && onSurface("signal-scanner") }, "Scanner \u2192")), trending.map((r, i) => {
+    const series = trendSparks[r.sym];
+    return /* @__PURE__ */ React.createElement("button", { key: i, className: "nm-row", onClick: () => onTicker(r.sym) }, /* @__PURE__ */ React.createElement("span", { className: "nm-row-l" }, /* @__PURE__ */ React.createElement("b", { className: "nm-row-sym mono" }, r.sym), /* @__PURE__ */ React.createElement("span", { className: "nm-row-name dim2" }, r.name)), series && series.length >= 3 ? /* @__PURE__ */ React.createElement(Sparkline, { data: series, color: `var(--${r.chg >= 0 ? "gn" : "rd"})`, w: 52, h: 20 }) : /* @__PURE__ */ React.createElement("span", { style: { width: 52, height: 20, display: "inline-block" } }), /* @__PURE__ */ React.createElement("span", { className: "nm-row-r" }, /* @__PURE__ */ React.createElement("span", { className: "nm-row-px mono" }, r.px), /* @__PURE__ */ React.createElement("span", { className: `nm-row-chg mono ${r.chg >= 0 ? "up" : "dn"}` }, r.chg >= 0 ? "+" : "", r.chg.toFixed(2), "%")));
+  })), /* @__PURE__ */ React.createElement("div", { className: "nm-rail-card" }, /* @__PURE__ */ React.createElement("div", { className: "nm-rail-h mono" }, /* @__PURE__ */ React.createElement("span", null, "MOST ACTIVE"), /* @__PURE__ */ React.createElement("span", { className: "nm-rail-go", onClick: () => onSurface && onSurface("momentum") }, "Movers \u2192")), gainers.map((r, i) => {
     const dv = r.dvol != null ? r.dvol >= 1e9 ? "$" + (r.dvol / 1e9).toFixed(1) + "B" : "$" + Math.round(r.dvol / 1e6) + "M" : null;
     return /* @__PURE__ */ React.createElement("button", { key: i, className: "nm-row nm-row--g", onClick: () => onTicker(r.sym) }, /* @__PURE__ */ React.createElement("span", { className: "nm-row-l" }, /* @__PURE__ */ React.createElement("b", { className: "nm-row-sym mono" }, r.sym), /* @__PURE__ */ React.createElement("span", { className: "nm-row-name dim2" }, dv || r.name)), /* @__PURE__ */ React.createElement("span", { className: "nm-row-r" }, /* @__PURE__ */ React.createElement("span", { className: "nm-row-px mono" }, r.px), /* @__PURE__ */ React.createElement("span", { className: `nm-row-chg mono ${r.chg >= 0 ? "up" : "dn"}` }, r.chg >= 0 ? "+" : "", r.chg.toFixed(1), "%")));
   }))));
@@ -25133,10 +25178,13 @@ function resolveSignalFeed() {
   const rows = HR.pool();
   if (!rows.length) return SIGNALFEED_MOCK;
   const inA = (r) => HR.inAudit(r.sym);
-  const buys = rows.filter((r) => r.verdict === "BUY" && inA(r)).sort((a, b) => b.score - a.score);
+  const buys = rows.filter((r) => HR.vmode(r) === "BUY" && inA(r)).sort((a, b) => b.score - a.score);
   const ins = rows.filter((r) => HR.num(r.insNet, 0) > 0 && inA(r)).sort((a, b) => b.insNet - a.insNet);
   const er = rows.filter((r) => HR.num(r.er, 99) <= 9 && HR.num(r.er, 99) >= 0 && inA(r)).sort((a, b) => a.er - b.er);
-  const bear = rows.filter((r) => (r.verdict === "SHORT" || r.verdict === "AVOID") && inA(r)).sort((a, b) => a.score - b.score);
+  const bear = rows.filter((r) => {
+    const v = HR.vmode(r);
+    return (v === "SHORT" || v === "AVOID") && inA(r);
+  }).sort((a, b) => a.score - b.score);
   const ai = rows.filter((r) => r.aiEdge != null && inA(r)).sort((a, b) => b.aiEdge - a.aiEdge);
   const M = window.__BV && window.__BV.market || null;
   const sm = window.__BV && window.__BV.scanMeta || null;
@@ -25145,7 +25193,7 @@ function resolveSignalFeed() {
   if (buys[0]) out.push({ t: scanT, tone: "gn", tag: "BULLISH", sym: buys[0].sym, text: `BUY verdict \xB7 score ${buys[0].score}${buys[0].setup ? " \xB7 " + buys[0].setup : ""}` });
   if (buys[1]) out.push({ t: scanT, tone: "gn", tag: "ALERT", sym: buys[1].sym, text: `Entry ${buys[1].eq || "in zone"} \xB7 R:R ${buys[1].rr}${buys[1].rvol !== "\u2014" ? " \xB7 " + buys[1].rvol + "\xD7 RVOL" : ""}` });
   if (er[0]) out.push({ t: scanT, tone: "amb", tag: "ER", sym: er[0].sym, text: `ER in ${er[0].er} sessions \xB7 event-risk elevated` });
-  if (bear[0]) out.push({ t: scanT, tone: "rd", tag: "BEARISH", sym: bear[0].sym, text: `${bear[0].verdict} \xB7 score ${bear[0].score} \xB7 excluded from longs` });
+  if (bear[0]) out.push({ t: scanT, tone: "rd", tag: "BEARISH", sym: bear[0].sym, text: `${HR.vmode(bear[0])} \xB7 score ${bear[0].score} \xB7 excluded from longs` });
   const _F = realFunnel(window.__tmode) || M && M.funnel;
   if (_F) out.push({ t: scanT, tone: "ink", tag: "BUNDLE", sym: null, text: `Daily bundle \xB7 ${_F.universe} ranked \xB7 ${_F.bullish} Bullish \xB7 ${_F.neutral} Neutral \xB7 ${_F.bearish} Bearish` });
   if (ai[0]) out.push({ t: scanT, tone: "violet", tag: "AI", sym: ai[0].sym, text: `AI edge +${ai[0].aiEdge.toFixed(2)} \xB7 highest hit-net today` });

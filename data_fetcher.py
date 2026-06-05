@@ -2790,19 +2790,25 @@ def get_index_quotes() -> list[dict]:
     affected tile rather than break the row (feed-honest).
     """
     out: list[dict] = []
-    # ── Schwab indices (one batched call) ──
+    # ── Schwab indices + rate/dollar/credit ETFs (one batched call) ──
+    # (sym, label, suffix, divisor, spark_sym) — yields ($TNX/$TYX) are quoted ×10
+    # → divisor 10. UUP (dollar) / HYG (HY credit) are real ETFs → live DAILY change
+    # (replaces the macro_signals 5-day change that was mislabeled as daily).
     try:
         import schwab_client as _sc
         SPEC = [
-            ("$SPX",   "S&P 500", ""),
-            ("$COMPX", "NASDAQ",  ""),
-            ("$DJI",   "DOW",     ""),
-            ("$RUT",   "RUSSELL", ""),
-            ("$VIX",   "VIX",     ""),
-            ("$TNX",   "US 10Y",  "%"),
+            ("$SPX",   "S&P 500",     "",  1.0, "$SPX"),
+            ("$COMPX", "NASDAQ",      "",  1.0, "$COMPX"),
+            ("$DJI",   "DOW",         "",  1.0, "$DJI"),
+            ("$RUT",   "RUSSELL",     "",  1.0, "$RUT"),
+            ("$VIX",   "VIX",         "",  1.0, "$VIX"),
+            ("$TNX",   "US 10Y",      "%", 10.0, "$TNX"),
+            ("$TYX",   "US 30Y",      "%", 10.0, "$TYX"),
+            ("UUP",    "DOLLAR·UUP",  "",  1.0, "UUP"),
+            ("HYG",    "HY·HYG",      "",  1.0, "HYG"),
         ]
-        blobs = _sc.get_quotes_batch([s for s, _, _ in SPEC]) or {}
-        for sym, label, suffix in SPEC:
+        blobs = _sc.get_quotes_batch([s for s, _, _, _, _ in SPEC]) or {}
+        for sym, label, suffix, div, spark in SPEC:
             b = blobs.get(sym) or blobs.get(sym.upper())
             q = (b or {}).get("quote") or {}
             last = q.get("lastPrice")
@@ -2810,19 +2816,17 @@ def get_index_quotes() -> list[dict]:
             if last in (None, "", "NA"):
                 continue
             try:
-                last = float(last)
+                last = float(last) / div
             except Exception:
                 continue
             try:
                 chg = float(chg) if chg not in (None, "", "NA") else None
             except Exception:
                 chg = None
-            if sym == "$TNX":           # CBOE 10Y yield index is quoted ×10
-                last = round(last / 10.0, 3)
             out.append({"key": sym.lstrip("$"), "label": label,
-                        "value": round(last, 2) if suffix != "%" else last,
+                        "value": round(last, 3) if suffix == "%" else round(last, 2),
                         "chg": (round(chg, 2) if chg is not None else None),
-                        "suffix": suffix})
+                        "suffix": suffix, "spark_sym": spark})
     except Exception:
         pass
     # ── EODHD crypto (Schwab has no crypto) ──
@@ -2839,7 +2843,7 @@ def get_index_quotes() -> list[dict]:
                     continue
                 close = float(close)
                 chg = float(chg) if chg not in (None, "", "NA") else None
-                out.append({"key": label, "label": label, "value": round(close, 2), "chg": (round(chg, 2) if chg is not None else None), "suffix": ""})
+                out.append({"key": label, "label": label, "value": round(close, 2), "chg": (round(chg, 2) if chg is not None else None), "suffix": "", "spark_sym": sym})
             except Exception:
                 continue
     except Exception:
@@ -2881,35 +2885,42 @@ def _stooq_quote(sym: str) -> dict | None:
         return None
 
 
+# last-good true-futures cache (price already unit-normalised) — so a Stooq throttle
+# reuses the prior real futures level instead of jumping to the ETF's different scale.
+_COMMODITY_LASTGOOD: dict = {}
+
 def get_commodity_quotes() -> list[dict]:
     """Commodity tape (WTI/Gold/Copper/Silver) — TRUE front-month futures from
-    Stooq (free, no key), with a Schwab commodity-ETF proxy fallback when Stooq
-    throttles. Label carries the source: bare name = true futures, "·ETF" suffix
-    = proxy. Returns [] on total failure (feed-honest)."""
-    # (stooq_sym, label, etf_proxy, divisor) — divisor normalises Stooq's native
-    # units to conventional dollars: COMEX copper & silver quote in cents → ÷100
-    # ($/lb, $/oz); WTI is already $/bbl and gold $/oz. Divisor is scale-only so the
-    # daily % change is unaffected.
+    Stooq (free, no key). On a Stooq throttle: reuse the last-good true value if
+    we have one, else fall back to a Schwab commodity-ETF proxy. Label carries the
+    source: bare name = true futures (live or last-good), "·ETF" = proxy."""
+    # (stooq_sym, label, etf_proxy, divisor, spark_sym) — divisor normalises Stooq's
+    # native units to conventional dollars: COMEX copper & silver quote in cents →
+    # ÷100 ($/lb, $/oz); WTI $/bbl and gold $/oz unchanged. Scale-only → %Δ unaffected.
     SPEC = [
-        ("cl.f", "WTI",    "USO",  1.0),
-        ("gc.f", "GOLD",   "GLD",  1.0),
-        ("hg.f", "COPPER", "CPER", 100.0),
-        ("si.f", "SILVER", "SLV",  100.0),
+        ("cl.f", "WTI",    "USO",  1.0,   "USO"),
+        ("gc.f", "GOLD",   "GLD",  1.0,   "GLD"),
+        ("hg.f", "COPPER", "CPER", 100.0, "CPER"),
+        ("si.f", "SILVER", "SLV",  100.0, "SLV"),
     ]
     out: list[dict] = []
     proxies_needed = []
-    for stq, label, etf, div in SPEC:
+    for stq, label, etf, div, spark in SPEC:
         q = _stooq_quote(stq)
         if q and q.get("price") is not None:
-            out.append({"key": label, "label": label, "value": round(q["price"] / div, 2), "chg": q.get("chg"), "suffix": ""})
+            tile = {"key": label, "label": label, "value": round(q["price"] / div, 2), "chg": q.get("chg"), "suffix": "", "spark_sym": spark}
+            _COMMODITY_LASTGOOD[label] = tile
+            out.append(tile)
+        elif label in _COMMODITY_LASTGOOD:
+            out.append(_COMMODITY_LASTGOOD[label])  # reuse last real futures value
         else:
-            proxies_needed.append((label, etf))
-    # one batched Schwab call for whatever Stooq couldn't serve
+            proxies_needed.append((label, etf, spark))
+    # one batched Schwab call for whatever Stooq couldn't serve and we've never cached
     if proxies_needed:
         try:
             import schwab_client as _sc
-            blobs = _sc.get_quotes_batch([etf for _, etf in proxies_needed]) or {}
-            for label, etf in proxies_needed:
+            blobs = _sc.get_quotes_batch([etf for _, etf, _ in proxies_needed]) or {}
+            for label, etf, spark in proxies_needed:
                 b = blobs.get(etf) or blobs.get(etf.upper())
                 qd = (b or {}).get("quote") or {}
                 last = qd.get("lastPrice")
@@ -2924,9 +2935,41 @@ def get_commodity_quotes() -> list[dict]:
                     chg = round(float(chg), 2) if chg not in (None, "", "NA") else None
                 except Exception:
                     chg = None
-                out.append({"key": label + "·" + etf, "label": label + "·" + etf, "value": round(last, 2), "chg": chg, "suffix": ""})
+                out.append({"key": label + "·" + etf, "label": label + "·" + etf, "value": round(last, 2), "chg": chg, "suffix": "", "spark_sym": spark})
         except Exception:
             pass
+    return out
+
+
+def get_sparks(symbols: list, n: int = 22) -> dict:
+    """Last ~n daily closes per symbol for Home sparklines — REAL price paths.
+    Routes by symbol: $-prefixed → Schwab index pricehistory; *.FOREX / *.CC →
+    EODHD eod; everything else (equities, ETFs) → Schwab pricehistory. Yields
+    ($TNX/$TYX) are ÷10 to match the quote. Returns {sym: [floats]}; missing/failed
+    symbols are simply absent (the sparkline then hides). All sources are in-stack."""
+    out: dict = {}
+    for raw in (symbols or []):
+        sym = str(raw).strip()
+        if not sym or sym in out:
+            continue
+        series = None
+        try:
+            if sym.endswith(".CC") or sym.endswith(".FOREX") or "-USD" in sym:
+                import eodhd_client as _eod
+                rows = _eod.eod(sym, period="d")
+                if isinstance(rows, list) and rows:
+                    series = [float(r.get("close")) for r in rows[-n:] if r.get("close") not in (None, "", "NA")]
+            else:
+                import schwab_client as _sc
+                h = _sc.get_pricehistory(sym, period_type="month", period=1, frequency_type="daily", frequency=1)
+                candles = (h or {}).get("candles") or []
+                if candles:
+                    div = 10.0 if sym in ("$TNX", "$TYX") else 1.0
+                    series = [round(float(c["close"]) / div, 4) for c in candles[-n:] if c.get("close") is not None]
+        except Exception:
+            series = None
+        if series and len(series) >= 3:
+            out[sym] = series
     return out
 
 

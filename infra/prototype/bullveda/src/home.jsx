@@ -61,7 +61,19 @@ const HR = (function () {
     const BV = window.__BV, h = BV && BV.realHoldings && BV.realHoldings();
     return new Set((h || []).map(p => sym0(p.sym)));
   }
-  return { num, numStr, sym0, rows, pool, ledgerSet, ledgerReal, auditOnly, inAudit, findRow, held, has: () => rows().length > 0 };
+  // active horizon → decisions_by_mode key
+  function modeKey(mode) {
+    const m = String(mode || window.__tmode || "swing").toLowerCase();
+    return m.indexOf("pos") === 0 ? "position" : m.indexOf("inv") === 0 ? "investment" : "swing";
+  }
+  // per-mode engine verdict (BUY/WATCH/AVOID/SHORT) for a scan row — so Home sections
+  // respect the Swing/Position/Invest toggle instead of always showing the overall call.
+  function vmode(row, mode) {
+    const dbm = row && row._raw && row._raw.decisions_by_mode;
+    const v = dbm && dbm[modeKey(mode)] && dbm[modeKey(mode)].verdict;
+    return String(v || (row && row.verdict) || "").toUpperCase();
+  }
+  return { num, numStr, sym0, rows, pool, ledgerSet, ledgerReal, auditOnly, inAudit, findRow, held, modeKey, vmode, has: () => rows().length > 0 };
 })();
 
 function HomeView({ onTicker, onSurface, mode, surface }) {
@@ -134,62 +146,80 @@ const IDXSTRIP_MOCK = [
   { s: "VIX", v: "16.3", c: -1.81 }, { s: "US 10Y", v: "4.32%", c: -0.46 },
   { s: "DXY", v: "103.4", c: +0.10 }, { s: "GOLD", v: "2,418", c: +0.34 },
 ];
-function resolveIndexStrip() {
+function resolveIndexStrip(liveIq) {
   const BV = window.__BV;
   const n = (v) => (typeof v === "number" && isFinite(v)) ? v : null;
   const fmt = (v, dp = 2) => v == null ? "—" : v >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(dp);
   const out = [];
   const have = new Set();
-  const push = (s, v, c2) => { if (v != null && v !== "—" && !have.has(s)) { out.push({ s, v, c: c2 }); have.add(s); } };
-  // ── TRUE headline indices — Schwab $SPX/$COMPX/$DJI/$RUT/$VIX/$TNX + EODHD BTC/ETH ──
-  const iq = (BV && BV.indexQuotes) || null;
+  const push = (s, v, c2, spark) => { if (v != null && v !== "—" && !have.has(s)) { out.push({ s, v, c: c2, spark: spark || null }); have.add(s); } };
+  // ── TRUE headline tape — Schwab indices/yields/ETFs + EODHD crypto + Stooq futures ──
+  const iq = liveIq || (BV && BV.indexQuotes) || null;
   if (iq && iq.length) {
     iq.forEach(q => {
       if (!q || q.value == null) return;
       const v = q.suffix === "%" ? (q.value.toFixed(2) + "%") : fmt(q.value);
-      push(q.label, v, q.chg != null ? q.chg : null);
+      push(q.label, v, q.chg != null ? q.chg : null, q.spark_sym);
     });
   }
-  // ── real ETF/cross-asset proxies for tiles the headline feed doesn't cover ──
+  // ── FX from bonds_forex (real daily change_p); dollar/credit/30Y now come from
+  //    index_quotes as real-daily Schwab ETFs, so they're not re-added here ──
   const c = (BV && BV.critical) || null;
   if (c) {
-    const mac = c.macro_signals || {}, bf = c.bonds_forex || {};
+    const bf = c.bonds_forex || {};
     const bfc = (k) => bf[k] ? n(bf[k].change_p) : null;
-    // (GOLD now arrives as a true future via index_quotes — no GLD proxy here)
-    if (mac.dxy) push("DXY·UUP", fmt(n(mac.dxy.price)), n(mac.dxy.chg5d));
-    if (bf["TYX.INDX"]) push("US 30Y", n(bf["TYX.INDX"].price) != null ? n(bf["TYX.INDX"].price).toFixed(2) + "%" : null, bfc("TYX.INDX"));
-    if (bf["EURUSD.FOREX"]) push("EUR/USD", fmt(n(bf["EURUSD.FOREX"].price), 4), bfc("EURUSD.FOREX"));
-    if (bf["USDJPY.FOREX"]) push("USD/JPY", fmt(n(bf["USDJPY.FOREX"].price), 2), bfc("USDJPY.FOREX"));
-    if (mac.hyg) push("HY·HYG", fmt(n(mac.hyg.price)), n(mac.hyg.chg5d));
+    if (bf["EURUSD.FOREX"]) push("EUR/USD", fmt(n(bf["EURUSD.FOREX"].price), 4), bfc("EURUSD.FOREX"), "EURUSD.FOREX");
+    if (bf["USDJPY.FOREX"]) push("USD/JPY", fmt(n(bf["USDJPY.FOREX"].price), 2), bfc("USDJPY.FOREX"), "USDJPY.FOREX");
   }
-  return out.length >= 4 ? out : IDXSTRIP_MOCK;
+  return out.length >= 4 ? out : IDXSTRIP_MOCK.map(m => ({ ...m, spark: null }));
 }
 function IndexStrip() {
-  const idx = useMemoH(() => resolveIndexStrip(), [bvTok()]);
+  const { useState: uS, useEffect: uE } = React;
+  const [liveIq, setLiveIq] = uS(null);
+  const [sparks, setSparks] = uS({});
+  const [age, setAge] = uS(0);
+  const idx = useMemoH(() => resolveIndexStrip(liveIq), [bvTok(), liveIq]);
+  const sparkKey = idx.map(i => i.spark).filter(Boolean).join(",");
+  // poll live quotes every 60s (boot snapshot → ticking tape)
+  uE(() => {
+    const BV = window.__BV; if (!BV || !BV.get) return;
+    let alive = true, tLast = Date.now();
+    const tick = () => BV.get("/api/index-quotes").then(d => { if (alive && d && d.index_quotes && d.index_quotes.length) { setLiveIq(d.index_quotes); tLast = Date.now(); } }).catch(() => {});
+    const iv = setInterval(tick, 60000);
+    const ageIv = setInterval(() => { if (alive) setAge(Math.round((Date.now() - tLast) / 1000)); }, 5000);
+    return () => { alive = false; clearInterval(iv); clearInterval(ageIv); };
+  }, []);
+  // real daily-close sparklines for the tile symbols (fetched once; server caches 30m)
+  uE(() => {
+    const BV = window.__BV; if (!BV || !BV.get || !sparkKey) return;
+    let alive = true;
+    BV.get("/api/spark?syms=" + encodeURIComponent(sparkKey)).then(d => { if (alive && d && d.sparks) setSparks(s => ({ ...s, ...d.sparks })); }).catch(() => {});
+    return () => { alive = false; };
+  }, [sparkKey]);
   return (
     <div className="ix-strip">
-      {idx.map((i, k) => (
-        <div key={k} className={`ix ix--${i.c == null ? "ink" : i.c >= 0 ? "gn" : "rd"}`}>
-          <span className="ix-s mono">{i.s}</span>
-          <span className="ix-v mono">{i.v}</span>
-          {i.c != null
-            ? <span className={`ix-c mono ${i.c >= 0 ? "up" : "dn"}`}>{i.c >= 0 ? "+" : ""}{i.c.toFixed(2)}%</span>
-            : <span className="ix-c mono dim2">—</span>}
-          <Spark sym={i.s} up={i.c == null ? true : i.c >= 0} />
-        </div>
-      ))}
+      <div className="ix ix--ink" title={`Live tape · refreshed ${age < 5 ? "now" : age + "s ago"}`}>
+        <span className="ix-s mono" style={{ color: "var(--gn)" }}>● LIVE</span>
+        <span className="ix-v mono dim2">{age < 90 ? "tape" : "delayed"}</span>
+      </div>
+      {idx.map((i, k) => {
+        const series = i.spark ? sparks[i.spark] : null;
+        const up = i.c == null ? true : i.c >= 0;
+        return (
+          <div key={k} className={`ix ix--${i.c == null ? "ink" : up ? "gn" : "rd"}`}>
+            <span className="ix-s mono">{i.s}</span>
+            <span className="ix-v mono">{i.v}</span>
+            {i.c != null
+              ? <span className={`ix-c mono ${up ? "up" : "dn"}`}>{i.c >= 0 ? "+" : ""}{i.c.toFixed(2)}%</span>
+              : <span className="ix-c mono dim2">—</span>}
+            {series && series.length >= 3
+              ? <Sparkline data={series} color={`var(--${up ? "gn" : "rd"})`} w={48} h={20} />
+              : <span style={{ width: 48, height: 20, display: "inline-block" }} />}
+          </div>
+        );
+      })}
     </div>
   );
-}
-
-function Spark({ sym, up }) {
-  const data = useMemoH(() => {
-    const code = (sym.charCodeAt(0) || 65) + (sym.charCodeAt(2) || 65);
-    const a = []; let v = 0;
-    for (let i = 0; i < 18; i++) { v += (Math.sin(i * 0.6 + code) + (up ? 0.18 : -0.14)) * 0.5; a.push(v); }
-    return a;
-  }, [sym, up]);
-  return <Sparkline data={data} color={`var(--${up ? "gn" : "rd"})`} w={48} h={20} />;
 }
 
 // ─── Market Context briefing — 3 condensed top-down cards ──────────
@@ -508,7 +538,7 @@ function resolveDiscovery() {
   const of = (window.__BV && window.__BV.optionsFlow) || [];
   const uoa = of.filter(o => o.ticker).sort((a, b) => (b.uoa_calls || 0) - (a.uoa_calls || 0))
     .map(o => [HR.sym0(o.ticker), o.status || "UOA"]);
-  const emg = rows.filter(r => r.verdict === "WATCH" && r.score >= 55).sort((a, b) => b.score - a.score)
+  const emg = rows.filter(r => HR.vmode(r) === "WATCH" && r.score >= 55).sort((a, b) => b.score - a.score)
     .map(r => [r.sym, "watch"]);
   const groups = [
     { tag: "52W HIGH", tone: "gn",     items: pick(hi, 3) },
@@ -609,7 +639,8 @@ const SCANNER_PICKS = [
 
 // Token that changes when the live universe / forward-scored ledger become
 // available — used as a memo dependency so Home re-derives real rows post-load.
-const bvTok = () => (HR.has() ? 1 : 0) + (HR.ledgerReal() ? 2 : 0) + (window.AIPredict && window.AIPredict.all ? 4 : 0);
+const bvTok = () => (HR.has() ? 1 : 0) + (HR.ledgerReal() ? 2 : 0) + (window.AIPredict && window.AIPredict.all ? 4 : 0)
+  + (window.__tmode === "position" ? 100 : window.__tmode === "investment" ? 200 : 0);
 
 // Scan funnel computed from the SAME per-mode engine verdicts the scanner/TopSetups
 // read (decisions_by_mode), so the hero funnel can't disagree with the rest of Home.
@@ -698,16 +729,18 @@ function resolveScannerPicks() {
   const rows = HR.pool();
   if (!rows.length) return SCANNER_PICKS;
   const rank = (v) => v === "BUY" ? 0 : v === "WATCH" ? 1 : v === "SHORT" ? 2 : 3;
+  // per-mode verdict (Swing/Position/Invest), not the overall call
   const picks = [...rows]
-    .filter(r => ["BUY", "WATCH", "SHORT"].includes(r.verdict) && HR.inAudit(r.sym))
-    .sort((a, b) => rank(a.verdict) - rank(b.verdict) || b.score - a.score)
+    .map(r => ({ r, vm: HR.vmode(r) }))
+    .filter(x => ["BUY", "WATCH", "SHORT"].includes(x.vm) && HR.inAudit(x.r.sym))
+    .sort((a, b) => rank(a.vm) - rank(b.vm) || b.r.score - a.r.score)
     .slice(0, 5)
-    .map(r => ({
+    .map(({ r, vm }) => ({
       sym: r.sym, name: r.name, score: r.score,
       rr: r.rr !== "—" ? r.rr : null,
       wlb: r.wlb,  // feed-honest (null → "—")
       edge: r.aiEdge != null ? (r.aiEdge >= 0 ? "+" : "") + r.aiEdge.toFixed(2) : null,
-      v: r.verdict,
+      v: vm,
     }));
   return picks.length ? picks : SCANNER_PICKS;
 }
@@ -754,8 +787,14 @@ function TopSetups({ onTicker }) {
     if (r.edge != null) parts.push("edge " + r.edge);
     return parts.length ? parts.join(" · ") : "live scan";
   };
+  const anyBuy = rows.some(r => r.v === "BUY");
   return (
     <div className="tset">
+      {!anyBuy && HR.has() && (
+        <div className="tset-note mono dim2" style={{ padding: "4px 8px", fontSize: 11, opacity: .75 }}>
+          No fresh BUYs in {String(window.__tmode || "swing").toLowerCase()} — every name is extended past its value zone. Top watchlist by score:
+        </div>
+      )}
       {rows.map((r, i) => (
         <button key={r.sym} className="tset-row" onClick={() => onTicker(r.sym)}>
           <span className="tset-rank mono dim">{String(i + 1).padStart(2, "0")}</span>
@@ -804,6 +843,7 @@ function resolveNewsBoard() {
 
 function NewsMarketsBoard({ onTicker, onSurface }) {
   const real = useMemoH(() => resolveNewsBoard(), [bvTok()]);
+  const [trendSparks, setTrendSparks] = React.useState({});
   const featured = real.featured || {
     head: "Chipmakers extend rally as hyperscaler capex guides lift the group",
     src: "Reuters", time: "12m", live: true, tickers: [["NVDA", +6.26], ["AVGO", +3.1], ["ARM", +2.4]],
@@ -836,6 +876,14 @@ function NewsMarketsBoard({ onTicker, onSurface }) {
     { sym: "TWLO", name: "Twilio Inc", px: "227.54", chg: +19.4 },
     { sym: "GENO", name: "Genoa Bio", px: "29.40", chg: +12.1 },
   ];
+  // real daily-close sparklines for the trending tickers (Schwab history, server-cached)
+  const trendKey = trending.map(r => r.sym).join(",");
+  React.useEffect(() => {
+    const BV = window.__BV; if (!BV || !BV.get || !trendKey) return;
+    let alive = true;
+    BV.get("/api/spark?syms=" + encodeURIComponent(trendKey)).then(d => { if (alive && d && d.sparks) setTrendSparks(s => ({ ...s, ...d.sparks })); }).catch(() => {});
+    return () => { alive = false; };
+  }, [trendKey]);
   const Story = ({ s, big }) => (
     <button className={`nm-story ${big ? "nm-story--big" : ""}`} onClick={() => s.tickers[0] && onTicker(s.tickers[0][0])}>
       {big && <div className="nm-feat-img"><span className="mono">◧ MARKETS</span></div>}
@@ -867,13 +915,18 @@ function NewsMarketsBoard({ onTicker, onSurface }) {
         <div className="nm-lookup" onClick={() => onSurface && onSurface("signal-scanner")}><span className="mono dim2">⌕ Quote lookup</span></div>
         <div className="nm-rail-card">
           <div className="nm-rail-h mono"><span>TRENDING TICKERS</span><span className="nm-rail-go" onClick={() => onSurface && onSurface("signal-scanner")}>Scanner →</span></div>
-          {trending.map((r, i) => (
+          {trending.map((r, i) => {
+            const series = trendSparks[r.sym];
+            return (
             <button key={i} className="nm-row" onClick={() => onTicker(r.sym)}>
               <span className="nm-row-l"><b className="nm-row-sym mono">{r.sym}</b><span className="nm-row-name dim2">{r.name}</span></span>
-              <Sparkline data={useMemoH(() => { const a = []; let v = 0; for (let j = 0; j < 16; j++) { v += (Math.sin(j * .7 + r.sym.charCodeAt(0)) + (r.up ? .2 : -.18)) * .5; a.push(v); } return a; }, [r.sym])} color={`var(--${r.up ? "gn" : "rd"})`} w={52} h={20} />
+              {series && series.length >= 3
+                ? <Sparkline data={series} color={`var(--${r.chg >= 0 ? "gn" : "rd"})`} w={52} h={20} />
+                : <span style={{ width: 52, height: 20, display: "inline-block" }} />}
               <span className="nm-row-r"><span className="nm-row-px mono">{r.px}</span><span className={`nm-row-chg mono ${r.chg >= 0 ? "up" : "dn"}`}>{r.chg >= 0 ? "+" : ""}{r.chg.toFixed(2)}%</span></span>
             </button>
-          ))}
+            );
+          })}
         </div>
         <div className="nm-rail-card">
           <div className="nm-rail-h mono"><span>MOST ACTIVE</span><span className="nm-rail-go" onClick={() => onSurface && onSurface("momentum")}>Movers →</span></div>
@@ -1098,10 +1151,10 @@ function resolveSignalFeed() {
   const rows = HR.pool();
   if (!rows.length) return SIGNALFEED_MOCK;
   const inA = (r) => HR.inAudit(r.sym);
-  const buys = rows.filter(r => r.verdict === "BUY" && inA(r)).sort((a, b) => b.score - a.score);
+  const buys = rows.filter(r => HR.vmode(r) === "BUY" && inA(r)).sort((a, b) => b.score - a.score);
   const ins = rows.filter(r => HR.num(r.insNet, 0) > 0 && inA(r)).sort((a, b) => b.insNet - a.insNet);
   const er = rows.filter(r => HR.num(r.er, 99) <= 9 && HR.num(r.er, 99) >= 0 && inA(r)).sort((a, b) => a.er - b.er);
-  const bear = rows.filter(r => (r.verdict === "SHORT" || r.verdict === "AVOID") && inA(r)).sort((a, b) => a.score - b.score);
+  const bear = rows.filter(r => { const v = HR.vmode(r); return (v === "SHORT" || v === "AVOID") && inA(r); }).sort((a, b) => a.score - b.score);
   const ai = rows.filter(r => r.aiEdge != null && inA(r)).sort((a, b) => b.aiEdge - a.aiEdge);
   const M = (window.__BV && window.__BV.market) || null;
   // all these signals derive from the latest scan bundle → stamp them with the real
@@ -1112,7 +1165,7 @@ function resolveSignalFeed() {
   if (buys[0]) out.push({ t: scanT, tone: "gn", tag: "BULLISH", sym: buys[0].sym, text: `BUY verdict · score ${buys[0].score}${buys[0].setup ? " · " + buys[0].setup : ""}` });
   if (buys[1]) out.push({ t: scanT, tone: "gn", tag: "ALERT", sym: buys[1].sym, text: `Entry ${buys[1].eq || "in zone"} · R:R ${buys[1].rr}${buys[1].rvol !== "—" ? " · " + buys[1].rvol + "× RVOL" : ""}` });
   if (er[0]) out.push({ t: scanT, tone: "amb", tag: "ER", sym: er[0].sym, text: `ER in ${er[0].er} sessions · event-risk elevated` });
-  if (bear[0]) out.push({ t: scanT, tone: "rd", tag: "BEARISH", sym: bear[0].sym, text: `${bear[0].verdict} · score ${bear[0].score} · excluded from longs` });
+  if (bear[0]) out.push({ t: scanT, tone: "rd", tag: "BEARISH", sym: bear[0].sym, text: `${HR.vmode(bear[0])} · score ${bear[0].score} · excluded from longs` });
   const _F = realFunnel(window.__tmode) || (M && M.funnel);
   if (_F) out.push({ t: scanT, tone: "ink", tag: "BUNDLE", sym: null, text: `Daily bundle · ${_F.universe} ranked · ${_F.bullish} Bullish · ${_F.neutral} Neutral · ${_F.bearish} Bearish` });
   if (ai[0]) out.push({ t: scanT, tone: "violet", tag: "AI", sym: ai[0].sym, text: `AI edge +${ai[0].aiEdge.toFixed(2)} · highest hit-net today` });

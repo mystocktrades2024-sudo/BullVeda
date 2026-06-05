@@ -619,6 +619,36 @@ async def index_quotes_api(auth: HTTPBasicCredentials = Depends(_check_auth)):
     return {"index_quotes": await _index_quotes_cached()}
 
 
+# ── Sparkline series (last ~22 daily closes) for Home tiles, TTL-cached per symbol ──
+_SPARK_CACHE = {"ts": 0.0, "data": {}}
+
+async def _sparks_cached(symbols: list, ttl: float = 1800.0):
+    """Real daily-close series per symbol (Schwab/EODHD history). Cached 30min — these
+    are daily bars, they don't move intraday. Only fetches symbols not already cached."""
+    import time as _t
+    now = _t.time()
+    if (now - _SPARK_CACHE["ts"]) >= ttl:
+        _SPARK_CACHE["data"] = {}; _SPARK_CACHE["ts"] = now
+    want = [s for s in (symbols or []) if s and s not in _SPARK_CACHE["data"]]
+    if want:
+        try:
+            import data_fetcher as _df
+            fresh = await _asyncio.get_event_loop().run_in_executor(None, _df.get_sparks, want)
+            _SPARK_CACHE["data"].update(fresh or {})
+        except Exception:
+            pass
+    return {s: _SPARK_CACHE["data"].get(s) for s in (symbols or []) if _SPARK_CACHE["data"].get(s)}
+
+
+@app.get("/api/spark")
+async def spark_api(syms: str = "", auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Sparkline series for Home — `?syms=$SPX,LOGI,BTC-USD.CC,...` → {sym:[closes]}."""
+    if isinstance(auth, Response):
+        return auth
+    wanted = [s.strip() for s in (syms or "").split(",") if s.strip()][:40]
+    return {"sparks": await _sparks_cached(wanted)}
+
+
 _BV_HEAVY_RESP = {"ts": 0.0, "body": None}
 
 @app.get("/api/bullveda-heavy")
