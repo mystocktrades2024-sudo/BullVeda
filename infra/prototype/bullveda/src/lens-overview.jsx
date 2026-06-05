@@ -699,13 +699,6 @@ Levels: entry $${entry.toFixed(2)}, stop $${(ticker.stop || 0).toFixed(2)}, targ
         </div>
       </div>
 
-      <div className="thx-ref">
-        <span className="thx-ref-h mono dim2">FOR REFERENCE</span>
-        <div className="thx-ref-grid">
-          {ref.map((r, i) => <div key={i} className="thx-ref-cell"><span className="mono dim2">{r[0]}</span><span className="mono">{r[1]}</span></div>)}
-        </div>
-      </div>
-
       {tAi && tAi !== "loading" && (
         <div className="aix-out mono thx-aiout">
           <span className="aix-tag">✦ KAIROS THESIS</span>
@@ -931,36 +924,31 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
     if (window.__setLens && map[name]) window.__setLens(map[name]);
   };
 
+  const isInvest = mode === "INVESTMENT";
   return (
     <div className="lens lens--ov">
 
-      {/* ── THE ANSWER · verdict + edge + the trade, one canonical block ── */}
+      {/* ── 1 · THE CALL + THE TRADE · one canonical answer block ── */}
       {window.DecisionHero && <DecisionHero ticker={ticker} mode={mode} heroStyle={heroStyle} sizeCat={sizeCat} onLens={routeLens} />}
 
-      {/* ── SURFACED BY · which discovery engines flagged this name ── */}
-      <SurfacedBy ticker={ticker} />
+      {/* ── INVALIDATION · the kill-switch sits WITH the trade (risk-first, P3/P15) ── */}
+      {(() => {
+        const L = window.coherentLevels ? window.coherentLevels(ticker) : ticker;
+        const er = ticker.earnings && ticker.earnings.days;
+        const rs = ticker.rsRank;
+        return (
+          <div className="ov-inval mono" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontSize: 11.5, padding: "7px 12px", margin: "0 0 12px", background: "color-mix(in oklab, var(--rd) 8%, var(--glass-bg-2))", border: "1px solid color-mix(in oklab, var(--rd) 30%, var(--glass-line))", borderRadius: 8 }}>
+            <span className="label-cap dn" style={{ fontSize: 9 }}>INVALIDATION</span>
+            {L.valid ? <span>Exit on a close below <b className="dn">${L.stop.toFixed(2)}</b> · hard stop</span> : <span className="dim2">no complete plan — wait for levels</span>}
+            {er != null && er >= 0 ? <><span className="dim2">·</span><span>earnings <b className={er <= 7 ? "dn" : "warn"}>T−{er}d</b> binary risk</span></> : null}
+            {rs != null && rs < 50 ? <><span className="dim2">·</span><span className="warn">RS {Math.round(rs)} — leadership weak</span></> : null}
+          </div>
+        );
+      })()}
 
-      {/* ── HORIZON STRIP · swing / position / investment verdicts side-by-side ── */}
-      <HorizonStrip ticker={ticker} mode={mode} onMode={(m) => window.__setMode && window.__setMode(m)} />
-
-      {/* ── REGIME FIT · does THIS setup work in THIS regime (P5) + catalyst tier ── */}
-      <RegimeFit ticker={ticker} mode={mode} />
-
-      {/* ── 1 · COMPANY & CATALYSTS · context first (full width, above the analysis) ── */}
-      <OvSection n={1} title="Company & Catalysts · Context"
-        sub="who they are · valuation · earnings · what's hitting the tape"
-        headerStyle={headerStyle} defaultOpen={true}
-        teaser="Profile · real valuation & quality · next earnings · live catalysts">
-        <div className="ov-co2x2">
-          <CompanySnapshot ticker={ticker} />
-          <CompanyValuation ticker={ticker} />
-          <NewsCatalysts ticker={ticker} />
-        </div>
-      </OvSection>
-
-      {/* ── 2 · ENTRY READINESS · the buy funnel, live ── */}
-      <OvSection n={2} title="Entry Readiness · Are We Cleared?"
-        sub="the buy funnel as ✓/✗ · plus the full rule-engine audit" headerStyle={headerStyle}>
+      {/* ── 2 · ARE WE CLEARED? · the buy funnel + rule-engine audit ── */}
+      <OvSection n={2} title="Are We Cleared? · Entry Readiness"
+        sub="the buy funnel as ✓/✗ · plus the full rule-engine audit" headerStyle={headerStyle} defaultOpen={true}>
         <BuyChecklist ticker={ticker} mode={mode} />
         {(window.__tier ?? 4) >= 3 && (
           <details className="ov-more">
@@ -970,91 +958,94 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
         )}
       </OvSection>
 
-      {/* ── 3 · LENS CONFLUENCE · the ONE evidence grid + launchpad ── */}
-      <OvSection n={3} title="Lens Confluence · The Evidence"
-        sub="every discipline's read · click any tile to open that lens" headerStyle={headerStyle}>
-        <ConfluenceHeatmap ticker={ticker} mode={mode} />
+      {/* ── 3 · CONVICTION · the 4 agreement views, consolidated ── */}
+      <OvSection n={3} title="Conviction · Do The Signals Agree?"
+        sub="3 horizons · regime fit · which engines flagged it · every lens' read"
+        headerStyle={headerStyle} defaultOpen={true}
+        teaser="horizons · regime fit · engine hits · lens confluence">
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <HorizonStrip ticker={ticker} mode={mode} onMode={(m) => window.__setMode && window.__setMode(m)} />
+          <RegimeFit ticker={ticker} mode={mode} />
+          <SurfacedBy ticker={ticker} />
+          <ConfluenceHeatmap ticker={ticker} mode={mode} />
+        </div>
       </OvSection>
 
-      {/* ── 4 · THE CASE · bull vs bear, synthesized once ── */}
+      {/* ── 4 · THE CASE · bull vs bear ── */}
       <OvSection n={4} title="The Case · Bull vs Bear"
-        sub="why it's a buy — and what would make it wrong" headerStyle={headerStyle}>
+        sub="why it's a buy — and what would make it wrong" headerStyle={headerStyle} defaultOpen={true}>
         <ThesisCard ticker={ticker} mode={mode} />
       </OvSection>
 
-      {/* ── 5 · KEEP ME HONEST · pre-mortem | what-changed | why-edge ── */}
-      <OvSection n={5} title="Keep Me Honest"
-        sub="what would break the thesis · what moved in 24h · why the edge exists"
+      {/* ── 5 · WHAT WOULD BREAK IT · risk-first pre-mortem + book stress ── */}
+      <OvSection n={5} title="What Would Break It · Risk"
+        sub="pre-mortem triggers · your note · book stress under shocks"
         headerStyle={headerStyle} defaultOpen={true}
-        teaser="Pre-mortem triggers · your note · change vs prior scan · sleeve mechanism">
-        <div className="ov-honest-3col">
-        <div className="ov-honest-block">
-        <div className="ov-honest-sub label-cap">▼ What would make this wrong · pre-mortem</div>
-        <div className="premortem">
-          {(() => {
-            const L = window.coherentLevels ? window.coherentLevels(ticker) : ticker;
-            const reg = String((window.__BV && window.__BV.market && window.__BV.market.regime4) || (ticker._scan && ticker._scan._raw && ticker._scan._raw.regime4) || "the current regime").replace(/_/g, " ");
-            const rs = ticker.rsRank;
-            const er = ticker.earnings && ticker.earnings.days;
-            const stopV = (L && L.stop) || ticker.stop || 0;
-            const rows = [];
-            rows.push(["1", `Closes below the stop $${stopV.toFixed(2)} — hard invalidation, exit on the close.`, "HARD", "rd"]);
-            rows.push(["2", `Regime flips out of ${reg} — the setup's backdrop is gone (re-check the regime gate).`, "MACRO", "amb"]);
-            if (rs != null) rows.push(["3", `RS rank falls below 40 (now ${Math.round(rs)}) — relative leadership lost.`, "MOMENTUM", rs < 50 ? "rd" : "amb"]);
-            else rows.push(["3", "Sector relative strength rolls over — relative leadership lost.", "MOMENTUM", "amb"]);
-            if (er != null && er >= 0 && er <= 30) rows.push(["4", `Earnings in ${er}d — binary event; trim or exit before the print unless the thesis confirms.`, "CATALYST", "rd"]);
-            else if (mode === "INVESTMENT") rows.push(["4", "ROE / operating margins deteriorate, or price exceeds fair value — margin of safety gone.", "FUNDAMENTAL", "amb"]);
-            else rows.push(["4", "Distribution-day cluster (heavy down-volume on no news) — institutions exiting.", "FUNDAMENTAL", "rd"]);
-            return rows.map(([n, t, tag, tone]) => (
-              <div key={n} className="premortem-row"><span className="pm-num mono">{n}</span><span className="pm-text">{t}</span><Pill tone={tone} small>{tag}</Pill></div>
-            ));
-          })()}
+        teaser="pre-mortem triggers · your note · β-scaled stress">
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.2fr) minmax(0,1fr)", gap: 12 }}>
+          <div className="ov-honest-block">
+            <div className="ov-honest-sub label-cap">▼ What would make this wrong · pre-mortem</div>
+            <div className="premortem">
+              {(() => {
+                const L = window.coherentLevels ? window.coherentLevels(ticker) : ticker;
+                const reg = String((window.__BV && window.__BV.market && window.__BV.market.regime4) || (ticker._scan && ticker._scan._raw && ticker._scan._raw.regime4) || "the current regime").replace(/_/g, " ");
+                const rs = ticker.rsRank;
+                const er = ticker.earnings && ticker.earnings.days;
+                const stopV = (L && L.stop) || ticker.stop || 0;
+                const rows = [];
+                rows.push(["1", `Closes below the stop $${stopV.toFixed(2)} — hard invalidation, exit on the close.`, "HARD", "rd"]);
+                rows.push(["2", `Regime flips out of ${reg} — the setup's backdrop is gone (re-check the regime gate).`, "MACRO", "amb"]);
+                if (rs != null) rows.push(["3", `RS rank falls below 40 (now ${Math.round(rs)}) — relative leadership lost.`, "MOMENTUM", rs < 50 ? "rd" : "amb"]);
+                else rows.push(["3", "Sector relative strength rolls over — relative leadership lost.", "MOMENTUM", "amb"]);
+                if (er != null && er >= 0 && er <= 30) rows.push(["4", `Earnings in ${er}d — binary event; trim or exit before the print unless the thesis confirms.`, "CATALYST", "rd"]);
+                else if (isInvest) rows.push(["4", "ROE / operating margins deteriorate, or price exceeds fair value — margin of safety gone.", "FUNDAMENTAL", "amb"]);
+                else rows.push(["4", "Distribution-day cluster (heavy down-volume on no news) — institutions exiting.", "FUNDAMENTAL", "rd"]);
+                return rows.map(([n, t, tag, tone]) => (
+                  <div key={n} className="premortem-row"><span className="pm-num mono">{n}</span><span className="pm-text">{t}</span><Pill tone={tone} small>{tag}</Pill></div>
+                ));
+              })()}
+            </div>
+            <PreMortemNote symbol={ticker.symbol} />
+          </div>
+          <div className="ov-honest-block">
+            <div className="ov-honest-sub label-cap">▼ Book stress · β-scaled shocks</div>
+            <StressSnapshot ticker={ticker} />
+          </div>
         </div>
-        <PreMortemNote symbol={ticker.symbol} />
-        </div>
+      </OvSection>
 
+      {/* ── 6 · CONTEXT · company / valuation / catalysts (open for INVEST) ── */}
+      <OvSection n={6} title="Company & Catalysts · Context"
+        sub="who they are · valuation · earnings · what's hitting the tape"
+        headerStyle={headerStyle} defaultOpen={isInvest}
+        teaser="Profile · real valuation & quality · next earnings · live catalysts">
+        <div className="ov-co2x2">
+          <CompanySnapshot ticker={ticker} />
+          <CompanyValuation ticker={ticker} />
+          <NewsCatalysts ticker={ticker} />
+        </div>
+      </OvSection>
+
+      {/* ── 7 · TRACK RECORD · WHAT CHANGED · MACRO (housekeeping, collapsed) ── */}
+      <OvSection n={7} title="Track Record · What Changed · Macro"
+        sub="sleeve mechanism + last trades · change vs prior scan · the macro backdrop"
+        headerStyle={headerStyle} defaultOpen={false}
+        teaser="sleeve edge + last 5 · 24h change · regime / rates / credit">
+        <div className="ov-honest-3col">
+          <div className="ov-honest-block">
+            <div className="ov-honest-sub label-cap">⚙ Why the edge exists · mechanism</div>
+            <SleeveAttribution ticker={ticker} />
+          </div>
           <div className="ov-honest-block">
             <div className="ov-honest-sub label-cap">↗ What changed · vs prior scan</div>
             <WhatChanged ticker={ticker} />
           </div>
           <div className="ov-honest-block">
-            <div className="ov-honest-sub label-cap">⚙ Why the edge exists · mechanism</div>
-            <SleeveAttribution ticker={ticker} />
+            <div className="ov-honest-sub label-cap">▼ Macro backdrop</div>
+            <MacroDrill />
           </div>
         </div>
       </OvSection>
-
-      {/* ── 6 · MACRO · STRESS · DESK READ (revived, real) ── */}
-      <OvSection n={6} title="Macro · Stress · Desk Read"
-        sub="the backdrop · book stress under shocks · one-line desk recap"
-        headerStyle={headerStyle} defaultOpen={false}
-        teaser="regime + rates + credit · β-scaled stress · desk recap">
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div><div className="ov-honest-sub label-cap">▼ Macro backdrop</div><MacroDrill /></div>
-          <div><div className="ov-honest-sub label-cap">▼ Book stress · β-scaled shocks</div><StressSnapshot ticker={ticker} /></div>
-          <DeskRead ticker={ticker} mode={mode} />
-        </div>
-      </OvSection>
-
-      <div className="lens-call">
-        <span className="label-cap">The Read · {mode}</span>
-        <span className="mono">
-          {(() => {
-            const L = window.coherentLevels ? window.coherentLevels(ticker) : ticker;
-            const ss = ticker.setupStats || {};
-            const ge = ticker.gatesEvaluated || [];
-            const pass = ge.filter(g => g.passed).length, tot = ge.length;
-            const er = ticker.earnings && ticker.earnings.days;
-            return <>
-              {L.valid ? <>A break above <b className="copper">${L.pivot.toFixed(2)}</b> confirms; stop ${L.stop.toFixed(2)}. </> : <>No complete trade plan for this name. </>}
-              {tot ? <><b className={pass === tot ? "up" : "warn"}>{pass}/{tot}</b> gates pass · </> : ""}
-              {ss.wilsonLB != null ? <>Wilson LB <b className={ss.wilsonLB >= 0.45 ? "up" : "warn"}>{(ss.wilsonLB * 100).toFixed(0)}%</b>{ss.n != null ? ` (n=${ss.n}${ss.n < 30 ? " ⚠" : ""})` : ""} · </> : "no per-setup record · "}
-              {ss.pf != null ? <>PF <b className={ss.pf >= 1.3 ? "up" : "warn"}>{ss.pf.toFixed(2)}</b> · </> : ""}
-              {er != null && er >= 0 && er <= 14 ? <b className="warn">size down into ER (T−{er}d).</b> : "½-Kelly sizing reference."}
-            </>;
-          })()}
-        </span>
-      </div>
     </div>
   );
 }
@@ -1299,47 +1290,6 @@ function StressSnapshot({ ticker }) {
 window.LensOverview = LensOverview;
 
 // ─── Desk Read — how a 20-yr quant scans it in 2 seconds ────────
-function DeskRead({ ticker, mode }) {
-  const L = window.coherentLevels ? window.coherentLevels(ticker) : ticker;
-  const ss = ticker.setupStats || {};
-  const dmKey = mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "investment" : "swing";
-  const dec = ticker.decisionsByMode && ticker.decisionsByMode[dmKey];
-  const rr = (dec && typeof dec.rr_ratio === "number") ? dec.rr_ratio : ticker.rMultiple;
-  const wr = ss.winRate, lb = ss.wilsonLB;
-  const rrT1 = (L.valid && (L.pivot - L.stop) > 0) ? (L.t1 - L.pivot) / (L.pivot - L.stop) : null;
-  const evR = (wr != null && rrT1 != null) ? (wr * rrT1 - (1 - wr)) : null;
-  const er = ticker.earnings && ticker.earnings.days;
-  return (
-    <div className="dr">
-      <div className="dr-metrics">
-        <DrCell label="EXPECTANCY" value={evR != null ? `${evR >= 0 ? "+" : ""}${evR.toFixed(2)}R` : "—"} tone={evR != null ? (evR >= 0 ? "gn" : "rd") : "ink"} tip="p·b − q · per unit risk" />
-        <DrCell label="EDGE · WILSON LB" value={lb != null ? `${(lb * 100).toFixed(0)}%` : "—"} tone={lb != null ? (lb >= 0.45 ? "gn" : "amb") : "ink"} tip={ss.n != null ? `95% LB · n=${ss.n}` : "no per-setup sample"} />
-        <DrCell label="R:R" value={rr != null ? rr.toFixed(2) : "—"} tone="copper" tip="reward ÷ risk" />
-        <DrCell label="PF" value={ss.pf != null ? ss.pf.toFixed(2) : "—"} tone={ss.pf != null ? (ss.pf >= 1.3 ? "gn" : "amb") : "ink"} tip="profit factor" />
-        <DrCell label="$ LIQUIDITY" value={ticker.dvol ? `$${(ticker.dvol / 1e6).toFixed(0)}M` : "—"} tone="gn" tip={ticker.spread != null ? `${ticker.spread.toFixed(2)}% spread` : "avg $ volume"} />
-        <DrCell label="SHORT FLOAT" value={ticker.shortFloat != null ? `${ticker.shortFloat.toFixed(1)}%` : "—"} tone={ticker.shortFloat >= 15 ? "amb" : "gn"} tip="squeeze / borrow risk" />
-        <DrCell label="CATALYST" value={ticker.catalystTier ? `T${ticker.catalystTier}` : "—"} tone={ticker.catalystTier === 1 ? "gn" : "amb"} tip="catalyst tier" />
-        <DrCell label="TIME RISK" value={er != null ? `ER ${er}d` : "clear"} tone={er != null && er <= 10 ? "amb" : "gn"} tip="event risk into the print" />
-      </div>
-      <div className="dr-call mono">
-        <span className="dr-call-tag">DESK READ</span>
-        <span className="dr-call-txt">
-          {ticker.symbol} — {ticker.setupFamily || "setup"}{lb != null ? `, edge LB ${(lb * 100).toFixed(0)}%${ss.n != null ? ` (n=${ss.n})` : ""}` : ", no per-setup track record yet"}{evR != null ? `, ${evR >= 0 ? "+" : ""}${evR.toFixed(2)}R expectancy` : ""}. {L.valid ? <>Risk bounded at the <b>${L.stop.toFixed(2)}</b> stop.</> : "No complete trade plan."} {er != null && er <= 10 ? <b className="warn"> ER in {er}d — size down / flatten pre-print.</b> : " Catalyst window clear."}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function DrCell({ label, value, tone, tip }) {
-  return (
-    <div className={`dr-cell dr-cell--${tone}`} title={tip}>
-      <div className="dr-cell-l mono">{label}</div>
-      <div className={`dr-cell-v mono kpi-tone--${tone}`}>{value}</div>
-    </div>
-  );
-}
-
 // ─── Company Snapshot · Quant Read ──────────────────────────
 function CompanySnapshot({ ticker }) {
   return (
