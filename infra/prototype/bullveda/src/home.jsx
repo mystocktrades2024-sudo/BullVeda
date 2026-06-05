@@ -147,7 +147,7 @@ function resolveIndexStrip() {
   if (c) {
     const mac = c.macro_signals || {}, bf = c.bonds_forex || {};
     const bfc = (k) => bf[k] ? n(bf[k].change_p) : null;
-    if (mac.gld) push("GOLD·GLD", fmt(n(mac.gld.price)), n(mac.gld.chg5d));
+    // (GOLD now arrives as a true future via index_quotes — no GLD proxy here)
     if (mac.dxy) push("DXY·UUP", fmt(n(mac.dxy.price)), n(mac.dxy.chg5d));
     if (bf["TYX.INDX"]) push("US 30Y", n(bf["TYX.INDX"].price) != null ? n(bf["TYX.INDX"].price).toFixed(2) + "%" : null, bfc("TYX.INDX"));
     if (bf["EURUSD.FOREX"]) push("EUR/USD", fmt(n(bf["EURUSD.FOREX"].price), 4), bfc("EURUSD.FOREX"));

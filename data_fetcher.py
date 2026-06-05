@@ -2844,6 +2844,85 @@ def get_index_quotes() -> list[dict]:
                 continue
     except Exception:
         pass
+    # ── commodities: WTI/Gold/Copper/Silver (Stooq true futures → Schwab ETF proxy) ──
+    try:
+        out.extend(get_commodity_quotes())
+    except Exception:
+        pass
+    return out
+
+
+def _stooq_quote(sym: str) -> dict | None:
+    """One free Stooq light quote → {price, chg} (true front-month futures).
+    Fields sd2t2ohlcvp give close + prev-close → real daily %. Stooq intermittently
+    serves a JS anti-bot challenge instead of CSV; detected + treated as a miss so
+    the caller falls back. No key, no license.
+    """
+    try:
+        import requests
+        url = f"https://stooq.com/q/l/?s={sym}&f=sd2t2ohlcvp&e=csv"
+        for _ in range(2):
+            r = requests.get(url, timeout=6, headers={"User-Agent": "Mozilla/5.0"})
+            t = (r.text or "").strip()
+            # anti-bot challenge or HTML → miss
+            if not t or "<" in t[:1] or "crypto.subtle" in t or "script" in t[:80].lower():
+                continue
+            parts = t.split(",")
+            if len(parts) < 9 or not parts[0].upper().startswith(sym.split(".")[0].upper()):
+                continue
+            try:
+                close = float(parts[6]); prev = float(parts[8])
+            except (ValueError, IndexError):
+                continue
+            chg = round((close - prev) / prev * 100, 2) if prev else None
+            return {"price": round(close, 2), "chg": chg}
+        return None
+    except Exception:
+        return None
+
+
+def get_commodity_quotes() -> list[dict]:
+    """Commodity tape (WTI/Gold/Copper/Silver) — TRUE front-month futures from
+    Stooq (free, no key), with a Schwab commodity-ETF proxy fallback when Stooq
+    throttles. Label carries the source: bare name = true futures, "·ETF" suffix
+    = proxy. Returns [] on total failure (feed-honest)."""
+    SPEC = [
+        ("cl.f", "WTI",    "USO"),
+        ("gc.f", "GOLD",   "GLD"),
+        ("hg.f", "COPPER", "CPER"),
+        ("si.f", "SILVER", "SLV"),
+    ]
+    out: list[dict] = []
+    proxies_needed = []
+    for stq, label, etf in SPEC:
+        q = _stooq_quote(stq)
+        if q and q.get("price") is not None:
+            out.append({"key": label, "label": label, "value": q["price"], "chg": q.get("chg"), "suffix": ""})
+        else:
+            proxies_needed.append((label, etf))
+    # one batched Schwab call for whatever Stooq couldn't serve
+    if proxies_needed:
+        try:
+            import schwab_client as _sc
+            blobs = _sc.get_quotes_batch([etf for _, etf in proxies_needed]) or {}
+            for label, etf in proxies_needed:
+                b = blobs.get(etf) or blobs.get(etf.upper())
+                qd = (b or {}).get("quote") or {}
+                last = qd.get("lastPrice")
+                if last in (None, "", "NA"):
+                    continue
+                try:
+                    last = float(last)
+                except Exception:
+                    continue
+                chg = qd.get("netPercentChange")
+                try:
+                    chg = round(float(chg), 2) if chg not in (None, "", "NA") else None
+                except Exception:
+                    chg = None
+                out.append({"key": label + "·" + etf, "label": label + "·" + etf, "value": round(last, 2), "chg": chg, "suffix": ""})
+        except Exception:
+            pass
     return out
 
 
