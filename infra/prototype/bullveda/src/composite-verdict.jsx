@@ -44,19 +44,19 @@ function compositeVerdict(ticker, mode) {
   const wsum = lenses.reduce((a, l) => a + (prof[l.k] ?? l.w), 0) || 1;
   lenses.forEach(l => { l.w = (prof[l.k] ?? l.w) / wsum; });
 
-  const net = Math.round(lenses.reduce((a, l) => a + l.w * l.v, 0));
-  const tone = v => v >= 62 ? "gn" : v >= 46 ? "amb" : "rd";
-  lenses.forEach(l => { l.tone = tone(l.v); });
-  // The engine's authoritative per-mode verdict overrides the client recompute
-  // (audit #6). The net score stays as the composite bias read, but the VERDICT LABEL
-  // must match what the engine actually decided for THIS mode — it was showing BUY
-  // while the engine flagged WATCH for swing/position/invest. decisions_by_mode keys
-  // are swing/position/investment; values may be a bare string or {verdict}.
+  // ── reconcile to the engine (audit #6 + score consistency) ──
+  // decisions_by_mode is the AUTHORITATIVE per-mode call. Use the engine's
+  // composite_score as the headline NUMBER (so Overview matches Home/Scanner) and
+  // its verdict as the LABEL; the lens-weighted recompute is only the fallback.
   const _dm = ticker.decisionsByMode || null;
   const _dmKey = moKey === "invest" ? "investment" : moKey;
   const _engRaw = _dm ? (_dm[_dmKey] != null ? _dm[_dmKey] : _dm[moKey]) : null;
   const _engVerdict = _engRaw ? (typeof _engRaw === "string" ? _engRaw : _engRaw.verdict) : null;
-  const _vt = v => v === "BUY" ? "gn" : v === "WATCH" ? "amb" : "rd";
+  const _engScore = (_engRaw && typeof _engRaw === "object" && typeof _engRaw.composite_score === "number") ? _engRaw.composite_score : null;
+  const lensNet = Math.round(lenses.reduce((a, l) => a + l.w * l.v, 0));
+  const net = _engScore != null ? Math.round(_engScore) : lensNet;
+  const tone = v => v >= 62 ? "gn" : v >= 46 ? "amb" : "rd";
+  lenses.forEach(l => { l.tone = tone(l.v); });
   const verdict = _engVerdict || (net >= 66 ? "BUY" : net >= 50 ? "WATCH" : net >= 40 ? "AVOID" : "PASS");
   const verdictSource = _engVerdict ? "engine" : "derived";
   const vtone = _engVerdict ? _vt(_engVerdict) : (net >= 66 ? "gn" : net >= 50 ? "amb" : "rd");

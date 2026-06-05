@@ -172,18 +172,14 @@ window.VerdictHero = VerdictHero;
 // Resolve a coherent {price,pivot,stop,t1,t2} set. The canonical ticker is
 // already consistent; off-universe stubs reuse one ticker's levels with their
 // own price, so we rescale geometry around price when it's clearly inconsistent.
+// Returns the REAL trade-plan levels — never fabricates geometry. `valid` is true
+// only when the engine produced an ordered, complete plan (stop<pivot<t1<t2, all >0);
+// callers show "—" / a "no plan" note when !valid instead of inventing numbers.
 window.coherentLevels = function (t) {
   const price = t.price || t.pivot || 0;
-  let pivot = t.pivot, stop = t.stop, t1 = t.t1, t2 = t.t2;
-  const ordered = stop < pivot && pivot < t1 && t1 < t2;
-  const near = price > 0 && Math.abs(price / pivot - 1) < 0.25 && price > stop * 0.9 && price < t2 * 1.08;
-  if (!(ordered && near) && price > 0) {
-    pivot = +(price * 0.982).toFixed(2);
-    stop  = +(price * 0.926).toFixed(2);
-    t1    = +(price * 1.080).toFixed(2);
-    t2    = +(price * 1.160).toFixed(2);
-  }
-  return { price, pivot, stop, t1, t2 };
+  const pivot = t.pivot || price, stop = t.stop, t1 = t.t1, t2 = t.t2;
+  const valid = stop > 0 && pivot > 0 && t1 > 0 && t2 > 0 && stop < pivot && pivot < t1 && t1 < t2;
+  return { price, pivot, stop, t1, t2, valid };
 };
 
 // ─── discoveryFootprint — which screen engines REALLY surfaced this name ───
@@ -448,7 +444,15 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
   const vtone = cv ? cv.vtone : (net >= 66 ? "gn" : net >= 50 ? "amb" : "rd");
   const bias = window.secBias ? window.secBias(cv ? cv.verdict : ticker.verdict) : (cv ? cv.verdict : ticker.verdict);
   const pillars = ticker.pillars;
-  const L = window.coherentLevels(ticker);
+  // ── per-mode levels (decisions_by_mode is the authoritative plan for the active
+  //    horizon — Position/Invest have different stop/T1/T2/R:R than swing) ──
+  const dmKey = mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "investment" : "swing";
+  const dec = (ticker.decisionsByMode && ticker.decisionsByMode[dmKey]) || null;
+  const Lbase = window.coherentLevels(ticker);
+  const L = (dec && dec.stop > 0 && dec.t1 > 0 && dec.t2 > 0)
+    ? { price: Lbase.price, pivot: dec.entry_mid || Lbase.pivot, stop: dec.stop, t1: dec.t1, t2: dec.t2, valid: true }
+    : Lbase;
+  const modeRR = dec && typeof dec.rr_ratio === "number" ? dec.rr_ratio : (ticker.rMultiple || null);
   const [chartView, setChartView] = React.useState(() => { try { return localStorage.getItem("dh-chart-view") || "full"; } catch (e) { return "full"; } });
   const pickChartView = v => { setChartView(v); try { localStorage.setItem("dh-chart-view", v); } catch (e) {} };
   const entry = L.pivot;                       // the trigger / entry
@@ -456,8 +460,14 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
   const reward1 = L.t1 - entry;
   const rrToT1 = risk > 0 ? reward1 / risk : 0;
   const ss = ticker.setupStats || {};
-  const wr = ss.winRate || 0.617, lb = ss.wilsonLB || 0.477;
-  const evR = (wr * rrToT1 - (1 - wr) * 1);
+  const wr = ss.winRate != null ? ss.winRate : null, lb = ss.wilsonLB != null ? ss.wilsonLB : null;
+  const evR = (wr != null && L.valid) ? (wr * rrToT1 - (1 - wr) * 1) : null;
+  // ── real book/sizing context ──
+  const NAV = (window.__BV && window.__BV.nav) || null;
+  const navRisk = NAV ? NAV * 0.005 : 420;          // 0.5%-NAV risk budget (½-Kelly floor)
+  const held = ((window.__BV && window.__BV.realHoldings && window.__BV.realHoldings()) || []).find(p => String(p.sym || "").toUpperCase() === String(ticker.symbol || "").toUpperCase());
+  const scanTs = (window.__BV && window.__BV.scanMeta && window.__BV.scanMeta.ts) || null;
+  const scanT = scanTs ? String(scanTs).split(" ").slice(-2).join(" ") : null;
   const erTxt = ticker.earnings ? `earnings in ${ticker.earnings.days}d` : "a clean catalyst window";
   const dissenters = cv ? cv.dissenters.slice(0, 4) : [];
 
@@ -469,8 +479,9 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
   else { st = "EXTENDED"; stTone = "amb"; stNote = `${((L.price - entry) / entry * 100).toFixed(1)}% above trigger · wait for a pullback`; }
 
   // sizing math (risk-based): risk budget ÷ per-share stop distance
-  const navRisk = 420, shares = risk > 0 ? Math.round(navRisk / risk) : 0;
+  const shares = (L.valid && risk > 0) ? Math.round(navRisk / risk) : 0;
   const dollars = Math.round(shares * L.price);
+  const navPct = NAV ? (dollars / NAV * 100) : null;
 
   // price ladder rungs, high → low, distance measured from live price
   const dist = v => `${v >= L.price ? "+" : ""}${((v - L.price) / L.price * 100).toFixed(1)}%`;
@@ -501,7 +512,7 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
         <div className="dh-main">
           <div className="dh-eyebrow">
             <span className="dh-eyebrow-l mono">COMPOSITE BIAS · {cv ? cv.lenses.length : 12} LENSES · <b className="copper">{mode}</b></span>
-            <Pill tone="gn" dot small>LIVE 14:23 ET</Pill>
+            <Pill tone="gn" dot small>{scanT ? "AS OF " + scanT + " PT" : "LIVE"}</Pill>
           </div>
 
           <div className="dh-verdict">
@@ -518,14 +529,14 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
           </div>
 
           <div className="dh-setup mono">
-            <b className="copper">{ticker.setupFamily || "Continuation breakout"}</b>
+            <b className="copper">{ticker.setupFamily || "—"}</b>
             <span> · hold ~{ticker.holdDays || 9}d · </span>
-            <b className={evR >= 0 ? "up" : "dn"}>{evR >= 0 ? "+" : ""}{evR.toFixed(2)}R expectancy</b>
-            <span> · edge LB <b className="up">{(lb * 100).toFixed(0)}%</b> · {erTxt}</span>
+            {evR != null ? <b className={evR >= 0 ? "up" : "dn"}>{evR >= 0 ? "+" : ""}{evR.toFixed(2)}R expectancy</b> : <b className="dim2">expectancy —</b>}
+            <span> · edge LB <b className={lb != null ? "up" : "dim2"}>{lb != null ? (lb * 100).toFixed(0) + "%" : "—"}</b>{ss.n != null ? <span className="dim2"> n={ss.n}{ss.n < 30 ? " ⚠" : ""}</span> : null} · {erTxt}</span>
           </div>
 
           <div className="dh-read">
-            <b className={vtone === "gn" ? "up" : vtone === "rd" ? "dn" : "warn"}>{ticker.symbol} reads {bias.toLowerCase()}</b> for a {mode.toLowerCase()} hold — a sample-validated {(ticker.setupFamily || "continuation").toLowerCase()} with a real edge (Wilson LB {(lb * 100).toFixed(0)}%, +{evR.toFixed(2)}R). Downside is bounded at one stop; {erTxt} is the live caveat to size around.
+            <b className={vtone === "gn" ? "up" : vtone === "rd" ? "dn" : "warn"}>{ticker.symbol} reads {bias.toLowerCase()}</b> for a {mode.toLowerCase()} hold{ticker.setupFamily ? <> — a <b>{ticker.setupFamily.toLowerCase()}</b> setup</> : ""}{lb != null ? <> with a {ss.n != null && ss.n < 30 ? "preliminary" : "sample-validated"} edge (Wilson LB {(lb * 100).toFixed(0)}%{ss.n != null ? `, n=${ss.n}` : ""}{evR != null ? `, ${evR >= 0 ? "+" : ""}${evR.toFixed(2)}R` : ""})</> : <> (no per-setup track record yet)</>}. {L.valid ? "Downside is bounded at one stop; " : "No complete trade plan for this name; "}{erTxt} is the live caveat to size around.
           </div>
 
           {dissenters.length > 0 && (
@@ -557,25 +568,25 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
           <div className="dh-rail-stats">
             <div className="dh-rs">
               <span className="dh-rs-l mono">R : R</span>
-              <span className="dh-rs-v mono copper" data-field="canonical_trade_plan.rr_ratio" data-fallback="rr_ratio ▸ rr" data-provenance="comp">{(ticker.rMultiple || rrToT1).toFixed(2)}R</span>
+              <span className="dh-rs-v mono copper" data-field="canonical_trade_plan.rr_ratio">{modeRR != null ? modeRR.toFixed(2) + "R" : "—"}</span>
               <span className="dh-rs-sub mono">reward ÷ risk</span>
             </div>
             <div className="dh-rs">
               <span className="dh-rs-l mono">SIZE</span>
-              <span className="dh-rs-v mono" data-field="position_size.shares" data-provenance="comp">{shares} sh</span>
-              <span className="dh-rs-sub mono">${dollars.toLocaleString()} · {(dollars / 108420 * 100).toFixed(1)}% NAV</span>
+              <span className="dh-rs-v mono">{shares ? shares + " sh" : "—"}</span>
+              <span className="dh-rs-sub mono">{shares ? `$${dollars.toLocaleString()}${navPct != null ? ` · ${navPct.toFixed(1)}% NAV` : ""}` : "no plan"}</span>
             </div>
             <div className="dh-rs">
               <span className="dh-rs-l mono">EDGE</span>
-              <span className="dh-rs-v mono up">{(lb * 100).toFixed(0)}%</span>
-              <span className="dh-rs-sub mono">Wilson LB · PF 1.84</span>
+              <span className={`dh-rs-v mono ${lb != null ? "up" : "dim2"}`}>{lb != null ? (lb * 100).toFixed(0) + "%" : "—"}</span>
+              <span className="dh-rs-sub mono">Wilson LB{ss.pf != null ? ` · PF ${ss.pf.toFixed(2)}` : ""}</span>
             </div>
           </div>
           <div className="dh-fit mono">
-            <span className="dh-fit-chip">size = ${navRisk} risk ÷ ${risk.toFixed(2)} stop</span>
-            <span className="dh-fit-chip">not held</span>
-            <span className="dh-fit-chip">correl 0.34 → book</span>
-            <span>adds cleanly · ½-Kelly</span>
+            {L.valid ? <span className="dh-fit-chip">size = ${Math.round(navRisk).toLocaleString()} risk ÷ ${risk.toFixed(2)} stop</span> : null}
+            <span className="dh-fit-chip">{held ? `in book · ${Math.abs(held.qty || 0)} sh` : "not held"}</span>
+            {ticker.beta != null ? <span className="dh-fit-chip">β {ticker.beta.toFixed(2)} → market</span> : null}
+            <span>{NAV ? "½-Kelly · 0.5%-NAV risk" : "½-Kelly reference"}</span>
           </div>
         </div>
        </div>
@@ -947,7 +958,7 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
       <OvSection n={1} title="Company & Catalysts · Context"
         sub="who they are · valuation · earnings · what's hitting the tape"
         headerStyle={headerStyle} defaultOpen={true}
-        teaser="Profile · valuation vs peers · earnings in 11d · 4 classified catalysts">
+        teaser="Profile · real valuation & quality · next earnings · live catalysts">
         <div className="ov-co2x2">
           <CompanySnapshot ticker={ticker} />
           <CompanyValuation ticker={ticker} />
@@ -961,7 +972,7 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
         <BuyChecklist ticker={ticker} mode={mode} />
         {(window.__tier ?? 4) >= 3 && (
           <details className="ov-more">
-            <summary className="ov-more-sum mono">Show the full 10-gate rule-engine audit · how 612 ranked → {window.secBias ? window.secBias((window.compositeVerdict ? window.compositeVerdict(ticker, mode).verdict : "BUY")) : "Bullish"} · PRO+</summary>
+            <summary className="ov-more-sum mono">Show the full rule-engine audit · how {(() => { const u = window.__BV && window.__BV.market && window.__BV.market.funnel && window.__BV.market.funnel.universe; return u ? u.toLocaleString() + " names" : "the universe"; })()} ranked → {window.secBias ? window.secBias((window.compositeVerdict ? window.compositeVerdict(ticker, mode).verdict : "BUY")) : "Bullish"} · PRO+</summary>
             <div className="ov-more-body"><GateCascade ticker={ticker} /></div>
           </details>
         )}
@@ -983,7 +994,7 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
       <OvSection n={5} title="Keep Me Honest"
         sub="what would break the thesis · what moved in 24h · why the edge exists"
         headerStyle={headerStyle} defaultOpen={true}
-        teaser="4 pre-mortem triggers · your note · 6 24h deltas · sleeve mechanism">
+        teaser="Pre-mortem triggers · your note · change vs prior scan · sleeve mechanism">
         <div className="ov-honest-3col">
         <div className="ov-honest-block">
         <div className="ov-honest-sub label-cap">▼ What would make this wrong · pre-mortem</div>
@@ -1024,9 +1035,20 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
       <div className="lens-call">
         <span className="label-cap">The Read · {mode}</span>
         <span className="mono">
-          A breakout above <b className="copper">${(window.coherentLevels ? window.coherentLevels(ticker).pivot : ticker.pivot).toFixed(2)}</b> confirms the setup ·
-          half-Kelly sizing reference · 9 of 10 gates pass · Wilson LB <b className="up">47.7%</b> · expectancy <b className="up">+0.51R</b> ·
-          <b className="warn"> size −25% into ER.</b>
+          {(() => {
+            const L = window.coherentLevels ? window.coherentLevels(ticker) : ticker;
+            const ss = ticker.setupStats || {};
+            const ge = ticker.gatesEvaluated || [];
+            const pass = ge.filter(g => g.passed).length, tot = ge.length;
+            const er = ticker.earnings && ticker.earnings.days;
+            return <>
+              {L.valid ? <>A break above <b className="copper">${L.pivot.toFixed(2)}</b> confirms; stop ${L.stop.toFixed(2)}. </> : <>No complete trade plan for this name. </>}
+              {tot ? <><b className={pass === tot ? "up" : "warn"}>{pass}/{tot}</b> gates pass · </> : ""}
+              {ss.wilsonLB != null ? <>Wilson LB <b className={ss.wilsonLB >= 0.45 ? "up" : "warn"}>{(ss.wilsonLB * 100).toFixed(0)}%</b>{ss.n != null ? ` (n=${ss.n}${ss.n < 30 ? " ⚠" : ""})` : ""} · </> : "no per-setup record · "}
+              {ss.pf != null ? <>PF <b className={ss.pf >= 1.3 ? "up" : "warn"}>{ss.pf.toFixed(2)}</b> · </> : ""}
+              {er != null && er >= 0 && er <= 14 ? <b className="warn">size down into ER (T−{er}d).</b> : "½-Kelly sizing reference."}
+            </>;
+          })()}
         </span>
       </div>
     </div>
