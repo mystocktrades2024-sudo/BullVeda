@@ -118,7 +118,66 @@ function QuickTake({ ticker, t, L, loading, failed }) {
         </div>
       </div>
       <div className="qt-plain mono">{plain}</div>
+      {(() => {
+        const ema21 = _n(t.ema21), vwap = _n(t.vwap20);
+        const support = stop != null ? stop : (_n(t.swing_lo_20) != null ? _n(t.swing_lo_20) : ema21);
+        const resist = _n(t.swing_hi_20) != null ? _n(t.swing_hi_20) : (vwap != null ? vwap : ema21);
+        if (tal.verdict === "BULLISH" && support != null) return <div className="qt-invalid mono dim2">⚑ Invalidation: a daily close below <b className="dn">${support.toFixed(2)}</b> breaks the bullish read.</div>;
+        if (tal.verdict === "BEARISH" && resist != null) return <div className="qt-invalid mono dim2">⚑ Turns constructive only on a reclaim above <b className="up">${resist.toFixed(2)}</b>.</div>;
+        if (tal.verdict === "MIXED" && support != null && resist != null) return <div className="qt-invalid mono dim2">⚑ Direction decides at the edges: bullish above <b className="up">${resist.toFixed(2)}</b>, bearish below <b className="dn">${support.toFixed(2)}</b>.</div>;
+        return null;
+      })()}
       {window.AiExplain && <AiExplain build={aiPrompt} label="Explain these technicals in plain English" tag="KAIROS · TECH" />}
+    </div>
+  );
+}
+
+// ─── Timeframe alignment + relative strength — two retail first-questions ─────
+function MTFStrip({ t, loading, failed }) {
+  if (loading || failed || t.price == null) return null;
+  const mtf = t.mtf || {}, rs = t.rs || {};
+  const daily = maRead(t);
+  const dDir = daily.tone === "gn" ? "bull" : daily.tone === "rd" ? "bear" : "mixed";
+  const tfs = [
+    { k: "Daily", dir: daily.label === "—" ? null : dDir, sub: daily.label === "—" ? "—" : daily.label.toLowerCase().replace(/ ·.*/, "").slice(0, 16) },
+    { k: "Weekly", dir: mtf.weekly ? mtf.weekly.trend : null, sub: mtf.weekly ? `RSI ${mtf.weekly.rsi.toFixed(0)}` : "—" },
+    { k: "Monthly", dir: mtf.monthly ? mtf.monthly.trend : null, sub: mtf.monthly ? `RSI ${mtf.monthly.rsi.toFixed(0)}` : "—" },
+  ];
+  const dirs = tfs.map(x => x.dir).filter(Boolean);
+  const aligned = dirs.length >= 2 && dirs.every(d => d === dirs[0]) && dirs[0] !== "mixed";
+  const conflict = dirs.includes("bull") && dirs.includes("bear");
+  const tone = d => d === "bull" ? "gn" : d === "bear" ? "rd" : "amb";
+  const icon = d => d === "bull" ? "▲" : d === "bear" ? "▼" : "●";
+  const rs1 = _n(rs.vs_spy_1m), rs3 = _n(rs.vs_spy_3m);
+  const rsTone = v => v == null ? "ink" : v >= 0 ? "gn" : "rd";
+  if (!mtf.weekly && rs1 == null) return null;
+  return (
+    <div className="mtf">
+      <div className="mtf-block">
+        <div className="label-cap">Timeframe alignment</div>
+        <div className="mtf-tfs">
+          {tfs.map((x, i) => (
+            <div key={i} className={`mtf-tf mtf-tf--${x.dir ? tone(x.dir) : "ink"}`}>
+              <span className="mtf-tf-k mono">{x.k}</span>
+              <span className={`mtf-tf-d mono kpi-tone--${x.dir ? tone(x.dir) : "ink"}`}>{x.dir ? icon(x.dir) + " " + x.dir : "—"}</span>
+              <span className="mtf-tf-s mono dim2">{x.sub}</span>
+            </div>
+          ))}
+        </div>
+        <div className="mono" style={{ fontSize: 10.5, marginTop: 6 }}>
+          {aligned ? <b className={`kpi-tone--${tone(dirs[0])}`}>✓ Aligned {dirs[0]} across timeframes — higher-conviction.</b>
+            : conflict ? <b className="kpi-tone--amb">⚠ Timeframes conflict — daily and weekly disagree; the trend you trade depends on your horizon.</b>
+              : <span className="dim2">Mixed alignment across timeframes.</span>}
+        </div>
+      </div>
+      <div className="mtf-block">
+        <div className="label-cap">Relative strength vs SPY</div>
+        <div className="mtf-rs-row">
+          <div className="mtf-rs-cell"><span className={`mtf-rs-v mono kpi-tone--${rsTone(rs1)}`}>{rs1 == null ? "—" : (rs1 >= 0 ? "+" : "") + rs1 + "%"}</span><span className="label-cap dim2">1-month</span></div>
+          <div className="mtf-rs-cell"><span className={`mtf-rs-v mono kpi-tone--${rsTone(rs3)}`}>{rs3 == null ? "—" : (rs3 >= 0 ? "+" : "") + rs3 + "%"}</span><span className="label-cap dim2">3-month</span></div>
+        </div>
+        {rs3 != null && <div className="mono dim2" style={{ fontSize: 10.5, marginTop: 4 }}>{rs3 >= 5 ? "Leading the market — relative strength." : rs3 <= -5 ? "Lagging the market — relative weakness." : "Roughly tracking the market."}</div>}
+      </div>
     </div>
   );
 }
@@ -138,6 +197,7 @@ function LensTechnicals({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
       {window.LensSummaryBar && <LensSummaryBar ticker={ticker} mode={mode} kind="technicals" tech={T} />}
       <TechHero ticker={ticker} mode={mode} t={T} loading={loading} failed={failed} />
       <QuickTake ticker={ticker} t={T} L={L} loading={loading} failed={failed} />
+      <MTFStrip t={T} loading={loading} failed={failed} />
 
       <div className="lens-section">
         <SectionHeader n={1} title="Indicator Dashboard"

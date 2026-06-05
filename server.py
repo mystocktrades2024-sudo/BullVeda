@@ -2925,6 +2925,44 @@ async def indicators_api(ticker: str, days: int = 420):
                 diverg = {"type": "none", "note": "oscillators confirm price — no divergence"}
         except Exception:
             diverg = None
+        # ── multi-timeframe trend (resample daily → weekly + monthly) ──
+        mtf = {"weekly": None, "monthly": None}
+        try:
+            didx = df.index
+            if not isinstance(didx, pd.DatetimeIndex):
+                didx = pd.to_datetime(didx, errors="coerce")
+            wdf = df.copy(); wdf.index = didx; wdf = wdf[~wdf.index.isna()]
+            def tf_trend(rule, span):
+                rs_ = wdf["Close"].resample(rule).last().dropna()
+                if len(rs_) < 8:
+                    return None
+                e_s = rs_.ewm(span=min(span, max(3, len(rs_) // 2)), adjust=False).mean()
+                e_l = rs_.ewm(span=min(span * 3, max(5, len(rs_) - 1)), adjust=False).mean()
+                p_, es, el = float(rs_.iloc[-1]), float(e_s.iloc[-1]), float(e_l.iloc[-1])
+                dd = rs_.diff(); uu = dd.clip(lower=0).ewm(alpha=1/14, adjust=False).mean(); ddn = (-dd.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
+                rsi_ = float((100 - 100 / (1 + uu / ddn.replace(0, np.nan))).iloc[-1])
+                trend = "bull" if (p_ >= es >= el) else "bear" if (p_ <= es <= el) else "mixed"
+                return {"trend": trend, "rsi": round(rsi_, 1), "ema_fast": round(es, 2), "ema_slow": round(el, 2)}
+            mtf["weekly"] = tf_trend("W", 10)
+            mtf["monthly"] = tf_trend("ME", 6)
+        except Exception:
+            pass
+        # ── relative strength vs SPY (1m / 3m excess return) ──
+        rsdata = None
+        try:
+            from data_fetcher import fetch_ohlcv_with_failover as _fof
+            spy, _s = _fof("SPY", days=days)
+            sc = spy["Close"].squeeze()
+            def _ret(series, n): return (float(series.iloc[-1] / series.iloc[-1 - n] - 1) * 100) if len(series) > n else None
+            st1, sp1, st3, sp3 = _ret(c, 21), _ret(sc, 21), _ret(c, 63), _ret(sc, 63)
+            rsdata = {
+                "vs_spy_1m": round(st1 - sp1, 1) if (st1 is not None and sp1 is not None) else None,
+                "vs_spy_3m": round(st3 - sp3, 1) if (st3 is not None and sp3 is not None) else None,
+                "ret_1m": round(st1, 1) if st1 is not None else None,
+                "ret_3m": round(st3, 1) if st3 is not None else None,
+            }
+        except Exception:
+            rsdata = None
         # ── recent candles for the real mini-chart (last 60) ──
         tail = df.tail(60)
         candles = []
@@ -2947,7 +2985,7 @@ async def indicators_api(ticker: str, days: int = 420):
                 "vwap20": vwap20, "rvol": rvol, "avg_vol20": avg_vol20, "last_vol": last_vol,
                 "high_52w": hi(252), "low_52w": lo(252), "swing_hi_20": hi(20), "swing_lo_20": lo(20),
                 "swing_hi_60": hi(60), "swing_lo_60": lo(60),
-                "divergence": diverg, "candles": candles, "price": px}
+                "divergence": diverg, "mtf": mtf, "rs": rsdata, "candles": candles, "price": px}
     except HTTPException:
         raise
     except Exception as e:
