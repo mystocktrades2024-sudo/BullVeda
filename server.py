@@ -2941,6 +2941,65 @@ async def fundamentals_api(ticker: str):
     except Exception as e:
         raise HTTPException(500, str(e))
 
+@app.get("/api/peers/{ticker}")
+async def peers_api(ticker: str):
+    """Real peer cohort for the Investment lens — same-industry (fallback same-sector)
+    names nearest by market cap, from data/fundamentals.db (2.7K names). Returns each
+    peer's real multiples/margins/growth + cohort medians used for multiple-reversion
+    fair value. No fabrication: cohort is whatever the local fundamentals DB actually has."""
+    ticker = ticker.upper().strip()
+    import sqlite3, statistics, os
+    dbp = os.path.join(os.path.dirname(__file__), "data", "fundamentals.db")
+    if not os.path.exists(dbp):
+        raise HTTPException(404, "fundamentals.db missing")
+    cols = ("ticker", "sector", "industry", "market_cap", "pe_ttm", "forward_pe",
+            "eps_ttm", "revenue_growth", "gross_margin", "operating_margin",
+            "profit_margin", "debt_equity", "fcf_ttm")
+    def _row(r):
+        d = {c: r[i] for i, c in enumerate(cols)}
+        for k in ("market_cap", "pe_ttm", "forward_pe", "eps_ttm", "revenue_growth",
+                  "gross_margin", "operating_margin", "profit_margin", "debt_equity", "fcf_ttm"):
+            v = d.get(k)
+            d[k] = float(v) if isinstance(v, (int, float)) else None
+        return d
+    try:
+        c = sqlite3.connect(dbp)
+        sel = "SELECT " + ",".join(cols) + " FROM fundamentals WHERE ticker=?"
+        me = c.execute(sel, (ticker,)).fetchone()
+        if not me:
+            return {"ticker": ticker, "peers": [], "medians": {}, "basis": None,
+                    "note": "ticker not in local fundamentals universe"}
+        meD = _row(me)
+        sector, industry, mcap = meD["sector"], meD["industry"], meD["market_cap"] or 0
+        # 1) same-industry; 2) fallback same-sector — pick whichever yields >=4 names
+        basis = "industry"
+        rows = c.execute(sel.replace("ticker=?", "industry=? AND market_cap>0 AND ticker!=?"),
+                         (industry, ticker)).fetchall() if industry else []
+        if len(rows) < 4 and sector:
+            basis = "sector"
+            rows = c.execute(sel.replace("ticker=?", "sector=? AND market_cap>0 AND ticker!=?"),
+                             (sector, ticker)).fetchall()
+        peers = [_row(r) for r in rows]
+        # nearest by market-cap ratio, take 5 + self = 6
+        peers.sort(key=lambda p: abs((p["market_cap"] or 0) - mcap) if mcap else 0)
+        peers = peers[:5]
+        cohort = [meD] + peers
+        def _med(key, lo=None, hi=None):
+            vals = [p[key] for p in cohort if p.get(key) is not None
+                    and (lo is None or p[key] > lo) and (hi is None or p[key] < hi)]
+            return round(statistics.median(vals), 4) if vals else None
+        medians = {
+            "pe_ttm": _med("pe_ttm", lo=0, hi=200), "forward_pe": _med("forward_pe", lo=0, hi=200),
+            "revenue_growth": _med("revenue_growth"), "gross_margin": _med("gross_margin"),
+            "operating_margin": _med("operating_margin"), "profit_margin": _med("profit_margin"),
+            "debt_equity": _med("debt_equity", lo=-1), "n": len(cohort),
+        }
+        return {"ticker": ticker, "self": meD, "peers": peers, "medians": medians, "basis": basis}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 @app.get("/api/social/{ticker}")
 async def social_api(ticker: str):
     """Social + news sentiment + SEC Form-4 insider activity (live, on-demand)."""
