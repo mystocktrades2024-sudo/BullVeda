@@ -39,6 +39,90 @@ function maRead(t) {
   return { label: "MIXED · PULLBACK", tone: "amb", primary };
 }
 
+// score every real signal as bull(+1)/neutral(0)/bear(−1) → the quick-decision tally
+function signalTally(t) {
+  const sg = [];
+  const add = (name, dir, why) => sg.push({ name, dir, why });
+  const rsi = _n(t.rsi); if (rsi != null) add("RSI", rsi >= 70 ? 0 : rsi >= 55 ? 1 : rsi >= 45 ? 0 : -1, rsi >= 70 ? "overbought" : rsi >= 55 ? "above midline" : rsi < 45 ? "below midline" : "neutral");
+  const hist = _n(t.macd_hist); if (hist != null) add("MACD", hist > 0 ? 1 : -1, hist > 0 ? "above signal" : "below signal");
+  const sk = _n(t.stoch_k), sd = _n(t.stoch_d); if (sk != null) add("Stochastic", sk < 20 ? -1 : sk > 80 ? 0 : (sd != null && sk >= sd) ? 1 : 0, sk < 20 ? "oversold" : sk > 80 ? "overbought" : (sd != null && sk >= sd) ? "%K rising" : "flat");
+  const adx = _n(t.adx), pdi = _n(t.plus_di), mdi = _n(t.minus_di); if (adx != null && pdi != null && mdi != null) add("Trend (ADX)", adx >= 20 ? (pdi >= mdi ? 1 : -1) : 0, adx < 20 ? "no clear trend" : pdi >= mdi ? "bulls leading" : "bears leading");
+  const mfi = _n(t.mfi); if (mfi != null) add("MFI", mfi >= 80 ? 0 : mfi >= 50 ? 1 : mfi < 30 ? -1 : 0, mfi >= 80 ? "overbought" : mfi >= 50 ? "inflow" : mfi < 30 ? "oversold" : "neutral");
+  const cmf = _n(t.cmf); if (cmf != null) add("Money flow", cmf >= 0.05 ? 1 : cmf <= -0.05 ? -1 : 0, cmf >= 0.05 ? "accumulation" : cmf <= -0.05 ? "distribution" : "balanced");
+  const price = _n(t.price), vwap = _n(t.vwap20); if (price != null && vwap != null) add("VWAP", price >= vwap ? 1 : -1, price >= vwap ? "above VWAP" : "below VWAP");
+  const obv = t.obv_trend; if (obv) add("OBV", obv === "rising" ? 1 : -1, obv + " volume");
+  const s200 = _n(t.sma200); if (price != null && s200 != null) add("200-day trend", price >= s200 ? 1 : -1, price >= s200 ? "above 200-day" : "below 200-day");
+  const ma = maRead(t); if (ma.label !== "—") add("MA alignment", ma.tone === "gn" ? 1 : ma.tone === "rd" ? -1 : 0, ma.label.toLowerCase());
+  const bull = sg.filter(s => s.dir > 0).length, bear = sg.filter(s => s.dir < 0).length, neutral = sg.filter(s => s.dir === 0).length;
+  const net = bull - bear;
+  return { bull, bear, neutral, signals: sg, total: sg.length, net,
+    verdict: net >= 3 ? "BULLISH" : net <= -3 ? "BEARISH" : "MIXED",
+    tone: net >= 3 ? "gn" : net <= -3 ? "rd" : "amb",
+    conf: Math.abs(net) >= 5 ? "high" : Math.abs(net) >= 2 ? "moderate" : "low" };
+}
+
+// ─── Quick Take — the one-glance decision layer for retail ────────────
+function QuickTake({ ticker, t, L, loading, failed }) {
+  if (loading) return <div className="qt qt--load mono dim2">reading the tape…</div>;
+  if (failed || t.price == null) return null;
+  const tal = signalTally(t);
+  const price = _n(t.price), atr = _n(t.atr);
+  const trigger = _n(t.swing_hi_20) || _n(t.high_52w);
+  // plan levels: prefer the engine's; else fall back to REAL ATR / swing structure
+  const stop = _n(L && L.stop) != null ? _n(L.stop)
+    : (atr != null && price != null) ? +(price - 1.5 * atr).toFixed(2)
+      : _n(t.swing_lo_20);
+  const tgt = _n(L && L.t1) != null ? _n(L.t1) : (_n(t.swing_hi_60) || _n(t.high_52w));
+  const entry = _n(L && L.pivot) != null ? L.pivot * 1.002 : price;
+  const stopFb = !(L && _n(L.stop) != null);   // using a fallback stop?
+  const rr = (stop != null && tgt != null && entry != null && (entry - stop) > 0) ? (tgt - entry) / (entry - stop) : null;
+  const topBull = tal.signals.filter(s => s.dir > 0).slice(0, 3).map(s => s.name);
+  const topBear = tal.signals.filter(s => s.dir < 0).slice(0, 3).map(s => s.name);
+  const plain = `Momentum reads ${tal.verdict.toLowerCase()} — ${tal.bull} of ${tal.total} signals bullish` +
+    (topBull.length ? ` (${topBull.join(", ")})` : "") +
+    (tal.bear ? `, ${tal.bear} bearish (${topBear.join(", ")})` : "") + `. Agreement is ${tal.conf}.`;
+  const segW = n => `${(n / (tal.total || 1)) * 100}%`;
+  const aiPrompt = () => {
+    const r = _n(t.rsi), hh = _n(t.macd_hist), ax = _n(t.adx), vw = _n(t.vwap20), s2 = _n(t.sma200), cm = _n(t.cmf);
+    return `In plain English for a beginner, is ${ticker.symbol} (around $${price.toFixed(2)}) technically bullish or bearish right now, and what should I watch next? Real readings: RSI ${r != null ? r.toFixed(0) : "n/a"}, MACD ${hh >= 0 ? "positive" : "negative"}, ADX ${ax != null ? ax.toFixed(0) : "n/a"} (${_n(t.plus_di) >= _n(t.minus_di) ? "buyers" : "sellers"} in control), price ${vw != null ? (price >= vw ? "above" : "below") : ""} VWAP, ${s2 != null ? (price >= s2 ? "above" : "below") : ""} its 200-day average, money flow ${cm >= 0 ? "positive" : "negative"}. ${tal.bull} of ${tal.total} signals are bullish. Three short sentences, no jargon.`;
+  };
+  return (
+    <div className={`qt qt--${tal.tone}`}>
+      <div className="qt-grid">
+        <div className="qt-verdict">
+          <div className="label-cap">Quick take</div>
+          <div className={`qt-v mono kpi-tone--${tal.tone}`}>{tal.verdict}</div>
+          <div className="qt-conf mono dim2">{tal.bull}/{tal.total} bullish · {tal.conf} agreement</div>
+        </div>
+        <div className="qt-tally">
+          <div className="qt-bar">
+            <span className="qt-seg qt-seg--gn" style={{ width: segW(tal.bull) }} title={`${tal.bull} bullish`} />
+            <span className="qt-seg qt-seg--amb" style={{ width: segW(tal.neutral) }} title={`${tal.neutral} neutral`} />
+            <span className="qt-seg qt-seg--rd" style={{ width: segW(tal.bear) }} title={`${tal.bear} bearish`} />
+          </div>
+          <div className="qt-legend mono">
+            <span className="up">▲ {tal.bull} bullish</span><span className="dim2">● {tal.neutral} neutral</span><span className="dn">▼ {tal.bear} bearish</span>
+          </div>
+          <div className="qt-chips">
+            {tal.signals.map((s, i) => (
+              <span key={i} className={`qt-chip qt-chip--${s.dir > 0 ? "gn" : s.dir < 0 ? "rd" : "amb"}`} title={`${s.name}: ${s.why}`}>{s.name}</span>
+            ))}
+          </div>
+        </div>
+        <div className="qt-plan">
+          <div className="label-cap">If you act</div>
+          <div className="qt-plan-row"><span className="mono dim2">Trigger</span><span className="mono copper">{trigger != null ? "$" + trigger.toFixed(2) : "—"}</span></div>
+          <div className="qt-plan-row"><span className="mono dim2">Stop{stopFb && atr != null ? <span className="dim2" style={{ fontSize: 9 }}> ·1.5ATR</span> : ""}</span><span className="mono dn">{stop != null ? "$" + stop.toFixed(2) : "—"}</span></div>
+          <div className="qt-plan-row"><span className="mono dim2">Target</span><span className="mono up">{tgt != null ? "$" + tgt.toFixed(2) : "—"}</span></div>
+          <div className="qt-plan-row"><span className="mono dim2">R:R</span><span className="mono">{rr != null ? rr.toFixed(2) : "—"}</span></div>
+        </div>
+      </div>
+      <div className="qt-plain mono">{plain}</div>
+      {window.AiExplain && <AiExplain build={aiPrompt} label="Explain these technicals in plain English" tag="KAIROS · TECH" />}
+    </div>
+  );
+}
+
 function LensTechnicals({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("tl-1"); const s2 = useStateToggle("tl-2");
   const s3 = useStateToggle("tl-3"); const s4 = useStateToggle("tl-4");
@@ -51,8 +135,9 @@ function LensTechnicals({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
 
   return (
     <div className="lens lens--tech">
-      {window.LensSummaryBar && <LensSummaryBar ticker={ticker} mode={mode} kind="technicals" />}
+      {window.LensSummaryBar && <LensSummaryBar ticker={ticker} mode={mode} kind="technicals" tech={T} />}
       <TechHero ticker={ticker} mode={mode} t={T} loading={loading} failed={failed} />
+      <QuickTake ticker={ticker} t={T} L={L} loading={loading} failed={failed} />
 
       <div className="lens-section">
         <SectionHeader n={1} title="Indicator Dashboard"
@@ -232,8 +317,8 @@ function IndicatorDash({ t, loading, failed }) {
       </div>
       <div className="ind-grid">
         {cells.map((i, idx) => (
-          <div key={idx} className={`ind-cell ind-${i.tone}`}>
-            <div className="ind-name mono">{i.name}</div>
+          <div key={idx} className={`ind-cell ind-${i.tone}`} title={IND_HELP[i.name.split("(")[0]] || ""}>
+            <div className="ind-name mono">{i.name} <span className="ind-help">ⓘ</span></div>
             <div className={`ind-v mono kpi-tone--${i.tone}`}>{i.v}</div>
             <div className="ind-state mono">{i.state}</div>
             <div className="ind-note mono dim">{i.note}</div>
@@ -243,6 +328,18 @@ function IndicatorDash({ t, loading, failed }) {
     </div>
   );
 }
+
+// plain-English glossary — hover any indicator to learn what it measures
+const IND_HELP = {
+  "RSI": "Relative Strength Index. Measures momentum 0–100. Above 50 = buyers in control; above 70 = possibly overbought; below 30 = possibly oversold.",
+  "MACD": "Moving Average Convergence Divergence. Positive (above signal) = upward momentum building; negative = downward.",
+  "Stoch": "Stochastic oscillator. Where price sits in its recent range. Above 80 = stretched high; below 20 = stretched low.",
+  "ADX": "Average Directional Index. Trend STRENGTH (not direction). Above 25 = a real trend; below 20 = choppy/no trend. +DI vs −DI shows who's winning.",
+  "MFI": "Money Flow Index — like RSI but volume-weighted. Above 50 = money flowing in; below 20 = oversold.",
+  "CMF": "Chaikin Money Flow. Positive = accumulation (buyers); negative = distribution (sellers), over 20 days.",
+  "ATR": "Average True Range — how much the stock typically moves per day. Used to size stops (wider ATR = wider stop).",
+  "BB %B": "Bollinger Band %B. Where price sits in its volatility band. Above 1 = above the upper band (extended); below 0 = below the lower band.",
+};
 
 // ─── §2 MA stack (real) ──────────────────────────────────────────────
 function MAStack({ ticker, t }) {

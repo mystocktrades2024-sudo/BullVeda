@@ -3,7 +3,7 @@
 // sections stay below. Derives per-ticker from pillars + composite engine.
 const { useMemo: useMemoLS } = React;
 
-function lensSummary(ticker, mode, kind) {
+function lensSummary(ticker, mode, kind, techData) {
   const P = ticker.pillars || {};
   const cl = v => Math.round(Math.max(2, Math.min(99, v)));
   const tone = v => v >= 62 ? "gn" : v >= 46 ? "amb" : "rd";
@@ -28,21 +28,25 @@ function lensSummary(ticker, mode, kind) {
       ["Lead theory", score >= 60 ? "VCP base #2" : "no dominant", score >= 60 ? "gn" : "amb"],
       ["R:R to target", (ticker.rMultiple || 1.7).toFixed(2), "copper"],
     ];
-  } else { // technicals
+  } else { // technicals — real RSI / RVOL from the boot payload (no hardcoded "RSI 64")
     score = cl(tech);
     label = "Technical Net Read";
     verdict = score >= 66 ? "BULLISH" : score >= 46 ? "NEUTRAL" : "WEAK";
+    // prefer the live indicators payload (same source as the hero) so they never disagree
+    const T = techData && typeof techData === "object" ? techData : {};
+    const rsi = (typeof T.rsi === "number" && isFinite(T.rsi)) ? T.rsi : (typeof ticker.rsi === "number" && isFinite(ticker.rsi)) ? ticker.rsi : null;
+    const rvol = (typeof T.rvol === "number" && isFinite(T.rvol)) ? T.rvol : (typeof ticker.rvol === "number" && isFinite(ticker.rvol)) ? ticker.rvol : null;
     bullets = [
-      ["Trend", score >= 60 ? "stacked-bull EMAs" : "mixed MAs", score >= 60 ? "gn" : "amb"],
-      ["Momentum", score >= 55 ? "RSI 64 · MACD+" : "fading", score >= 55 ? "gn" : "amb"],
-      ["Volume", "RVOL 1.3× · OBV up", "gn"],
+      ["Trend", score >= 60 ? "above key MAs" : score >= 46 ? "mixed MAs" : "below key MAs", score >= 60 ? "gn" : score >= 46 ? "amb" : "rd"],
+      ["Momentum", rsi != null ? `RSI ${rsi.toFixed(0)}` : "—", rsi == null ? "ink" : rsi >= 55 ? "gn" : rsi >= 45 ? "amb" : "rd"],
+      ["Volume", rvol != null ? `RVOL ${rvol.toFixed(2)}×` : "—", rvol == null ? "ink" : rvol >= 1.3 ? "gn" : "amb"],
     ];
   }
   return { label, verdict, score, tone: tone(score), bullets };
 }
 
-function LensSummaryBar({ ticker, mode, kind }) {
-  const s = useMemoLS(() => lensSummary(ticker, mode, kind), [ticker, mode, kind, ticker && ticker.symbol]);
+function LensSummaryBar({ ticker, mode, kind, tech }) {
+  const s = useMemoLS(() => lensSummary(ticker, mode, kind, tech), [ticker, mode, kind, ticker && ticker.symbol, tech && tech.rsi, tech && tech.rvol]);
   return (
     <div className={`lsum lsum--${s.tone}`}>
       <div className="lsum-l">
