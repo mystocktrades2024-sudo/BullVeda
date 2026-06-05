@@ -214,6 +214,15 @@ function App() {
 
   const goHome = () => { setTicker(null); setSurface("home"); };
 
+  // deep-link: ?t=SYM[&lens=overview] opens a ticker's detail on load (shareable URLs)
+  useEffectApp(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const sym = p.get("t") || p.get("ticker");
+      if (sym) handleTickerClick(sym.toUpperCase(), p.get("lens") || "overview");
+    } catch (e) {}
+  }, []);
+
   return (
     <div className={`app ${t.focus ? "app--focus" : ""} ${t.railExpanded ? "app--rail-open" : ""}`}>
       <IconRail activeId={surface} onPick={handleSurfaceClick} tier={tier}

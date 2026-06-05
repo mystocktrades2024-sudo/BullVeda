@@ -59,6 +59,7 @@ const _cvImpl = function (ticker, mode) {
   const net = _engScore != null ? Math.round(_engScore) : lensNet;
   const tone = v => v >= 62 ? "gn" : v >= 46 ? "amb" : "rd";
   lenses.forEach(l => { l.tone = tone(l.v); });
+  const _vt = v => v === "BUY" ? "gn" : v === "WATCH" ? "amb" : "rd";
   const verdict = _engVerdict || (net >= 66 ? "BUY" : net >= 50 ? "WATCH" : net >= 40 ? "AVOID" : "PASS");
   const verdictSource = _engVerdict ? "engine" : "derived";
   const vtone = _engVerdict ? _vt(_engVerdict) : (net >= 66 ? "gn" : net >= 50 ? "amb" : "rd");
