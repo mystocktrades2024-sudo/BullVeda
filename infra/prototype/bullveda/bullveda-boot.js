@@ -270,6 +270,12 @@
         direction: pUp != null ? pUp : 0.5,
         hitNet: hit ? +((num(hit.p_t1_first, 0)) - (num(hit.p_stop_first, 0))).toFixed(2)
           : (pUp != null ? +(pUp - (1 - pUp)).toFixed(2) : 0),
+        // hit-order probabilities — P(T1 reached before stop) vs P(stop first). The
+        // single most decision-relevant probabilistic edge; surfaced as a visual.
+        pT1: hit && num(hit.p_t1_first) != null ? +num(hit.p_t1_first).toFixed(3) : null,
+        pStop: hit && num(hit.p_stop_first) != null ? +num(hit.p_stop_first).toFixed(3) : null,
+        modelAuc: hit ? num(hit.model_auc) : (ml && ml.model_meta ? num(ml.model_meta.auc) : null),
+        modelN: hit ? num(hit.model_n) : null,
         magnitude: mag ? { lo: +num(mag.q10, 0).toFixed(1), mid: +num(mag.q50, 0).toFixed(1), hi: +num(mag.q90, 0).toFixed(1) }
           : { lo: 0, mid: 0, hi: 0 },
       },

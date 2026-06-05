@@ -915,6 +915,108 @@ function OvSection({ n, title, sub, headerStyle, defaultOpen = true, teaser, chi
 }
 window.OvSection = OvSection;
 
+// ════════════════════════════════════════════════════════════════════
+// QUANT MICRO-VISUALS — the probabilistic edge made visible (not walls of
+// numbers): conviction meter, P(T1 vs stop), forward-return distribution,
+// Wilson CI band. All from real ml/setupStats data.
+// ════════════════════════════════════════════════════════════════════
+(function () {
+  const css = `
+  .cm{ background:var(--glass-bg-1); border:1px solid var(--glass-line); border-radius:10px; padding:11px 14px; margin-bottom:10px; }
+  .cm-net{ display:flex; align-items:baseline; gap:4px; margin-bottom:8px; }
+  .cm-num{ font:700 30px var(--mono); line-height:1; } .cm-of{ font-size:13px; }
+  .cm-bias{ font:700 12px var(--mono); padding:2px 9px; border-radius:999px; border:1px solid color-mix(in oklab,currentColor 35%,transparent); }
+  .cm-bar{ display:flex; height:10px; border-radius:6px; overflow:hidden; background:var(--glass-bg-2); }
+  .cm-seg{ height:100%; } .cm-g{ background:var(--gn); } .cm-a{ background:var(--amb); } .cm-r{ background:var(--rd); }
+  .cm-leg{ font-size:10px; margin-top:5px; }
+  .eo-card{ background:var(--glass-bg-1); border:1px solid var(--glass-line); border-radius:10px; padding:11px 14px; margin-bottom:10px; display:flex; flex-direction:column; gap:9px; }
+  .eo-hd{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .eo-tag{ font:700 9px var(--mono); letter-spacing:.12em; color:var(--copper); border:1px solid color-mix(in oklab,var(--copper) 40%,transparent); border-radius:3px; padding:3px 8px; }
+  .eo-row{ display:grid; grid-template-columns:128px 1fr 92px; align-items:center; gap:10px; }
+  .eo-k{ font-size:9.5px; letter-spacing:.05em; color:var(--ink-3); }
+  .eo-v{ font-size:12px; text-align:right; white-space:nowrap; }
+  .eo-track{ position:relative; height:14px; background:var(--glass-bg-2); border-radius:4px; }
+  .eo-split{ position:relative; display:flex; height:14px; border-radius:4px; overflow:hidden; background:var(--glass-bg-2); }
+  .eo-split-g{ background:color-mix(in oklab,var(--gn) 80%,transparent); height:100%; } .eo-split-r{ background:color-mix(in oklab,var(--rd) 75%,transparent); height:100%; }
+  .eo-band{ position:absolute; top:3px; height:8px; background:color-mix(in oklab,var(--copper) 35%,transparent); border-radius:3px; }
+  .eo-ci{ position:absolute; top:4px; height:6px; background:color-mix(in oklab,var(--gn) 35%,transparent); border-radius:3px; }
+  .eo-pt{ position:absolute; top:1px; width:2px; height:12px; background:var(--ink-1); border-radius:1px; transform:translateX(-1px); }
+  .eo-zero{ position:absolute; top:0; width:1px; height:14px; background:var(--ink-3); opacity:.6; }
+  .eo-be{ position:absolute; top:-2px; width:0; height:18px; border-left:1px dashed var(--amb); }
+  .eo-foot{ font-size:10px; padding-top:5px; border-top:1px solid var(--glass-line); }
+  .conf-cell{ position:relative; } .conf-spark{ display:block; height:4px; border-radius:2px; margin-top:4px; background:var(--glass-bg-2); position:relative; overflow:hidden; }
+  .conf-spark i{ position:absolute; top:0; height:100%; }
+  .sleeve-rbar{ display:inline-block; height:7px; border-radius:2px; vertical-align:middle; margin-left:6px; }`;
+  if (!document.getElementById("eo-css")) { const s = document.createElement("style"); s.id = "eo-css"; s.textContent = css; document.head.appendChild(s); }
+})();
+const _pc = v => Math.max(0, Math.min(100, v));
+function ConvictionMeter({ cv }) {
+  if (!cv) return null;
+  const total = (cv.agree + cv.caution + cv.fail) || 1;
+  const tone = cv.net >= 66 ? "gn" : cv.net >= 50 ? "amb" : "rd";
+  return (
+    <div className="cm">
+      <div className="cm-net">
+        <span className={`cm-num kpi-tone--${tone}`}>{cv.net}</span><span className="cm-of mono dim2">/100</span>
+        <span className={`cm-bias mono kpi-tone--${tone}`} style={{ marginLeft: 10 }}>{window.secBias ? window.secBias(cv.verdict) : cv.verdict}</span>
+        <span className="mono dim2" style={{ marginLeft: 10, fontSize: 11 }}>conf {cv.conf}</span>
+      </div>
+      <div className="cm-bar">
+        <div className="cm-seg cm-g" style={{ width: cv.agree / total * 100 + "%" }} title={`${cv.agree} agree`} />
+        <div className="cm-seg cm-a" style={{ width: cv.caution / total * 100 + "%" }} title={`${cv.caution} caution`} />
+        <div className="cm-seg cm-r" style={{ width: cv.fail / total * 100 + "%" }} title={`${cv.fail} against`} />
+      </div>
+      <div className="cm-leg mono"><b className="up">{cv.agree}</b> agree · <b className="warn">{cv.caution}</b> caution · <b className="dn">{cv.fail}</b> against · {cv.lenses.length} lenses</div>
+    </div>
+  );
+}
+function EdgeOdds({ ticker, mode }) {
+  const ml = ticker.ml || {};
+  const ss = ticker.setupStats || {};
+  const dmKey = mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "investment" : "swing";
+  const dec = ticker.decisionsByMode && ticker.decisionsByMode[dmKey];
+  const rr = (dec && dec.rr_ratio) || ticker.rMultiple;
+  const mag = ml.magnitude;
+  if (ml.pT1 == null && !mag && ss.winRate == null) return null;
+  // hit odds
+  const oddsT = (ml.pT1 != null && ml.pStop != null) ? ml.pT1 / (ml.pT1 + ml.pStop) * 100 : null;
+  // distribution scale
+  const lo = mag && mag.lo, mid = mag && mag.mid, hi = mag && mag.hi;
+  const dMin = (lo != null) ? Math.min(lo, 0) - 1 : 0, dMax = (hi != null) ? Math.max(hi, 0) + 1 : 1, dSpan = (dMax - dMin) || 1;
+  const dx = v => _pc((v - dMin) / dSpan * 100);
+  // wilson CI
+  const wr = ss.winRate, lb = ss.wilsonLB;
+  const wUp = (wr != null && lb != null) ? Math.min(1, wr + (wr - lb)) : null;
+  const be = rr ? 1 / (1 + rr) : null;
+  return (
+    <div className="eo-card">
+      <div className="eo-hd"><span className="eo-tag mono">PROBABILISTIC EDGE</span>{ml.modelAuc != null ? <span className="mono dim2" style={{ fontSize: 10 }}>ML AUC {ml.modelAuc.toFixed(2)}{ml.modelN ? ` · n=${ml.modelN.toLocaleString()}` : ""}</span> : null}</div>
+      {oddsT != null ? (
+        <div className="eo-row">
+          <span className="eo-k mono">P(T1 vs STOP first)</span>
+          <div className="eo-split"><div className="eo-split-g" style={{ width: oddsT + "%" }} /><div className="eo-split-r" style={{ width: (100 - oddsT) + "%" }} /></div>
+          <span className="eo-v mono"><b className={ml.pT1 >= ml.pStop ? "up" : "dn"}>{(ml.pT1 * 100).toFixed(0)}%</b> <span className="dim2">/ {(ml.pStop * 100).toFixed(0)}%</span></span>
+        </div>
+      ) : null}
+      {lo != null && hi != null ? (
+        <div className="eo-row">
+          <span className="eo-k mono">10d RETURN · Q10–90</span>
+          <div className="eo-track"><div className="eo-zero" style={{ left: dx(0) + "%" }} /><div className="eo-band" style={{ left: dx(lo) + "%", width: (dx(hi) - dx(lo)) + "%" }} />{mid != null ? <div className="eo-pt" style={{ left: dx(mid) + "%" }} /> : null}</div>
+          <span className={`eo-v mono ${mid >= 0 ? "up" : "dn"}`}>{mid >= 0 ? "+" : ""}{mid != null ? mid.toFixed(1) : "—"}%</span>
+        </div>
+      ) : null}
+      {wr != null && lb != null ? (
+        <div className="eo-row">
+          <span className="eo-k mono">WIN RATE · 95% CI</span>
+          <div className="eo-track">{be != null ? <div className="eo-be" style={{ left: _pc(be * 100) + "%" }} title={`breakeven ${(be * 100).toFixed(0)}%`} /> : null}<div className="eo-ci" style={{ left: _pc(lb * 100) + "%", width: _pc((wUp - lb) * 100) + "%" }} /><div className="eo-pt" style={{ left: _pc(wr * 100) + "%" }} /></div>
+          <span className={`eo-v mono ${be != null && wr > be ? "up" : "warn"}`}>{(wr * 100).toFixed(0)}% <span className="dim2">LB {(lb * 100).toFixed(0)}</span></span>
+        </div>
+      ) : null}
+      <div className="eo-foot mono">{ml.direction != null ? <>P(up) <b className={ml.direction >= 0.5 ? "up" : "dn"}>{(ml.direction * 100).toFixed(0)}%</b> · </> : ""}ML hit-net <b className={ml.hitNet >= 0 ? "up" : "dn"}>{ml.hitNet >= 0 ? "+" : ""}{ml.hitNet}</b>{ss.pf != null ? <> · setup PF <b className={ss.pf >= 1.3 ? "up" : "warn"}>{ss.pf.toFixed(2)}</b></> : ""}{ss.n != null && ss.n < 30 ? <span className="warn"> · n&lt;30 ⚠</span> : ""}</div>
+    </div>
+  );
+}
+
 function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const ticker = (window.modeAdjust ? window.modeAdjust(t0, mode) : t0);
 
@@ -962,8 +1064,10 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
       <OvSection n={3} title="Conviction · Do The Signals Agree?"
         sub="3 horizons · regime fit · which engines flagged it · every lens' read"
         headerStyle={headerStyle} defaultOpen={true}
-        teaser="horizons · regime fit · engine hits · lens confluence">
+        teaser="conviction meter · probabilistic edge · horizons · lens confluence">
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {(() => { const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null; return cv ? <ConvictionMeter cv={cv} /> : null; })()}
+          <EdgeOdds ticker={ticker} mode={mode} />
           <HorizonStrip ticker={ticker} mode={mode} onMode={(m) => window.__setMode && window.__setMode(m)} />
           <RegimeFit ticker={ticker} mode={mode} />
           <SurfacedBy ticker={ticker} />
@@ -1067,6 +1171,7 @@ function ConfluenceHeatmap({ ticker, mode }) {
           <button key={i} className={`conf-cell conf-${tone}`} onClick={go} title={`open ${c.k} · weight ${(c.w * 100).toFixed(0)}%`}>
             <div className="conf-lens mono">{c.k}</div>
             <div className={`conf-v mono kpi-tone--${tone}`}>{c.v}</div>
+            <div className="conf-spark"><i style={{ left: Math.min(c.v, 50) + "%", width: Math.abs(c.v - 50) + "%", background: c.v >= 50 ? "var(--gn)" : "var(--rd)" }} /></div>
             <div className="conf-note mono dim2">{c.why}</div>
           </button>
         );
@@ -1143,6 +1248,7 @@ function SleeveAttribution({ ticker }) {
                   <span className="mono"><b>{s.sym}</b></span>
                   <span className="mono dim2">{s.age}d ago</span>
                   <span className={`mono kpi-tone--${tone}`}>{s.ret >= 0 ? "+" : ""}{s.ret.toFixed(1)}%</span>
+                  <span className="sleeve-rbar" style={{ width: Math.max(3, Math.min(42, Math.abs(s.ret) * 3)) + "px", background: s.ret >= 0 ? "var(--gn)" : "var(--rd)" }} />
                 </div>
               );
             })}
