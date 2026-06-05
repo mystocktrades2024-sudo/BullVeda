@@ -41,7 +41,7 @@ const FIXTURE_LINES = [
 
 const FIXTURE_ZONES = [{ lo: 186, hi: 205.2, tone: "cy", label: "Base" }];
 
-const FIXTURE_TARGETS = [
+var FIXTURE_TARGETS = [
   { label: "Breakout pivot",       basis: "flat resistance of the base", price: "205.2", rr: "trigger", conf: null,  tone: "copper" },
   { label: "T1 · measured move",   basis: "base height (20) added to pivot", price: "225.0", rr: "+5.5%", conf: 0.64, tone: "gn" },
   { label: "T2 · 1.5× extension", basis: "1.5 × base height",           price: "235.0", rr: "+10.2%", conf: 0.41, tone: "amb" },
@@ -56,7 +56,7 @@ const FIXTURE_LIBRARY = [
   { p: "Inverse H&S",        st: "WATCH",    mm: "$238", conf: 0.49, tone: "amb" },
 ];
 
-const FIXTURE_STAT = {
+var FIXTURE_STAT = {
   primary_pattern: "VCP · Asc. triangle",
   stage: "Breakout + retest",
   contractions: "5 · 18%→3%",

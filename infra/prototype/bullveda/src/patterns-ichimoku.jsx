@@ -46,7 +46,7 @@ function buildFixtureBars(ticker) {
 }
 
 // Static fixture stat/signals/lines/targets (for standalone showcase)
-const FIXTURE_STAT = {
+var FIXTURE_STAT = {
   cloud: "Above", tk_cross: "Bullish", chikou: "Free",
   future_kumo: "Green · bullish twist", confidence: 0.74,
   bull_count: 5, verdict: "strong_bull",
@@ -68,7 +68,7 @@ const FIXTURE_SIGNALS = [
   { s: "Price above Kijun baseline",          v: "PASS · above",       tone: "gn" },
 ];
 
-const FIXTURE_TARGETS = {
+var FIXTURE_TARGETS = {
   kumo_target: 222.0, kijun_stop: 201.4,
   cloud_top: 205.0, cloud_bottom: 197.2, cloud_height: 7.8,
   rr: 3.4, bull: true,
