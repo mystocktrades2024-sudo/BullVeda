@@ -1,82 +1,6 @@
 // lens-overview.jsx — quant overview (overrides the in-file LensOverview)
 // Loaded AFTER detail-panel.jsx so window.LensOverview = this one.
 
-// ──── Rich VerdictHero — overrides the in-file one ──────────────
-function VerdictHero({ ticker, mode, heroStyle, sizeCat }) {
-  const pillars = ticker.pillars;
-  const entry = ticker.pivot * 1.002;
-  const risk = entry - ticker.stop;
-  const reward1 = ticker.t1 - entry;
-  return (
-    <div className="hero vh-rich vh-rich--compact">
-      <div className="vhr-cockpit">
-        <div className="vhr-vis">
-          {heroStyle === "gauge" && <Gauge value={ticker.score} label="OVERALL" size={sizeCat === "S" ? 120 : 140} />}
-          {heroStyle === "radar" && <Radar pillars={pillars} size={sizeCat === "S" ? 130 : 156} />}
-          {heroStyle === "cone"  && (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-              <div className="label-cap">10d cone · ±{ticker.ml.magnitude.hi.toFixed(0)}%</div>
-              <Cone lo={ticker.ml.magnitude.lo} mid={ticker.ml.magnitude.mid} hi={ticker.ml.magnitude.hi} w={220} h={108} />
-            </div>
-          )}
-          <div className="vhr-pillchips">
-            {Object.entries(pillars).map(([k, v]) => {
-              const tone = v >= 70 ? "gn" : v >= 50 ? "amb" : "rd";
-              return <span key={k} className={`vhr-pchip kpi-tone--${tone}`} title={k} data-field={`t.scoring_breakdown.${k}_score`}>{k.slice(0, 4)} {v}</span>;
-            })}
-          </div>
-        </div>
-
-        <div className="vhr-body">
-          <div className="vhr-eyebrow">
-            <span className="mono label-cap">Setup · Execution · <b className="copper">{mode}</b></span>
-            <Pill tone="gn" dot small>LIVE 14:23 ET</Pill>
-          </div>
-          <div className="vhr-setup mono">
-            <b className="copper">{ticker.setupFamily}</b>
-            <span className="dim2"> · hold ~{ticker.holdDays}d · </span><b>{ticker.rMultiple.toFixed(2)}R</b>
-            <span className="dim2"> · {ticker.setupStats.winRate != null ? (ticker.setupStats.winRate*100).toFixed(0)+"% hist" : "no ledger hist"}{ticker.setupStats.wilsonLB != null ? " · Wilson LB "+(ticker.setupStats.wilsonLB*100).toFixed(0)+"%" : ""}</span>
-          </div>
-
-          <div className="vhr-ticket">
-            <div className="vhr-tk">
-              <div className="vhr-tk-l label-cap">ENTRY</div>
-              <div className="vhr-tk-v mono copper" data-field="canonical_trade_plan.entry.low" data-fallback="entry_low ▸ entry_lo" data-provenance="comp">${entry.toFixed(2)}</div>
-            </div>
-            <div className="vhr-tk">
-              <div className="vhr-tk-l label-cap">STOP · MAX LOSS</div>
-              <div className="vhr-tk-v mono dn" data-field="canonical_trade_plan.stop" data-fallback="trade_plan.stop ▸ stop" data-provenance="comp">${ticker.stop.toFixed(2)}</div>
-              <div className="vhr-tk-sub mono dim2">−${risk.toFixed(2)} · −{(risk/entry*100).toFixed(1)}%</div>
-            </div>
-            <div className="vhr-tk">
-              <div className="vhr-tk-l label-cap">T1 · T2</div>
-              <div className="vhr-tk-v mono up" data-field="canonical_trade_plan.target1" data-fallback="t1 ▸ trade_levels.t1" data-provenance="comp">${ticker.t1.toFixed(2)} <span className="dim2">·</span> ${ticker.t2.toFixed(2)}</div>
-              <div className="vhr-tk-sub mono dim2">+${reward1.toFixed(2)} · {(reward1/risk).toFixed(2)}R</div>
-            </div>
-            <div className="vhr-tk">
-              <div className="vhr-tk-l label-cap">SIZE · NAV</div>
-              <div className="vhr-tk-v mono" data-field="position_size.shares" data-provenance="comp">110 sh</div>
-              <div className="vhr-tk-sub mono dim2">$7,416 · 6.8% NAV</div>
-            </div>
-            <div className="vhr-tk">
-              <div className="vhr-tk-l label-cap">R · WILSON</div>
-              <div className="vhr-tk-v mono copper" data-field="canonical_trade_plan.rr_ratio" data-fallback="rr_ratio ▸ rr" data-provenance="comp">{ticker.rMultiple.toFixed(2)}R</div>
-              <div className="vhr-tk-sub mono dim2">LB 47.7% · PF 1.41</div>
-            </div>
-          </div>
-
-          <div className="vhr-actions">
-            <button className="vhr-act vhr-act--gn">▲ Place bracket</button>
-            <button className="vhr-act vhr-act--rd">▼ Place short</button>
-            <button className="vhr-act">＋ Watchlist</button>
-            <button className="vhr-act vhr-act--ghost">⚙ Adjust size</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-window.VerdictHero = VerdictHero;
 
 // ════════════════════════════════════════════════════════════════════
 // DecisionHero — THE one canonical answer. Merges the composite verdict,
@@ -775,7 +699,7 @@ Levels: entry $${entry.toFixed(2)}, stop $${(ticker.stop || 0).toFixed(2)}, targ
         </div>
       </div>
 
-      <div className="thx-ref" style={{display:"none"}}>
+      <div className="thx-ref">
         <span className="thx-ref-h mono dim2">FOR REFERENCE</span>
         <div className="thx-ref-grid">
           {ref.map((r, i) => <div key={i} className="thx-ref-cell"><span className="mono dim2">{r[0]}</span><span className="mono">{r[1]}</span></div>)}

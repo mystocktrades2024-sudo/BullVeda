@@ -3,8 +3,10 @@
 // systemic finding ("confluence shown but never reconciled").
 const { useMemo: useMemoCV } = React;
 
-// ── engine: per-ticker, per-mode → { net, verdict, tone, conf, lenses, agree, caution, dissent, dissenters } ──
-function compositeVerdict(ticker, mode) {
+// memo cache — compositeVerdict is called ~6× per detail render (hero, horizon×3,
+// thesis, checklist). Cache by identity so it computes once per (ticker, mode, data).
+const _CV_CACHE = new Map();
+const _cvImpl = function (ticker, mode) {
   const P = ticker.pillars || {};
   const moKey = mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "invest" : "swing";
   const proj = (window.AIPredict && ticker.symbol) ? window.AIPredict.projection(ticker.symbol, moKey) : null;
@@ -73,7 +75,16 @@ function compositeVerdict(ticker, mode) {
   const sd = Math.sqrt(lenses.reduce((a, l) => a + (l.v - mean) ** 2, 0) / lenses.length);
   const conf = sd < 12 ? "HIGH" : sd < 20 ? "MED" : "LOW";
   const disagree = sd < 12 ? "low" : sd < 20 ? "moderate" : "high";
-  return { net, verdict, verdictSource, vtone, conf, disagree, lenses, agree, caution, fail, dissenters, mode };
+  return { net, lensNet, verdict, verdictSource, vtone, conf, disagree, lenses, agree, caution, fail, dissenters, mode };
+};
+function compositeVerdict(ticker, mode) {
+  const key = (ticker && ticker.symbol || "") + "|" + mode + "|" + (ticker && ticker.score) + "|" + (ticker && ticker.ml && ticker.ml.direction) + "|" + (ticker && ticker._fund ? 1 : 0);
+  const hit = _CV_CACHE.get(key);
+  if (hit) return hit;
+  const r = _cvImpl(ticker, mode);
+  if (_CV_CACHE.size > 200) _CV_CACHE.clear();
+  _CV_CACHE.set(key, r);
+  return r;
 }
 window.compositeVerdict = compositeVerdict;
 
