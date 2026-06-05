@@ -80,6 +80,7 @@ function useInvData(ticker) {
       revGrowthQ: _P(H.QuarterlyRevenueGrowthYOY), divYield: _P(H.DividendYield),
       equity, totalDebt, netDebt, currentRatio, debtEquity, ebitda0, netDebtEbitda, shareCagr, salesPS,
       sector: ticker.sector || fund.sector || "",
+      dcfG: Math.max(0.02, Math.min(0.18, cagr(cf, "freeCashFlow") != null ? cagr(cf, "freeCashFlow") : (cagr(inc, "totalRevenue") != null ? cagr(inc, "totalRevenue") * 0.8 : 0.08))),
       hasFund: !!(inc.length || cf.length || H.MarketCapitalization),
     };
   }, [ticker.symbol, ticker.price, ticker._fund]);
@@ -108,7 +109,8 @@ function _impliedGrowth(fcfPS, price, w, tg) {
 }
 
 // ── the real fair-value method stack (multiples anchor + reverse-DCF) ──
-function fairValueMethods(d, peers) {
+function fairValueMethods(d, peers, asm) {
+  asm = asm || {};
   const out = [];
   const med = (peers && peers.medians) || {};
   const peerPE = _P(med.pe_ttm), peerFwdPE = _P(med.forward_pe), peerEvEbitda = _P(med.ev_ebitda), peerPS = _P(med.price_sales);
@@ -121,7 +123,10 @@ function fairValueMethods(d, peers) {
   const adjLbl = growthAdj !== 1 ? ` · growth-adj ${growthAdj.toFixed(2)}×` : "";
   const isGrowth = ownGrow != null && ownGrow >= 0.15;   // Graham's mechanism fails for growth names
   const isFinancial = /financ|bank|insur|capital market/i.test(d.sector || "");   // enterprise multiples invalid for lenders
-  const wacc = _capmWacc(d.beta);
+  // assumptions — user overrides (sliders) fall back to the data-derived defaults
+  const wacc = asm.wacc != null ? asm.wacc : _capmWacc(d.beta);
+  const term = asm.term != null ? asm.term : 0.03;
+  const dcfG = asm.g != null ? asm.g : d.dcfG;
 
   if (d.targetPrice) out.push({ key: "pt", m: "Analyst price target", sub: "consensus mean · EODHD", fair: d.targetPrice, w: 0.20, band: 0.08 });
   if (peerPE && d.eps && d.eps > 0) out.push({ key: "peTrail", m: "Peer P/E · trailing EPS", sub: `cohort ${peerPE.toFixed(1)}× · EPS $${d.eps.toFixed(2)}${adjLbl}`, fair: peerPE * d.eps * growthAdj, w: 0.16, band: 0.12 });
@@ -144,14 +149,13 @@ function fairValueMethods(d, peers) {
   }
   // Reverse-DCF — skip for financials (FCF distorted by loan-book / funding flows)
   if (!isFinancial && d.fcfPS && d.fcfPS > 0) {
-    const g = Math.max(0.02, Math.min(0.18, d.fcfCagr != null ? d.fcfCagr : (d.revCagr != null ? d.revCagr * 0.8 : 0.08)));
-    const fv = _dcfValue(d.fcfPS, g, wacc, 0.03);
-    if (fv) out.push({ key: "dcf", m: "Reverse-DCF · base case", sub: `FCF/sh $${d.fcfPS.toFixed(2)} · g ${(g * 100).toFixed(0)}%→3% · WACC ${(wacc * 100).toFixed(1)}%`, fair: fv, w: 0.26, band: 0.18, g });
+    const fv = _dcfValue(d.fcfPS, dcfG, wacc, term);
+    if (fv) out.push({ key: "dcf", m: "Reverse-DCF · base case", sub: `FCF/sh $${d.fcfPS.toFixed(2)} · g ${(dcfG * 100).toFixed(0)}%→${(term * 100).toFixed(0)}% · WACC ${(wacc * 100).toFixed(1)}%`, fair: fv, w: 0.26, band: 0.18, g: dcfG });
   }
   const tw = out.reduce((s, x) => s + x.w, 0) || 1;
   out.forEach(x => { x.wn = x.w / tw; x.mos = (x.fair / d.price - 1) * 100; });
   const blended = out.length ? out.reduce((s, x) => s + x.fair * x.wn, 0) : null;
-  return { methods: out, blended, blendedMos: blended != null ? (blended / d.price - 1) * 100 : null, growthAdj, isGrowth, isFinancial, wacc };
+  return { methods: out, blended, blendedMos: blended != null ? (blended / d.price - 1) * 100 : null, growthAdj, isGrowth, isFinancial, wacc, term, dcfG };
 }
 
 function _tone(mos) { return mos == null ? "ink" : mos >= 8 ? "gn" : mos >= -8 ? "amb" : "rd"; }
@@ -164,7 +168,11 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
   const s7 = useStateToggle("iv-7");
   const d = useInvData(ticker);
   const peers = usePeers(ticker.symbol);
-  const fv = React.useMemo(() => fairValueMethods(d, peers), [d, peers]);
+  // DCF assumption overrides (sliders). null = use the data-derived default.
+  const [asm, setAsm] = React.useState({ g: null, term: null, wacc: null });
+  React.useEffect(() => { setAsm({ g: null, term: null, wacc: null }); }, [ticker.symbol]);  // reset on ticker change
+  const fv = React.useMemo(() => fairValueMethods(d, peers, asm), [d, peers, asm]);
+  const dcfDefaults = React.useMemo(() => ({ g: d.dcfG, term: 0.03, wacc: _capmWacc(d.beta) }), [d.dcfG, d.beta]);
 
   if (!d.hasFund && !ticker._loading) {
     return (
@@ -191,7 +199,12 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
             <FootballField d={d} fv={fv} />
             <div className="iv-split" style={{ marginTop: 14 }}>
               <div className="iv-split-main"><MarginOfSafety d={d} fv={fv} /></div>
-              <div className="iv-split-side"><ValueScale d={d} fv={fv} /><ReverseDcf d={d} fv={fv} /></div>
+              <div className="iv-split-side">
+                <ValueScale d={d} fv={fv} />
+                {(fv.methods.some(m => m.key === "dcf") || fv.methods.some(m => m.key === "pbRoe")) &&
+                  <DcfAssumptions asm={asm} defaults={dcfDefaults} onChange={setAsm} showGrowth={fv.methods.some(m => m.key === "dcf")} />}
+                <ReverseDcf d={d} fv={fv} />
+              </div>
             </div>
           </div>
         </StateWrap>
@@ -280,12 +293,12 @@ function ValueHero({ ticker, mode, d, fv }) {
           <div className="vh-verdict">
             <span className={`vh-tag kpi-tone--${vtone}`}>{window.secBias ? window.secBias(verdict) : verdict}</span>
             {net != null && <span className="vh-score mono">{Math.round(net)}<span className="th-score-unit">/100</span></span>}
-            {mos != null && <Pill tone={tone} small>{mos >= 0 ? "premium" : "margin"} {Math.abs(mos).toFixed(0)}%</Pill>}
+            {mos != null && <Pill tone={tone} small>{mos >= 0 ? "margin" : "premium"} {Math.abs(mos).toFixed(0)}%</Pill>}
           </div>
           <div className="vh-line mono dim2">
             {fv.blended != null ? <>
               Blended fair <b>${fv.blended.toFixed(2)}</b> · range ${lo.toFixed(0)}–${hi.toFixed(0)} across {fv.methods.length} methods.
-              Current <b>${d.price.toFixed(2)}</b> sits {mos >= 0 ? <b className="dn">{mos.toFixed(0)}% above</b> : <b className="up">{Math.abs(mos).toFixed(0)}% below</b>} blended fair value.
+              Current <b>${d.price.toFixed(2)}</b> sits {mos >= 0 ? <b className="up">{Math.abs(mos).toFixed(0)}% below</b> : <b className="dn">{Math.abs(mos).toFixed(0)}% above</b>} blended fair value.
             </> : <>Not enough earnings / cash-flow to triangulate fair value — analyst target only.</>}
           </div>
         </div>
@@ -481,8 +494,8 @@ function ReverseDcf({ d, fv }) {
     <div className="dcf-sens"><div className="label-cap" style={{ marginBottom: 6 }}>Reverse-DCF</div>
       <div className="mono dim2" style={{ fontSize: 11 }}>FCF is not positive on a trailing basis — a cash-flow DCF doesn't apply. Lean on the multiple-reversion methods above.</div></div>
   );
-  const wacc = fv.wacc || 0.09;
-  const implied = _impliedGrowth(d.fcfPS, d.price, wacc, 0.03);
+  const wacc = fv.wacc || 0.09, term = fv.term != null ? fv.term : 0.03;
+  const implied = _impliedGrowth(d.fcfPS, d.price, wacc, term);
   const hist = d.fcfCagr;
   const w0 = Math.round(wacc * 100);
   const waccs = [w0 - 1, w0, w0 + 1, w0 + 2].map(x => x / 100), grows = [0.02, 0.05, 0.08, 0.12];
@@ -500,13 +513,45 @@ function ReverseDcf({ d, fv }) {
         <tbody>
           {waccs.map(wv => (
             <tr key={wv}><td className="mono dim2">{(wv * 100).toFixed(0)}%</td>
-              {grows.map(g => { const val = _dcfValue(d.fcfPS, g, wv, 0.03); const mos = val ? (val / d.price - 1) * 100 : null;
+              {grows.map(g => { const val = _dcfValue(d.fcfPS, g, wv, term); const mos = val ? (val / d.price - 1) * 100 : null;
                 return <td key={g} className={`r mono dcf-cell kpi-tone--${mos == null ? "ink" : tone(mos)}`} title={mos != null ? `MoS ${mos >= 0 ? "+" : ""}${mos.toFixed(0)}%` : "n/a"} style={mos != null ? { background: `color-mix(in oklab, var(--${tone(mos)}) ${Math.min(22, Math.abs(mos))}%, transparent)` } : {}}>{val ? "$" + val.toFixed(0) : "—"}</td>; })}
             </tr>
           ))}
         </tbody>
       </table>
       <div className="mono dim2" style={{ fontSize: 10.5, marginTop: 6 }}>Intrinsic value/share at each discount rate × first-stage growth. Green = trades below fair.</div>
+    </div>
+  );
+}
+
+// ─── §1 · DCF assumption sliders — stress-test the inputs the model can't
+//     measure (first-stage growth, terminal growth, discount rate). null = the
+//     data-derived default (history + CAPM); dragging overrides + recomputes. ──
+function DcfAssumptions({ asm, defaults, onChange, showGrowth }) {
+  const eff = {
+    g: asm.g != null ? asm.g : defaults.g,
+    term: asm.term != null ? asm.term : defaults.term,
+    wacc: asm.wacc != null ? asm.wacc : defaults.wacc,
+  };
+  const dirty = asm.g != null || asm.term != null || asm.wacc != null;
+  const Row = ({ k, label, min, max, step, val, fmt }) => (
+    <div className="iv-asm-row">
+      <span className="iv-asm-lbl mono">{label}</span>
+      <input type="range" min={min} max={max} step={step} value={val} className="iv-asm-slider"
+        onChange={e => onChange(a => ({ ...a, [k]: +e.target.value }))} />
+      <span className={`iv-asm-val mono ${asm[k] != null ? "copper" : "dim2"}`}>{fmt(val)}</span>
+    </div>
+  );
+  return (
+    <div className="iv-asm">
+      <div className="iv-asm-hd">
+        <span className="label-cap">DCF assumptions</span>
+        {dirty && <button className="iv-asm-reset mono" onClick={() => onChange({ g: null, term: null, wacc: null })}>↺ auto</button>}
+      </div>
+      {showGrowth && <Row k="g" label="1st-stage growth" min={0} max={0.25} step={0.005} val={eff.g} fmt={v => (v * 100).toFixed(1) + "%"} />}
+      {showGrowth && <Row k="term" label="terminal growth" min={0.01} max={0.05} step={0.0025} val={eff.term} fmt={v => (v * 100).toFixed(2) + "%"} />}
+      <Row k="wacc" label={showGrowth ? "WACC (discount)" : "cost of equity"} min={0.07} max={0.13} step={0.0025} val={eff.wacc} fmt={v => (v * 100).toFixed(2) + "%"} />
+      <div className="mono dim2" style={{ fontSize: 10, marginTop: 4 }}>{dirty ? "Custom inputs — fair value above reflects them." : "Auto: derived from history + CAPM. Drag to stress-test."}</div>
     </div>
   );
 }
@@ -867,13 +912,13 @@ function crossLensCells(ticker, mode, d, fv) {
 function TheRead({ d, fv }) {
   const mos = fv.blendedMos;
   if (mos == null) return null;
-  const cheap = mos <= -8, rich = mos >= 8;
+  const cheap = mos >= 8, rich = mos <= -8;   // mos = (fair/price − 1): positive = undervalued
   const entry = fv.blended ? fv.blended * 0.92 : d.price * 0.92;
   return (
     <div className="lens-call">
       <span className="label-cap">The Read · Investment</span>
       <span className="mono">
-        <b className={cheap ? "up" : rich ? "dn" : "copper"}>{cheap ? `Margin of safety ${Math.abs(mos).toFixed(0)}%` : rich ? `Premium ${mos.toFixed(0)}%` : "Roughly fair"}</b>
+        <b className={cheap ? "up" : rich ? "dn" : "copper"}>{cheap ? `Margin of safety ${Math.abs(mos).toFixed(0)}%` : rich ? `Premium ${Math.abs(mos).toFixed(0)}%` : "Roughly fair"}</b>
         {" "}· blended fair <b>${fv.blended ? fv.blended.toFixed(2) : "—"}</b>.{" "}
         {rich ? <>More attractive on a pullback toward <b>${entry.toFixed(2)}</b>.</> : cheap ? <>Valuation supports accumulation; size to conviction and let the thesis play out.</> : <>Wait for a better entry or a fundamental catalyst to tip the risk/reward.</>}
       </span>

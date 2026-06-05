@@ -1660,6 +1660,18 @@ body { overflow: hidden; }
 .iv-ff svg { display: block; width: 100%; }
 .rdcf-head { background: color-mix(in oklab, var(--violet) 6%, transparent); border: 1px solid color-mix(in oklab, var(--violet) 22%, transparent); border-radius: var(--r-2); padding: 9px 11px; font-size: 11.5px; line-height: 1.55; display: flex; flex-direction: column; gap: 2px; }
 
+/* §1 DCF assumption sliders */
+.iv-asm { background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-2); padding: 9px 11px; margin-bottom: 10px; }
+.iv-asm-hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.iv-asm-reset { background: none; border: 1px solid color-mix(in oklab, var(--copper) 40%, transparent); color: var(--copper); border-radius: 999px; font-size: 9.5px; padding: 2px 8px; cursor: pointer; }
+.iv-asm-reset:hover { background: color-mix(in oklab, var(--copper) 14%, transparent); }
+.iv-asm-row { display: grid; grid-template-columns: 92px 1fr 52px; align-items: center; gap: 8px; margin: 5px 0; }
+.iv-asm-lbl { font-size: 10.5px; color: var(--ink-2); }
+.iv-asm-val { font-size: 11px; text-align: right; font-weight: 600; }
+.iv-asm-slider { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 3px; background: var(--line); outline: none; }
+.iv-asm-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 13px; height: 13px; border-radius: 50%; background: var(--copper); cursor: pointer; border: 2px solid var(--bg-0); }
+.iv-asm-slider::-moz-range-thumb { width: 13px; height: 13px; border-radius: 50%; background: var(--copper); cursor: pointer; border: 2px solid var(--bg-0); }
+
 /* §6 verbatim 10-K disclosures panel */
 .iv-10k { margin-top: 12px; background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-2); padding: 11px 13px; }
 .iv-10k-hd { display: flex; align-items: center; margin-bottom: 8px; }
@@ -14030,6 +14042,7 @@ function useInvData(ticker) {
       shareCagr,
       salesPS,
       sector: ticker.sector || fund.sector || "",
+      dcfG: Math.max(0.02, Math.min(0.18, cagr(cf, "freeCashFlow") != null ? cagr(cf, "freeCashFlow") : cagr(inc, "totalRevenue") != null ? cagr(inc, "totalRevenue") * 0.8 : 0.08)),
       hasFund: !!(inc.length || cf.length || H.MarketCapitalization)
     };
   }, [ticker.symbol, ticker.price, ticker._fund]);
@@ -14062,7 +14075,8 @@ function _impliedGrowth(fcfPS, price, w, tg) {
   }
   return (lo + hi) / 2;
 }
-function fairValueMethods(d, peers) {
+function fairValueMethods(d, peers, asm) {
+  asm = asm || {};
   const out = [];
   const med = peers && peers.medians || {};
   const peerPE = _P(med.pe_ttm), peerFwdPE = _P(med.forward_pe), peerEvEbitda = _P(med.ev_ebitda), peerPS = _P(med.price_sales);
@@ -14072,7 +14086,9 @@ function fairValueMethods(d, peers) {
   const adjLbl = growthAdj !== 1 ? ` \xB7 growth-adj ${growthAdj.toFixed(2)}\xD7` : "";
   const isGrowth = ownGrow != null && ownGrow >= 0.15;
   const isFinancial = /financ|bank|insur|capital market/i.test(d.sector || "");
-  const wacc = _capmWacc(d.beta);
+  const wacc = asm.wacc != null ? asm.wacc : _capmWacc(d.beta);
+  const term = asm.term != null ? asm.term : 0.03;
+  const dcfG = asm.g != null ? asm.g : d.dcfG;
   if (d.targetPrice) out.push({ key: "pt", m: "Analyst price target", sub: "consensus mean \xB7 EODHD", fair: d.targetPrice, w: 0.2, band: 0.08 });
   if (peerPE && d.eps && d.eps > 0) out.push({ key: "peTrail", m: "Peer P/E \xB7 trailing EPS", sub: `cohort ${peerPE.toFixed(1)}\xD7 \xB7 EPS $${d.eps.toFixed(2)}${adjLbl}`, fair: peerPE * d.eps * growthAdj, w: 0.16, band: 0.12 });
   if (peerFwdPE && d.fwdEps && d.fwdEps > 0) out.push({ key: "peFwd", m: "Peer fwd P/E \xB7 forward EPS", sub: `cohort fwd ${peerFwdPE.toFixed(1)}\xD7 \xB7 fwd EPS $${d.fwdEps.toFixed(2)}${adjLbl}`, fair: peerFwdPE * d.fwdEps * growthAdj, w: 0.16, band: 0.12 });
@@ -14087,9 +14103,8 @@ function fairValueMethods(d, peers) {
     out.push({ key: "pbRoe", m: "Justified P/B \xB7 ROE\xF7COE", sub: `ROE ${(d.roe * 100).toFixed(0)}% \xF7 COE ${(coe * 100).toFixed(1)}% \u2192 ${justPB.toFixed(2)}\xD7 \xB7 BVPS $${d.bvps.toFixed(2)}`, fair: justPB * d.bvps, w: 0.24, band: 0.13 });
   }
   if (!isFinancial && d.fcfPS && d.fcfPS > 0) {
-    const g = Math.max(0.02, Math.min(0.18, d.fcfCagr != null ? d.fcfCagr : d.revCagr != null ? d.revCagr * 0.8 : 0.08));
-    const fv = _dcfValue(d.fcfPS, g, wacc, 0.03);
-    if (fv) out.push({ key: "dcf", m: "Reverse-DCF \xB7 base case", sub: `FCF/sh $${d.fcfPS.toFixed(2)} \xB7 g ${(g * 100).toFixed(0)}%\u21923% \xB7 WACC ${(wacc * 100).toFixed(1)}%`, fair: fv, w: 0.26, band: 0.18, g });
+    const fv = _dcfValue(d.fcfPS, dcfG, wacc, term);
+    if (fv) out.push({ key: "dcf", m: "Reverse-DCF \xB7 base case", sub: `FCF/sh $${d.fcfPS.toFixed(2)} \xB7 g ${(dcfG * 100).toFixed(0)}%\u2192${(term * 100).toFixed(0)}% \xB7 WACC ${(wacc * 100).toFixed(1)}%`, fair: fv, w: 0.26, band: 0.18, g: dcfG });
   }
   const tw = out.reduce((s, x) => s + x.w, 0) || 1;
   out.forEach((x) => {
@@ -14097,7 +14112,7 @@ function fairValueMethods(d, peers) {
     x.mos = (x.fair / d.price - 1) * 100;
   });
   const blended = out.length ? out.reduce((s, x) => s + x.fair * x.wn, 0) : null;
-  return { methods: out, blended, blendedMos: blended != null ? (blended / d.price - 1) * 100 : null, growthAdj, isGrowth, isFinancial, wacc };
+  return { methods: out, blended, blendedMos: blended != null ? (blended / d.price - 1) * 100 : null, growthAdj, isGrowth, isFinancial, wacc, term, dcfG };
 }
 function _tone(mos) {
   return mos == null ? "ink" : mos >= 8 ? "gn" : mos >= -8 ? "amb" : "rd";
@@ -14112,7 +14127,12 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
   const s7 = useStateToggle("iv-7");
   const d = useInvData(ticker);
   const peers = usePeers(ticker.symbol);
-  const fv = React.useMemo(() => fairValueMethods(d, peers), [d, peers]);
+  const [asm, setAsm] = React.useState({ g: null, term: null, wacc: null });
+  React.useEffect(() => {
+    setAsm({ g: null, term: null, wacc: null });
+  }, [ticker.symbol]);
+  const fv = React.useMemo(() => fairValueMethods(d, peers, asm), [d, peers, asm]);
+  const dcfDefaults = React.useMemo(() => ({ g: d.dcfG, term: 0.03, wacc: _capmWacc(d.beta) }), [d.dcfG, d.beta]);
   if (!d.hasFund && !ticker._loading) {
     return /* @__PURE__ */ React.createElement("div", { className: "lens lens--inv" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad", style: { padding: "40px 18px", textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 8 } }, "Investment \xB7 Value"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 13 } }, "No fundamentals returned for ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, ticker.symbol), " \u2014 value lens needs EODHD financials (income / cash-flow / balance). It may be an ETF, ADR, or a name outside the fundamentals universe.")));
   }
@@ -14125,7 +14145,7 @@ function LensInvestment({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "iv-1" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s1.value, source: "EODHD financials + /api/peers cohort" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(PriceFairChannel, { ticker, d, peers }), /* @__PURE__ */ React.createElement(FootballField, { d, fv }), /* @__PURE__ */ React.createElement("div", { className: "iv-split", style: { marginTop: 14 } }, /* @__PURE__ */ React.createElement("div", { className: "iv-split-main" }, /* @__PURE__ */ React.createElement(MarginOfSafety, { d, fv })), /* @__PURE__ */ React.createElement("div", { className: "iv-split-side" }, /* @__PURE__ */ React.createElement(ValueScale, { d, fv }), /* @__PURE__ */ React.createElement(ReverseDcf, { d, fv })))))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s1.value, source: "EODHD financials + /api/peers cohort" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(PriceFairChannel, { ticker, d, peers }), /* @__PURE__ */ React.createElement(FootballField, { d, fv }), /* @__PURE__ */ React.createElement("div", { className: "iv-split", style: { marginTop: 14 } }, /* @__PURE__ */ React.createElement("div", { className: "iv-split-main" }, /* @__PURE__ */ React.createElement(MarginOfSafety, { d, fv })), /* @__PURE__ */ React.createElement("div", { className: "iv-split-side" }, /* @__PURE__ */ React.createElement(ValueScale, { d, fv }), (fv.methods.some((m) => m.key === "dcf") || fv.methods.some((m) => m.key === "pbRoe")) && /* @__PURE__ */ React.createElement(DcfAssumptions, { asm, defaults: dcfDefaults, onChange: setAsm, showGrowth: fv.methods.some((m) => m.key === "dcf") }), /* @__PURE__ */ React.createElement(ReverseDcf, { d, fv })))))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 2,
@@ -14198,7 +14218,7 @@ function ValueHero({ ticker, mode, d, fv }) {
   const tone = _tone(mos);
   const lo = fv.methods.length ? Math.min(...fv.methods.map((m) => m.fair)) : null;
   const hi = fv.methods.length ? Math.max(...fv.methods.map((m) => m.fair)) : null;
-  return /* @__PURE__ */ React.createElement("div", { className: "hero value-hero" }, /* @__PURE__ */ React.createElement("div", { className: "vh-top" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Master verdict \xB7 ", (mode || "INVEST").toUpperCase(), " mode"), /* @__PURE__ */ React.createElement("div", { className: "vh-verdict" }, /* @__PURE__ */ React.createElement("span", { className: `vh-tag kpi-tone--${vtone}` }, window.secBias ? window.secBias(verdict) : verdict), net != null && /* @__PURE__ */ React.createElement("span", { className: "vh-score mono" }, Math.round(net), /* @__PURE__ */ React.createElement("span", { className: "th-score-unit" }, "/100")), mos != null && /* @__PURE__ */ React.createElement(Pill, { tone, small: true }, mos >= 0 ? "premium" : "margin", " ", Math.abs(mos).toFixed(0), "%")), /* @__PURE__ */ React.createElement("div", { className: "vh-line mono dim2" }, fv.blended != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, "Blended fair ", /* @__PURE__ */ React.createElement("b", null, "$", fv.blended.toFixed(2)), " \xB7 range $", lo.toFixed(0), "\u2013$", hi.toFixed(0), " across ", fv.methods.length, " methods. Current ", /* @__PURE__ */ React.createElement("b", null, "$", d.price.toFixed(2)), " sits ", mos >= 0 ? /* @__PURE__ */ React.createElement("b", { className: "dn" }, mos.toFixed(0), "% above") : /* @__PURE__ */ React.createElement("b", { className: "up" }, Math.abs(mos).toFixed(0), "% below"), " blended fair value.") : /* @__PURE__ */ React.createElement(React.Fragment, null, "Not enough earnings / cash-flow to triangulate fair value \u2014 analyst target only.")))));
+  return /* @__PURE__ */ React.createElement("div", { className: "hero value-hero" }, /* @__PURE__ */ React.createElement("div", { className: "vh-top" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Master verdict \xB7 ", (mode || "INVEST").toUpperCase(), " mode"), /* @__PURE__ */ React.createElement("div", { className: "vh-verdict" }, /* @__PURE__ */ React.createElement("span", { className: `vh-tag kpi-tone--${vtone}` }, window.secBias ? window.secBias(verdict) : verdict), net != null && /* @__PURE__ */ React.createElement("span", { className: "vh-score mono" }, Math.round(net), /* @__PURE__ */ React.createElement("span", { className: "th-score-unit" }, "/100")), mos != null && /* @__PURE__ */ React.createElement(Pill, { tone, small: true }, mos >= 0 ? "margin" : "premium", " ", Math.abs(mos).toFixed(0), "%")), /* @__PURE__ */ React.createElement("div", { className: "vh-line mono dim2" }, fv.blended != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, "Blended fair ", /* @__PURE__ */ React.createElement("b", null, "$", fv.blended.toFixed(2)), " \xB7 range $", lo.toFixed(0), "\u2013$", hi.toFixed(0), " across ", fv.methods.length, " methods. Current ", /* @__PURE__ */ React.createElement("b", null, "$", d.price.toFixed(2)), " sits ", mos >= 0 ? /* @__PURE__ */ React.createElement("b", { className: "up" }, Math.abs(mos).toFixed(0), "% below") : /* @__PURE__ */ React.createElement("b", { className: "dn" }, Math.abs(mos).toFixed(0), "% above"), " blended fair value.") : /* @__PURE__ */ React.createElement(React.Fragment, null, "Not enough earnings / cash-flow to triangulate fair value \u2014 analyst target only.")))));
 }
 function PriceFairChannel({ ticker, d, peers }) {
   const [hist, setHist] = React.useState(null);
@@ -14305,17 +14325,38 @@ function MarginOfSafety({ d, fv }) {
 function ReverseDcf({ d, fv }) {
   if (fv.isFinancial) return /* @__PURE__ */ React.createElement("div", { className: "dcf-sens" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 6 } }, "Reverse-DCF"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 11 } }, "This is a financial \u2014 its free cash flow is distorted by loan-book and funding flows, so a cash-flow DCF doesn't apply. Value rests on the ", /* @__PURE__ */ React.createElement("b", null, "Justified P/B (ROE\xF7COE)"), " method above instead."));
   if (!d.fcfPS || d.fcfPS <= 0) return /* @__PURE__ */ React.createElement("div", { className: "dcf-sens" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 6 } }, "Reverse-DCF"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 11 } }, "FCF is not positive on a trailing basis \u2014 a cash-flow DCF doesn't apply. Lean on the multiple-reversion methods above."));
-  const wacc = fv.wacc || 0.09;
-  const implied = _impliedGrowth(d.fcfPS, d.price, wacc, 0.03);
+  const wacc = fv.wacc || 0.09, term = fv.term != null ? fv.term : 0.03;
+  const implied = _impliedGrowth(d.fcfPS, d.price, wacc, term);
   const hist = d.fcfCagr;
   const w0 = Math.round(wacc * 100);
   const waccs = [w0 - 1, w0, w0 + 1, w0 + 2].map((x) => x / 100), grows = [0.02, 0.05, 0.08, 0.12];
   const tone = (mos) => mos >= 8 ? "gn" : mos >= -8 ? "amb" : "rd";
   return /* @__PURE__ */ React.createElement("div", { className: "dcf-sens" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 6 } }, "Reverse-DCF \xB7 what's priced in"), /* @__PURE__ */ React.createElement("div", { className: "rdcf-head mono" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "market is pricing FCF growth of"), " ", /* @__PURE__ */ React.createElement("b", { className: implied != null && hist != null ? implied > hist ? "dn" : "up" : "" }, implied != null ? (implied * 100).toFixed(1) + "%/yr" : "\u2014")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "you've delivered (5y FCF CAGR)"), " ", /* @__PURE__ */ React.createElement("b", null, hist != null ? (hist * 100).toFixed(1) + "%/yr" : "\u2014")), /* @__PURE__ */ React.createElement("div", { className: "dim2", style: { fontSize: 10.5, marginTop: 2 } }, implied != null && hist != null ? implied > hist ? "Priced-in growth exceeds your track record \u2014 the market is optimistic; the thesis needs acceleration." : "Priced-in growth is below your track record \u2014 the bar is beatable if history repeats." : `10y fade to 3% terminal \xB7 ${(wacc * 100).toFixed(1)}% WACC (CAPM, \u03B2 ${(d.beta != null ? d.beta : 1).toFixed(2)}).`)), /* @__PURE__ */ React.createElement("table", { className: "dtable dcf-grid", style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { className: "dim2" }, "WACC \u2193 \xB7 g \u2192"), grows.map((g) => /* @__PURE__ */ React.createElement("th", { key: g, className: "r" }, (g * 100).toFixed(0), "%")))), /* @__PURE__ */ React.createElement("tbody", null, waccs.map((wv) => /* @__PURE__ */ React.createElement("tr", { key: wv }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, (wv * 100).toFixed(0), "%"), grows.map((g) => {
-    const val = _dcfValue(d.fcfPS, g, wv, 0.03);
+    const val = _dcfValue(d.fcfPS, g, wv, term);
     const mos = val ? (val / d.price - 1) * 100 : null;
     return /* @__PURE__ */ React.createElement("td", { key: g, className: `r mono dcf-cell kpi-tone--${mos == null ? "ink" : tone(mos)}`, title: mos != null ? `MoS ${mos >= 0 ? "+" : ""}${mos.toFixed(0)}%` : "n/a", style: mos != null ? { background: `color-mix(in oklab, var(--${tone(mos)}) ${Math.min(22, Math.abs(mos))}%, transparent)` } : {} }, val ? "$" + val.toFixed(0) : "\u2014");
   }))))), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 10.5, marginTop: 6 } }, "Intrinsic value/share at each discount rate \xD7 first-stage growth. Green = trades below fair."));
+}
+function DcfAssumptions({ asm, defaults, onChange, showGrowth }) {
+  const eff = {
+    g: asm.g != null ? asm.g : defaults.g,
+    term: asm.term != null ? asm.term : defaults.term,
+    wacc: asm.wacc != null ? asm.wacc : defaults.wacc
+  };
+  const dirty = asm.g != null || asm.term != null || asm.wacc != null;
+  const Row = ({ k, label, min, max, step, val, fmt }) => /* @__PURE__ */ React.createElement("div", { className: "iv-asm-row" }, /* @__PURE__ */ React.createElement("span", { className: "iv-asm-lbl mono" }, label), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "range",
+      min,
+      max,
+      step,
+      value: val,
+      className: "iv-asm-slider",
+      onChange: (e) => onChange((a) => ({ ...a, [k]: +e.target.value }))
+    }
+  ), /* @__PURE__ */ React.createElement("span", { className: `iv-asm-val mono ${asm[k] != null ? "copper" : "dim2"}` }, fmt(val)));
+  return /* @__PURE__ */ React.createElement("div", { className: "iv-asm" }, /* @__PURE__ */ React.createElement("div", { className: "iv-asm-hd" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "DCF assumptions"), dirty && /* @__PURE__ */ React.createElement("button", { className: "iv-asm-reset mono", onClick: () => onChange({ g: null, term: null, wacc: null }) }, "\u21BA auto")), showGrowth && /* @__PURE__ */ React.createElement(Row, { k: "g", label: "1st-stage growth", min: 0, max: 0.25, step: 5e-3, val: eff.g, fmt: (v) => (v * 100).toFixed(1) + "%" }), showGrowth && /* @__PURE__ */ React.createElement(Row, { k: "term", label: "terminal growth", min: 0.01, max: 0.05, step: 25e-4, val: eff.term, fmt: (v) => (v * 100).toFixed(2) + "%" }), /* @__PURE__ */ React.createElement(Row, { k: "wacc", label: showGrowth ? "WACC (discount)" : "cost of equity", min: 0.07, max: 0.13, step: 25e-4, val: eff.wacc, fmt: (v) => (v * 100).toFixed(2) + "%" }), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 10, marginTop: 4 } }, dirty ? "Custom inputs \u2014 fair value above reflects them." : "Auto: derived from history + CAPM. Drag to stress-test."));
 }
 function ValueScale({ d, fv }) {
   if (!fv.methods.length) return null;
@@ -14552,9 +14593,9 @@ function crossLensCells(ticker, mode, d, fv) {
 function TheRead({ d, fv }) {
   const mos = fv.blendedMos;
   if (mos == null) return null;
-  const cheap = mos <= -8, rich = mos >= 8;
+  const cheap = mos >= 8, rich = mos <= -8;
   const entry = fv.blended ? fv.blended * 0.92 : d.price * 0.92;
-  return /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 Investment"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", { className: cheap ? "up" : rich ? "dn" : "copper" }, cheap ? `Margin of safety ${Math.abs(mos).toFixed(0)}%` : rich ? `Premium ${mos.toFixed(0)}%` : "Roughly fair"), " ", "\xB7 blended fair ", /* @__PURE__ */ React.createElement("b", null, "$", fv.blended ? fv.blended.toFixed(2) : "\u2014"), ".", " ", rich ? /* @__PURE__ */ React.createElement(React.Fragment, null, "More attractive on a pullback toward ", /* @__PURE__ */ React.createElement("b", null, "$", entry.toFixed(2)), ".") : cheap ? /* @__PURE__ */ React.createElement(React.Fragment, null, "Valuation supports accumulation; size to conviction and let the thesis play out.") : /* @__PURE__ */ React.createElement(React.Fragment, null, "Wait for a better entry or a fundamental catalyst to tip the risk/reward.")));
+  return /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 Investment"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", { className: cheap ? "up" : rich ? "dn" : "copper" }, cheap ? `Margin of safety ${Math.abs(mos).toFixed(0)}%` : rich ? `Premium ${Math.abs(mos).toFixed(0)}%` : "Roughly fair"), " ", "\xB7 blended fair ", /* @__PURE__ */ React.createElement("b", null, "$", fv.blended ? fv.blended.toFixed(2) : "\u2014"), ".", " ", rich ? /* @__PURE__ */ React.createElement(React.Fragment, null, "More attractive on a pullback toward ", /* @__PURE__ */ React.createElement("b", null, "$", entry.toFixed(2)), ".") : cheap ? /* @__PURE__ */ React.createElement(React.Fragment, null, "Valuation supports accumulation; size to conviction and let the thesis play out.") : /* @__PURE__ */ React.createElement(React.Fragment, null, "Wait for a better entry or a fundamental catalyst to tip the risk/reward.")));
 }
 window.LensInvestment = LensInvestment;
 </script>
