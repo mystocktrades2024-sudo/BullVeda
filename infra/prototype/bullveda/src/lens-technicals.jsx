@@ -195,6 +195,7 @@ function LensTechnicals({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
   return (
     <div className="lens lens--tech">
       {window.LensSummaryBar && <LensSummaryBar ticker={ticker} mode={mode} kind="technicals" tech={T} />}
+      {window.QuantQuickCard && <QuantQuickCard d={window.quickDecision(ticker, mode)} title={`Quick Read · Technicals · ${mode}`} />}
       <TechHero ticker={ticker} mode={mode} t={T} loading={loading} failed={failed} />
       <QuickTake ticker={ticker} t={T} L={L} loading={loading} failed={failed} />
       <MTFStrip t={T} loading={loading} failed={failed} />

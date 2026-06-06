@@ -251,6 +251,18 @@ function DetailTabs({ lensId, onLensId, sizeCat, tier = 4, variant = "wrap" }) {
 
 function DetailLens({ lensId, ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const props = { ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle };
+  // off-universe ticker is still resolving (detailLive) — many lenses derive off a
+  // real price; render a loading state rather than compute on a null price.
+  if (ticker && (ticker._loading || ticker.price == null) && !ticker._noData) {
+    return <div className="lens" style={{ padding: "48px 18px", textAlign: "center" }}>
+      <div className="mono dim2" style={{ fontSize: 13 }}>Fetching live data for <b className="copper">{ticker.symbol}</b>…</div>
+    </div>;
+  }
+  if (ticker && ticker._noData) {
+    return <div className="lens" style={{ padding: "48px 18px", textAlign: "center" }}>
+      <div className="mono dim2" style={{ fontSize: 13 }}>No market data available for <b className="copper">{ticker.symbol}</b> — it may be delisted, an index, or outside coverage.</div>
+    </div>;
+  }
   if (lensId === "plan") return <LensPlan {...props} />;
   if (lensId === "technicals") return <LensTechnicals {...props} />;
   if (lensId === "investment") return <LensInvestment {...props} />;

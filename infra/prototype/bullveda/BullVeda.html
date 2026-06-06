@@ -12938,6 +12938,46 @@ function Cone({ lo, mid, hi, current = 0, w = 280, h = 110 }) {
     }
   ), /* @__PURE__ */ React.createElement("text", { x: w - pad, y: yFor(hi) - 4, textAnchor: "end", className: "mono", fontSize: "10", fill: "var(--gn)" }, "+", hi.toFixed(1), "%"), /* @__PURE__ */ React.createElement("text", { x: w - pad, y: yFor(mid) - 4, textAnchor: "end", className: "mono", fontSize: "10", fill: "var(--ink-2)" }, "+", mid.toFixed(1), "%"), /* @__PURE__ */ React.createElement("text", { x: w - pad, y: yFor(lo) + 12, textAnchor: "end", className: "mono", fontSize: "10", fill: "var(--rd)" }, lo.toFixed(1), "%"));
 }
+function quickDecision(ticker, mode) {
+  if (!ticker || !window.coherentLevels) return null;
+  const md = (mode || "SWING").toUpperCase();
+  const t2t = window.modeAdjust ? window.modeAdjust(ticker, md) : ticker;
+  const L = window.coherentLevels(t2t);
+  if (!L || L.valid === false || !(L.stop > 0 && L.pivot > L.stop && L.t1 > L.pivot)) return null;
+  const entry = +(L.pivot * 1.002).toFixed(2);
+  const stop = L.stop, target = L.t1;
+  const risk = Math.max(0.01, entry - stop);
+  const rr = (target - entry) / risk;
+  const cv = window.compositeVerdict ? window.compositeVerdict(ticker, md) : null;
+  const verdict = cv ? cv.verdict : ticker.verdict || "\u2014";
+  const vtone = cv ? cv.vtone : verdict === "BUY" ? "gn" : verdict === "AVOID" || verdict === "SHORT" ? "rd" : "amb";
+  const money = (v) => typeof v === "number" && isFinite(v) ? "$" + v.toFixed(2) : "\u2014";
+  const pct = (target - entry) / entry * 100;
+  const action = verdict === "BUY" ? `Entry near ${money(entry)} \xB7 first target ${money(target)} (+${pct.toFixed(1)}%).` : verdict === "WATCH" || verdict === "WAIT" ? `Not a trade yet \u2014 watch for entry near ${money(entry)} toward ${money(target)}.` : verdict === "AVOID" ? "No edge at this price \u2014 stand aside." : verdict === "SHORT" ? `Short bias \u2014 resistance near ${money(entry)}.` : `Entry ${money(entry)} \xB7 target ${money(target)}.`;
+  return {
+    verdict,
+    vtone,
+    action,
+    entry,
+    stop,
+    target,
+    rr,
+    invalid: `price closes below ${money(stop)}`,
+    badge: cv && cv.net != null ? `composite ${cv.net}/100` : null
+  };
+}
+function QuantQuickCard({ d, title, onSize }) {
+  if (!d) return null;
+  const money = (v) => typeof v === "number" && isFinite(v) ? "$" + v.toFixed(2) : "\u2014";
+  const rrTone = d.rr == null ? "ink" : d.rr >= 2 ? "gn" : d.rr >= 1 ? "amb" : "rd";
+  const size = onSize || (() => {
+    try {
+      window.__setLens && window.__setLens("plan");
+    } catch (e) {
+    }
+  });
+  return /* @__PURE__ */ React.createElement("div", { className: `smc-qc smc-qc--${d.vtone}` }, /* @__PURE__ */ React.createElement("div", { className: "smc-qc-l" }, /* @__PURE__ */ React.createElement("div", { className: "smc-qc-head" }, /* @__PURE__ */ React.createElement("span", { className: `smc-qc-verdict smc-qc-verdict--${d.vtone}` }, d.verdict), /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, title || "Quick Read"), d.badge && /* @__PURE__ */ React.createElement("span", { className: "smc-qc-real mono" }, d.badge)), /* @__PURE__ */ React.createElement("div", { className: "smc-qc-action mono" }, d.action), d.invalid && /* @__PURE__ */ React.createElement("div", { className: "smc-qc-invalid mono dim2" }, "\u2715 Idea is wrong if ", d.invalid, ".")), /* @__PURE__ */ React.createElement("div", { className: "smc-qc-r" }, /* @__PURE__ */ React.createElement("div", { className: "smc-qc-tiles" }, /* @__PURE__ */ React.createElement("div", { className: "smc-qc-tile", title: "Buy zone / trigger level." }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Entry"), /* @__PURE__ */ React.createElement("span", { className: "mono copper" }, d.entryLabel || money(d.entry))), /* @__PURE__ */ React.createElement("div", { className: "smc-qc-tile", title: "Protective stop \u2014 a close past it invalidates the idea." }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Stop"), /* @__PURE__ */ React.createElement("span", { className: "mono dn" }, money(d.stop))), /* @__PURE__ */ React.createElement("div", { className: "smc-qc-tile", title: "First target." }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Target"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, money(d.target))), /* @__PURE__ */ React.createElement("div", { className: "smc-qc-tile", title: "Reward-to-risk to the first target." }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "R:R"), /* @__PURE__ */ React.createElement("span", { className: `mono kpi-tone--${rrTone}` }, d.rr != null ? d.rr.toFixed(2) + "R" : "\u2014"))), /* @__PURE__ */ React.createElement("button", { className: "smc-qc-btn", title: "Open the Plan tab to size this and see $ risk", onClick: size }, "\u2192 Size in Plan")));
+}
 Object.assign(window, {
   SectionHeader,
   FreshnessPill,
@@ -12949,7 +12989,9 @@ Object.assign(window, {
   Sparkline,
   Gauge,
   Radar,
-  Cone
+  Cone,
+  QuantQuickCard,
+  quickDecision
 });
 </script>
 <script>/* src/ai-explain.jsx */
@@ -13259,6 +13301,12 @@ function DetailTabs({ lensId, onLensId, sizeCat, tier = 4, variant = "wrap" }) {
 }
 function DetailLens({ lensId, ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const props = { ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle };
+  if (ticker && (ticker._loading || ticker.price == null) && !ticker._noData) {
+    return /* @__PURE__ */ React.createElement("div", { className: "lens", style: { padding: "48px 18px", textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 13 } }, "Fetching live data for ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, ticker.symbol), "\u2026"));
+  }
+  if (ticker && ticker._noData) {
+    return /* @__PURE__ */ React.createElement("div", { className: "lens", style: { padding: "48px 18px", textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 13 } }, "No market data available for ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, ticker.symbol), " \u2014 it may be delisted, an index, or outside coverage."));
+  }
   if (lensId === "plan") return /* @__PURE__ */ React.createElement(LensPlan, { ...props });
   if (lensId === "technicals") return /* @__PURE__ */ React.createElement(LensTechnicals, { ...props });
   if (lensId === "investment") return /* @__PURE__ */ React.createElement(LensInvestment, { ...props });
@@ -13892,7 +13940,7 @@ function LensTechnicals({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
   const t = useTech(ticker.symbol);
   const loading = t === null, failed = t === false;
   const T = t && typeof t === "object" ? t : {};
-  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--tech" }, window.LensSummaryBar && /* @__PURE__ */ React.createElement(LensSummaryBar, { ticker, mode, kind: "technicals", tech: T }), /* @__PURE__ */ React.createElement(TechHero, { ticker, mode, t: T, loading, failed }), /* @__PURE__ */ React.createElement(QuickTake, { ticker, t: T, L, loading, failed }), /* @__PURE__ */ React.createElement(MTFStrip, { t: T, loading, failed }), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--tech" }, window.LensSummaryBar && /* @__PURE__ */ React.createElement(LensSummaryBar, { ticker, mode, kind: "technicals", tech: T }), window.QuantQuickCard && /* @__PURE__ */ React.createElement(QuantQuickCard, { d: window.quickDecision(ticker, mode), title: `Quick Read \xB7 Technicals \xB7 ${mode}` }), /* @__PURE__ */ React.createElement(TechHero, { ticker, mode, t: T, loading, failed }), /* @__PURE__ */ React.createElement(QuickTake, { ticker, t: T, L, loading, failed }), /* @__PURE__ */ React.createElement(MTFStrip, { t: T, loading, failed }), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 1,
@@ -20084,7 +20132,7 @@ function LensPatternsV2({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
     gann: /* @__PURE__ */ React.createElement("span", { className: "mono" }, "Price rides just under the ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "1\xD71 master line ($216)"), "; next Square-of-Nine at ", /* @__PURE__ */ React.createElement("b", { className: "violet" }, "$219"), ", and the 60-bar price-time square lands ", /* @__PURE__ */ React.createElement("b", null, "Jul 30"), ". Use as a confluence overlay."),
     montecarlo: /* @__PURE__ */ React.createElement("span", { className: "mono" }, "2,000-path simulation: right-skewed, median ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "positive"), ", P(reach T1 before stop) ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "\u224858%"), " vs stop-first \u224840% \u2014 ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "positive expectancy"), " conditional on the setup holding.")
   }[tab];
-  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--patterns-v2" }, window.LensSummaryBar && /* @__PURE__ */ React.createElement(LensSummaryBar, { ticker, mode, kind: "patterns" }), /* @__PURE__ */ React.createElement("div", { className: "pv-bar" }, /* @__PURE__ */ React.createElement(SubTabs, { tab, onTab: setTab, items: PV_SUBTABS }), /* @__PURE__ */ React.createElement(DirSwitch, { dir, onDir: setDir })), tab === "ensemble" && /* @__PURE__ */ React.createElement(ConfluenceView, { ticker: tk, dir, mode, onTab: setTab }), tab === "mlforecast" && /* @__PURE__ */ React.createElement(MLForecastView, { ticker: tk, dir, mode }), tab === "wyckoff" && /* @__PURE__ */ React.createElement(WyckoffView, { ticker: tk, dir, mode }), tab === "elliott" && /* @__PURE__ */ React.createElement(ElliottView, { ticker: tk, dir, mode }), tab === "fibonacci" && /* @__PURE__ */ React.createElement(FibonacciView, { ticker: tk, dir, mode }), tab === "volprofile" && /* @__PURE__ */ React.createElement(VolumeProfileView, { ticker: tk, dir, mode }), tab === "ichimoku" && /* @__PURE__ */ React.createElement(IchimokuView, { ticker: tk, dir, mode }), tab === "td" && /* @__PURE__ */ React.createElement(TDSequentialView, { ticker: tk, dir, mode }), tab === "classical" && /* @__PURE__ */ React.createElement(ClassicalView, { ticker: tk, dir, mode }), tab === "harmonic" && /* @__PURE__ */ React.createElement(HarmonicView, { ticker: tk, dir, mode }), tab === "wolfe" && /* @__PURE__ */ React.createElement(WolfeView, { ticker: tk, dir, mode }), tab === "candles" && /* @__PURE__ */ React.createElement(CandlestickView, { ticker: tk, dir, mode }), tab === "altcharts" && /* @__PURE__ */ React.createElement(AltChartsView, { ticker: tk, dir, mode }), tab === "gann" && /* @__PURE__ */ React.createElement(GannView, { ticker: tk, dir, mode }), tab === "montecarlo" && /* @__PURE__ */ React.createElement(MonteCarloView, { ticker: tk, dir, mode }), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 ", PV_SUBTABS.find((s) => s.id === tab).label), theCall), /* @__PURE__ */ React.createElement(PatternHorizons, { ticker: tk, method: PV_SUBTABS.find((s) => s.id === tab).label, mode }));
+  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--patterns-v2" }, window.LensSummaryBar && /* @__PURE__ */ React.createElement(LensSummaryBar, { ticker, mode, kind: "patterns" }), window.QuantQuickCard && /* @__PURE__ */ React.createElement(QuantQuickCard, { d: window.quickDecision(ticker, mode), title: `Quick Read \xB7 Patterns \xB7 ${mode}` }), /* @__PURE__ */ React.createElement("div", { className: "pv-bar" }, /* @__PURE__ */ React.createElement(SubTabs, { tab, onTab: setTab, items: PV_SUBTABS }), /* @__PURE__ */ React.createElement(DirSwitch, { dir, onDir: setDir })), tab === "ensemble" && /* @__PURE__ */ React.createElement(ConfluenceView, { ticker: tk, dir, mode, onTab: setTab }), tab === "mlforecast" && /* @__PURE__ */ React.createElement(MLForecastView, { ticker: tk, dir, mode }), tab === "wyckoff" && /* @__PURE__ */ React.createElement(WyckoffView, { ticker: tk, dir, mode }), tab === "elliott" && /* @__PURE__ */ React.createElement(ElliottView, { ticker: tk, dir, mode }), tab === "fibonacci" && /* @__PURE__ */ React.createElement(FibonacciView, { ticker: tk, dir, mode }), tab === "volprofile" && /* @__PURE__ */ React.createElement(VolumeProfileView, { ticker: tk, dir, mode }), tab === "ichimoku" && /* @__PURE__ */ React.createElement(IchimokuView, { ticker: tk, dir, mode }), tab === "td" && /* @__PURE__ */ React.createElement(TDSequentialView, { ticker: tk, dir, mode }), tab === "classical" && /* @__PURE__ */ React.createElement(ClassicalView, { ticker: tk, dir, mode }), tab === "harmonic" && /* @__PURE__ */ React.createElement(HarmonicView, { ticker: tk, dir, mode }), tab === "wolfe" && /* @__PURE__ */ React.createElement(WolfeView, { ticker: tk, dir, mode }), tab === "candles" && /* @__PURE__ */ React.createElement(CandlestickView, { ticker: tk, dir, mode }), tab === "altcharts" && /* @__PURE__ */ React.createElement(AltChartsView, { ticker: tk, dir, mode }), tab === "gann" && /* @__PURE__ */ React.createElement(GannView, { ticker: tk, dir, mode }), tab === "montecarlo" && /* @__PURE__ */ React.createElement(MonteCarloView, { ticker: tk, dir, mode }), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 ", PV_SUBTABS.find((s) => s.id === tab).label), theCall), /* @__PURE__ */ React.createElement(PatternHorizons, { ticker: tk, method: PV_SUBTABS.find((s) => s.id === tab).label, mode }));
 }
 function PatternHorizons({ ticker, method, mode }) {
   const L = window.coherentLevels ? window.coherentLevels(ticker) : null;
