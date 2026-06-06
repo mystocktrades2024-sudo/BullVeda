@@ -1684,6 +1684,29 @@ body { overflow: hidden; }
 .ind-help { font-size: 8.5px; color: var(--ink-3); cursor: help; }
 .qt-invalid { font-size: 11px; margin: 2px 0 9px; }
 
+/* options — profit calculator grid */
+.otk-pcalc { font-size: 11px; }
+.otk-pc-ctrl, .otk-pc-iv { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.otk-pc-ctrl select { background: var(--bg-2); border: 1px solid var(--line); color: var(--ink-1); border-radius: 5px; padding: 4px 8px; font: 600 11px var(--mono); }
+.otk-pc-ctrl label { display: flex; align-items: center; gap: 5px; color: var(--ink-3); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+.otk-pc-ctrl input { width: 64px; background: var(--bg-2); border: 1px solid var(--line); color: var(--ink-1); border-radius: 4px; padding: 3px 6px; font: 600 11px var(--mono); }
+.otk-pc-seg, .otk-pc-iv { }
+.otk-pc-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+.otk-pc-seg button, .otk-pc-iv button { background: none; border: none; color: var(--ink-3); font: 600 10px var(--mono); padding: 4px 9px; cursor: pointer; }
+.otk-pc-seg button.is-on { background: color-mix(in oklab, var(--cy) 18%, transparent); color: var(--cy); }
+.otk-pc-iv button { border: 1px solid var(--line); border-radius: 5px; margin-right: 4px; }
+.otk-pc-iv button.is-on { background: color-mix(in oklab, var(--cy) 14%, transparent); color: var(--cy); border-color: color-mix(in oklab, var(--cy) 40%, transparent); }
+.otk-pc-cost { margin-left: auto; color: var(--ink-2); }
+.otk-pc-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r-2); }
+.otk-pc-tbl { width: 100%; border-collapse: collapse; font-size: 11px; }
+.otk-pc-tbl th { color: var(--ink-3); font-weight: 600; padding: 5px 8px; text-align: left; position: sticky; top: 0; background: var(--bg-1); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.otk-pc-tbl th.r, .otk-pc-tbl td.r { text-align: right; }
+.otk-pc-tbl td { padding: 3px 8px; font-weight: 600; }
+.otk-pc-px { color: var(--ink-2); white-space: nowrap; }
+.otk-pc-tag { font-size: 8px; margin-left: 5px; text-transform: uppercase; }
+.otk-pc-tbl tr.is-spot { box-shadow: inset 0 1px 0 var(--cy), inset 0 -1px 0 var(--cy); }
+.otk-pc-tbl tr.is-tgt td { border-top: 1px dashed color-mix(in oklab, var(--amber, #d9a441) 60%, transparent); border-bottom: 1px dashed color-mix(in oklab, var(--amber, #d9a441) 60%, transparent); }
+
 /* options — call/put toggle + recommendation + retail plan */
 .otk-side-toggle { display: inline-flex; gap: 0; margin-left: 8px; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; vertical-align: middle; }
 .otk-side-toggle button { font: 600 9px var(--mono); padding: 2px 8px; background: none; border: none; color: var(--ink-3); cursor: pointer; }
@@ -21059,116 +21082,211 @@ function MTFScreener({ m, state }) {
     return /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, r.tf)), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: t, small: true }, r.bias)), /* @__PURE__ */ React.createElement("td", { className: `mono ${t === "gn" ? "up" : t === "rd" ? "dn" : "warn"}` }, tr), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, r.note));
   })));
 }
+function _riskNav() {
+  const bv = window.__BV && typeof window.__BV.nav === "number" ? window.__BV.nav : null;
+  if (bv && bv > 0) return { nav: bv, demo: false };
+  try {
+    if (window.MyPF) {
+      const s = window.MyPF.summarize(window.MyPF.combined());
+      if (s && s.totalValue > 0) return { nav: s.totalValue, demo: false };
+    }
+  } catch (e) {
+  }
+  return { nav: 1e5, demo: true };
+}
+function useRiskModel(ticker, mode) {
+  const sym = ticker && ticker.symbol || "", md = (mode || "SWING").toUpperCase();
+  const key = "risk|" + sym + "|" + md;
+  const read = () => {
+    try {
+      return window.__BV && window.__BV.patternCached && window.__BV.patternCached("risk", sym, md) || null;
+    } catch (e) {
+      return null;
+    }
+  };
+  const [real, setReal] = useStateSMC(read);
+  useEffSMC(() => {
+    let on = true;
+    setReal(read());
+    try {
+      if (window.__BV && window.__BV.fetchPattern && sym) window.__BV.fetchPattern("risk", sym, md).then((d) => {
+        if (on) setReal(d);
+      });
+    } catch (e) {
+    }
+    return () => {
+      on = false;
+    };
+  }, [key]);
+  let st = "mock";
+  if (real && typeof real === "object" && "ok" in real) st = "loaded";
+  else if (real === null && window.__BV && window.__BV.fetchPattern) st = "loading";
+  return { rm: real, state: st };
+}
+function riskSizing(ticker, mode) {
+  const md = (mode || "SWING").toUpperCase();
+  const t2 = window.modeAdjust ? window.modeAdjust(ticker, md) : ticker;
+  const L = window.coherentLevels ? window.coherentLevels(t2) : null;
+  const { nav, demo } = _riskNav();
+  if (!L || L.valid === false || !(L.stop > 0 && L.pivot > L.stop && L.t1 > L.pivot)) return { nav, demo, ok: false };
+  const entry = +(L.pivot * 1.002).toFixed(2), stop = L.stop, t1 = L.t1;
+  const risk = Math.max(0.01, entry - stop);
+  const shares = Math.max(1, Math.round(Math.round(nav * 39e-4) / risk));
+  const notional = shares * entry, maxLoss = shares * risk;
+  const rr = (t1 - entry) / risk;
+  const ss = ticker.setupStats || {}, wr = ss.winRate;
+  const kelly = wr != null && rr > 0 ? Math.max(0, (wr * rr - (1 - wr)) / rr) : null;
+  return {
+    ok: true,
+    nav,
+    demo,
+    entry,
+    stop,
+    t1,
+    risk,
+    shares,
+    notional,
+    maxLoss,
+    rr,
+    kelly,
+    wr,
+    n: ss.n,
+    navPct: notional / nav * 100,
+    lossNavPct: maxLoss / nav * 100,
+    pctToStop: risk / entry * 100
+  };
+}
 function LensRisk({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("rk-1");
   const s2 = useStateToggle("rk-2");
   const s3 = useStateToggle("rk-3");
   const s4 = useStateToggle("rk-4");
   const s5 = useStateToggle("rk-5");
-  const RL = window.coherentLevels ? window.coherentLevels(ticker) : { stop: ticker.stop, pivot: ticker.pivot, t1: ticker.t1 };
-  const RrR = ((RL.t1 - RL.pivot * 1.002) / (RL.pivot * 1.002 - RL.stop)).toFixed(2);
-  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--risk" }, /* @__PURE__ */ React.createElement("div", { className: "hero risk-hero" }, /* @__PURE__ */ React.createElement("div", { className: "th-left" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Risk read \xB7 per-trade + book"), /* @__PURE__ */ React.createElement("div", { className: "th-score" }, /* @__PURE__ */ React.createElement("div", { className: "th-score-num mono" }, "OK"), /* @__PURE__ */ React.createElement(Pill, { tone: "gn", dot: true }, "within gates"), /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "ER in 11d \xB7 cap size"))), /* @__PURE__ */ React.createElement("div", { className: "th-right" }, /* @__PURE__ */ React.createElement(LossCone, null))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  const { rm, state } = useRiskModel(ticker, mode);
+  const sz = riskSizing(ticker, mode);
+  const erD = ticker.earnings && ticker.earnings.days != null ? ticker.earnings.days : null;
+  const gatesOK = sz.ok && sz.lossNavPct <= 0.75 && sz.navPct <= 10;
+  const hot = rm && rm.ok && rm.beta != null && rm.beta > 2 || sz.ok && sz.lossNavPct > 0.75;
+  const verdict = !sz.ok ? "\u2014" : hot ? "HOT" : gatesOK ? "OK" : "REVIEW";
+  const vTone = verdict === "OK" ? "gn" : verdict === "HOT" ? "rd" : "amb";
+  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--risk" }, /* @__PURE__ */ React.createElement("div", { className: "hero risk-hero" }, /* @__PURE__ */ React.createElement("div", { className: "th-left" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Risk read \xB7 per-trade \xB7 ", mode, rm && rm.ok ? " \xB7 " + rm.tf : ""), /* @__PURE__ */ React.createElement("div", { className: "th-score" }, /* @__PURE__ */ React.createElement("div", { className: "th-score-num mono" }, verdict), sz.ok && /* @__PURE__ */ React.createElement(Pill, { tone: gatesOK ? "gn" : "rd", dot: true }, gatesOK ? "within gates" : "over size cap"), rm && rm.ok && rm.beta != null && /* @__PURE__ */ React.createElement(Pill, { tone: rm.beta > 2 ? "rd" : rm.beta > 1.3 ? "amb" : "gn", small: true }, "\u03B2 ", rm.beta), erD != null && erD <= 10 && /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "ER in ", erD, "d \xB7 cap size"))), /* @__PURE__ */ React.createElement("div", { className: "th-right" }, /* @__PURE__ */ React.createElement(LossCone, { rm }))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 1,
       title: "Loss-Distribution Cones",
-      sub: "1-day \xB7 1\u03C3 / 2\u03C3 / 3\u03C3 \xB7 based on 60d realized vol",
+      sub: `${mode} horizon \xB7 1\u03C3 / 2\u03C3 / 3\u03C3 \xB7 from 126d realized vol`,
       style: headerStyle,
-      right: /* @__PURE__ */ React.createElement(StateToggle, { name: "rk-1" })
+      right: /* @__PURE__ */ React.createElement(StateToggle, { name: "rk-1" }),
+      tip: "How far price typically swings over the hold, from real 126-day volatility. 1\u03C3 \u2248 68% of outcomes, 2\u03C3 \u2248 95%, 3\u03C3 \u2248 99%."
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s1.value, source: "vol engine \xB7 60d realized" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(RiskCones, { ticker, mode })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s1.value, source: "vol engine \xB7 126d realized" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(RiskCones, { rm, state })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 2,
-      title: "Live Kelly \xB7 Sizing Metrics",
-      sub: "real-time using current edge + portfolio_state",
+      title: "Kelly \xB7 Sizing Metrics",
+      sub: "position size from the real ladder + ledger edge",
       style: headerStyle,
-      right: /* @__PURE__ */ React.createElement(StateToggle, { name: "rk-2" })
+      right: /* @__PURE__ */ React.createElement(StateToggle, { name: "rk-2" }),
+      tip: "Kelly = growth-optimal bet size from your win-rate & R:R. Needs ledger history; half-Kelly is the safer default."
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s2.value, source: "risk engine" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "Raw Kelly", value: "84%", tone: "amb", sub: "(p\xB7b\u2212q)/b" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "\xBD Kelly \xB7 capped", value: "42%", tone: "copper", sub: "discipline" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Final size %", value: "6.8%", tone: "copper", sub: "of NAV \xB7 110 sh" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Max loss", value: "$420", tone: "rd", sub: "0.39% of NAV" }))))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s2.value, source: "risk engine \xB7 ledger + NAV" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(RiskSizing, { sz })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 3,
       title: "VaR \xB7 CVaR \xB7 Sharpe",
-      sub: "1d \xB7 10d \xB7 per-ticker + post-fill book impact",
+      sub: `${mode} horizon \xB7 parametric + historical \xB7 from real returns`,
       style: headerStyle,
-      right: /* @__PURE__ */ React.createElement(StateToggle, { name: "rk-3" })
+      right: /* @__PURE__ */ React.createElement(StateToggle, { name: "rk-3" }),
+      tip: "VaR: the loss you won't exceed 95% of days. CVaR: the average loss on the worst 5% of days. Sharpe/Sortino: risk-adjusted return (annualized)."
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s3.value, source: "risk engine \xB7 MC + parametric" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(VarTable, { ticker, mode })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s3.value, source: "risk engine \xB7 126d returns" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(VarTable, { rm, sz, state })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 4,
-      title: "Stress \xB7 6 \xD7 5 Heatmap",
-      sub: "scenario \xD7 outcome \xB7 MoS in each cell",
+      title: "Stress Scenarios",
+      sub: "beta- and vol-scaled shocks on this position",
       style: headerStyle,
-      right: /* @__PURE__ */ React.createElement(StateToggle, { name: "rk-4" })
+      right: /* @__PURE__ */ React.createElement(StateToggle, { name: "rk-4" }),
+      tip: "What each shock does to THIS position, scaled by the stock's real beta and volatility."
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s4.value, source: "scenario engine" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(StressGrid, null)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s4.value, source: "scenario engine \xB7 real \u03B2 + vol" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(StressGrid, { rm, sz, state })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 5,
-      title: "Liquidity Ladder \xB7 \u03B2 exposure",
-      sub: "bid/ask depth \xB7 ADV slip \xB7 book-\u03B2 post-fill",
+      title: "Liquidity \xB7 \u03B2 exposure",
+      sub: "spread \xB7 ADV participation \xB7 beta",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "rk-5" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s5.value, source: "quotes + portfolio_state" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "L1 spread", value: "$0.04", tone: "gn", sub: "6 bps \xB7 OK" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "ADV slip est.", value: "\u2212$0.03", tone: "gn", sub: "110 sh / 1.12M ADV" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Book \u03B2 \xB7 pre", value: "0.93", tone: "ink" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Book \u03B2 \xB7 post", value: "0.96", tone: "amb", sub: "+0.03 \xB7 within cap 1.10" }))))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(SectionHeader, { n: 6, title: "Cross-Lens Confluence", style: headerStyle }), /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CrossLens, { lead: "rd", cells: [
-    { lens: "Risk", verdict: "OK", tone: "gn", note: "all gates pass \xB7 cap size pre-ER" },
-    { lens: "Plan", verdict: "READY", tone: "gn", note: `R ${RrR} \xB7 stop $${RL.stop.toFixed(2)}` },
-    { lens: "Earnings", verdict: "11 d", tone: "amb", note: "trim 25% pre-ER" },
-    { lens: "Portfolio", verdict: "FIT", tone: "gn", note: "correl 0.34 \xB7 NAV 6.8%" },
-    { lens: "Liquidity", verdict: "OK", tone: "gn", note: "1.12M ADV \xB7 6 bps spread" }
-  ] }))), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 Risk"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "Max loss ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "$420"), " = 0.39% NAV \xB7 VaR(1d) ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "\u22122.1%"), " \xB7 Sharpe contrib +0.04. ", /* @__PURE__ */ React.createElement("b", null, "Pass."))));
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s5.value, source: "quotes + risk engine" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(RiskLiquidity, { ticker, sz, rm })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(SectionHeader, { n: 6, title: "Cross-Lens Confluence", style: headerStyle }), /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, sz.ok ? /* @__PURE__ */ React.createElement(CrossLens, { lead: "rd", cells: [
+    { lens: "Risk", verdict, tone: vTone, note: gatesOK ? "size within gates" : "over size cap" },
+    { lens: "Plan", verdict: sz.rr >= 1.5 ? "READY" : "THIN", tone: sz.rr >= 1.5 ? "gn" : "amb", note: `R ${sz.rr.toFixed(2)} \xB7 stop $${sz.stop.toFixed(2)}` },
+    { lens: "VaR(1d)", verdict: rm && rm.ok ? `\u2212${rm.var95_pct}%` : "\u2014", tone: "amb", note: rm && rm.ok ? "95% parametric" : "\u2014" },
+    { lens: "Max loss", verdict: `$${Math.round(sz.maxLoss)}`, tone: "rd", note: `${sz.lossNavPct.toFixed(2)}% of NAV` },
+    { lens: "Beta", verdict: rm && rm.ok && rm.beta != null ? String(rm.beta) : "\u2014", tone: rm && rm.ok && rm.beta > 2 ? "rd" : "gn", note: "vs SPY" }
+  ] }) : /* @__PURE__ */ React.createElement(SmcEmpty, { state, what: "risk metrics" }))), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 Risk"), sz.ok ? /* @__PURE__ */ React.createElement("span", { className: "mono" }, "Max loss ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "$", Math.round(sz.maxLoss)), " = ", sz.lossNavPct.toFixed(2), "% of NAV", sz.demo ? " (demo)" : "", rm && rm.ok ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 VaR(1d 95%) ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "\u2212", rm.var95_pct, "%"), " \xB7 vol ", rm.vol_ann_pct, "% ann \xB7 \u03B2 ", rm.beta != null ? rm.beta : "\u2014") : null, ". ", /* @__PURE__ */ React.createElement("b", { className: vTone === "gn" ? "up" : vTone === "rd" ? "dn" : "warn" }, verdict === "OK" ? "Within risk gates." : verdict === "HOT" ? "Hot \u2014 trim size." : "Review size.")) : /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "No coherent ladder for ", ticker && ticker.symbol || "this name", " \u2014 sizing & risk can't be computed without fabricating levels.")));
 }
-function LossCone() {
-  return /* @__PURE__ */ React.createElement("svg", { viewBox: "0 0 280 110", width: "280", height: "110", style: { overflow: "visible" } }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("linearGradient", { id: "lc-gn", x1: "0", y1: "0", x2: "0", y2: "1" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: "var(--gn)", stopOpacity: "0.35" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: "var(--gn)", stopOpacity: "0" })), /* @__PURE__ */ React.createElement("linearGradient", { id: "lc-rd", x1: "0", y1: "1", x2: "0", y2: "0" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: "var(--rd)", stopOpacity: "0.35" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: "var(--rd)", stopOpacity: "0" }))), /* @__PURE__ */ React.createElement("line", { x1: "20", y1: "55", x2: "270", y2: "55", stroke: "var(--line)", strokeDasharray: "3 3" }), /* @__PURE__ */ React.createElement("path", { d: "M 20 55 Q 130 14 270 14 L 270 55 Z", fill: "url(#lc-gn)" }), /* @__PURE__ */ React.createElement("path", { d: "M 20 55 Q 130 96 270 96 L 270 55 Z", fill: "url(#lc-rd)" }), /* @__PURE__ */ React.createElement("path", { d: "M 20 55 Q 130 30 270 30", stroke: "var(--gn)", strokeWidth: "1.6", fill: "none", style: { filter: "drop-shadow(0 0 5px var(--gn))" } }), /* @__PURE__ */ React.createElement("path", { d: "M 20 55 Q 130 78 270 78", stroke: "var(--rd)", strokeWidth: "1.6", fill: "none", style: { filter: "drop-shadow(0 0 5px var(--rd))" } }), /* @__PURE__ */ React.createElement("path", { d: "M 20 55 Q 130 14 270 14", stroke: "var(--gn)", strokeWidth: "1.1", fill: "none", opacity: "0.5" }), /* @__PURE__ */ React.createElement("path", { d: "M 20 55 Q 130 96 270 96", stroke: "var(--rd)", strokeWidth: "1.1", fill: "none", opacity: "0.5" }), /* @__PURE__ */ React.createElement("circle", { cx: "20", cy: "55", r: "4", fill: "var(--copper)", style: { filter: "drop-shadow(0 0 8px var(--copper))" } }), /* @__PURE__ */ React.createElement("text", { x: "266", y: "11", fontSize: "9.5", className: "mono", textAnchor: "end", fill: "var(--gn)" }, "+3\u03C3 +6.4%"), /* @__PURE__ */ React.createElement("text", { x: "266", y: "27", fontSize: "9.5", className: "mono", textAnchor: "end", fill: "var(--gn)" }, "+1\u03C3 +2.1%"), /* @__PURE__ */ React.createElement("text", { x: "266", y: "82", fontSize: "9.5", className: "mono", textAnchor: "end", fill: "var(--rd)" }, "\u22121\u03C3 \u22122.1%"), /* @__PURE__ */ React.createElement("text", { x: "266", y: "106", fontSize: "9.5", className: "mono", textAnchor: "end", fill: "var(--rd)" }, "\u22123\u03C3 \u22126.4%"));
+function LossCone({ rm }) {
+  const s1 = rm && rm.ok && rm.cones && rm.cones[0] ? rm.cones[0].pct : null;
+  const s3 = rm && rm.ok && rm.cones && rm.cones[2] ? rm.cones[2].pct : null;
+  return /* @__PURE__ */ React.createElement("svg", { viewBox: "0 0 280 110", width: "280", height: "110", style: { overflow: "visible" } }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("linearGradient", { id: "lc-gn", x1: "0", y1: "0", x2: "0", y2: "1" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: "var(--gn)", stopOpacity: "0.35" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: "var(--gn)", stopOpacity: "0" })), /* @__PURE__ */ React.createElement("linearGradient", { id: "lc-rd", x1: "0", y1: "1", x2: "0", y2: "0" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: "var(--rd)", stopOpacity: "0.35" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: "var(--rd)", stopOpacity: "0" }))), /* @__PURE__ */ React.createElement("line", { x1: "20", y1: "55", x2: "270", y2: "55", stroke: "var(--line)", strokeDasharray: "3 3" }), /* @__PURE__ */ React.createElement("path", { d: "M 20 55 Q 130 14 270 14 L 270 55 Z", fill: "url(#lc-gn)" }), /* @__PURE__ */ React.createElement("path", { d: "M 20 55 Q 130 96 270 96 L 270 55 Z", fill: "url(#lc-rd)" }), /* @__PURE__ */ React.createElement("path", { d: "M 20 55 Q 130 30 270 30", stroke: "var(--gn)", strokeWidth: "1.6", fill: "none", style: { filter: "drop-shadow(0 0 5px var(--gn))" } }), /* @__PURE__ */ React.createElement("path", { d: "M 20 55 Q 130 78 270 78", stroke: "var(--rd)", strokeWidth: "1.6", fill: "none", style: { filter: "drop-shadow(0 0 5px var(--rd))" } }), /* @__PURE__ */ React.createElement("circle", { cx: "20", cy: "55", r: "4", fill: "var(--copper)", style: { filter: "drop-shadow(0 0 8px var(--copper))" } }), /* @__PURE__ */ React.createElement("text", { x: "266", y: "11", fontSize: "9.5", className: "mono", textAnchor: "end", fill: "var(--gn)" }, "+3\u03C3 ", s3 != null ? "+" + s3 + "%" : "\u2014"), /* @__PURE__ */ React.createElement("text", { x: "266", y: "27", fontSize: "9.5", className: "mono", textAnchor: "end", fill: "var(--gn)" }, "+1\u03C3 ", s1 != null ? "+" + s1 + "%" : "\u2014"), /* @__PURE__ */ React.createElement("text", { x: "266", y: "82", fontSize: "9.5", className: "mono", textAnchor: "end", fill: "var(--rd)" }, "\u22121\u03C3 ", s1 != null ? "\u2212" + s1 + "%" : "\u2014"), /* @__PURE__ */ React.createElement("text", { x: "266", y: "106", fontSize: "9.5", className: "mono", textAnchor: "end", fill: "var(--rd)" }, "\u22123\u03C3 ", s3 != null ? "\u2212" + s3 + "%" : "\u2014"));
 }
-function RiskCones({ ticker, mode }) {
-  const px = ticker && ticker.price || 67.42;
-  const dvol = 0.021;
-  const hd = mode === "POSITION" ? 10 : mode === "INVESTMENT" ? 21 : 1;
-  const lbl = hd === 1 ? "1d" : hd + "d";
-  const s1 = dvol * Math.sqrt(hd);
-  const band = (k) => `$${(px * (1 - s1 * k)).toFixed(2)} \u2014 $${(px * (1 + s1 * k)).toFixed(2)}`;
-  return /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: `${lbl} \xB7 1\u03C3`, value: `\xB1${(s1 * 100).toFixed(1)}%`, tone: "ink", sub: band(1) }), /* @__PURE__ */ React.createElement(KpiTile, { label: `${lbl} \xB7 2\u03C3`, value: `\xB1${(s1 * 200).toFixed(1)}%`, tone: "amb", sub: band(2) }), /* @__PURE__ */ React.createElement(KpiTile, { label: `${lbl} \xB7 3\u03C3`, value: `\xB1${(s1 * 300).toFixed(1)}%`, tone: "rd", sub: band(3) }), /* @__PURE__ */ React.createElement(KpiTile, { label: `${hd === 1 ? "10d" : hd * 2 + "d"} \xB7 1\u03C3`, value: `\xB1${(dvol * Math.sqrt(hd === 1 ? 10 : hd * 2) * 100).toFixed(1)}%`, tone: "amb", sub: band(1) }));
+function RiskSizing({ sz }) {
+  if (!sz.ok) return /* @__PURE__ */ React.createElement(SmcEmpty, { state: "loaded", what: "sizing (no coherent ladder)" });
+  return /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "Raw Kelly", value: sz.kelly != null ? (sz.kelly * 100).toFixed(0) + "%" : "\u2014", tone: "amb", sub: sz.kelly != null ? `f* \xB7 n=${sz.n}` : "no ledger edge" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "\xBD Kelly", value: sz.kelly != null ? (sz.kelly * 50).toFixed(0) + "%" : "\u2014", tone: "copper", sub: "discipline haircut" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Size \xB7 % NAV", value: `${sz.navPct.toFixed(1)}%`, tone: sz.navPct > 10 ? "rd" : sz.navPct > 7 ? "amb" : "gn", sub: `${sz.shares} sh${sz.demo ? " \xB7 demo NAV" : ""}` }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Max loss", value: `$${Math.round(sz.maxLoss)}`, tone: "rd", sub: `${sz.lossNavPct.toFixed(2)}% of NAV` }));
 }
-function VarTable({ ticker, mode }) {
-  const hd = mode === "POSITION" ? 10 : mode === "INVESTMENT" ? 21 : 1;
-  const lbl = hd === 1 ? "1d" : hd + "d";
-  const dvol = 0.021;
-  const sig = dvol * Math.sqrt(hd);
-  const inv = 7416;
-  const var95 = +(sig * 1.645 * 100).toFixed(1);
-  const cvar = +(sig * 2.06 * 100).toFixed(1);
-  const var2x = +(dvol * Math.sqrt(hd === 1 ? 10 : hd * 2) * 1.645 * 100).toFixed(1);
+function RiskCones({ rm, state }) {
+  if (!rm || !rm.ok) return /* @__PURE__ */ React.createElement(SmcEmpty, { state, what: "volatility cones" });
+  const cur = rm.cur_close;
+  const band = (c) => `$${c.lo.toFixed(2)} \u2014 $${c.hi.toFixed(2)}`;
+  const tone = ["ink", "amb", "rd"];
+  return /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, rm.cones.map((c, i) => /* @__PURE__ */ React.createElement(KpiTile, { key: i, label: `${rm.hd === 1 ? "1d" : rm.hd + "d"} \xB7 ${c.k}\u03C3`, value: `\xB1${c.pct}%`, tone: tone[i], sub: band(c) })), /* @__PURE__ */ React.createElement(KpiTile, { label: "Vol \xB7 annualized", value: `${rm.vol_ann_pct}%`, tone: "amb", sub: `${rm.vol_1d_pct}% daily` }));
+}
+function VarTable({ rm, sz, state }) {
+  if (!rm || !rm.ok) return /* @__PURE__ */ React.createElement(SmcEmpty, { state, what: "VaR metrics" });
+  const notional = sz.ok ? sz.notional : 0;
+  const dollar = (p) => sz.ok ? `\u2212$${Math.round(p / 100 * notional)} (${sz.shares} sh)` : "\u2014";
   const rows = [
-    { metric: `VaR \xB7 ${lbl} \xB7 95%`, v: `\u2212${var95}%`, abs: `\u2212$${Math.round(var95 / 100 * inv)} (110 sh)`, tone: var95 > 5 ? "rd" : "amb" },
-    { metric: `CVaR \xB7 ${lbl} \xB7 95%`, v: `\u2212${cvar}%`, abs: `\u2212$${Math.round(cvar / 100 * inv)} (tail avg)`, tone: "rd" },
-    { metric: `VaR \xB7 ${hd === 1 ? "10d" : hd * 2 + "d"} \xB7 95%`, v: `\u2212${var2x}%`, abs: `\u2212$${Math.round(var2x / 100 * inv)}`, tone: "rd" },
-    { metric: "Sharpe contrib", v: "+0.04", abs: "on book", tone: "gn" },
-    { metric: "Sortino contrib", v: "+0.07", abs: "on book", tone: "gn" },
-    { metric: "Max DD if stop hits", v: "\u22125.9%", abs: "\u2212$420 \xB7 0.39% NAV", tone: "rd" }
+    { metric: `VaR \xB7 ${rm.hd === 1 ? "1d" : rm.hd + "d"} \xB7 95% (parametric)`, v: `\u2212${rm.var95_pct}%`, abs: dollar(rm.var95_pct), tone: rm.var95_pct > 5 ? "rd" : "amb" },
+    { metric: "VaR \xB7 95% (historical)", v: `\u2212${rm.var95_hist_pct}%`, abs: dollar(rm.var95_hist_pct), tone: "amb" },
+    { metric: "CVaR \xB7 95% (tail avg)", v: `\u2212${rm.cvar95_pct}%`, abs: dollar(rm.cvar95_pct), tone: "rd" },
+    { metric: "VaR \xB7 99% (parametric)", v: `\u2212${rm.var99_pct}%`, abs: dollar(rm.var99_pct), tone: "rd" },
+    { metric: "Sharpe (126d, ann)", v: rm.sharpe_126d.toFixed(2), abs: "risk-adj return", tone: rm.sharpe_126d >= 1 ? "gn" : "amb" },
+    { metric: "Sortino (126d, ann)", v: rm.sortino_126d.toFixed(2), abs: "downside-adj", tone: rm.sortino_126d >= 1 ? "gn" : "amb" },
+    { metric: "Max drawdown (1yr)", v: `${rm.max_dd_pct}%`, abs: "peak-to-trough", tone: "rd" }
   ];
-  return /* @__PURE__ */ React.createElement("table", { className: "dtable" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Metric \xB7 ", mode, " horizon"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Value"), /* @__PURE__ */ React.createElement("th", null, "Absolute"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, r.metric), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular kpi-tone--${r.tone}` }, r.v), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, r.abs)))));
+  return /* @__PURE__ */ React.createElement("table", { className: "dtable" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Metric"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Value"), /* @__PURE__ */ React.createElement("th", null, "Absolute"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, r.metric), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular kpi-tone--${r.tone}` }, r.v), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, r.abs)))));
 }
-function StressGrid() {
-  const scenarios = [
-    "\u22123\u03C3 market gap",
-    "Rate +50bp",
-    "VIX \u2192 30",
-    "Sector ETF \u22125%",
-    "Earnings \u221215%",
-    "Liquidity halve"
+function StressGrid({ rm, sz, state }) {
+  if (!rm || !rm.ok || !sz.ok) return /* @__PURE__ */ React.createElement(SmcEmpty, { state, what: "stress scenarios" });
+  const beta = rm.beta != null ? rm.beta : 1, vol = rm.vol_1d_pct / 100, stopMove = sz.pctToStop / 100;
+  const scen = [
+    { s: "Market \u22122\u03C3 day", m: -0.02 * beta },
+    { s: "Market \u22123\u03C3 gap", m: -0.03 * beta },
+    { s: "Vol doubles (panic)", m: -2 * vol },
+    { s: "Sector \u22125%", m: -0.05 * Math.min(beta, 1.6) },
+    { s: "Earnings gap \u221210%", m: -0.1 },
+    { s: "Stop hit", m: -stopMove }
   ];
-  const outcomes = ["P&L", "% NAV", "Stop hit?", "Days to recover", "Action"];
-  const grid = scenarios.map((s, i) => [
-    { v: `\u2212$${(380 + i * 90).toFixed(0)}`, tone: i < 3 ? "amb" : "rd" },
-    { v: `\u2212${(0.35 + i * 0.1).toFixed(2)}%`, tone: i < 3 ? "amb" : "rd" },
-    { v: i < 2 ? "no" : i < 4 ? "tight" : "YES", tone: i < 2 ? "gn" : i < 4 ? "amb" : "rd" },
-    { v: i < 2 ? "1\u20132" : i < 4 ? "3\u20135" : "\u2014", tone: "ink" },
-    { v: i < 2 ? "hold" : i < 4 ? "trim 25%" : "flatten", tone: i < 2 ? "gn" : i < 4 ? "amb" : "rd" }
-  ]);
-  return /* @__PURE__ */ React.createElement("div", { className: "stress-grid" }, /* @__PURE__ */ React.createElement("div", { className: "sg-corner" }), outcomes.map((o, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "sg-col-hdr mono label-cap" }, o)), scenarios.map((s, r) => /* @__PURE__ */ React.createElement(React.Fragment, { key: r }, /* @__PURE__ */ React.createElement("div", { className: "sg-row-hdr mono" }, s), grid[r].map((c, ci) => /* @__PURE__ */ React.createElement("div", { key: ci, className: `sg-cell sg-${c.tone}` }, c.v)))));
+  const outcomes = ["P&L", "% NAV", "Stop hit?", "Action"];
+  const grid = scen.map((x) => {
+    const pnl = sz.notional * x.m, navp = pnl / sz.nav * 100, stopHit = Math.abs(x.m) >= stopMove;
+    const action = navp <= -1 ? "flatten" : stopHit ? "OCO exit" : navp <= -0.5 ? "trim 25%" : "hold";
+    return [
+      { v: `\u2212$${Math.abs(Math.round(pnl))}`, tone: navp <= -1 ? "rd" : "amb" },
+      { v: `${navp.toFixed(2)}%`, tone: navp <= -1 ? "rd" : "amb" },
+      { v: stopHit ? "YES" : "no", tone: stopHit ? "rd" : "gn" },
+      { v: action, tone: action === "hold" ? "gn" : action === "flatten" ? "rd" : "amb" }
+    ];
+  });
+  return /* @__PURE__ */ React.createElement("div", { className: "stress-grid" }, /* @__PURE__ */ React.createElement("div", { className: "sg-corner" }), outcomes.map((o, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "sg-col-hdr mono label-cap" }, o)), scen.map((x, r) => /* @__PURE__ */ React.createElement(React.Fragment, { key: r }, /* @__PURE__ */ React.createElement("div", { className: "sg-row-hdr mono" }, x.s), grid[r].map((c, ci) => /* @__PURE__ */ React.createElement("div", { key: ci, className: `sg-cell sg-${c.tone}` }, c.v)))));
+}
+function RiskLiquidity({ ticker, sz, rm }) {
+  const spread = typeof ticker.spread === "number" && ticker.spread > 0 ? ticker.spread : null;
+  const dvol = typeof ticker.dvol === "number" && ticker.dvol > 0 ? ticker.dvol : null;
+  const partPct = dvol && sz.ok ? sz.notional / dvol * 100 : null;
+  const advFmt = dvol ? dvol >= 1e9 ? "$" + (dvol / 1e9).toFixed(1) + "B" : "$" + (dvol / 1e6).toFixed(0) + "M" : "\u2014";
+  return /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "Spread", value: spread != null ? `${spread.toFixed(2)}%` : "\u2014", tone: spread == null ? "ink" : spread <= 0.1 ? "gn" : spread <= 0.5 ? "amb" : "rd", sub: spread != null ? "bid/ask" : "no quote" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "ADV ($)", value: advFmt, tone: "ink", sub: "avg daily $-vol" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Participation", value: partPct != null ? partPct < 0.01 ? "<0.01%" : partPct.toFixed(2) + "%" : "\u2014", tone: partPct == null ? "ink" : partPct < 1 ? "gn" : "amb", sub: "order \xF7 ADV" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Beta \xB7 vs SPY", value: rm && rm.ok && rm.beta != null ? rm.beta.toFixed(2) : "\u2014", tone: rm && rm.ok && rm.beta > 2 ? "rd" : rm && rm.ok && rm.beta > 1.3 ? "amb" : "gn", sub: "position \u03B2" }));
 }
 window.LensSMC = LensSMC;
 window.LensRisk = LensRisk;
@@ -25528,9 +25646,9 @@ function LensOptions({ ticker, mode }) {
       bad: o.ivVsHv >= 8,
       text: `IV ${o.iv.toFixed(0)}% vs realized HV20 ${o.hv20.toFixed(0)}% \u2192 vol is ${o.ivVsHv <= -5 ? "CHEAP \u2014 buying premium favorable" : o.ivVsHv >= 8 ? "RICH \u2014 you're overpaying for vol" : "fair vs realized"}`
     }
-  ) : /* @__PURE__ */ React.createElement(OtkCheck, { neutral: true, text: `ATM IV ${o.iv != null ? o.iv.toFixed(1) + "%" : "\u2014"} \u2014 realized-vol comparison unavailable` }), o.erInWindow ? /* @__PURE__ */ React.createElement(OtkCheck, { bad: true, text: `EARNINGS in ${o.erDays}d (inside this expiry) \u2014 expect IV crush post-print` }) : o.erDays != null ? /* @__PURE__ */ React.createElement(OtkCheck, { ok: true, text: `No earnings before expiry (next in ${o.erDays}d) \u2014 clean theta` }) : /* @__PURE__ */ React.createElement(OtkCheck, { neutral: true, text: "Earnings date unknown" })), /* @__PURE__ */ React.createElement("div", { className: "otk-heroes" }, /* @__PURE__ */ React.createElement("div", { className: "otk-hero" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "PREMIUM"), /* @__PURE__ */ React.createElement("div", { className: "mono otk-hero-v cy" }, "$", o.prem.toFixed(2))), /* @__PURE__ */ React.createElement("div", { className: "otk-hero" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "\u0394 DELTA"), /* @__PURE__ */ React.createElement("div", { className: "mono otk-hero-v" }, o.delta != null ? o.delta.toFixed(2) : "\u2014")), /* @__PURE__ */ React.createElement("div", { className: "otk-hero" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "P(PROFIT)"), /* @__PURE__ */ React.createElement("div", { className: "mono otk-hero-v" }, o.pop != null ? o.pop + "%" : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 8 } }, "at expiry")), /* @__PURE__ */ React.createElement("div", { className: "otk-hero" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "\u03B8/DAY"), /* @__PURE__ */ React.createElement("div", { className: "mono otk-hero-v dn" }, o.theta != null ? "$" + o.theta.toFixed(2) : "\u2014"))))), horizonMismatch && /* @__PURE__ */ React.createElement("div", { className: "otk-horizon mono" }, "\u2691 ", mode === "INVESTMENT" ? "Invest" : "Position", " horizon: the live feed only has near-term contracts (\u2264", maxDte, " DTE). Options aren't suited to a multi-month thesis here \u2014 this shows the nearest weekly for context, not a ", mode === "INVESTMENT" ? "long-term" : "multi-month", " holding."), /* @__PURE__ */ React.createElement(OptQuickTake, { ticker, mode, o }), /* @__PURE__ */ React.createElement(RetailPlan, { o, contracts }), /* @__PURE__ */ React.createElement("div", { className: "otk-tabs" }, TABS.map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `otk-tab ${tab === id ? "is-on" : ""}`, onClick: () => setTab(id) }, l))), /* @__PURE__ */ React.createElement("div", { className: "otk-body" }, tab === "chain" && /* @__PURE__ */ React.createElement(OtkChainGreeks, { o, exps }), tab === "gex" && /* @__PURE__ */ React.createElement(OtkGEX, { o }), tab === "build" && /* @__PURE__ */ React.createElement(OtkBuild, { o })));
+  ) : /* @__PURE__ */ React.createElement(OtkCheck, { neutral: true, text: `ATM IV ${o.iv != null ? o.iv.toFixed(1) + "%" : "\u2014"} \u2014 realized-vol comparison unavailable` }), o.erInWindow ? /* @__PURE__ */ React.createElement(OtkCheck, { bad: true, text: `EARNINGS in ${o.erDays}d (inside this expiry) \u2014 expect IV crush post-print` }) : o.erDays != null ? /* @__PURE__ */ React.createElement(OtkCheck, { ok: true, text: `No earnings before expiry (next in ${o.erDays}d) \u2014 clean theta` }) : /* @__PURE__ */ React.createElement(OtkCheck, { neutral: true, text: "Earnings date unknown" })), /* @__PURE__ */ React.createElement("div", { className: "otk-heroes" }, /* @__PURE__ */ React.createElement("div", { className: "otk-hero" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "PREMIUM"), /* @__PURE__ */ React.createElement("div", { className: "mono otk-hero-v cy" }, "$", o.prem.toFixed(2))), /* @__PURE__ */ React.createElement("div", { className: "otk-hero" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "\u0394 DELTA"), /* @__PURE__ */ React.createElement("div", { className: "mono otk-hero-v" }, o.delta != null ? o.delta.toFixed(2) : "\u2014")), /* @__PURE__ */ React.createElement("div", { className: "otk-hero" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "P(PROFIT)"), /* @__PURE__ */ React.createElement("div", { className: "mono otk-hero-v" }, o.pop != null ? o.pop + "%" : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 8 } }, "at expiry")), /* @__PURE__ */ React.createElement("div", { className: "otk-hero" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "\u03B8/DAY"), /* @__PURE__ */ React.createElement("div", { className: "mono otk-hero-v dn" }, o.theta != null ? "$" + o.theta.toFixed(2) : "\u2014"))))), horizonMismatch && /* @__PURE__ */ React.createElement("div", { className: "otk-horizon mono" }, "\u2691 ", mode === "INVESTMENT" ? "Invest" : "Position", " horizon: the live feed only has near-term contracts (\u2264", maxDte, " DTE). Options aren't suited to a multi-month thesis here \u2014 this shows the nearest weekly for context, not a ", mode === "INVESTMENT" ? "long-term" : "multi-month", " holding."), /* @__PURE__ */ React.createElement(OptQuickTake, { ticker, mode, o, exps }), /* @__PURE__ */ React.createElement(RetailPlan, { o, contracts }), /* @__PURE__ */ React.createElement("div", { className: "otk-tabs" }, TABS.map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `otk-tab ${tab === id ? "is-on" : ""}`, onClick: () => setTab(id) }, l))), /* @__PURE__ */ React.createElement("div", { className: "otk-body" }, tab === "chain" && /* @__PURE__ */ React.createElement(OtkChainGreeks, { o, exps }), tab === "gex" && /* @__PURE__ */ React.createElement(OtkGEX, { o, exps }), tab === "build" && /* @__PURE__ */ React.createElement(OtkBuild, { o })));
 }
-function OptQuickTake({ ticker, mode, o }) {
+function OptQuickTake({ ticker, mode, o, exps }) {
   const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
   const net = cv ? cv.net : null;
   const biasBull = net != null ? net >= 55 : null, biasBear = net != null ? net < 45 : null;
@@ -25543,11 +25661,11 @@ function OptQuickTake({ ticker, mode, o }) {
   const fights = o.isPut && biasBull || !o.isPut && biasBear;
   const gex = useOTm(() => {
     try {
-      return computeGEX(o);
+      return computeGEX(o.spot, exps);
     } catch (e) {
       return null;
     }
-  }, [o]);
+  }, [o.spot, exps]);
   const F = [];
   if (net != null) F.push({ k: "Direction", v: aligned ? 1 : fights ? -1 : 0, text: aligned ? `${opt} aligns with the stock's ${biasBull ? "bullish" : "bearish"} read (${Math.round(net)}/100)` : fights ? `${opt} fights the stock's ${biasBull ? "bullish" : "bearish"} read (${Math.round(net)}/100) \u2014 wrong direction` : `stock is mixed (${Math.round(net)}/100) \u2014 no directional tailwind` });
   if (achievable != null) F.push({ k: "Cost vs move", v: achievable ? 1 : -1, text: `needs ${beMove >= 0 ? "+" : ""}${beMove.toFixed(1)}% (${o.isPut ? "a drop" : "a rise"}) by expiry; market prices \xB1${imp}% \u2192 ${achievable ? "achievable" : "a stretch"}` });
@@ -25682,45 +25800,85 @@ function bsPOP(S, BE, T, sigma, r = 0.04) {
   const d2 = (Math.log(S / BE) + (r - sigma * sigma / 2) * T) / (sigma * Math.sqrt(T));
   return Math.round(Math.max(1, Math.min(99, bsNormCdf(d2) * 100)));
 }
+function _atmMid(o, type) {
+  const s = o.strikes.find((x) => x.strike === o.strike) || o.strikes[0];
+  const leg = (type === "put" ? s.put : s.call) || {};
+  return _on(leg.bid) != null && _on(leg.ask) != null ? +((leg.bid + leg.ask) / 2).toFixed(2) : _on(leg.mark, 0);
+}
+const OTK_STRATS = {
+  "Long Call (bullish)": { dir: "buy", otype: "call" },
+  "Long Put (bearish)": { dir: "buy", otype: "put" },
+  "Covered Call (income)": { dir: "write", otype: "call" },
+  "Cash-Secured Put": { dir: "write", otype: "put" }
+};
 function OtkProfitGrid({ o }) {
-  const sigma = (o.iv != null ? o.iv : 40) / 100;
-  const K = o.strike, prem = o.prem, dteY = (o.dte || 5) / 252;
-  const moves = [-0.1, -0.05, -0.02, 0, 0.02, 0.05, 0.1];
-  const dayBuckets = Array.from(/* @__PURE__ */ new Set([0, Math.round(o.dte * 0.5), o.dte])).filter((d) => d <= o.dte);
-  const cell = (mv, dHeld) => {
-    const S = o.spot * (1 + mv);
-    const Trem = Math.max(0, (o.dte || 5) - dHeld) / 252;
-    const val = bsCall(S, K, Trem, sigma);
-    const pl = (val - prem) / prem * 100;
+  const [strat, setStrat] = useOT(o.isPut ? "Long Put (bearish)" : "Long Call (bullish)");
+  const def = OTK_STRATS[strat] || OTK_STRATS["Long Call (bullish)"];
+  const [strike, setStrike] = useOT(o.strike);
+  const [prem, setPrem] = useOT(o.prem);
+  const [contracts, setContracts] = useOT(1);
+  const [ivScen, setIvScen] = useOT("flat");
+  React.useEffect(() => {
+    setStrike(o.strike);
+    setPrem(_atmMid(o, def.otype));
+  }, [o.strike, o.dte, o.sym, strat]);
+  const baseSigma = (o.iv != null ? o.iv : 40) / 100;
+  const sigma = Math.max(0.03, ivScen === "crush" ? baseSigma * 0.6 : ivScen === "-10" ? baseSigma - 0.1 : ivScen === "+10" ? baseSigma + 0.1 : baseSigma);
+  const dteN = Math.max(1, o.dte || 5);
+  const isPut = def.otype === "put", isWrite = def.dir === "write";
+  const fn = isPut ? bsPut : bsCall;
+  const beAtExp = isPut ? +(strike - prem).toFixed(2) : +(strike + prem).toFixed(2);
+  const maxCol = Math.min(30, dteN), step = Math.max(1, Math.round(maxCol / 6));
+  const cols = [];
+  for (let d = 0; d <= maxCol && d < dteN; d += step) cols.push(d);
+  cols.push(dteN);
+  const colLbl = (d) => d === 0 ? "Today" : d >= dteN ? "EXPIRY" : "+" + d + "d";
+  const hiP = o.spot * 1.075, loP = o.spot * 0.925, NR = 21;
+  const prices = [];
+  for (let i = 0; i < NR; i++) prices.push(+(hiP - (hiP - loP) * i / (NR - 1)).toFixed(prices.length && hiP < 50 ? 2 : 0));
+  const tgt = isPut ? o.spot * (1 - (o.impMove || 5) / 100) : o.spot * (1 + (o.impMove || 5) / 100);
+  const spotRow = prices.reduce((bi, p, i) => Math.abs(p - o.spot) < Math.abs(prices[bi] - o.spot) ? i : bi, 0);
+  const tgtRow = prices.reduce((bi, p, i) => Math.abs(p - tgt) < Math.abs(prices[bi] - tgt) ? i : bi, 0);
+  const cellPL = (S, dHeld) => {
+    const Trem = Math.max(0, dteN - dHeld) / 252;
+    const val = fn(S, strike, Trem, sigma);
+    let pl = (val - prem) / Math.max(0.01, prem) * 100;
+    if (isWrite) pl = Math.max(-400, -pl);
     return pl;
   };
-  const tone = (pl) => pl >= 25 ? "gn" : pl >= 0 ? "amb" : pl <= -50 ? "rd" : "rd";
-  return /* @__PURE__ */ React.createElement("table", { className: "dtable otk-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Spot move"), dayBuckets.map((d) => /* @__PURE__ */ React.createElement("th", { key: d, className: "r" }, d === 0 ? "now" : `T+${d}`)))), /* @__PURE__ */ React.createElement("tbody", null, moves.map((mv, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, mv >= 0 ? "+" : "", (mv * 100).toFixed(0), "% \u2192 $", (o.spot * (1 + mv)).toFixed(0)), dayBuckets.map((d) => {
-    const pl = cell(mv, d);
-    return /* @__PURE__ */ React.createElement("td", { key: d, className: `r mono kpi-tone--${tone(pl)}` }, pl >= 0 ? "+" : "", pl.toFixed(0), "%");
-  })))));
+  const cellStyle = (pl) => {
+    const c = pl >= 0 ? "var(--gn)" : "var(--rd)";
+    const op = Math.min(0.4, Math.abs(pl) / 130 * 0.4 + 0.04);
+    return { background: `color-mix(in oklab, ${c} ${Math.round(op * 100)}%, transparent)`, color: pl >= 0 ? "var(--gn)" : "var(--rd)" };
+  };
+  const totalCost = prem * 100 * contracts;
+  return /* @__PURE__ */ React.createElement("div", { className: "otk-pcalc" }, /* @__PURE__ */ React.createElement("div", { className: "otk-pc-ctrl mono" }, /* @__PURE__ */ React.createElement("select", { value: strat, onChange: (e) => setStrat(e.target.value) }, Object.keys(OTK_STRATS).map((s) => /* @__PURE__ */ React.createElement("option", { key: s }, s))), /* @__PURE__ */ React.createElement("span", { className: "otk-pc-seg" }, /* @__PURE__ */ React.createElement("button", { className: !isWrite ? "is-on" : "", onClick: () => setStrat(isPut ? "Long Put (bearish)" : "Long Call (bullish)") }, "Buy"), /* @__PURE__ */ React.createElement("button", { className: isWrite ? "is-on" : "", onClick: () => setStrat(isPut ? "Cash-Secured Put" : "Covered Call (income)") }, "Write")), /* @__PURE__ */ React.createElement("span", { className: "otk-pc-seg" }, /* @__PURE__ */ React.createElement("button", { className: !isPut ? "is-on" : "", onClick: () => setStrat(isWrite ? "Covered Call (income)" : "Long Call (bullish)") }, "Call"), /* @__PURE__ */ React.createElement("button", { className: isPut ? "is-on" : "", onClick: () => setStrat(isWrite ? "Cash-Secured Put" : "Long Put (bearish)") }, "Put")), /* @__PURE__ */ React.createElement("label", null, "Strike ", /* @__PURE__ */ React.createElement("input", { type: "number", value: strike, onChange: (e) => setStrike(+e.target.value) })), /* @__PURE__ */ React.createElement("label", null, "Premium ", /* @__PURE__ */ React.createElement("input", { type: "number", step: "0.05", value: prem, onChange: (e) => setPrem(+e.target.value) })), /* @__PURE__ */ React.createElement("label", null, "Contracts ", /* @__PURE__ */ React.createElement("input", { type: "number", min: "1", value: contracts, onChange: (e) => setContracts(Math.max(1, +e.target.value)) })), /* @__PURE__ */ React.createElement("span", { className: "otk-pc-cost" }, "Cost ", /* @__PURE__ */ React.createElement("b", { className: "cy" }, "$", totalCost.toLocaleString()))), /* @__PURE__ */ React.createElement("div", { className: "otk-pc-iv mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "IV scenario"), [["-10", "\u221210 vol"], ["flat", "IV flat"], ["+10", "+10 vol"], ["crush", "\u26A1 ER crush"]].map(([k, l]) => /* @__PURE__ */ React.createElement("button", { key: k, className: ivScen === k ? "is-on" : "", onClick: () => setIvScen(k) }, l)), /* @__PURE__ */ React.createElement("span", { className: "dim2", style: { marginLeft: "auto" } }, "\u03C3 now ", /* @__PURE__ */ React.createElement("b", null, (baseSigma * 100).toFixed(0), "%"), ivScen !== "flat" ? ` \u2192 ${(sigma * 100).toFixed(0)}%` : "")), /* @__PURE__ */ React.createElement("div", { className: "otk-pc-scroll" }, /* @__PURE__ */ React.createElement("table", { className: "otk-pc-tbl mono" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Price"), cols.map((d, i) => /* @__PURE__ */ React.createElement("th", { key: i, className: "r" }, colLbl(d))), /* @__PURE__ */ React.createElement("th", { className: "r" }, "\xB1% spot"))), /* @__PURE__ */ React.createElement("tbody", null, prices.map((p, ri) => /* @__PURE__ */ React.createElement("tr", { key: ri, className: ri === spotRow ? "is-spot" : ri === tgtRow ? "is-tgt" : "" }, /* @__PURE__ */ React.createElement("td", { className: "otk-pc-px" }, "$", p.toLocaleString(), ri === spotRow ? /* @__PURE__ */ React.createElement("span", { className: "otk-pc-tag cy" }, "spot") : ri === tgtRow ? /* @__PURE__ */ React.createElement("span", { className: "otk-pc-tag warn" }, "target") : ""), cols.map((d, ci) => {
+    const pl = cellPL(p, d);
+    return /* @__PURE__ */ React.createElement("td", { key: ci, className: "r", style: cellStyle(pl) }, pl >= 0 ? "+" : "", pl.toFixed(0));
+  }), /* @__PURE__ */ React.createElement("td", { className: "r dim2" }, p >= o.spot ? "+" : "", ((p / o.spot - 1) * 100).toFixed(1), "%")))))), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 10.5, marginTop: 6 } }, "Each cell = % return on the $", prem.toFixed(2), " premium (", strike, isPut ? "P" : "C", " \xB7 ", dteN, "DTE) at that price & date, IV held at \u03C3 ", (sigma * 100).toFixed(0), "%. ", /* @__PURE__ */ React.createElement("b", { className: "cy" }, "Cyan"), " = live spot; ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "amber"), " = implied-move target ($", tgt.toFixed(0), "). EXPIRY = intrinsic. Breakeven at expiry ", /* @__PURE__ */ React.createElement("b", null, "$", beAtExp.toFixed(2)), " (", isPut ? "" : "+", ((beAtExp / o.spot - 1) * 100).toFixed(1), "%)."));
 }
-function computeGEX(o) {
-  const spot = o.spot;
-  const rows = o.strikes.map((s) => {
-    const cOi = _on((s.call || {}).oi, 0), pOi = _on((s.put || {}).oi, 0);
-    const cG = _on((s.call || {}).gamma, 0), pG = _on((s.put || {}).gamma, 0);
-    const callGEX = -cOi * cG * spot * spot * 1e-4;
-    const putGEX = pOi * pG * spot * spot * 1e-4;
-    return { k: s.strike, callOI: cOi, putOI: pOi, net: +(callGEX + putGEX).toFixed(2) };
-  });
+function computeGEX(spot, exps) {
+  if (!spot || !exps || !exps.length) return null;
+  const dol = 100 * spot * (spot * 0.01);
+  const agg = {};
+  exps.forEach((e) => (e.strikes || []).forEach((s) => {
+    const k = s.strike;
+    if (k == null) return;
+    const c = s.call || {}, p = s.put || {};
+    const cOi = _on(c.oi, 0), pOi = _on(p.oi, 0), cG = _on(c.gamma, 0), pG = _on(p.gamma, 0);
+    const a = agg[k] || (agg[k] = { net: 0, callOI: 0, putOI: 0 });
+    a.net += (-cOi * cG + pOi * pG) * dol;
+    a.callOI += cOi;
+    a.putOI += pOi;
+  }));
+  let rows = Object.keys(agg).map((k) => ({ k: +k, ...agg[k] })).sort((a, b) => a.k - b.k);
+  const win = rows.filter((r) => r.k >= spot * 0.88 && r.k <= spot * 1.14);
+  rows = win.length >= 4 ? win : rows;
+  if (rows.length > 13) {
+    const ci = rows.reduce((bi, r, i) => Math.abs(r.k - spot) < Math.abs(rows[bi].k - spot) ? i : bi, 0);
+    rows = rows.slice(Math.max(0, ci - 6), ci + 7);
+  }
   if (!rows.length) return null;
-  let maxPain = rows[0].k, minPay = Infinity;
-  rows.forEach((r) => {
-    let p = 0;
-    rows.forEach((s) => {
-      p += Math.max(0, r.k - s.k) * s.callOI + Math.max(0, s.k - r.k) * s.putOI;
-    });
-    if (p < minPay) {
-      minPay = p;
-      maxPain = r.k;
-    }
-  });
   const callWall = rows.reduce((a, b) => b.callOI > a.callOI ? b : a).k;
   const putWall = rows.reduce((a, b) => b.putOI > a.putOI ? b : a).k;
   let flip = spot;
@@ -25730,27 +25888,48 @@ function computeGEX(o) {
       break;
     }
   }
-  const total = +rows.reduce((a, b) => a + b.net, 0).toFixed(2);
-  return { rows, maxPain, callWall, putWall, flip, total };
+  let maxPain = rows[0].k, minPay = Infinity;
+  rows.forEach((r) => {
+    let pay = 0;
+    rows.forEach((s) => {
+      pay += Math.max(0, r.k - s.k) * s.callOI + Math.max(0, s.k - r.k) * s.putOI;
+    });
+    if (pay < minPay) {
+      minPay = pay;
+      maxPain = r.k;
+    }
+  });
+  const total = rows.reduce((a, b) => a + b.net, 0);
+  return { rows, callWall, putWall, flip, maxPain, total };
 }
-function OtkGEX({ o }) {
-  const g = useOTm(() => computeGEX(o), [o]);
+function OtkGEX({ o, exps }) {
+  const g = useOTm(() => computeGEX(o.spot, exps), [o.spot, exps]);
   if (!g) return /* @__PURE__ */ React.createElement("div", { className: "otk-card otk-card--wide" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { padding: 16 } }, "Not enough open-interest in the live chain to compute dealer gamma."));
-  const W = 720, H = 220, padL = 16, padR = 16, padT = 16, padB = 30;
+  const W = 720, H = 234, padL = 16, padR = 16, padT = 30, padB = 30;
   const n = g.rows.length, bw = (W - padL - padR) / n;
-  const maxAbs = Math.max(...g.rows.map((r) => Math.abs(r.net)), 0.01);
+  const maxAbs = Math.max(...g.rows.map((r) => Math.abs(r.net)), 1);
   const y0 = padT + (H - padT - padB) / 2, yh = (H - padT - padB) / 2;
   const cx = (i) => padL + bw * (i + 0.5);
   const spotI = (o.spot - g.rows[0].k) / Math.max(1e-6, g.rows[n - 1].k - g.rows[0].k) * (n - 1);
   const spotX = padL + bw * (spotI + 0.5);
   const pos = g.total >= 0;
+  const fmtMM = (v) => (v >= 0 ? "+" : "\u2212") + "$" + Math.abs(v / 1e6).toFixed(1) + "mm";
+  const idxOf = (k) => g.rows.findIndex((r) => r.k === k);
+  const marks = [{ k: g.putWall, lbl: "PUT WALL", c: "var(--rd)" }, { k: g.callWall, lbl: "CALL WALL", c: "var(--gn)" }, { k: g.flip, lbl: "\u03B3-FLIP", c: "var(--amber, #d9a441)" }].filter((m) => idxOf(m.k) >= 0);
+  const slots = {};
   const gexPrompt = () => `Explain options dealer-gamma (GEX) to a BEGINNER STOCK trader (they don't trade options) in plain, simple English. Use the live numbers for ${o.sym} below: 3-4 short sentences, use the actual prices, end with ONE practical takeaway for someone trading the shares.
-Spot: $${o.spot.toFixed(2)} \xB7 Net GEX: ${g.total >= 0 ? "+" : ""}${g.total} (${g.total >= 0 ? "positive \u2014 moves dampened" : "negative \u2014 moves amplified"}) \xB7 Call wall: $${g.callWall} \xB7 Put wall: $${g.putWall} \xB7 Flip: $${g.flip} \xB7 Max pain: $${g.maxPain}`;
-  return /* @__PURE__ */ React.createElement("div", { className: "otk-card otk-card--wide" }, /* @__PURE__ */ React.createElement("div", { className: "otk-card-h mono" }, "DEALER GAMMA (GEX) \xB7 ", o.dte, "DTE \xB7 ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "computed from live chain OI \xD7 \u03B3")), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-kpis" }, /* @__PURE__ */ React.createElement("div", { className: "otk-gex-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "NET GEX"), /* @__PURE__ */ React.createElement("span", { className: `mono otk-gex-kv ${pos ? "up" : "dn"}` }, pos ? "+" : "\u2212", "$", Math.abs(g.total).toFixed(2)), /* @__PURE__ */ React.createElement("span", { className: "mono dim2", style: { fontSize: 8 } }, pos ? "stabilizing" : "amplifying")), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "\u03B3-FLIP"), /* @__PURE__ */ React.createElement("span", { className: "mono otk-gex-kv warn" }, "$", g.flip)), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "MAX PAIN"), /* @__PURE__ */ React.createElement("span", { className: "mono otk-gex-kv copper" }, "$", g.maxPain)), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "CALL WALL"), /* @__PURE__ */ React.createElement("span", { className: "mono otk-gex-kv up" }, "$", g.callWall)), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "PUT WALL"), /* @__PURE__ */ React.createElement("span", { className: "mono otk-gex-kv dn" }, "$", g.putWall))), /* @__PURE__ */ React.createElement("svg", { width: "100%", height: H, viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "xMidYMid meet", className: "otk-gex-svg" }, /* @__PURE__ */ React.createElement("line", { x1: padL, y1: y0, x2: W - padR, y2: y0, stroke: "var(--glass-line)" }), g.rows.map((r, i) => {
+Spot: $${o.spot.toFixed(2)} \xB7 Net GEX: ${fmtMM(g.total)} (${pos ? "positive \u2014 moves dampened" : "negative \u2014 moves amplified"}) \xB7 Call wall: $${g.callWall} \xB7 Put wall: $${g.putWall} \xB7 Flip: $${g.flip} \xB7 Max pain: $${g.maxPain}`;
+  return /* @__PURE__ */ React.createElement("div", { className: "otk-card otk-card--wide" }, /* @__PURE__ */ React.createElement("div", { className: "otk-card-h mono" }, "DEALER GAMMA (GEX) \xB7 by strike \xB7 ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "computed from chain OI \xD7 \u03B3 (all expirations)")), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-kpis" }, /* @__PURE__ */ React.createElement("div", { className: "otk-gex-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "NET GEX"), /* @__PURE__ */ React.createElement("span", { className: `mono otk-gex-kv ${pos ? "up" : "dn"}` }, fmtMM(g.total)), /* @__PURE__ */ React.createElement("span", { className: "mono dim2", style: { fontSize: 8 } }, pos ? "stabilizing" : "amplifying")), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "\u03B3-FLIP"), /* @__PURE__ */ React.createElement("span", { className: "mono otk-gex-kv warn" }, "$", g.flip)), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "MAX PAIN"), /* @__PURE__ */ React.createElement("span", { className: "mono otk-gex-kv copper" }, "$", g.maxPain)), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "CALL WALL"), /* @__PURE__ */ React.createElement("span", { className: "mono otk-gex-kv up" }, "$", g.callWall)), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-kpi" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "PUT WALL"), /* @__PURE__ */ React.createElement("span", { className: "mono otk-gex-kv dn" }, "$", g.putWall))), /* @__PURE__ */ React.createElement("svg", { width: "100%", height: H, viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "xMidYMid meet", className: "otk-gex-svg" }, /* @__PURE__ */ React.createElement("line", { x1: padL, y1: y0, x2: W - padR, y2: y0, stroke: "var(--glass-line)" }), g.rows.map((r, i) => {
     const h = Math.abs(r.net) / maxAbs * yh;
     const up = r.net >= 0;
     return /* @__PURE__ */ React.createElement("g", { key: i }, /* @__PURE__ */ React.createElement("rect", { x: cx(i) - bw * 0.32, y: up ? y0 - h : y0, width: bw * 0.64, height: h, fill: up ? "var(--gn)" : "var(--rd)", opacity: "0.78", rx: "1.5" }), /* @__PURE__ */ React.createElement("text", { x: cx(i), y: H - 9, fontSize: "9", className: "mono", textAnchor: "middle", fill: r.k === g.maxPain ? "var(--copper)" : "var(--ink-3)" }, "$", r.k));
-  }), /* @__PURE__ */ React.createElement("line", { x1: spotX, y1: padT, x2: spotX, y2: H - padB, stroke: "var(--ink)", strokeDasharray: "3 3", opacity: "0.7" }), /* @__PURE__ */ React.createElement("text", { x: spotX, y: padT - 4, fontSize: "8.5", className: "mono", textAnchor: "middle", fill: "var(--ink-2)" }, "spot $", o.spot.toFixed(0)), /* @__PURE__ */ React.createElement("text", { x: padL + 2, y: padT + 8, fontSize: "8", className: "mono", fill: "var(--gn)" }, "+ dealers dampen"), /* @__PURE__ */ React.createElement("text", { x: padL + 2, y: H - padB - 2, fontSize: "8", className: "mono", fill: "var(--rd)" }, "\u2212 dealers amplify")), /* @__PURE__ */ React.createElement("div", { className: "otk-verdict-mini mono" }, /* @__PURE__ */ React.createElement("span", { className: pos ? "up" : "dn" }, pos ? "POSITIVE \u03B3" : "NEGATIVE \u03B3"), " \xB7", " ", pos ? /* @__PURE__ */ React.createElement(React.Fragment, null, "dealers buy dips / sell rips \u2192 moves ", /* @__PURE__ */ React.createElement("b", null, "dampened"), "; price gravitates toward ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "max-pain $", g.maxPain), ", pinning between ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "put wall $", g.putWall), " and ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "call wall $", g.callWall), ". Below ", /* @__PURE__ */ React.createElement("b", null, "\u03B3-flip $", g.flip), " turns amplifying.") : /* @__PURE__ */ React.createElement(React.Fragment, null, "dealer hedging ", /* @__PURE__ */ React.createElement("b", null, "amplifies"), " moves \u2014 expect bigger swings; reclaiming ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "\u03B3-flip $", g.flip), " restores stability."), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " \xB7 ", o.dte, "-DTE chain \xB7 informational, not advice.")), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-stock" }, /* @__PURE__ */ React.createElement("div", { className: "otk-gex-stock-top" }, /* @__PURE__ */ React.createElement("span", { className: "otk-gex-stock-tag mono" }, "FOR THE STOCK")), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-plain mono" }, pos ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "otk-gex-pl-hd" }, /* @__PURE__ */ React.createElement("b", { className: "up" }, "Likely calmer / range-bound near-term."), " It tends to trade between two prices:"), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-pl-row" }, /* @__PURE__ */ React.createElement("span", { className: "otk-gex-pl-k dn" }, "FLOOR $", g.putWall), " \u2014 dips here often get bought."), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-pl-row" }, /* @__PURE__ */ React.createElement("span", { className: "otk-gex-pl-k up" }, "CEILING $", g.callWall), " \u2014 rallies here often stall."), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-pl-row" }, /* @__PURE__ */ React.createElement("span", { className: "otk-gex-pl-k warn" }, "IF IT BREAKS $", g.flip, "+"), " the calm is over \u2014 it can run.")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "otk-gex-pl-hd" }, /* @__PURE__ */ React.createElement("b", { className: "dn" }, "Likely faster / trending near-term."), " Moves get bigger:"), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-pl-row" }, /* @__PURE__ */ React.createElement("span", { className: "otk-gex-pl-k dn" }, "$", g.putWall, " may not hold"), " \u2014 drops can keep falling."), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-pl-row" }, /* @__PURE__ */ React.createElement("span", { className: "otk-gex-pl-k up" }, "$", g.callWall, " may not cap it"), " \u2014 rallies can keep running."), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-pl-row" }, /* @__PURE__ */ React.createElement("span", { className: "otk-gex-pl-k warn" }, "WATCH $", g.flip), " \u2014 back above usually restores calm.")), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-pl-foot dim2" }, "Near-term (", o.dte, "-DTE) dealer positioning only. Informational \u2014 not advice.")), window.AiExplain && /* @__PURE__ */ React.createElement(AiExplain, { build: gexPrompt, label: "Explain with AI", tag: "KAIROS \xB7 GEX" })));
+  }), marks.map((m, mi) => {
+    const i = idxOf(m.k);
+    const x = cx(i);
+    const slot = slots[i] = (slots[i] || 0) + 1;
+    const ly = padT - 18 + (slot - 1) * 9;
+    return /* @__PURE__ */ React.createElement("g", { key: mi }, /* @__PURE__ */ React.createElement("line", { x1: x, y1: padT, x2: x, y2: H - padB, stroke: m.c, strokeWidth: "1.2", opacity: "0.45" }), /* @__PURE__ */ React.createElement("text", { x, y: ly, fontSize: "7.5", className: "mono", textAnchor: "middle", fill: m.c, fontWeight: "700" }, m.lbl));
+  }), /* @__PURE__ */ React.createElement("line", { x1: spotX, y1: padT, x2: spotX, y2: H - padB, stroke: "var(--ink)", strokeDasharray: "3 3", opacity: "0.75" }), /* @__PURE__ */ React.createElement("text", { x: spotX, y: padT - 4, fontSize: "8.5", className: "mono", textAnchor: "middle", fill: "var(--ink-2)" }, "spot $", o.spot.toFixed(0)), /* @__PURE__ */ React.createElement("text", { x: padL + 2, y: y0 - yh + 8, fontSize: "8", className: "mono", fill: "var(--gn)" }, "+ dealers dampen"), /* @__PURE__ */ React.createElement("text", { x: padL + 2, y: y0 + yh - 2, fontSize: "8", className: "mono", fill: "var(--rd)" }, "\u2212 dealers amplify")), /* @__PURE__ */ React.createElement("div", { className: "otk-verdict-mini mono" }, /* @__PURE__ */ React.createElement("span", { className: pos ? "up" : "dn" }, pos ? "POSITIVE \u03B3" : "NEGATIVE \u03B3"), " \xB7", " ", pos ? /* @__PURE__ */ React.createElement(React.Fragment, null, "dealers buy dips / sell rips \u2192 moves ", /* @__PURE__ */ React.createElement("b", null, "dampened"), "; price gravitates toward ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "max-pain $", g.maxPain), ", pinning between ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "put wall $", g.putWall), " and ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "call wall $", g.callWall), ". Below ", /* @__PURE__ */ React.createElement("b", null, "\u03B3-flip $", g.flip), " turns amplifying.") : /* @__PURE__ */ React.createElement(React.Fragment, null, "dealer hedging ", /* @__PURE__ */ React.createElement("b", null, "amplifies"), " moves \u2014 expect bigger swings; reclaiming ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "\u03B3-flip $", g.flip), " restores stability."), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " \xB7 ", o.dte, "-DTE chain \xB7 informational, not advice.")), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-stock" }, /* @__PURE__ */ React.createElement("div", { className: "otk-gex-stock-top" }, /* @__PURE__ */ React.createElement("span", { className: "otk-gex-stock-tag mono" }, "FOR THE STOCK")), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-plain mono" }, pos ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "otk-gex-pl-hd" }, /* @__PURE__ */ React.createElement("b", { className: "up" }, "Likely calmer / range-bound near-term."), " It tends to trade between two prices:"), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-pl-row" }, /* @__PURE__ */ React.createElement("span", { className: "otk-gex-pl-k dn" }, "FLOOR $", g.putWall), " \u2014 dips here often get bought."), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-pl-row" }, /* @__PURE__ */ React.createElement("span", { className: "otk-gex-pl-k up" }, "CEILING $", g.callWall), " \u2014 rallies here often stall."), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-pl-row" }, /* @__PURE__ */ React.createElement("span", { className: "otk-gex-pl-k warn" }, "IF IT BREAKS $", g.flip, "+"), " the calm is over \u2014 it can run.")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "otk-gex-pl-hd" }, /* @__PURE__ */ React.createElement("b", { className: "dn" }, "Likely faster / trending near-term."), " Moves get bigger:"), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-pl-row" }, /* @__PURE__ */ React.createElement("span", { className: "otk-gex-pl-k dn" }, "$", g.putWall, " may not hold"), " \u2014 drops can keep falling."), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-pl-row" }, /* @__PURE__ */ React.createElement("span", { className: "otk-gex-pl-k up" }, "$", g.callWall, " may not cap it"), " \u2014 rallies can keep running."), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-pl-row" }, /* @__PURE__ */ React.createElement("span", { className: "otk-gex-pl-k warn" }, "WATCH $", g.flip), " \u2014 back above usually restores calm.")), /* @__PURE__ */ React.createElement("div", { className: "otk-gex-pl-foot dim2" }, "Near-term (", o.dte, "-DTE) dealer positioning only. Informational \u2014 not advice.")), window.AiExplain && /* @__PURE__ */ React.createElement(AiExplain, { build: gexPrompt, label: "Explain with AI", tag: "KAIROS \xB7 GEX" })));
 }
 function legInfo(o, strike, type) {
   const s = o.strikes.find((x) => x.strike === strike) || o.strikes.reduce((a, x) => Math.abs(x.strike - strike) < Math.abs(a.strike - strike) ? x : a, o.strikes[0]);

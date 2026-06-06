@@ -693,218 +693,268 @@ function MTFScreener({ m, state }) {
 // ────────────────────────────────────────────────────────────
 // RISK — VaR, Kelly, drawdown, stress, liquidity
 // ────────────────────────────────────────────────────────────
+// real account NAV (live equity → MyPF rollup → labeled demo)
+function _riskNav() {
+  const bv = (window.__BV && typeof window.__BV.nav === "number") ? window.__BV.nav : null;
+  if (bv && bv > 0) return { nav: bv, demo: false };
+  try { if (window.MyPF) { const s = window.MyPF.summarize(window.MyPF.combined()); if (s && s.totalValue > 0) return { nav: s.totalValue, demo: false }; } } catch (e) {}
+  return { nav: 100000, demo: true };
+}
+// real risk model from engines/risk.py via /api/pattern/risk
+function useRiskModel(ticker, mode) {
+  const sym = (ticker && ticker.symbol) || "", md = (mode || "SWING").toUpperCase();
+  const key = "risk|" + sym + "|" + md;
+  const read = () => { try { return (window.__BV && window.__BV.patternCached && window.__BV.patternCached("risk", sym, md)) || null; } catch (e) { return null; } };
+  const [real, setReal] = useStateSMC(read);
+  useEffSMC(() => {
+    let on = true; setReal(read());
+    try { if (window.__BV && window.__BV.fetchPattern && sym) window.__BV.fetchPattern("risk", sym, md).then(d => { if (on) setReal(d); }); } catch (e) {}
+    return () => { on = false; };
+  }, [key]);
+  let st = "mock";
+  if (real && typeof real === "object" && ("ok" in real)) st = "loaded";
+  else if (real === null && window.__BV && window.__BV.fetchPattern) st = "loading";
+  return { rm: real, state: st };
+}
+// position sizing from the real coherent ladder + NAV + ledger (Kelly)
+function riskSizing(ticker, mode) {
+  const md = (mode || "SWING").toUpperCase();
+  const t2 = window.modeAdjust ? window.modeAdjust(ticker, md) : ticker;
+  const L = window.coherentLevels ? window.coherentLevels(t2) : null;
+  const { nav, demo } = _riskNav();
+  if (!L || L.valid === false || !(L.stop > 0 && L.pivot > L.stop && L.t1 > L.pivot)) return { nav, demo, ok: false };
+  const entry = +(L.pivot * 1.002).toFixed(2), stop = L.stop, t1 = L.t1;
+  const risk = Math.max(0.01, entry - stop);
+  const shares = Math.max(1, Math.round(Math.round(nav * 0.0039) / risk));
+  const notional = shares * entry, maxLoss = shares * risk;
+  const rr = (t1 - entry) / risk;
+  const ss = ticker.setupStats || {}, wr = ss.winRate;
+  const kelly = (wr != null && rr > 0) ? Math.max(0, (wr * rr - (1 - wr)) / rr) : null;
+  return { ok: true, nav, demo, entry, stop, t1, risk, shares, notional, maxLoss, rr, kelly, wr, n: ss.n,
+           navPct: notional / nav * 100, lossNavPct: maxLoss / nav * 100, pctToStop: risk / entry * 100 };
+}
+
 function LensRisk({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("rk-1"); const s2 = useStateToggle("rk-2");
   const s3 = useStateToggle("rk-3"); const s4 = useStateToggle("rk-4");
   const s5 = useStateToggle("rk-5");
-  const RL = window.coherentLevels ? window.coherentLevels(ticker) : { stop: ticker.stop, pivot: ticker.pivot, t1: ticker.t1 };
-  const RrR = (((RL.t1 - RL.pivot * 1.002) / (RL.pivot * 1.002 - RL.stop))).toFixed(2);
+  const { rm, state } = useRiskModel(ticker, mode);
+  const sz = riskSizing(ticker, mode);
+  const erD = ticker.earnings && ticker.earnings.days != null ? ticker.earnings.days : null;
+  const gatesOK = sz.ok && sz.lossNavPct <= 0.75 && sz.navPct <= 10;
+  const hot = (rm && rm.ok && rm.beta != null && rm.beta > 2) || (sz.ok && sz.lossNavPct > 0.75);
+  const verdict = !sz.ok ? "—" : hot ? "HOT" : gatesOK ? "OK" : "REVIEW";
+  const vTone = verdict === "OK" ? "gn" : verdict === "HOT" ? "rd" : "amb";
 
   return (
     <div className="lens lens--risk">
       <div className="hero risk-hero">
         <div className="th-left">
-          <div className="label-cap">Risk read · per-trade + book</div>
+          <div className="label-cap">Risk read · per-trade · {mode}{rm && rm.ok ? " · " + rm.tf : ""}</div>
           <div className="th-score">
-            <div className="th-score-num mono">OK</div>
-            <Pill tone="gn" dot>within gates</Pill>
-            <Pill tone="amb" small>ER in 11d · cap size</Pill>
+            <div className="th-score-num mono">{verdict}</div>
+            {sz.ok && <Pill tone={gatesOK ? "gn" : "rd"} dot>{gatesOK ? "within gates" : "over size cap"}</Pill>}
+            {rm && rm.ok && rm.beta != null && <Pill tone={rm.beta > 2 ? "rd" : rm.beta > 1.3 ? "amb" : "gn"} small>β {rm.beta}</Pill>}
+            {erD != null && erD <= 10 && <Pill tone="amb" small>ER in {erD}d · cap size</Pill>}
           </div>
         </div>
         <div className="th-right">
-          <LossCone />
+          <LossCone rm={rm} />
         </div>
       </div>
 
       <div className="lens-section">
         <SectionHeader n={1} title="Loss-Distribution Cones"
-          sub="1-day · 1σ / 2σ / 3σ · based on 60d realized vol"
-          style={headerStyle} right={<StateToggle name="rk-1" />} />
-        <StateWrap state={s1.value} source="vol engine · 60d realized">
-          <div className="lens-pad"><RiskCones ticker={ticker} mode={mode} /></div>
+          sub={`${mode} horizon · 1σ / 2σ / 3σ · from 126d realized vol`}
+          style={headerStyle} right={<StateToggle name="rk-1" />} tip="How far price typically swings over the hold, from real 126-day volatility. 1σ ≈ 68% of outcomes, 2σ ≈ 95%, 3σ ≈ 99%." />
+        <StateWrap state={s1.value} source="vol engine · 126d realized">
+          <div className="lens-pad"><RiskCones rm={rm} state={state} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={2} title="Live Kelly · Sizing Metrics"
-          sub="real-time using current edge + portfolio_state"
-          style={headerStyle} right={<StateToggle name="rk-2" />} />
-        <StateWrap state={s2.value} source="risk engine">
-          <div className="lens-pad">
-            <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <KpiTile label="Raw Kelly" value="84%" tone="amb" sub="(p·b−q)/b" />
-              <KpiTile label="½ Kelly · capped" value="42%" tone="copper" sub="discipline" />
-              <KpiTile label="Final size %" value="6.8%" tone="copper" sub="of NAV · 110 sh" />
-              <KpiTile label="Max loss" value="$420" tone="rd" sub="0.39% of NAV" />
-            </div>
-          </div>
+        <SectionHeader n={2} title="Kelly · Sizing Metrics"
+          sub="position size from the real ladder + ledger edge"
+          style={headerStyle} right={<StateToggle name="rk-2" />} tip="Kelly = growth-optimal bet size from your win-rate & R:R. Needs ledger history; half-Kelly is the safer default." />
+        <StateWrap state={s2.value} source="risk engine · ledger + NAV">
+          <div className="lens-pad"><RiskSizing sz={sz} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
         <SectionHeader n={3} title="VaR · CVaR · Sharpe"
-          sub="1d · 10d · per-ticker + post-fill book impact"
-          style={headerStyle} right={<StateToggle name="rk-3" />} />
-        <StateWrap state={s3.value} source="risk engine · MC + parametric">
-          <div className="lens-pad"><VarTable ticker={ticker} mode={mode} /></div>
+          sub={`${mode} horizon · parametric + historical · from real returns`}
+          style={headerStyle} right={<StateToggle name="rk-3" />} tip="VaR: the loss you won't exceed 95% of days. CVaR: the average loss on the worst 5% of days. Sharpe/Sortino: risk-adjusted return (annualized)." />
+        <StateWrap state={s3.value} source="risk engine · 126d returns">
+          <div className="lens-pad"><VarTable rm={rm} sz={sz} state={state} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={4} title="Stress · 6 × 5 Heatmap"
-          sub="scenario × outcome · MoS in each cell"
-          style={headerStyle} right={<StateToggle name="rk-4" />} />
-        <StateWrap state={s4.value} source="scenario engine">
-          <div className="lens-pad"><StressGrid /></div>
+        <SectionHeader n={4} title="Stress Scenarios"
+          sub="beta- and vol-scaled shocks on this position"
+          style={headerStyle} right={<StateToggle name="rk-4" />} tip="What each shock does to THIS position, scaled by the stock's real beta and volatility." />
+        <StateWrap state={s4.value} source="scenario engine · real β + vol">
+          <div className="lens-pad"><StressGrid rm={rm} sz={sz} state={state} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={5} title="Liquidity Ladder · β exposure"
-          sub="bid/ask depth · ADV slip · book-β post-fill"
+        <SectionHeader n={5} title="Liquidity · β exposure"
+          sub="spread · ADV participation · beta"
           style={headerStyle} right={<StateToggle name="rk-5" />} />
-        <StateWrap state={s5.value} source="quotes + portfolio_state">
-          <div className="lens-pad">
-            <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <KpiTile label="L1 spread" value="$0.04" tone="gn" sub="6 bps · OK" />
-              <KpiTile label="ADV slip est." value="−$0.03" tone="gn" sub="110 sh / 1.12M ADV" />
-              <KpiTile label="Book β · pre" value="0.93" tone="ink" />
-              <KpiTile label="Book β · post" value="0.96" tone="amb" sub="+0.03 · within cap 1.10" />
-            </div>
-          </div>
+        <StateWrap state={s5.value} source="quotes + risk engine">
+          <div className="lens-pad"><RiskLiquidity ticker={ticker} sz={sz} rm={rm} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
         <SectionHeader n={6} title="Cross-Lens Confluence" style={headerStyle} />
         <div className="lens-pad">
-          <CrossLens lead="rd" cells={[
-            { lens: "Risk",       verdict: "OK",     tone: "gn",  note: "all gates pass · cap size pre-ER" },
-            { lens: "Plan",       verdict: "READY",  tone: "gn",  note: `R ${RrR} · stop $${RL.stop.toFixed(2)}` },
-            { lens: "Earnings",   verdict: "11 d",   tone: "amb", note: "trim 25% pre-ER" },
-            { lens: "Portfolio",  verdict: "FIT",    tone: "gn",  note: "correl 0.34 · NAV 6.8%" },
-            { lens: "Liquidity",  verdict: "OK",     tone: "gn",  note: "1.12M ADV · 6 bps spread" },
-          ]} />
+          {sz.ok ? <CrossLens lead="rd" cells={[
+            { lens: "Risk", verdict: verdict, tone: vTone, note: gatesOK ? "size within gates" : "over size cap" },
+            { lens: "Plan", verdict: sz.rr >= 1.5 ? "READY" : "THIN", tone: sz.rr >= 1.5 ? "gn" : "amb", note: `R ${sz.rr.toFixed(2)} · stop $${sz.stop.toFixed(2)}` },
+            { lens: "VaR(1d)", verdict: rm && rm.ok ? `−${rm.var95_pct}%` : "—", tone: "amb", note: rm && rm.ok ? "95% parametric" : "—" },
+            { lens: "Max loss", verdict: `$${Math.round(sz.maxLoss)}`, tone: "rd", note: `${sz.lossNavPct.toFixed(2)}% of NAV` },
+            { lens: "Beta", verdict: rm && rm.ok && rm.beta != null ? String(rm.beta) : "—", tone: rm && rm.ok && rm.beta > 2 ? "rd" : "gn", note: "vs SPY" },
+          ]} /> : <SmcEmpty state={state} what="risk metrics" />}
         </div>
       </div>
 
       <div className="lens-call">
         <span className="label-cap">The Read · Risk</span>
-        <span className="mono">
-          Max loss <b className="dn">$420</b> = 0.39% NAV · VaR(1d) <b className="warn">−2.1%</b> ·
-          Sharpe contrib +0.04. <b>Pass.</b>
-        </span>
+        {sz.ok ? <span className="mono">
+          Max loss <b className="dn">${Math.round(sz.maxLoss)}</b> = {sz.lossNavPct.toFixed(2)}% of NAV{sz.demo ? " (demo)" : ""}
+          {rm && rm.ok ? <> · VaR(1d 95%) <b className="warn">−{rm.var95_pct}%</b> · vol {rm.vol_ann_pct}% ann · β {rm.beta != null ? rm.beta : "—"}</> : null}
+          {". "}<b className={vTone === "gn" ? "up" : vTone === "rd" ? "dn" : "warn"}>{verdict === "OK" ? "Within risk gates." : verdict === "HOT" ? "Hot — trim size." : "Review size."}</b>
+        </span> : <span className="mono dim2">No coherent ladder for {(ticker && ticker.symbol) || "this name"} — sizing & risk can't be computed without fabricating levels.</span>}
       </div>
     </div>
   );
 }
 
-function LossCone() {
+function LossCone({ rm }) {
+  const s1 = (rm && rm.ok && rm.cones && rm.cones[0]) ? rm.cones[0].pct : null;
+  const s3 = (rm && rm.ok && rm.cones && rm.cones[2]) ? rm.cones[2].pct : null;
   return (
     <svg viewBox="0 0 280 110" width="280" height="110" style={{ overflow: "visible" }}>
       <defs>
-        <linearGradient id="lc-gn" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--gn)" stopOpacity="0.35" />
-          <stop offset="100%" stopColor="var(--gn)" stopOpacity="0" />
-        </linearGradient>
-        <linearGradient id="lc-rd" x1="0" y1="1" x2="0" y2="0">
-          <stop offset="0%" stopColor="var(--rd)" stopOpacity="0.35" />
-          <stop offset="100%" stopColor="var(--rd)" stopOpacity="0" />
-        </linearGradient>
+        <linearGradient id="lc-gn" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--gn)" stopOpacity="0.35" /><stop offset="100%" stopColor="var(--gn)" stopOpacity="0" /></linearGradient>
+        <linearGradient id="lc-rd" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stopColor="var(--rd)" stopOpacity="0.35" /><stop offset="100%" stopColor="var(--rd)" stopOpacity="0" /></linearGradient>
       </defs>
       <line x1="20" y1="55" x2="270" y2="55" stroke="var(--line)" strokeDasharray="3 3" />
       <path d="M 20 55 Q 130 14 270 14 L 270 55 Z" fill="url(#lc-gn)" />
       <path d="M 20 55 Q 130 96 270 96 L 270 55 Z" fill="url(#lc-rd)" />
-      <path d="M 20 55 Q 130 30 270 30"  stroke="var(--gn)" strokeWidth="1.6" fill="none" style={{ filter: "drop-shadow(0 0 5px var(--gn))" }} />
-      <path d="M 20 55 Q 130 78 270 78"  stroke="var(--rd)" strokeWidth="1.6" fill="none" style={{ filter: "drop-shadow(0 0 5px var(--rd))" }} />
-      <path d="M 20 55 Q 130 14 270 14"  stroke="var(--gn)" strokeWidth="1.1" fill="none" opacity="0.5" />
-      <path d="M 20 55 Q 130 96 270 96"  stroke="var(--rd)" strokeWidth="1.1" fill="none" opacity="0.5" />
+      <path d="M 20 55 Q 130 30 270 30" stroke="var(--gn)" strokeWidth="1.6" fill="none" style={{ filter: "drop-shadow(0 0 5px var(--gn))" }} />
+      <path d="M 20 55 Q 130 78 270 78" stroke="var(--rd)" strokeWidth="1.6" fill="none" style={{ filter: "drop-shadow(0 0 5px var(--rd))" }} />
       <circle cx="20" cy="55" r="4" fill="var(--copper)" style={{ filter: "drop-shadow(0 0 8px var(--copper))" }} />
-      <text x="266" y="11" fontSize="9.5" className="mono" textAnchor="end" fill="var(--gn)">+3σ +6.4%</text>
-      <text x="266" y="27" fontSize="9.5" className="mono" textAnchor="end" fill="var(--gn)">+1σ +2.1%</text>
-      <text x="266" y="82" fontSize="9.5" className="mono" textAnchor="end" fill="var(--rd)">−1σ −2.1%</text>
-      <text x="266" y="106" fontSize="9.5" className="mono" textAnchor="end" fill="var(--rd)">−3σ −6.4%</text>
+      <text x="266" y="11" fontSize="9.5" className="mono" textAnchor="end" fill="var(--gn)">+3σ {s3 != null ? "+" + s3 + "%" : "—"}</text>
+      <text x="266" y="27" fontSize="9.5" className="mono" textAnchor="end" fill="var(--gn)">+1σ {s1 != null ? "+" + s1 + "%" : "—"}</text>
+      <text x="266" y="82" fontSize="9.5" className="mono" textAnchor="end" fill="var(--rd)">−1σ {s1 != null ? "−" + s1 + "%" : "—"}</text>
+      <text x="266" y="106" fontSize="9.5" className="mono" textAnchor="end" fill="var(--rd)">−3σ {s3 != null ? "−" + s3 + "%" : "—"}</text>
     </svg>
   );
 }
 
-function RiskCones({ ticker, mode }) {
-  const px = (ticker && ticker.price) || 67.42;
-  const dvol = 0.021;                                   // 1d 1σ
-  const hd = mode === "POSITION" ? 10 : mode === "INVESTMENT" ? 21 : 1;
-  const lbl = hd === 1 ? "1d" : hd + "d";
-  const s1 = dvol * Math.sqrt(hd);
-  const band = (k) => `$${(px * (1 - s1 * k)).toFixed(2)} — $${(px * (1 + s1 * k)).toFixed(2)}`;
+function RiskSizing({ sz }) {
+  if (!sz.ok) return <SmcEmpty state="loaded" what="sizing (no coherent ladder)" />;
   return (
     <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-      <KpiTile label={`${lbl} · 1σ`} value={`±${(s1 * 100).toFixed(1)}%`} tone="ink" sub={band(1)} />
-      <KpiTile label={`${lbl} · 2σ`} value={`±${(s1 * 200).toFixed(1)}%`} tone="amb" sub={band(2)} />
-      <KpiTile label={`${lbl} · 3σ`} value={`±${(s1 * 300).toFixed(1)}%`} tone="rd" sub={band(3)} />
-      <KpiTile label={`${hd === 1 ? "10d" : (hd * 2) + "d"} · 1σ`} value={`±${(dvol * Math.sqrt(hd === 1 ? 10 : hd * 2) * 100).toFixed(1)}%`} tone="amb" sub={band(1)} />
+      <KpiTile label="Raw Kelly" value={sz.kelly != null ? (sz.kelly * 100).toFixed(0) + "%" : "—"} tone="amb" sub={sz.kelly != null ? `f* · n=${sz.n}` : "no ledger edge"} />
+      <KpiTile label="½ Kelly" value={sz.kelly != null ? (sz.kelly * 50).toFixed(0) + "%" : "—"} tone="copper" sub="discipline haircut" />
+      <KpiTile label="Size · % NAV" value={`${sz.navPct.toFixed(1)}%`} tone={sz.navPct > 10 ? "rd" : sz.navPct > 7 ? "amb" : "gn"} sub={`${sz.shares} sh${sz.demo ? " · demo NAV" : ""}`} />
+      <KpiTile label="Max loss" value={`$${Math.round(sz.maxLoss)}`} tone="rd" sub={`${sz.lossNavPct.toFixed(2)}% of NAV`} />
     </div>
   );
 }
 
-function VarTable({ ticker, mode }) {
-  const hd = mode === "POSITION" ? 10 : mode === "INVESTMENT" ? 21 : 1;
-  const lbl = hd === 1 ? "1d" : hd + "d";
-  const dvol = 0.021;                                  // 1-day 1σ
-  const sig = dvol * Math.sqrt(hd);
-  const inv = 7416;                                    // demo book notional for the position
-  const var95 = +(sig * 1.645 * 100).toFixed(1);
-  const cvar = +(sig * 2.06 * 100).toFixed(1);
-  const var2x = +(dvol * Math.sqrt(hd === 1 ? 10 : hd * 2) * 1.645 * 100).toFixed(1);
+function RiskCones({ rm, state }) {
+  if (!rm || !rm.ok) return <SmcEmpty state={state} what="volatility cones" />;
+  const cur = rm.cur_close;
+  const band = (c) => `$${c.lo.toFixed(2)} — $${c.hi.toFixed(2)}`;
+  const tone = ["ink", "amb", "rd"];
+  return (
+    <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+      {rm.cones.map((c, i) => (
+        <KpiTile key={i} label={`${rm.hd === 1 ? "1d" : rm.hd + "d"} · ${c.k}σ`} value={`±${c.pct}%`} tone={tone[i]} sub={band(c)} />
+      ))}
+      <KpiTile label="Vol · annualized" value={`${rm.vol_ann_pct}%`} tone="amb" sub={`${rm.vol_1d_pct}% daily`} />
+    </div>
+  );
+}
+
+function VarTable({ rm, sz, state }) {
+  if (!rm || !rm.ok) return <SmcEmpty state={state} what="VaR metrics" />;
+  const notional = sz.ok ? sz.notional : 0;
+  const dollar = (p) => sz.ok ? `−$${Math.round(p / 100 * notional)} (${sz.shares} sh)` : "—";
   const rows = [
-    { metric: `VaR · ${lbl} · 95%`,  v: `−${var95}%`, abs: `−$${Math.round(var95/100*inv)} (110 sh)`, tone: var95 > 5 ? "rd" : "amb" },
-    { metric: `CVaR · ${lbl} · 95%`, v: `−${cvar}%`, abs: `−$${Math.round(cvar/100*inv)} (tail avg)`, tone: "rd" },
-    { metric: `VaR · ${hd === 1 ? "10d" : (hd*2)+"d"} · 95%`, v: `−${var2x}%`, abs: `−$${Math.round(var2x/100*inv)}`, tone: "rd" },
-    { metric: "Sharpe contrib", v: "+0.04", abs: "on book", tone: "gn" },
-    { metric: "Sortino contrib", v: "+0.07", abs: "on book", tone: "gn" },
-    { metric: "Max DD if stop hits", v: "−5.9%", abs: "−$420 · 0.39% NAV", tone: "rd" },
+    { metric: `VaR · ${rm.hd === 1 ? "1d" : rm.hd + "d"} · 95% (parametric)`, v: `−${rm.var95_pct}%`, abs: dollar(rm.var95_pct), tone: rm.var95_pct > 5 ? "rd" : "amb" },
+    { metric: "VaR · 95% (historical)", v: `−${rm.var95_hist_pct}%`, abs: dollar(rm.var95_hist_pct), tone: "amb" },
+    { metric: "CVaR · 95% (tail avg)", v: `−${rm.cvar95_pct}%`, abs: dollar(rm.cvar95_pct), tone: "rd" },
+    { metric: "VaR · 99% (parametric)", v: `−${rm.var99_pct}%`, abs: dollar(rm.var99_pct), tone: "rd" },
+    { metric: "Sharpe (126d, ann)", v: rm.sharpe_126d.toFixed(2), abs: "risk-adj return", tone: rm.sharpe_126d >= 1 ? "gn" : "amb" },
+    { metric: "Sortino (126d, ann)", v: rm.sortino_126d.toFixed(2), abs: "downside-adj", tone: rm.sortino_126d >= 1 ? "gn" : "amb" },
+    { metric: "Max drawdown (1yr)", v: `${rm.max_dd_pct}%`, abs: "peak-to-trough", tone: "rd" },
   ];
   return (
     <table className="dtable">
-      <thead><tr><th>Metric · {mode} horizon</th><th className="r">Value</th><th>Absolute</th></tr></thead>
+      <thead><tr><th>Metric</th><th className="r">Value</th><th>Absolute</th></tr></thead>
       <tbody>
         {rows.map((r, i) => (
-          <tr key={i}>
-            <td className="mono">{r.metric}</td>
-            <td className={`r mono tabular kpi-tone--${r.tone}`}>{r.v}</td>
-            <td className="mono dim">{r.abs}</td>
-          </tr>
+          <tr key={i}><td className="mono">{r.metric}</td><td className={`r mono tabular kpi-tone--${r.tone}`}>{r.v}</td><td className="mono dim">{r.abs}</td></tr>
         ))}
       </tbody>
     </table>
   );
 }
 
-function StressGrid() {
-  const scenarios = [
-    "−3σ market gap", "Rate +50bp", "VIX → 30", "Sector ETF −5%", "Earnings −15%", "Liquidity halve",
+function StressGrid({ rm, sz, state }) {
+  if (!rm || !rm.ok || !sz.ok) return <SmcEmpty state={state} what="stress scenarios" />;
+  const beta = rm.beta != null ? rm.beta : 1.0, vol = rm.vol_1d_pct / 100, stopMove = sz.pctToStop / 100;
+  const scen = [
+    { s: "Market −2σ day", m: -0.02 * beta },
+    { s: "Market −3σ gap", m: -0.03 * beta },
+    { s: "Vol doubles (panic)", m: -2 * vol },
+    { s: "Sector −5%", m: -0.05 * Math.min(beta, 1.6) },
+    { s: "Earnings gap −10%", m: -0.10 },
+    { s: "Stop hit", m: -stopMove },
   ];
-  const outcomes = ["P&L", "% NAV", "Stop hit?", "Days to recover", "Action"];
-  // synthesize
-  const grid = scenarios.map((s, i) => [
-    { v: `−$${(380 + i * 90).toFixed(0)}`,  tone: i < 3 ? "amb" : "rd" },
-    { v: `−${(0.35 + i * 0.10).toFixed(2)}%`, tone: i < 3 ? "amb" : "rd" },
-    { v: i < 2 ? "no" : i < 4 ? "tight" : "YES", tone: i < 2 ? "gn" : i < 4 ? "amb" : "rd" },
-    { v: i < 2 ? "1–2" : i < 4 ? "3–5" : "—", tone: "ink" },
-    { v: i < 2 ? "hold" : i < 4 ? "trim 25%" : "flatten", tone: i < 2 ? "gn" : i < 4 ? "amb" : "rd" },
-  ]);
+  const outcomes = ["P&L", "% NAV", "Stop hit?", "Action"];
+  const grid = scen.map(x => {
+    const pnl = sz.notional * x.m, navp = pnl / sz.nav * 100, stopHit = Math.abs(x.m) >= stopMove;
+    const action = navp <= -1.0 ? "flatten" : stopHit ? "OCO exit" : navp <= -0.5 ? "trim 25%" : "hold";
+    return [
+      { v: `−$${Math.abs(Math.round(pnl))}`, tone: navp <= -1 ? "rd" : "amb" },
+      { v: `${navp.toFixed(2)}%`, tone: navp <= -1 ? "rd" : "amb" },
+      { v: stopHit ? "YES" : "no", tone: stopHit ? "rd" : "gn" },
+      { v: action, tone: action === "hold" ? "gn" : action === "flatten" ? "rd" : "amb" },
+    ];
+  });
   return (
     <div className="stress-grid">
       <div className="sg-corner" />
-      {outcomes.map((o, i) => (
-        <div key={i} className="sg-col-hdr mono label-cap">{o}</div>
-      ))}
-      {scenarios.map((s, r) => (
+      {outcomes.map((o, i) => (<div key={i} className="sg-col-hdr mono label-cap">{o}</div>))}
+      {scen.map((x, r) => (
         <React.Fragment key={r}>
-          <div className="sg-row-hdr mono">{s}</div>
-          {grid[r].map((c, ci) => (
-            <div key={ci} className={`sg-cell sg-${c.tone}`}>{c.v}</div>
-          ))}
+          <div className="sg-row-hdr mono">{x.s}</div>
+          {grid[r].map((c, ci) => (<div key={ci} className={`sg-cell sg-${c.tone}`}>{c.v}</div>))}
         </React.Fragment>
       ))}
+    </div>
+  );
+}
+
+function RiskLiquidity({ ticker, sz, rm }) {
+  const spread = (typeof ticker.spread === "number" && ticker.spread > 0) ? ticker.spread : null;
+  const dvol = (typeof ticker.dvol === "number" && ticker.dvol > 0) ? ticker.dvol : null;
+  const partPct = (dvol && sz.ok) ? sz.notional / dvol * 100 : null;
+  const advFmt = dvol ? (dvol >= 1e9 ? "$" + (dvol / 1e9).toFixed(1) + "B" : "$" + (dvol / 1e6).toFixed(0) + "M") : "—";
+  return (
+    <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+      <KpiTile label="Spread" value={spread != null ? `${spread.toFixed(2)}%` : "—"} tone={spread == null ? "ink" : spread <= 0.1 ? "gn" : spread <= 0.5 ? "amb" : "rd"} sub={spread != null ? "bid/ask" : "no quote"} />
+      <KpiTile label="ADV ($)" value={advFmt} tone="ink" sub="avg daily $-vol" />
+      <KpiTile label="Participation" value={partPct != null ? (partPct < 0.01 ? "<0.01%" : partPct.toFixed(2) + "%") : "—"} tone={partPct == null ? "ink" : partPct < 1 ? "gn" : "amb"} sub="order ÷ ADV" />
+      <KpiTile label="Beta · vs SPY" value={rm && rm.ok && rm.beta != null ? rm.beta.toFixed(2) : "—"} tone={rm && rm.ok && rm.beta > 2 ? "rd" : rm && rm.ok && rm.beta > 1.3 ? "amb" : "gn"} sub="position β" />
     </div>
   );
 }
