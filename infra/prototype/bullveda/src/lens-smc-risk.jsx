@@ -142,10 +142,10 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           </div>
           <div className="th-pill-row">
             {ok ? <>
-              <Pill tone="gn" small>{obs.length} OB · {nUnmit} unmitigated</Pill>
-              <Pill tone="cy" small>{nFVGu} FVG unfilled</Pill>
-              {draw && <Pill tone="amb" small>draw {draw.side} {smcMoney(draw.price)}</Pill>}
-              <Pill tone={biasTone} small>SMC {m.smc_score}</Pill>
+              <Pill tone="gn" small>{nUnmit} fresh OB{nUnmit === 1 ? "" : "s"} · {bias === "bull" ? "dip-buy zones" : bias === "bear" ? "rip-sell zones" : "watch zones"}</Pill>
+              {nFVGu > 0 ? <Pill tone="cy" small>{nFVGu} open gap{nFVGu === 1 ? "" : "s"} · price magnets</Pill> : <Pill tone="ink" small>no open gaps</Pill>}
+              {draw && <Pill tone="amb" small>target {smcMoney(draw.price)}</Pill>}
+              <Pill tone={biasTone} small>conviction {m.smc_score}/100</Pill>
             </> : <Pill tone="amb" small>{state === "loading" ? "loading live bars…" : "no live structure"}</Pill>}
           </div>
         </div>
