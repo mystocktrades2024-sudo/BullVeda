@@ -238,12 +238,14 @@ def _range(df: pd.DataFrame, ph: List[int], pl: List[int], bias: str) -> Dict[st
     # leg inversion bug and the over-wide 60-bar window. cur clamp only nudges at a
     # genuine new extreme (correctly → 0%/100%).
     cur = float(df["Close"].iloc[-1])
-    piv = sorted(ph + pl)[-6:]
-    if len(piv) >= 2:
-        lo = min(float(df["Low"].iloc[i]) for i in piv)
-        hi = max(float(df["High"].iloc[i]) for i in piv)
+    n = len(df)
+    cut = n - min(n, 35)                       # only pivots from the last ~35 bars (recent leg)
+    rp = [i for i in (ph + pl) if i >= cut]
+    if len(rp) >= 2:
+        lo = min(float(df["Low"].iloc[i]) for i in rp)
+        hi = max(float(df["High"].iloc[i]) for i in rp)
     else:
-        seg = df.tail(20)
+        seg = df.tail(25)                      # fallback: recent trailing extremes
         lo, hi = float(seg["Low"].min()), float(seg["High"].max())
     lo = min(lo, cur)
     hi = max(hi, cur)

@@ -72,18 +72,22 @@ function smcDecision(m) {
   const cur = m.cur_close, r = m.range, draw = m.draw_on_liquidity;
   const bull = m.bias === "bull", bear = m.bias === "bear";
   const obs = m.order_blocks || [];
+  // nearest in-direction OB to current price
   let ob = null;
-  if (bull) ob = obs.filter(o => o.type === "demand" && o.hi <= cur * 1.005 && o.state !== "mitigated").sort((a, b) => b.hi - a.hi)[0]
-                || obs.filter(o => o.type === "demand").sort((a, b) => b.hi - a.hi)[0];
-  else if (bear) ob = obs.filter(o => o.type === "supply" && o.lo >= cur * 0.995 && o.state !== "mitigated").sort((a, b) => a.lo - b.lo)[0]
-                || obs.filter(o => o.type === "supply").sort((a, b) => a.lo - b.lo)[0];
+  if (bull) ob = obs.filter(o => o.type === "demand" && o.hi <= cur * 1.005).sort((a, b) => b.hi - a.hi)[0] || null;
+  else if (bear) ob = obs.filter(o => o.type === "supply" && o.lo >= cur * 0.995).sort((a, b) => a.lo - b.lo)[0] || null;
+  const obMid = ob ? (ob.lo + ob.hi) / 2 : null;
+  const obFar = obMid != null && Math.abs(obMid - cur) / cur > 0.12;   // >12% away = not an actionable entry
+  const nearEntry = !!(ob && !obFar);
   let entry = null, stop = null;
-  if (ob) {
+  if (nearEntry) {
     entry = +(((ob.lo + ob.hi) / 2)).toFixed(2);
     stop = bull ? +(ob.lo * 0.99).toFixed(2) : +(ob.hi * 1.01).toFixed(2);
   }
-  let target = draw ? draw.price : (bull ? r.hi : bear ? r.lo : null);
-  // target must sit beyond the entry in the bias direction — else use the range boundary
+  // target: a real level BEYOND current price in the bias direction — else blue-sky/none
+  let target = null;
+  if (bull) target = (draw && draw.price > cur) ? draw.price : (r.hi > cur ? r.hi : null);
+  else if (bear) target = (draw && draw.price < cur) ? draw.price : (r.lo < cur ? r.lo : null);
   if (entry != null && target != null) {
     if (bull && target <= entry) target = Math.max(r.hi, +(entry * 1.02).toFixed(2));
     else if (bear && target >= entry) target = Math.min(r.lo, +(entry * 0.98).toFixed(2));
@@ -94,17 +98,29 @@ function smcDecision(m) {
     const valid = bull ? (target > entry && entry > stop) : (target < entry && entry < stop);
     rr = (valid && risk > 0) ? rew / risk : null;
   }
+  const obPct = obMid != null ? Math.round(Math.abs(obMid - cur) / cur * 100) : null;
   let verdict, vtone, action;
-  if (!bull && !bear) { verdict = "NO EDGE"; vtone = "amb"; action = "Range-bound — no committed bias. Wait for a break of structure before trading."; }
-  else if (bull) {
-    if (r.zone === "discount" || r.ote_active) { verdict = "BUY"; vtone = "gn"; action = `Bullish and in ${r.ote_active ? "the OTE zone" : "discount"} — long the demand OB toward ${smcMoney(target)}.`; }
-    else if (r.zone === "premium") { verdict = "WAIT"; vtone = "amb"; action = `Bullish but extended (premium, ${r.pct}% of range). Don't chase — wait for a pullback into ${ob ? smcMoney(ob.lo) + "–" + smcMoney(ob.hi) : "the OB"} / OTE ${smcMoney(r.ote_lo)}–${smcMoney(r.ote_hi)}, then long.`; }
-    else { verdict = "WATCH"; vtone = "cy"; action = "Bullish at equilibrium — wait for a discount pullback or a fresh break of structure."; }
-  } else { verdict = "AVOID"; vtone = "rd"; action = `Bearish structure — no long. ${r.zone === "premium" ? "Short setup from premium toward " + smcMoney(target) + "." : "Stand aside until structure flips."}`; }
-  const invalid = (entry != null && stop != null) ? `price closes ${bull ? "below" : "above"} ${smcMoney(stop)}` : `${m.tf} close ${bull ? "below" : "above"} ${smcMoney(bull ? r.lo : r.hi)}`;
-  // far target = the draw sits in a liquidity void (>20% away) → R:R is real but not a "first" target
+  if (!bull && !bear) {
+    verdict = "NO EDGE"; vtone = "amb";
+    action = "Range-bound — no committed bias. Wait for a break of structure before trading.";
+  } else if (bull) {
+    if (!nearEntry) {
+      verdict = "EXTENDED"; vtone = "amb";
+      action = `Bullish but extended at ${r.pct}% of range — no low-risk entry near price${ob ? ` (nearest demand OB is ${smcMoney(ob.lo)}–${smcMoney(ob.hi)}, ~${obPct}% below)` : ""}. Don't chase — wait for a pullback into structure or a fresh base.`;
+    } else if (r.zone === "discount" || r.ote_active) {
+      verdict = "BUY"; vtone = "gn";
+      action = `Bullish and in ${r.ote_active ? "the OTE zone" : "discount"} — long the demand OB ${smcMoney(ob.lo)}–${smcMoney(ob.hi)}${target ? ` toward ${smcMoney(target)}` : ""}.`;
+    } else {
+      verdict = "WAIT"; vtone = "amb";
+      action = `Bullish but extended (premium, ${r.pct}% of range). Don't chase — wait for a pullback into ${smcMoney(ob.lo)}–${smcMoney(ob.hi)} / OTE ${smcMoney(r.ote_lo)}–${smcMoney(r.ote_hi)}, then long.`;
+    }
+  } else {
+    verdict = "AVOID"; vtone = "rd";
+    action = `Bearish structure — no long. ${(nearEntry && r.zone === "premium") ? `Short setup from the supply OB ${smcMoney(ob.lo)}–${smcMoney(ob.hi)}${target ? ` toward ${smcMoney(target)}` : ""}.` : "Stand aside until structure flips."}`;
+  }
+  const invalid = (entry != null && stop != null) ? `price closes ${bull ? "below" : "above"} ${smcMoney(stop)}` : `${m.tf} structure flips (${bull ? "CHoCH down" : "CHoCH up"})`;
   const targetFar = (entry != null && target != null) && (Math.abs(target - entry) / entry > 0.20);
-  return { verdict, vtone, action, entry, stop, target, rr, ob, invalid, bull, bear, targetFar };
+  return { verdict, vtone, action, entry, stop, target, rr, ob: nearEntry ? ob : null, invalid, bull, bear, targetFar };
 }
 
 // The annotated map: real candles with OB / FVG / liquidity / OTE zones drawn on

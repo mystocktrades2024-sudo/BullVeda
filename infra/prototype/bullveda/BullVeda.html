@@ -20671,14 +20671,19 @@ function smcDecision(m) {
   const bull = m.bias === "bull", bear = m.bias === "bear";
   const obs = m.order_blocks || [];
   let ob = null;
-  if (bull) ob = obs.filter((o) => o.type === "demand" && o.hi <= cur * 1.005 && o.state !== "mitigated").sort((a, b) => b.hi - a.hi)[0] || obs.filter((o) => o.type === "demand").sort((a, b) => b.hi - a.hi)[0];
-  else if (bear) ob = obs.filter((o) => o.type === "supply" && o.lo >= cur * 0.995 && o.state !== "mitigated").sort((a, b) => a.lo - b.lo)[0] || obs.filter((o) => o.type === "supply").sort((a, b) => a.lo - b.lo)[0];
+  if (bull) ob = obs.filter((o) => o.type === "demand" && o.hi <= cur * 1.005).sort((a, b) => b.hi - a.hi)[0] || null;
+  else if (bear) ob = obs.filter((o) => o.type === "supply" && o.lo >= cur * 0.995).sort((a, b) => a.lo - b.lo)[0] || null;
+  const obMid = ob ? (ob.lo + ob.hi) / 2 : null;
+  const obFar = obMid != null && Math.abs(obMid - cur) / cur > 0.12;
+  const nearEntry = !!(ob && !obFar);
   let entry = null, stop = null;
-  if (ob) {
+  if (nearEntry) {
     entry = +((ob.lo + ob.hi) / 2).toFixed(2);
     stop = bull ? +(ob.lo * 0.99).toFixed(2) : +(ob.hi * 1.01).toFixed(2);
   }
-  let target = draw ? draw.price : bull ? r.hi : bear ? r.lo : null;
+  let target = null;
+  if (bull) target = draw && draw.price > cur ? draw.price : r.hi > cur ? r.hi : null;
+  else if (bear) target = draw && draw.price < cur ? draw.price : r.lo < cur ? r.lo : null;
   if (entry != null && target != null) {
     if (bull && target <= entry) target = Math.max(r.hi, +(entry * 1.02).toFixed(2));
     else if (bear && target >= entry) target = Math.min(r.lo, +(entry * 0.98).toFixed(2));
@@ -20689,33 +20694,34 @@ function smcDecision(m) {
     const valid = bull ? target > entry && entry > stop : target < entry && entry < stop;
     rr = valid && risk > 0 ? rew / risk : null;
   }
+  const obPct = obMid != null ? Math.round(Math.abs(obMid - cur) / cur * 100) : null;
   let verdict, vtone, action;
   if (!bull && !bear) {
     verdict = "NO EDGE";
     vtone = "amb";
     action = "Range-bound \u2014 no committed bias. Wait for a break of structure before trading.";
   } else if (bull) {
-    if (r.zone === "discount" || r.ote_active) {
+    if (!nearEntry) {
+      verdict = "EXTENDED";
+      vtone = "amb";
+      action = `Bullish but extended at ${r.pct}% of range \u2014 no low-risk entry near price${ob ? ` (nearest demand OB is ${smcMoney(ob.lo)}\u2013${smcMoney(ob.hi)}, ~${obPct}% below)` : ""}. Don't chase \u2014 wait for a pullback into structure or a fresh base.`;
+    } else if (r.zone === "discount" || r.ote_active) {
       verdict = "BUY";
       vtone = "gn";
-      action = `Bullish and in ${r.ote_active ? "the OTE zone" : "discount"} \u2014 long the demand OB toward ${smcMoney(target)}.`;
-    } else if (r.zone === "premium") {
+      action = `Bullish and in ${r.ote_active ? "the OTE zone" : "discount"} \u2014 long the demand OB ${smcMoney(ob.lo)}\u2013${smcMoney(ob.hi)}${target ? ` toward ${smcMoney(target)}` : ""}.`;
+    } else {
       verdict = "WAIT";
       vtone = "amb";
-      action = `Bullish but extended (premium, ${r.pct}% of range). Don't chase \u2014 wait for a pullback into ${ob ? smcMoney(ob.lo) + "\u2013" + smcMoney(ob.hi) : "the OB"} / OTE ${smcMoney(r.ote_lo)}\u2013${smcMoney(r.ote_hi)}, then long.`;
-    } else {
-      verdict = "WATCH";
-      vtone = "cy";
-      action = "Bullish at equilibrium \u2014 wait for a discount pullback or a fresh break of structure.";
+      action = `Bullish but extended (premium, ${r.pct}% of range). Don't chase \u2014 wait for a pullback into ${smcMoney(ob.lo)}\u2013${smcMoney(ob.hi)} / OTE ${smcMoney(r.ote_lo)}\u2013${smcMoney(r.ote_hi)}, then long.`;
     }
   } else {
     verdict = "AVOID";
     vtone = "rd";
-    action = `Bearish structure \u2014 no long. ${r.zone === "premium" ? "Short setup from premium toward " + smcMoney(target) + "." : "Stand aside until structure flips."}`;
+    action = `Bearish structure \u2014 no long. ${nearEntry && r.zone === "premium" ? `Short setup from the supply OB ${smcMoney(ob.lo)}\u2013${smcMoney(ob.hi)}${target ? ` toward ${smcMoney(target)}` : ""}.` : "Stand aside until structure flips."}`;
   }
-  const invalid = entry != null && stop != null ? `price closes ${bull ? "below" : "above"} ${smcMoney(stop)}` : `${m.tf} close ${bull ? "below" : "above"} ${smcMoney(bull ? r.lo : r.hi)}`;
+  const invalid = entry != null && stop != null ? `price closes ${bull ? "below" : "above"} ${smcMoney(stop)}` : `${m.tf} structure flips (${bull ? "CHoCH down" : "CHoCH up"})`;
   const targetFar = entry != null && target != null && Math.abs(target - entry) / entry > 0.2;
-  return { verdict, vtone, action, entry, stop, target, rr, ob, invalid, bull, bear, targetFar };
+  return { verdict, vtone, action, entry, stop, target, rr, ob: nearEntry ? ob : null, invalid, bull, bear, targetFar };
 }
 function SMCAnnotatedChart({ m, state }) {
   if (!_smcUsable(m) || !Array.isArray(m.ohlc) || m.ohlc.length < 5) return /* @__PURE__ */ React.createElement(SmcEmpty, { state, what: "chart" });
