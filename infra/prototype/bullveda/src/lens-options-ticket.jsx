@@ -224,15 +224,26 @@ function OtkCheck({ ok, bad, warn, neutral, text }) {
 
 // ───── TAB 1: CHAIN & GREEKS (real) ─────
 function OtkChainGreeks({ o, exps }) {
+  const mid = (b, a, m) => (_on(b) != null && _on(a) != null) ? (b + a) / 2 : _on(m);
   const rows = o.strikes.map(s => {
     const c = s.call || {}, p = s.put || {};
     const dist = (s.strike - o.spot) / o.spot;
     return { k: s.strike, atm: s.strike === o.strike, itm: s.strike < o.spot, dist,
-      cMid: (_on(c.bid) != null && _on(c.ask) != null) ? (c.bid + c.ask) / 2 : _on(c.mark),
-      cDelta: _on(c.delta), cIv: _on(c.iv), cOi: _on(c.oi, 0), cVol: _on(c.vol, 0),
-      pIv: _on(p.iv), pOi: _on(p.oi, 0) };
+      cMid: mid(c.bid, c.ask, c.mark), cDelta: _on(c.delta), cIv: _on(c.iv), cOi: _on(c.oi, 0), cVol: _on(c.vol, 0),
+      pMid: mid(p.bid, p.ask, p.mark), pDelta: _on(p.delta), pIv: _on(p.iv), pOi: _on(p.oi, 0), pVol: _on(p.vol, 0) };
   });
   const maxOI = Math.max(...rows.map(r => Math.max(r.cOi, r.pOi)), 1);
+  // put/call ratios (sentiment) + real unusual activity (today's vol > resting OI)
+  const totCOi = rows.reduce((a, r) => a + r.cOi, 0), totPOi = rows.reduce((a, r) => a + r.pOi, 0);
+  const totCVol = rows.reduce((a, r) => a + r.cVol, 0), totPVol = rows.reduce((a, r) => a + r.pVol, 0);
+  const pcrOi = totCOi > 0 ? +(totPOi / totCOi).toFixed(2) : null;
+  const pcrVol = totCVol > 0 ? +(totPVol / totCVol).toFixed(2) : null;
+  const uoa = rows.flatMap(r => {
+    const out = [];
+    if (r.cVol > r.cOi && r.cVol > 200) out.push({ k: r.k, side: "C", vol: r.cVol });
+    if (r.pVol > r.pOi && r.pVol > 200) out.push({ k: r.k, side: "P", vol: r.pVol });
+    return out;
+  }).sort((a, b) => b.vol - a.vol);
   // term structure: real ATM IV by expiry
   const term = exps.map(e => {
     const ss = (e.strikes || []).filter(s => s.call);
@@ -256,23 +267,36 @@ function OtkChainGreeks({ o, exps }) {
   return (
     <div className="otk-grid">
       <div className="otk-card otk-card--wide">
-        <div className="otk-card-h mono">CHAIN · {o.exp.expiration} · {o.dte}DTE · {rows.length} strikes · <span className="dim2">live Schwab greeks</span></div>
+        <div className="otk-card-h mono">CHAIN · {o.exp.expiration} · {o.dte}DTE · <span className="cy">calls</span> ◂ strike ▸ <span className="violet">puts</span> · <span className="dim2">live Schwab greeks</span></div>
         <table className="dtable otk-tbl otk-chain">
-          <thead><tr><th>Strike</th><th>Moneyness</th><th className="r">Δ call</th><th className="r">IV call</th><th className="r">Call mid</th><th className="r">Vol</th><th className="r">Call OI</th><th>OI depth</th></tr></thead>
+          <thead><tr>
+            <th className="r">OI</th><th className="r">Vol</th><th className="r">IV</th><th className="r">Δ</th><th className="r">Mid</th>
+            <th style={{ textAlign: "center" }}>STRIKE</th>
+            <th className="r">Mid</th><th className="r">Δ</th><th className="r">IV</th><th className="r">Vol</th><th className="r">OI</th>
+          </tr></thead>
           <tbody>{rows.map((s, i) => (
             <tr key={i} className={s.atm ? "is-current" : ""}>
-              <td className="mono"><b>${s.k}</b>{s.atm && <span className="otk-atm mono">ATM</span>}</td>
-              <td className={`mono ${s.itm ? "up" : "dim2"}`}>{s.itm ? "ITM" : s.atm ? "ATM" : "OTM"} {(s.dist * 100).toFixed(1)}%</td>
-              <td className="r mono">{_of(s.cDelta)}</td>
-              <td className="r mono">{s.cIv != null ? s.cIv.toFixed(1) + "%" : "—"}</td>
+              <td className="r mono dim2">{(s.cOi || 0).toLocaleString()}</td>
+              <td className={`r mono ${s.cVol > s.cOi && s.cVol > 200 ? "up" : "dim2"}`}>{(s.cVol || 0).toLocaleString()}</td>
+              <td className="r mono">{s.cIv != null ? s.cIv.toFixed(0) + "%" : "—"}</td>
+              <td className="r mono dim2">{_of(s.cDelta)}</td>
               <td className="r mono cy">{s.cMid != null ? "$" + s.cMid.toFixed(2) : "—"}</td>
-              <td className="r mono dim2">{(s.cVol || 0).toLocaleString()}</td>
-              <td className="r mono">{(s.cOi || 0).toLocaleString()}</td>
-              <td><div className="otk-oibar"><i style={{ width: `${s.cOi / maxOI * 100}%` }} /></div></td>
+              <td className="mono" style={{ textAlign: "center" }}><b>${s.k}</b>{s.atm && <span className="otk-atm mono">ATM</span>}</td>
+              <td className="r mono" style={{ color: "var(--violet)" }}>{s.pMid != null ? "$" + s.pMid.toFixed(2) : "—"}</td>
+              <td className="r mono dim2">{_of(s.pDelta)}</td>
+              <td className="r mono">{s.pIv != null ? s.pIv.toFixed(0) + "%" : "—"}</td>
+              <td className={`r mono ${s.pVol > s.pOi && s.pVol > 200 ? "dn" : "dim2"}`}>{(s.pVol || 0).toLocaleString()}</td>
+              <td className="r mono dim2">{(s.pOi || 0).toLocaleString()}</td>
             </tr>
           ))}</tbody>
         </table>
-        <div className="mono dim2" style={{ fontSize: 10, marginTop: 6 }}>Deep-ITM/OTM IV can read extreme on 0-DTE — that's the real quote, not an error. ATM IV is the clean read.</div>
+        <div className="mono" style={{ fontSize: 10.5, marginTop: 6, display: "flex", gap: 16, flexWrap: "wrap", color: "var(--ink-2)" }}>
+          {pcrOi != null && <span>Put/Call OI <b className={pcrOi >= 1 ? "dn" : "up"}>{pcrOi}</b> — {pcrOi >= 1.2 ? "put-heavy (hedging / bearish lean)" : pcrOi <= 0.7 ? "call-heavy (bullish lean)" : "balanced"}</span>}
+          {pcrVol != null && <span className="dim2">· P/C vol {pcrVol}</span>}
+          {uoa.length > 0
+            ? <span>· <b className="copper">Unusual:</b> {uoa.slice(0, 3).map(u => `${u.k}${u.side} ${u.vol.toLocaleString()}v`).join(", ")} <span className="dim2">(today's vol &gt; resting OI)</span></span>
+            : <span className="dim2">· no unusual vol vs OI</span>}
+        </div>
       </div>
 
       <div className="otk-card">
@@ -480,48 +504,97 @@ Spot: $${o.spot.toFixed(2)} · Net GEX: ${g.total >= 0 ? "+" : ""}${g.total} (${
   );
 }
 
-// ───── TAB 3: BUILD & JOURNAL ─────
+// ───── TAB 3: STRATEGIES & JOURNAL (real legs from the chain) ─────
+function legInfo(o, strike, type) {
+  const s = o.strikes.find(x => x.strike === strike) || o.strikes.reduce((a, x) => Math.abs(x.strike - strike) < Math.abs(a.strike - strike) ? x : a, o.strikes[0]);
+  const leg = type === "call" ? (s.call || {}) : (s.put || {});
+  const prem = (_on(leg.bid) != null && _on(leg.ask) != null) ? (leg.bid + leg.ask) / 2 : _on(leg.mark, 0);
+  return { strike: s.strike, prem: prem || 0, delta: _on(leg.delta, 0), gamma: _on(leg.gamma, 0), theta: _on(leg.theta, 0), vega: _on(leg.vega, 0) };
+}
 function OtkBuild({ o }) {
-  const S = o.spot, P = o.prem;
-  // pull real OTM strikes from the chain for the spread legs
-  const ks = o.strikes.map(s => s.strike).sort((a, b) => a - b);
-  const above = ks.filter(k => k > S), below = ks.filter(k => k < S);
-  const k0 = o.strike, k1 = above[0] || +(S * 1.03).toFixed(0), k1d = below[below.length - 1] || +(S * 0.97).toFixed(0);
-  const STRATS = {
-    "Long Call": { dir: "bullish", legs: [`+1 C ${k0}`], net: P, maxLoss: P * 100, maxGain: "uncapped", be: +(k0 + P).toFixed(2) },
-    "Long Put": { dir: "bearish", legs: [`+1 P ${k0}`], net: o.putMark != null ? o.putMark : P, maxLoss: (o.putMark != null ? o.putMark : P) * 100, maxGain: +((k0 - P) * 100).toFixed(0), be: +(k0 - P).toFixed(2) },
-    "Bull Call Spread": { dir: "bullish", legs: [`+1 C ${k0}`, `−1 C ${k1}`], net: +(P * 0.5).toFixed(2), maxLoss: +(P * 0.5 * 100).toFixed(0), maxGain: +((k1 - k0 - P * 0.5) * 100).toFixed(0), be: +(k0 + P * 0.5).toFixed(2) },
-    "Cash-Secured Put": { dir: "neutral-bull", legs: [`−1 P ${k1d}`], net: -(o.putMark != null ? o.putMark : P * 0.6), maxLoss: +((k1d - (o.putMark != null ? o.putMark : P * 0.6)) * 100).toFixed(0), maxGain: +((o.putMark != null ? o.putMark : P * 0.6) * 100).toFixed(0), be: +(k1d - (o.putMark != null ? o.putMark : P * 0.6)).toFixed(2) },
-  };
   const [strat, setStrat] = useOT("Long Call");
-  const r = STRATS[strat]; const credit = r.net < 0;
+  const ks = o.strikes.map(s => s.strike).sort((a, b) => a - b);
+  const atmK = o.strike, above = ks.filter(k => k > atmK), below = ks.filter(k => k < atmK);
+  const kUp1 = above[0] || atmK, kDn1 = below[below.length - 1] || atmK;
+  const DEFS = {
+    "Long Call": { bias: "bullish", legs: [{ type: "call", dir: 1, strike: atmK }] },
+    "Long Put": { bias: "bearish", legs: [{ type: "put", dir: 1, strike: atmK }] },
+    "Bull Call Spread": { bias: "bullish", legs: [{ type: "call", dir: 1, strike: atmK }, { type: "call", dir: -1, strike: kUp1 }] },
+    "Bear Put Spread": { bias: "bearish", legs: [{ type: "put", dir: 1, strike: atmK }, { type: "put", dir: -1, strike: kDn1 }] },
+    "Cash-Secured Put": { bias: "neutral-bull", legs: [{ type: "put", dir: -1, strike: kDn1 }] },
+  };
+  const def = DEFS[strat];
+  const legs = def.legs.map(l => ({ ...l, ...legInfo(o, l.strike, l.type) }));
+  const netDebit = legs.reduce((a, l) => a + l.dir * l.prem, 0);    // + = debit, − = credit (per share)
+  const credit = netDebit < 0;
+  const net = ["delta", "gamma", "theta", "vega"].reduce((acc, g) => { acc[g] = legs.reduce((a, l) => a + l.dir * l[g], 0); return acc; }, {});
+  const payoff = S => legs.reduce((a, l) => { const intr = l.type === "call" ? Math.max(S - l.strike, 0) : Math.max(l.strike - S, 0); return a + l.dir * (intr - l.prem); }, 0) * 100;
+  // sample payoff to get max/min/breakeven across a wide spot range
+  const lo = o.spot * 0.80, hi = o.spot * 1.20, N = 120;
+  const samp = []; for (let i = 0; i <= N; i++) { const S = lo + (hi - lo) * i / N; samp.push({ S, pl: payoff(S) }); }
+  const maxGain = Math.max(...samp.map(p => p.pl)), maxLoss = Math.min(...samp.map(p => p.pl));
+  const uncapped = strat === "Long Call" || strat === "Bull Call Spread" ? (payoff(hi) >= maxGain - 1 && strat === "Long Call") : false;
+  const bes = []; for (let i = 1; i < samp.length; i++) { if ((samp[i - 1].pl < 0) !== (samp[i].pl < 0)) bes.push(+( (samp[i - 1].S + samp[i].S) / 2).toFixed(2)); }
   return (
     <div className="otk-grid">
       <div className="otk-card otk-card--wide">
-        <div className="otk-card-h mono">SPREAD BUILDER · legs priced off the live ATM premium &amp; real strikes</div>
-        <div className="otk-sb-strats">{Object.keys(STRATS).map(s => <button key={s} className={`otk-sb-chip ${strat === s ? "is-on" : ""}`} onClick={() => setStrat(s)}>{s}</button>)}</div>
-        <div className="otk-sb-legs">{r.legs.map((l, i) => <span key={i} className={`otk-sb-leg ${l[0] === "+" ? "buy" : "sell"}`}>{l}</span>)}<span className="otk-sb-bias mono dim2">· {r.dir} bias</span></div>
-        <div className="otk-sb-stats">
-          <div className="otk-sb-stat"><span className="mono dim2">{credit ? "Credit" : "Debit"}</span><span className={`mono ${credit ? "up" : ""}`}>${Math.abs(r.net).toFixed(2)}</span></div>
-          <div className="otk-sb-stat"><span className="mono dim2">Max loss</span><span className="mono dn">−${typeof r.maxLoss === "number" ? r.maxLoss.toLocaleString() : r.maxLoss}</span></div>
-          <div className="otk-sb-stat"><span className="mono dim2">Max gain</span><span className="mono up">{r.maxGain === "uncapped" ? "uncapped ↑" : "+$" + Number(r.maxGain).toLocaleString()}</span></div>
-          <div className="otk-sb-stat"><span className="mono dim2">Breakeven</span><span className="mono">${r.be.toFixed(2)}</span></div>
+        <div className="otk-card-h mono">STRATEGY BUILDER · legs priced off the live chain · real strikes &amp; marks</div>
+        <div className="otk-sb-strats">{Object.keys(DEFS).map(s => <button key={s} className={`otk-sb-chip ${strat === s ? "is-on" : ""}`} onClick={() => setStrat(s)}>{s}</button>)}</div>
+        <div className="otk-sb-legs">{legs.map((l, i) => <span key={i} className={`otk-sb-leg ${l.dir > 0 ? "buy" : "sell"}`}>{l.dir > 0 ? "+1" : "−1"} {l.type === "call" ? "C" : "P"} {l.strike}</span>)}<span className="otk-sb-bias mono dim2">· {def.bias} bias</span></div>
+        <OtkPayoff samp={samp} spot={o.spot} bes={bes} />
+        <div className="otk-sb-stats" style={{ marginTop: 8 }}>
+          <div className="otk-sb-stat"><span className="mono dim2">{credit ? "Net credit" : "Net debit"}</span><span className={`mono ${credit ? "up" : ""}`}>${Math.abs(netDebit * 100).toFixed(0)}</span></div>
+          <div className="otk-sb-stat"><span className="mono dim2">Max loss</span><span className="mono dn">−${Math.abs(maxLoss).toFixed(0)}</span></div>
+          <div className="otk-sb-stat"><span className="mono dim2">Max gain</span><span className="mono up">{uncapped ? "uncapped ↑" : "+$" + maxGain.toFixed(0)}</span></div>
+          <div className="otk-sb-stat"><span className="mono dim2">Breakeven</span><span className="mono">{bes.length ? bes.map(b => "$" + b.toFixed(2)).join(" / ") : "—"}</span></div>
         </div>
-        <div className="mono dim2" style={{ fontSize: 10.5, marginTop: 8 }}>Single legs use the live ATM mark; spreads approximate the short leg off the real chain strikes. Verify exact fills in your broker.</div>
+        <div className="otk-greeks" style={{ marginTop: 8 }}>
+          {[["net Δ", net.delta], ["net Γ", net.gamma], ["net Θ/d", net.theta], ["net ν", net.vega]].map(([k, v], i) => (
+            <div key={i} className="otk-greek"><span className="mono dim2">{k}</span><span className={`mono otk-greek-v ${v >= 0 ? "" : "dn"}`}>{v >= 0 ? "+" : ""}{(k.includes("Θ") || k.includes("ν") ? "$" : "")}{v.toFixed(k.includes("Γ") ? 4 : 3)}</span></div>
+          ))}
+        </div>
+        <div className="mono dim2" style={{ fontSize: 10.5, marginTop: 8 }}>Every leg is the live mid from the real chain; payoff is at expiry. Net greeks sum the legs. Verify exact fills in your broker.</div>
       </div>
       <div className="otk-card">
-        <div className="otk-card-h mono">CONTRACT · live quote</div>
+        <div className="otk-card-h mono">CONTRACT · live quote + smart fill</div>
         <div className="otk-stats">
-          {[["Strike", "$" + o.strike], ["Expiry", o.exp.expiration], ["Bid", o.bid != null ? "$" + o.bid.toFixed(2) : "—"], ["Ask", o.ask != null ? "$" + o.ask.toFixed(2) : "—"], ["Mark", o.mark != null ? "$" + o.mark.toFixed(2) : "—"], ["Open int", o.oi != null ? o.oi.toLocaleString() : "—"]].map(([k, v], i) => (
+          {[["Strike", "$" + o.strike], ["Expiry", o.exp.expiration], ["Bid", o.bid != null ? "$" + o.bid.toFixed(2) : "—"], ["Ask", o.ask != null ? "$" + o.ask.toFixed(2) : "—"],
+            ["Mid (target)", (o.bid != null && o.ask != null) ? "$" + ((o.bid + o.ask) / 2).toFixed(2) : "—"],
+            ["Spread", (o.bid != null && o.ask != null) ? "$" + (o.ask - o.bid).toFixed(2) + ` (${o.spreadPct}%)` : "—"],
+            ["Open int", o.oi != null ? o.oi.toLocaleString() : "—"]].map(([k, v], i) => (
             <div key={i} className="otk-stat"><span className="mono dim2">{k}</span><span className="mono">{v}</span></div>
           ))}
         </div>
+        <div className="otk-verdict-mini mono">{(o.bid != null && o.ask != null)
+          ? <><span className={o.spreadPct < 10 ? "up" : "warn"}>{o.spreadPct < 10 ? "TIGHT" : "WIDE"}</span> · work a limit at the mid <b className="cy">${((o.bid + o.ask) / 2).toFixed(2)}</b>{o.spreadPct >= 10 ? <>, then up to <b>${((o.bid + o.ask) / 2 + (o.ask - o.bid) * 0.25).toFixed(2)}</b> (mid + ¼ spread)</> : ""}</>
+          : "no live bid/ask"}</div>
       </div>
       <div className="otk-card otk-card--wide">
         <div className="otk-card-h mono">TRADE JOURNAL · per-ticker notes</div>
         <OtkJournal symbol={o.sym} />
       </div>
     </div>
+  );
+}
+
+// payoff-at-expiry curve for the selected structure
+function OtkPayoff({ samp, spot, bes }) {
+  const W = 600, H = 150, padL = 44, padR = 12, padT = 12, padB = 22;
+  const xs = samp.map(p => p.S), pls = samp.map(p => p.pl);
+  const xmin = Math.min(...xs), xmax = Math.max(...xs);
+  const ymin = Math.min(...pls, 0), ymax = Math.max(...pls, 0);
+  const x = S => padL + (S - xmin) / (xmax - xmin) * (W - padL - padR);
+  const y = v => padT + (1 - (v - ymin) / (ymax - ymin || 1)) * (H - padT - padB);
+  const path = samp.map((p, i) => `${i ? "L" : "M"} ${x(p.S).toFixed(1)} ${y(p.pl).toFixed(1)}`).join(" ");
+  return (
+    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} className="otk-mini-svg" preserveAspectRatio="none" style={{ marginTop: 6 }}>
+      <line x1={padL} y1={y(0)} x2={W - padR} y2={y(0)} stroke="var(--ink-3)" opacity="0.5" />
+      <text x={padL - 4} y={y(0) + 3} fontSize="8" className="mono" textAnchor="end" fill="var(--ink-3)">$0</text>
+      <path d={path} fill="none" stroke="var(--copper)" strokeWidth="2" />
+      <line x1={x(spot)} y1={padT} x2={x(spot)} y2={H - padB} stroke="var(--ink)" strokeDasharray="3 3" opacity="0.6" />
+      <text x={x(spot)} y={H - 7} fontSize="8" className="mono" textAnchor="middle" fill="var(--ink-2)">spot ${spot.toFixed(0)}</text>
+      {bes.map((b, i) => <g key={i}><line x1={x(b)} y1={padT} x2={x(b)} y2={H - padB} stroke="var(--amber, #d9a441)" strokeDasharray="2 2" opacity="0.7" /><text x={x(b)} y={padT + 8} fontSize="8" className="mono" textAnchor="middle" fill="var(--amber, #d9a441)">BE ${b.toFixed(0)}</text></g>)}
+    </svg>
   );
 }
 

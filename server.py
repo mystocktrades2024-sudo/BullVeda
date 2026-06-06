@@ -7502,7 +7502,7 @@ async def options_chain_api(sym: str):
                 "spot": _schwab_spot_fallback(sym)}
 
     try:
-        greeks = schwab_client.extract_chain_greeks(chain, max_expirations=8)
+        greeks = schwab_client.extract_chain_greeks(chain, max_expirations=12)
     except Exception as e:
         return {"sym": sym, "error": f"extract_chain_greeks failed: {e}",
                 "spot": chain.get("underlyingPrice") or _schwab_spot_fallback(sym)}
