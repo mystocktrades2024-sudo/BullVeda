@@ -168,7 +168,7 @@ function LensOptions({ ticker, mode }) {
       {horizonMismatch && (
         <div className="otk-horizon mono">⚑ {mode === "INVESTMENT" ? "Invest" : "Position"} horizon: the live feed only has near-term contracts (≤{maxDte} DTE). Options aren't suited to a multi-month thesis here — this shows the nearest weekly for context, not a {mode === "INVESTMENT" ? "long-term" : "multi-month"} holding.</div>
       )}
-      <OptQuickTake ticker={ticker} mode={mode} o={o} />
+      <OptQuickTake ticker={ticker} mode={mode} o={o} exps={exps} />
       <RetailPlan o={o} contracts={contracts} />
 
       <div className="otk-tabs">
@@ -177,7 +177,7 @@ function LensOptions({ ticker, mode }) {
 
       <div className="otk-body">
         {tab === "chain" && <OtkChainGreeks o={o} exps={exps} />}
-        {tab === "gex" && <OtkGEX o={o} />}
+        {tab === "gex" && <OtkGEX o={o} exps={exps} />}
         {tab === "build" && <OtkBuild o={o} />}
       </div>
     </div>
@@ -185,7 +185,7 @@ function LensOptions({ ticker, mode }) {
 }
 
 // ───── Options Quick Take — "should I do this trade?" decision layer ─────
-function OptQuickTake({ ticker, mode, o }) {
+function OptQuickTake({ ticker, mode, o, exps }) {
   const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
   const net = cv ? cv.net : null;
   const biasBull = net != null ? net >= 55 : null, biasBear = net != null ? net < 45 : null;
@@ -196,7 +196,7 @@ function OptQuickTake({ ticker, mode, o }) {
   const achievable = imp != null ? beAbs <= imp : null;
   const aligned = (o.isPut && biasBear) || (!o.isPut && biasBull);
   const fights = (o.isPut && biasBull) || (!o.isPut && biasBear);
-  const gex = useOTm(() => { try { return computeGEX(o); } catch (e) { return null; } }, [o]);
+  const gex = useOTm(() => { try { return computeGEX(o.spot, exps); } catch (e) { return null; } }, [o.spot, exps]);
   const F = [];
   if (net != null) F.push({ k: "Direction", v: aligned ? 1 : fights ? -1 : 0, text: aligned ? `${opt} aligns with the stock's ${biasBull ? "bullish" : "bearish"} read (${Math.round(net)}/100)` : fights ? `${opt} fights the stock's ${biasBull ? "bullish" : "bearish"} read (${Math.round(net)}/100) — wrong direction` : `stock is mixed (${Math.round(net)}/100) — no directional tailwind` });
   if (achievable != null) F.push({ k: "Cost vs move", v: achievable ? 1 : -1, text: `needs ${beMove >= 0 ? "+" : ""}${beMove.toFixed(1)}% (${o.isPut ? "a drop" : "a rise"}) by expiry; market prices ±${imp}% → ${achievable ? "achievable" : "a stretch"}` });
@@ -493,69 +493,136 @@ function bsPut(S, K, T, sigma, r = 0.04) { if (T <= 0) return Math.max(K - S, 0)
 // risk-neutral probability the call finishes above breakeven by expiry = N(d2|K=BE)
 function bsPOP(S, BE, T, sigma, r = 0.04) { if (T <= 0 || sigma <= 0 || S <= 0 || BE <= 0) return S > BE ? 100 : 0; const d2 = (Math.log(S / BE) + (r - sigma * sigma / 2) * T) / (sigma * Math.sqrt(T)); return Math.round(Math.max(1, Math.min(99, bsNormCdf(d2) * 100))); }
 
+// helper: ATM call/put mid from the live chain (for strategy switches)
+function _atmMid(o, type) {
+  const s = o.strikes.find(x => x.strike === o.strike) || o.strikes[0];
+  const leg = (type === "put" ? s.put : s.call) || {};
+  return (_on(leg.bid) != null && _on(leg.ask) != null) ? +(((leg.bid + leg.ask) / 2)).toFixed(2) : _on(leg.mark, 0);
+}
+const OTK_STRATS = {
+  "Long Call (bullish)": { dir: "buy", otype: "call" },
+  "Long Put (bearish)": { dir: "buy", otype: "put" },
+  "Covered Call (income)": { dir: "write", otype: "call" },
+  "Cash-Secured Put": { dir: "write", otype: "put" },
+};
 function OtkProfitGrid({ o }) {
-  const sigma = (o.iv != null ? o.iv : 40) / 100;
-  const K = o.strike, prem = o.prem, dteY = (o.dte || 5) / 252;
-  const moves = [-0.10, -0.05, -0.02, 0, 0.02, 0.05, 0.10];
-  const dayBuckets = Array.from(new Set([0, Math.round(o.dte * 0.5), o.dte])).filter(d => d <= o.dte);
-  const cell = (mv, dHeld) => {
-    const S = o.spot * (1 + mv);
-    const Trem = Math.max(0, ((o.dte || 5) - dHeld)) / 252;
-    const val = bsCall(S, K, Trem, sigma);
-    const pl = (val - prem) / prem * 100;
+  const [strat, setStrat] = useOT(o.isPut ? "Long Put (bearish)" : "Long Call (bullish)");
+  const def = OTK_STRATS[strat] || OTK_STRATS["Long Call (bullish)"];
+  const [strike, setStrike] = useOT(o.strike);
+  const [prem, setPrem] = useOT(o.prem);
+  const [contracts, setContracts] = useOT(1);
+  const [ivScen, setIvScen] = useOT("flat");          // -10 | flat | +10 | crush
+  // re-sync to the live ticket when the underlying contract changes
+  React.useEffect(() => { setStrike(o.strike); setPrem(_atmMid(o, def.otype)); }, [o.strike, o.dte, o.sym, strat]);
+  const baseSigma = (o.iv != null ? o.iv : 40) / 100;
+  const sigma = Math.max(0.03, ivScen === "crush" ? baseSigma * 0.6 : ivScen === "-10" ? baseSigma - 0.10 : ivScen === "+10" ? baseSigma + 0.10 : baseSigma);
+  const dteN = Math.max(1, o.dte || 5);
+  const isPut = def.otype === "put", isWrite = def.dir === "write";
+  const fn = isPut ? bsPut : bsCall;
+  const beAtExp = isPut ? +(strike - prem).toFixed(2) : +(strike + prem).toFixed(2);
+  // day columns: Today → ~6 steps → EXPIRY
+  const maxCol = Math.min(30, dteN), step = Math.max(1, Math.round(maxCol / 6));
+  const cols = []; for (let d = 0; d <= maxCol && d < dteN; d += step) cols.push(d); cols.push(dteN);
+  const colLbl = d => d === 0 ? "Today" : d >= dteN ? "EXPIRY" : "+" + d + "d";
+  // price rows: spot ±7.5%, high → low
+  const hiP = o.spot * 1.075, loP = o.spot * 0.925, NR = 21;
+  const prices = []; for (let i = 0; i < NR; i++) prices.push(+(hiP - (hiP - loP) * i / (NR - 1)).toFixed(prices.length && hiP < 50 ? 2 : 0));
+  const tgt = isPut ? o.spot * (1 - (o.impMove || 5) / 100) : o.spot * (1 + (o.impMove || 5) / 100);
+  const spotRow = prices.reduce((bi, p, i) => Math.abs(p - o.spot) < Math.abs(prices[bi] - o.spot) ? i : bi, 0);
+  const tgtRow = prices.reduce((bi, p, i) => Math.abs(p - tgt) < Math.abs(prices[bi] - tgt) ? i : bi, 0);
+  const cellPL = (S, dHeld) => {
+    const Trem = Math.max(0, (dteN - dHeld)) / 252;
+    const val = fn(S, strike, Trem, sigma);
+    let pl = (val - prem) / Math.max(0.01, prem) * 100;
+    if (isWrite) pl = Math.max(-400, -pl);   // short: invert, floor the visual
     return pl;
   };
-  const tone = pl => pl >= 25 ? "gn" : pl >= 0 ? "amb" : pl <= -50 ? "rd" : "rd";
+  const cellStyle = pl => { const c = pl >= 0 ? "var(--gn)" : "var(--rd)"; const op = Math.min(0.4, Math.abs(pl) / 130 * 0.4 + 0.04); return { background: `color-mix(in oklab, ${c} ${Math.round(op * 100)}%, transparent)`, color: pl >= 0 ? "var(--gn)" : "var(--rd)" }; };
+  const totalCost = prem * 100 * contracts;
   return (
-    <table className="dtable otk-tbl">
-      <thead><tr><th>Spot move</th>{dayBuckets.map(d => <th key={d} className="r">{d === 0 ? "now" : `T+${d}`}</th>)}</tr></thead>
-      <tbody>{moves.map((mv, i) => (
-        <tr key={i}>
-          <td className="mono">{mv >= 0 ? "+" : ""}{(mv * 100).toFixed(0)}% → ${(o.spot * (1 + mv)).toFixed(0)}</td>
-          {dayBuckets.map(d => { const pl = cell(mv, d); return <td key={d} className={`r mono kpi-tone--${tone(pl)}`}>{pl >= 0 ? "+" : ""}{pl.toFixed(0)}%</td>; })}
-        </tr>
-      ))}</tbody>
-    </table>
+    <div className="otk-pcalc">
+      <div className="otk-pc-ctrl mono">
+        <select value={strat} onChange={e => setStrat(e.target.value)}>{Object.keys(OTK_STRATS).map(s => <option key={s}>{s}</option>)}</select>
+        <span className="otk-pc-seg"><button className={!isWrite ? "is-on" : ""} onClick={() => setStrat(isPut ? "Long Put (bearish)" : "Long Call (bullish)")}>Buy</button><button className={isWrite ? "is-on" : ""} onClick={() => setStrat(isPut ? "Cash-Secured Put" : "Covered Call (income)")}>Write</button></span>
+        <span className="otk-pc-seg"><button className={!isPut ? "is-on" : ""} onClick={() => setStrat(isWrite ? "Covered Call (income)" : "Long Call (bullish)")}>Call</button><button className={isPut ? "is-on" : ""} onClick={() => setStrat(isWrite ? "Cash-Secured Put" : "Long Put (bearish)")}>Put</button></span>
+        <label>Strike <input type="number" value={strike} onChange={e => setStrike(+e.target.value)} /></label>
+        <label>Premium <input type="number" step="0.05" value={prem} onChange={e => setPrem(+e.target.value)} /></label>
+        <label>Contracts <input type="number" min="1" value={contracts} onChange={e => setContracts(Math.max(1, +e.target.value))} /></label>
+        <span className="otk-pc-cost">Cost <b className="cy">${totalCost.toLocaleString()}</b></span>
+      </div>
+      <div className="otk-pc-iv mono">
+        <span className="dim2">IV scenario</span>
+        {[["-10", "−10 vol"], ["flat", "IV flat"], ["+10", "+10 vol"], ["crush", "⚡ ER crush"]].map(([k, l]) => <button key={k} className={ivScen === k ? "is-on" : ""} onClick={() => setIvScen(k)}>{l}</button>)}
+        <span className="dim2" style={{ marginLeft: "auto" }}>σ now <b>{(baseSigma * 100).toFixed(0)}%</b>{ivScen !== "flat" ? ` → ${(sigma * 100).toFixed(0)}%` : ""}</span>
+      </div>
+      <div className="otk-pc-scroll">
+        <table className="otk-pc-tbl mono">
+          <thead><tr><th>Price</th>{cols.map((d, i) => <th key={i} className="r">{colLbl(d)}</th>)}<th className="r">±% spot</th></tr></thead>
+          <tbody>{prices.map((p, ri) => (
+            <tr key={ri} className={ri === spotRow ? "is-spot" : ri === tgtRow ? "is-tgt" : ""}>
+              <td className="otk-pc-px">${p.toLocaleString()}{ri === spotRow ? <span className="otk-pc-tag cy">spot</span> : ri === tgtRow ? <span className="otk-pc-tag warn">target</span> : ""}</td>
+              {cols.map((d, ci) => { const pl = cellPL(p, d); return <td key={ci} className="r" style={cellStyle(pl)}>{pl >= 0 ? "+" : ""}{pl.toFixed(0)}</td>; })}
+              <td className="r dim2">{p >= o.spot ? "+" : ""}{((p / o.spot - 1) * 100).toFixed(1)}%</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      <div className="mono dim2" style={{ fontSize: 10.5, marginTop: 6 }}>Each cell = % return on the ${prem.toFixed(2)} premium ({strike}{isPut ? "P" : "C"} · {dteN}DTE) at that price &amp; date, IV held at σ {(sigma * 100).toFixed(0)}%. <b className="cy">Cyan</b> = live spot; <b className="warn">amber</b> = implied-move target (${tgt.toFixed(0)}). EXPIRY = intrinsic. Breakeven at expiry <b>${beAtExp.toFixed(2)}</b> ({isPut ? "" : "+"}{((beAtExp / o.spot - 1) * 100).toFixed(1)}%).</div>
+    </div>
   );
 }
 
 // ───── TAB 2: DEALER GAMMA (real, from the live chain) ─────
-function computeGEX(o) {
-  const spot = o.spot;
-  const rows = o.strikes.map(s => {
-    const cOi = _on((s.call || {}).oi, 0), pOi = _on((s.put || {}).oi, 0);
-    const cG = _on((s.call || {}).gamma, 0), pG = _on((s.put || {}).gamma, 0);
-    const callGEX = -cOi * cG * spot * spot * 1e-4;   // dealer short calls (−), short puts (+)
-    const putGEX = pOi * pG * spot * spot * 1e-4;
-    return { k: s.strike, callOI: cOi, putOI: pOi, net: +(callGEX + putGEX).toFixed(2) };
-  });
+function computeGEX(spot, exps) {
+  if (!spot || !exps || !exps.length) return null;
+  const dol = 100 * spot * (spot * 0.01);   // $ per 1% move per (γ × OI) contract
+  const agg = {};
+  exps.forEach(e => (e.strikes || []).forEach(s => {
+    const k = s.strike; if (k == null) return;
+    const c = s.call || {}, p = s.put || {};
+    const cOi = _on(c.oi, 0), pOi = _on(p.oi, 0), cG = _on(c.gamma, 0), pG = _on(p.gamma, 0);
+    const a = agg[k] || (agg[k] = { net: 0, callOI: 0, putOI: 0 });
+    a.net += (-cOi * cG + pOi * pG) * dol;   // dealers short calls (−), short puts (+)
+    a.callOI += cOi; a.putOI += pOi;
+  }));
+  let rows = Object.keys(agg).map(k => ({ k: +k, ...agg[k] })).sort((a, b) => a.k - b.k);
+  const win = rows.filter(r => r.k >= spot * 0.88 && r.k <= spot * 1.14);
+  rows = win.length >= 4 ? win : rows;
+  if (rows.length > 13) {
+    const ci = rows.reduce((bi, r, i) => Math.abs(r.k - spot) < Math.abs(rows[bi].k - spot) ? i : bi, 0);
+    rows = rows.slice(Math.max(0, ci - 6), ci + 7);
+  }
   if (!rows.length) return null;
-  let maxPain = rows[0].k, minPay = Infinity;
-  rows.forEach(r => { let p = 0; rows.forEach(s => { p += Math.max(0, r.k - s.k) * s.callOI + Math.max(0, s.k - r.k) * s.putOI; }); if (p < minPay) { minPay = p; maxPain = r.k; } });
   const callWall = rows.reduce((a, b) => b.callOI > a.callOI ? b : a).k;
   const putWall = rows.reduce((a, b) => b.putOI > a.putOI ? b : a).k;
   let flip = spot; for (let i = 1; i < rows.length; i++) { if ((rows[i - 1].net < 0) !== (rows[i].net < 0)) { flip = rows[i].k; break; } }
-  const total = +rows.reduce((a, b) => a + b.net, 0).toFixed(2);
-  return { rows, maxPain, callWall, putWall, flip, total };
+  let maxPain = rows[0].k, minPay = Infinity;
+  rows.forEach(r => { let pay = 0; rows.forEach(s => { pay += Math.max(0, r.k - s.k) * s.callOI + Math.max(0, s.k - r.k) * s.putOI; }); if (pay < minPay) { minPay = pay; maxPain = r.k; } });
+  const total = rows.reduce((a, b) => a + b.net, 0);
+  return { rows, callWall, putWall, flip, maxPain, total };
 }
-function OtkGEX({ o }) {
-  const g = useOTm(() => computeGEX(o), [o]);
+function OtkGEX({ o, exps }) {
+  const g = useOTm(() => computeGEX(o.spot, exps), [o.spot, exps]);
   if (!g) return <div className="otk-card otk-card--wide"><div className="mono dim2" style={{ padding: 16 }}>Not enough open-interest in the live chain to compute dealer gamma.</div></div>;
-  const W = 720, H = 220, padL = 16, padR = 16, padT = 16, padB = 30;
+  const W = 720, H = 234, padL = 16, padR = 16, padT = 30, padB = 30;
   const n = g.rows.length, bw = (W - padL - padR) / n;
-  const maxAbs = Math.max(...g.rows.map(r => Math.abs(r.net)), 0.01);
+  const maxAbs = Math.max(...g.rows.map(r => Math.abs(r.net)), 1);
   const y0 = padT + (H - padT - padB) / 2, yh = (H - padT - padB) / 2;
   const cx = i => padL + bw * (i + 0.5);
   const spotI = (o.spot - g.rows[0].k) / Math.max(1e-6, (g.rows[n - 1].k - g.rows[0].k)) * (n - 1);
   const spotX = padL + bw * (spotI + 0.5);
   const pos = g.total >= 0;
+  const fmtMM = v => (v >= 0 ? "+" : "−") + "$" + Math.abs(v / 1e6).toFixed(1) + "mm";
+  const idxOf = k => g.rows.findIndex(r => r.k === k);
+  const marks = [{ k: g.putWall, lbl: "PUT WALL", c: "var(--rd)" }, { k: g.callWall, lbl: "CALL WALL", c: "var(--gn)" }, { k: g.flip, lbl: "γ-FLIP", c: "var(--amber, #d9a441)" }].filter(m => idxOf(m.k) >= 0);
+  const slots = {};
   const gexPrompt = () => `Explain options dealer-gamma (GEX) to a BEGINNER STOCK trader (they don't trade options) in plain, simple English. Use the live numbers for ${o.sym} below: 3-4 short sentences, use the actual prices, end with ONE practical takeaway for someone trading the shares.
-Spot: $${o.spot.toFixed(2)} · Net GEX: ${g.total >= 0 ? "+" : ""}${g.total} (${g.total >= 0 ? "positive — moves dampened" : "negative — moves amplified"}) · Call wall: $${g.callWall} · Put wall: $${g.putWall} · Flip: $${g.flip} · Max pain: $${g.maxPain}`;
+Spot: $${o.spot.toFixed(2)} · Net GEX: ${fmtMM(g.total)} (${pos ? "positive — moves dampened" : "negative — moves amplified"}) · Call wall: $${g.callWall} · Put wall: $${g.putWall} · Flip: $${g.flip} · Max pain: $${g.maxPain}`;
   return (
     <div className="otk-card otk-card--wide">
-      <div className="otk-card-h mono">DEALER GAMMA (GEX) · {o.dte}DTE · <span className="dim2">computed from live chain OI × γ</span></div>
+      <div className="otk-card-h mono">DEALER GAMMA (GEX) · by strike · <span className="dim2">computed from chain OI × γ (all expirations)</span></div>
       <div className="otk-gex-kpis">
-        <div className="otk-gex-kpi"><span className="mono dim2">NET GEX</span><span className={`mono otk-gex-kv ${pos ? "up" : "dn"}`}>{pos ? "+" : "−"}${Math.abs(g.total).toFixed(2)}</span><span className="mono dim2" style={{ fontSize: 8 }}>{pos ? "stabilizing" : "amplifying"}</span></div>
+        <div className="otk-gex-kpi"><span className="mono dim2">NET GEX</span><span className={`mono otk-gex-kv ${pos ? "up" : "dn"}`}>{fmtMM(g.total)}</span><span className="mono dim2" style={{ fontSize: 8 }}>{pos ? "stabilizing" : "amplifying"}</span></div>
         <div className="otk-gex-kpi"><span className="mono dim2">γ-FLIP</span><span className="mono otk-gex-kv warn">${g.flip}</span></div>
         <div className="otk-gex-kpi"><span className="mono dim2">MAX PAIN</span><span className="mono otk-gex-kv copper">${g.maxPain}</span></div>
         <div className="otk-gex-kpi"><span className="mono dim2">CALL WALL</span><span className="mono otk-gex-kv up">${g.callWall}</span></div>
@@ -566,10 +633,12 @@ Spot: $${o.spot.toFixed(2)} · Net GEX: ${g.total >= 0 ? "+" : ""}${g.total} (${
         {g.rows.map((r, i) => { const h = (Math.abs(r.net) / maxAbs) * yh; const up = r.net >= 0;
           return (<g key={i}><rect x={cx(i) - bw * 0.32} y={up ? y0 - h : y0} width={bw * 0.64} height={h} fill={up ? "var(--gn)" : "var(--rd)"} opacity="0.78" rx="1.5" />
             <text x={cx(i)} y={H - 9} fontSize="9" className="mono" textAnchor="middle" fill={r.k === g.maxPain ? "var(--copper)" : "var(--ink-3)"}>${r.k}</text></g>); })}
-        <line x1={spotX} y1={padT} x2={spotX} y2={H - padB} stroke="var(--ink)" strokeDasharray="3 3" opacity="0.7" />
+        {marks.map((m, mi) => { const i = idxOf(m.k); const x = cx(i); const slot = (slots[i] = (slots[i] || 0) + 1); const ly = padT - 18 + (slot - 1) * 9;
+          return (<g key={mi}><line x1={x} y1={padT} x2={x} y2={H - padB} stroke={m.c} strokeWidth="1.2" opacity="0.45" /><text x={x} y={ly} fontSize="7.5" className="mono" textAnchor="middle" fill={m.c} fontWeight="700">{m.lbl}</text></g>); })}
+        <line x1={spotX} y1={padT} x2={spotX} y2={H - padB} stroke="var(--ink)" strokeDasharray="3 3" opacity="0.75" />
         <text x={spotX} y={padT - 4} fontSize="8.5" className="mono" textAnchor="middle" fill="var(--ink-2)">spot ${o.spot.toFixed(0)}</text>
-        <text x={padL + 2} y={padT + 8} fontSize="8" className="mono" fill="var(--gn)">+ dealers dampen</text>
-        <text x={padL + 2} y={H - padB - 2} fontSize="8" className="mono" fill="var(--rd)">− dealers amplify</text>
+        <text x={padL + 2} y={y0 - yh + 8} fontSize="8" className="mono" fill="var(--gn)">+ dealers dampen</text>
+        <text x={padL + 2} y={y0 + yh - 2} fontSize="8" className="mono" fill="var(--rd)">− dealers amplify</text>
       </svg>
       <div className="otk-verdict-mini mono">
         <span className={pos ? "up" : "dn"}>{pos ? "POSITIVE γ" : "NEGATIVE γ"}</span> ·{" "}
