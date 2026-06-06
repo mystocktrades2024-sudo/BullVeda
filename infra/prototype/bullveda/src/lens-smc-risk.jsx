@@ -107,6 +107,56 @@ function smcDecision(m) {
   return { verdict, vtone, action, entry, stop, target, rr, ob, invalid, bull, bear, targetFar };
 }
 
+// The annotated map: real candles with OB / FVG / liquidity / OTE zones drawn on
+// price — the "show me the zones on the chart" view a retail trader needs first.
+function SMCAnnotatedChart({ m, state }) {
+  if (!_smcUsable(m) || !Array.isArray(m.ohlc) || m.ohlc.length < 5) return <SmcEmpty state={state} what="chart" />;
+  const bars = m.ohlc, r = m.range, draw = m.draw_on_liquidity, cur = m.cur_close;
+  const obs = (m.order_blocks || []).slice(0, 4);
+  const fvgs = (m.fvgs || []).filter(g => g.state === "unfilled").slice(0, 3);
+  const W = 900, H = 320, padT = 14, padB = 16, padL = 8, padR = 150;
+  const zP = [].concat(obs.flatMap(o => [o.lo, o.hi]), fvgs.flatMap(g => [g.lo, g.hi]), draw ? [draw.price] : [], [r.ote_lo, r.ote_hi, cur]);
+  const lo = Math.min(...bars.map(b => b.l), ...zP) * 0.999;
+  const hi = Math.max(...bars.map(b => b.h), ...zP) * 1.001;
+  const span = Math.max(hi - lo, 1e-6);
+  const y = p => padT + (1 - (p - lo) / span) * (H - padT - padB);
+  const cw = (W - padL - padR) / bars.length, cx = i => padL + i * cw + cw / 2;
+  // right-edge labels, de-overlapped greedily
+  const labels = [];
+  const addLabel = (price, text, color) => { const yy = y(price); if (labels.some(l => Math.abs(l.y - yy) < 12)) return; labels.push({ y: yy, text, color }); };
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="xMidYMid meet" className="smc-map-svg">
+      <defs>
+        <linearGradient id="ac-obp" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="var(--gn)" stopOpacity="0.22"/><stop offset="100%" stopColor="var(--gn)" stopOpacity="0.05"/></linearGradient>
+        <linearGradient id="ac-obm" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="var(--rd)" stopOpacity="0.22"/><stop offset="100%" stopColor="var(--rd)" stopOpacity="0.05"/></linearGradient>
+      </defs>
+      {/* OTE band */}
+      <rect x={padL} y={y(r.ote_hi)} width={W - padL - padR} height={Math.max(2, y(r.ote_lo) - y(r.ote_hi))} fill="var(--copper)" opacity="0.10" />
+      {/* OB zones */}
+      {obs.map((o, i) => { addLabel(o.hi, `${o.type === "demand" ? "▲ OB+" : "▼ OB−"} ${o.state}`, o.type === "demand" ? "var(--gn)" : "var(--rd)");
+        return <rect key={"ob" + i} x={padL} y={y(o.hi)} width={W - padL - padR} height={Math.max(3, y(o.lo) - y(o.hi))} fill={o.type === "demand" ? "url(#ac-obp)" : "url(#ac-obm)"} stroke={`var(--${o.type === "demand" ? "gn" : "rd"})`} strokeOpacity="0.35" strokeWidth="0.6" />; })}
+      {/* FVG zones */}
+      {fvgs.map((g, i) => { addLabel(g.hi, "▦ FVG", "var(--violet)");
+        return <rect key={"fv" + i} x={padL} y={y(g.hi)} width={W - padL - padR} height={Math.max(2, y(g.lo) - y(g.hi))} fill="var(--violet)" opacity="0.12" strokeDasharray="3 3" stroke="var(--violet)" strokeOpacity="0.3" />; })}
+      {/* draw-on-liquidity */}
+      {draw && (()=>{ addLabel(draw.price, `◆ draw ${draw.side}`, "var(--amb)"); return <line x1={padL} y1={y(draw.price)} x2={W - padR} y2={y(draw.price)} stroke="var(--amb)" strokeDasharray="5 3" opacity="0.7" />; })()}
+      {/* candles */}
+      {bars.map((b, i) => { const up = b.c >= b.o, col = up ? "var(--gn)" : "var(--rd)";
+        return <g key={i}><line x1={cx(i)} y1={y(b.h)} x2={cx(i)} y2={y(b.l)} stroke={col} strokeWidth="0.8" opacity="0.85" /><rect x={cx(i) - cw * 0.3} y={y(Math.max(b.o, b.c))} width={Math.max(1, cw * 0.6)} height={Math.max(1, Math.abs(y(b.o) - y(b.c)))} fill={col} opacity="0.9" /></g>; })}
+      {/* current price */}
+      <line x1={padL} y1={y(cur)} x2={W - padR} y2={y(cur)} stroke="var(--copper)" strokeWidth="1" strokeDasharray="2 2" />
+      <circle cx={cx(bars.length - 1)} cy={y(cur)} r="3.5" fill="var(--copper)" style={{ filter: "drop-shadow(0 0 5px var(--copper))" }} />
+      {/* right-edge labels */}
+      {labels.concat([{ y: y(cur), text: `● ${smcMoney(cur)}`, color: "var(--copper)" }]).map((l, i) => (
+        <g key={"lb" + i}>
+          <line x1={W - padR} y1={l.y} x2={W - padR + 10} y2={l.y} stroke={l.color} strokeOpacity="0.5" />
+          <text x={W - padR + 14} y={l.y + 3.5} fontSize="10" className="mono" fill={l.color}>{l.text}</text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
 function SmcQuickCard({ m }) {
   if (!_smcUsable(m)) return null;
   const d = smcDecision(m);
@@ -209,6 +259,12 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
       </div>
 
       <div className="lens-section">
+        <SectionHeader title="Annotated Map · zones on price"
+          sub="real candles with order blocks · FVGs · liquidity draw · OTE drawn to scale" style="minimal" />
+        <div className="lens-pad"><SMCAnnotatedChart m={m} state={state} /></div>
+      </div>
+
+      <div className="lens-section">
         <SectionHeader n={0} title="Macro · Higher-Timeframe Context"
           sub="draw on liquidity · HTF bias · premium/discount · daily/weekly levels"
           style={headerStyle} right={<StateToggle name="sm-0" />} />
@@ -218,7 +274,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={1} title="Order Blocks"
+        <SectionHeader n={1} title="Order Blocks" tip={'Order Block (OB): the last opposite-color candle before a strong move that broke structure — where institutions likely filled. Price often respects it on a revisit.'}
           sub="last 6 unmitigated demand/supply zones · institutional footprints"
           style={headerStyle} right={<StateToggle name="sm-1" />} />
         <StateWrap state={s1.value} source="bespoke detector · candle structure">
@@ -227,7 +283,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={2} title="Fair Value Gaps · BoS · CHoCH"
+        <SectionHeader n={2} title="Fair Value Gaps · BoS · CHoCH" tip={'FVG: a 3-bar price gap (imbalance) the market tends to revisit. BoS: break of structure (trend continues). CHoCH: change of character (possible reversal).'}
           sub="structural shifts · break-of-structure log"
           style={headerStyle} right={<StateToggle name="sm-2" />} />
         <StateWrap state={s2.value} source="structure aggregator">
@@ -236,7 +292,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={3} title="Liquidity Sweeps · Pools"
+        <SectionHeader n={3} title="Liquidity Sweeps · Pools" tip={'Liquidity = clustered stops at prior highs/lows. Price often sweeps (spikes through) them to fill size, then reverses.'}
           sub="stop-hunts above prior highs / below prior lows · resting liquidity"
           style={headerStyle} right={<StateToggle name="sm-3" />} />
         <StateWrap state={s3.value} source="sweep detector · 30 sessions">
@@ -245,7 +301,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={4} title="Premium / Discount · Equilibrium"
+        <SectionHeader n={4} title="Premium / Discount · Equilibrium" tip={'Dealing range split at 50% equilibrium: below = discount (buy zone), above = premium (sell zone).'}
           sub="dealing-range zones · where to buy vs sell"
           style={headerStyle} right={<StateToggle name="sm-5" />} />
         <StateWrap state={s5.value} source="dealing range · trailing extremes">
@@ -267,7 +323,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
       </button>
       {adv && (<>
       <div className="lens-section">
-        <SectionHeader n={6} title="Inducement · Liquidity Engineering"
+        <SectionHeader n={6} title="Inducement · Liquidity Engineering" tip={'Inducement: a minor high/low that lures breakout traders so their stops get swept before the real move.'}
           sub="the trap before the move · minor liquidity swept first"
           style={headerStyle} right={<StateToggle name="sm-6" />} />
         <StateWrap state={s6b.value} source="inducement detector · sub-pivot sweeps">
@@ -276,7 +332,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={7} title="Breaker · Mitigation Blocks"
+        <SectionHeader n={7} title="Breaker · Mitigation Blocks" tip={'Breaker: a failed OB that flips polarity (old support → resistance). Mitigation block: an OB revisited and partially filled.'}
           sub="failed OBs that flip polarity · revisited origins"
           style={headerStyle} right={<StateToggle name="sm-7" />} />
         <StateWrap state={s7b.value} source="polarity-flip detector">
@@ -285,7 +341,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={8} title="Liquidity Voids · Displacement · OTE"
+        <SectionHeader n={8} title="Liquidity Voids · Displacement · OTE" tip={'Displacement: an impulsive move leaving an imbalance (void). OTE = Optimal Trade Entry: the 62–79% retracement of that move.'}
           sub="inefficiencies · momentum leg · optimal trade entry 62–79%"
           style={headerStyle} right={<StateToggle name="sm-8" />} />
         <StateWrap state={s8b.value} source="displacement + fib OTE engine">
@@ -294,7 +350,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={9} title="Kill Zones · SMT Divergence"
+        <SectionHeader n={9} title="Kill Zones · SMT Divergence" tip={'Kill zones: high-activity session windows (London / NY). SMT: when a stock and its sector/index disagree on a high/low — a relative-strength tell.'}
           sub="session timing edge · correlated-pair divergence"
           style={headerStyle} right={<StateToggle name="sm-9" />} />
         <StateWrap state={s9b.value} source="session clock + SMT vs sector ETF">
@@ -303,7 +359,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={10} title="Entry Model · Confluence Grade"
+        <SectionHeader n={10} title="Entry Model · Confluence Grade" tip={'A–F checklist: liquidity sweep → CHoCH/BoS → FVG → OB/OTE entry → confirmation. More steps complete = higher-confluence setup.'}
           sub="sweep → CHoCH → FVG → OB · step tracker + A–F grade"
           style={headerStyle} right={<StateToggle name="sm-10" />} />
         <StateWrap state={s10b.value} source="entry-model state machine">
@@ -321,7 +377,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={12} title="Confluence Stacking · A+ Zones"
+        <SectionHeader n={12} title="Confluence Stacking · A+ Zones" tip={'Zones where multiple SMC factors overlap (OB + FVG + OTE + discount + HTF level). More factors = higher-probability entry.'}
           sub="OB + FVG + OTE + HTF level + liquidity aligned"
           style={headerStyle} right={<StateToggle name="sm-12" />} />
         <StateWrap state={s12b.value} source="confluence scorer">
@@ -330,7 +386,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={13} title="Mitigation Hit-Rate · Liquidity Heatmap"
+        <SectionHeader n={13} title="Mitigation Hit-Rate · Liquidity Heatmap" tip={'How often each zone type was respected historically (replayed on real bars) + where resting liquidity is densest.'}
           sub="zone respect history + resting liquidity density"
           style={headerStyle} right={<StateToggle name="sm-13" />} />
         <StateWrap state={s13b.value} source="zone tracker + liquidity density">

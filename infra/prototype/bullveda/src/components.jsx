@@ -11,13 +11,13 @@ const { useState, useEffect, useRef, useMemo } = React;
 // Section header
 // ────────────────────────────────────────────────────────────
 
-function SectionHeader({ n, title, sub, freshness = "live", freshnessAge, right, style = "copper" }) {
+function SectionHeader({ n, title, sub, freshness = "live", freshnessAge, right, style = "copper", tip }) {
   // style: 'copper' (§N copper number), 'minimal' (no number, thin rule), 'sticky-rail' (left rail)
   if (style === "minimal") {
     return (
       <div className="sec-hdr sec-hdr--min">
         <div className="sec-hdr-text">
-          <div className="sec-hdr-title">{title}</div>
+          <div className="sec-hdr-title">{title}{tip && <span className="sec-hdr-tip" title={tip}> &#9432;</span>}</div>
           {sub && <div className="sec-hdr-sub">{sub}</div>}
         </div>
         <div className="sec-hdr-right">
@@ -32,7 +32,7 @@ function SectionHeader({ n, title, sub, freshness = "live", freshnessAge, right,
       <div className="sec-hdr sec-hdr--rail">
         <div className="sec-hdr-rail-num">§{String(n).padStart(2, "0")}</div>
         <div className="sec-hdr-text">
-          <div className="sec-hdr-title">{title}</div>
+          <div className="sec-hdr-title">{title}{tip && <span className="sec-hdr-tip" title={tip}> &#9432;</span>}</div>
           {sub && <div className="sec-hdr-sub">{sub}</div>}
         </div>
         <div className="sec-hdr-right">
@@ -47,7 +47,7 @@ function SectionHeader({ n, title, sub, freshness = "live", freshnessAge, right,
     <div className="sec-hdr sec-hdr--copper">
       <div className="sec-hdr-num">§{n}</div>
       <div className="sec-hdr-text">
-        <div className="sec-hdr-title">{title}</div>
+        <div className="sec-hdr-title">{title}{tip && <span className="sec-hdr-tip" title={tip}> &#9432;</span>}</div>
         {sub && <div className="sec-hdr-sub">{sub}</div>}
       </div>
       <div className="sec-hdr-right">

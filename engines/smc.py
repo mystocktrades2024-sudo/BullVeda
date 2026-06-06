@@ -450,6 +450,9 @@ def detect(df: pd.DataFrame, meta: Dict[str, Any], ticker: str) -> Dict[str, Any
                ("CHoCH " + (struct["last_dir"] or "").upper() if choch else struct["bias"].upper())
 
     spark = [round(float(x), 2) for x in df["Close"].tail(48).tolist()]
+    _tail = df.tail(60)
+    ohlc = [{"o": round(float(o), 2), "h": round(float(h), 2), "l": round(float(l), 2), "c": round(float(c), 2)}
+            for o, h, l, c in zip(_tail["Open"], _tail["High"], _tail["Low"], _tail["Close"])]
 
     zone_stats = _zone_stats(df)
     smt = None
@@ -468,6 +471,7 @@ def detect(df: pd.DataFrame, meta: Dict[str, Any], ticker: str) -> Dict[str, Any
         "ok": True,
         "zone_stats": zone_stats,
         "smt": smt,
+        "ohlc": ohlc,
         "bars": int(len(df)),
         "cur_close": round(cur, 2),
         "spark": spark,
