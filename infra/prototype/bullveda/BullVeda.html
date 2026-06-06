@@ -20592,6 +20592,54 @@ function smcMoney(v) {
 function smcTone(state) {
   return state === "fresh" ? "ink" : state === "held" ? "gn" : state === "mitigated" ? "amb" : "cy";
 }
+function useSmcIntraday(sym) {
+  const [d, setD] = useStateSMC(null);
+  useEffSMC(() => {
+    let on = true;
+    if (!sym) return;
+    fetch(`/api/smc_bars?t=${encodeURIComponent(sym)}&interval=1h`, { credentials: "same-origin" }).then((r) => r.ok ? r.json() : null).then((j) => {
+      if (on) setD(j || { bars: [] });
+    }).catch(() => {
+      if (on) setD({ bars: [] });
+    });
+    return () => {
+      on = false;
+    };
+  }, [sym]);
+  return d;
+}
+function smcKillZones(bars) {
+  if (!Array.isArray(bars) || !bars.length) return null;
+  const fmt = (t, o) => {
+    try {
+      return new Intl.DateTimeFormat("en-US", Object.assign({ timeZone: "America/New_York" }, o)).format(new Date(t * 1e3));
+    } catch (e) {
+      return "";
+    }
+  };
+  const etHour = (t) => {
+    const h = +fmt(t, { hour: "2-digit", hour12: false });
+    return isFinite(h) ? h : null;
+  };
+  const etDay = (t) => fmt(t, { month: "2-digit", day: "2-digit" });
+  const zoneOf = (h) => h == null ? null : h >= 2 && h < 5 ? "London" : h >= 8 && h < 11 ? "NY AM" : h >= 13 && h < 16 ? "NY PM" : h >= 20 || h < 1 ? "Asia" : null;
+  const sess = {};
+  bars.forEach((b) => {
+    const z = zoneOf(etHour(b.time));
+    if (!z) return;
+    const k = etDay(b.time) + "|" + z;
+    const s = sess[k] || (sess[k] = { z, day: etDay(b.time), hi: -1e9, lo: 1e9, last: 0 });
+    s.hi = Math.max(s.hi, b.high);
+    s.lo = Math.min(s.lo, b.low);
+    s.last = Math.max(s.last, b.time);
+  });
+  const arr = Object.values(sess).sort((a, b) => a.last - b.last);
+  for (let i = 1; i < arr.length; i++) {
+    arr[i].sweptHigh = arr[i].hi > arr[i - 1].hi;
+    arr[i].sweptLow = arr[i].lo < arr[i - 1].lo;
+  }
+  return { sessions: arr.slice(-4), active: zoneOf(etHour(bars[bars.length - 1].time)) };
+}
 function smcDecision(m) {
   if (!m || !m.ok) return null;
   const cur = m.cur_close, r = m.range, draw = m.draw_on_liquidity;
@@ -21068,19 +21116,15 @@ function SMCConfluence({ m, state }) {
   return /* @__PURE__ */ React.createElement("div", { className: "smc-sub" }, zones.map((z, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `smc-conf smc-conf--${z.tone}` }, /* @__PURE__ */ React.createElement("div", { className: "smc-conf-grade" }, z.grade), /* @__PURE__ */ React.createElement("div", { className: "smc-conf-body" }, /* @__PURE__ */ React.createElement("div", { className: "mono smc-conf-px" }, /* @__PURE__ */ React.createElement("b", null, z.px), " ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 ", z.factors.length, " factors")), /* @__PURE__ */ React.createElement("div", { className: "smc-conf-tags" }, z.factors.map((f, j) => /* @__PURE__ */ React.createElement("span", { key: j, className: "smc-conf-tag mono" }, f)))))), best && /* @__PURE__ */ React.createElement("div", { className: "mono dim", style: { fontSize: 11 } }, "The ", best.px, " zone stacks ", best.n, " factors (", best.factors.join(" \xB7 "), ") \u2192 ", /* @__PURE__ */ React.createElement("b", { className: best.tone === "gn" ? "up" : "warn" }, best.grade), ". Highest-confluence zone on this timeframe."));
 }
 function SMCMitigationHeat({ m, state }) {
+  var _a, _b, _c, _d, _e, _f;
   if (!_smcUsable(m)) return /* @__PURE__ */ React.createElement(SmcEmpty, { state, what: "liquidity density" });
-  const obs = m.order_blocks || [];
-  const counts = {
-    demandFresh: obs.filter((o) => o.type === "demand" && o.state !== "mitigated").length,
-    demandMit: obs.filter((o) => o.type === "demand" && o.state === "mitigated").length,
-    supplyFresh: obs.filter((o) => o.type === "supply" && o.state !== "mitigated").length,
-    fvgUnfilled: (m.fvgs || []).filter((g) => g.state === "unfilled").length
-  };
+  const zs = m.zone_stats || { demand: {}, supply: {}, fvg: {} };
+  const rateTone = (v) => v == null ? "ink" : v >= 70 ? "gn" : v >= 50 ? "amb" : "rd";
   const L = m.liquidity, cur = m.cur_close;
   const pools = [].concat((L.buyside || []).map((b) => ({ price: b.price, side: "buy", w: b.equal || 1 }))).concat((L.sellside || []).map((s) => ({ price: s.price, side: "sell", w: 1 }))).concat([{ price: cur, side: "spot", w: 0 }]);
   const maxw = Math.max(1, ...pools.map((p) => p.w));
   pools.sort((a, b) => b.price - a.price);
-  return /* @__PURE__ */ React.createElement("div", { className: "smc-2col" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 6 } }, "ZONE INVENTORY \xB7 this timeframe"), /* @__PURE__ */ React.createElement("table", { className: "dtable" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Zone type"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Unmitigated"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Mitigated"))), /* @__PURE__ */ React.createElement("tbody", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { className: "mono" }, "Demand OB"), /* @__PURE__ */ React.createElement("td", { className: "r mono kpi-tone--gn" }, counts.demandFresh), /* @__PURE__ */ React.createElement("td", { className: "r mono dim" }, counts.demandMit)), /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { className: "mono" }, "Supply OB"), /* @__PURE__ */ React.createElement("td", { className: "r mono kpi-tone--rd" }, counts.supplyFresh), /* @__PURE__ */ React.createElement("td", { className: "r mono dim" }, obs.filter((o) => o.type === "supply" && o.state === "mitigated").length)), /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { className: "mono" }, "FVG"), /* @__PURE__ */ React.createElement("td", { className: "r mono kpi-tone--cy" }, counts.fvgUnfilled), /* @__PURE__ */ React.createElement("td", { className: "r mono dim" }, (m.fvgs || []).filter((g) => g.state === "filled").length)))), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 10, marginTop: 6 } }, "Per-zone respect hit-rate needs a trade-outcome backtest (not computed here) \u2014 counts above are live structure only.")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 6 } }, "RESTING LIQUIDITY \xB7 density"), /* @__PURE__ */ React.createElement("div", { className: "smc-heat" }, pools.map((p, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "smc-heat-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono smc-heat-px" }, smcMoney(p.price)), /* @__PURE__ */ React.createElement("div", { className: "smc-heat-bar" }, /* @__PURE__ */ React.createElement("div", { className: `smc-heat-fill smc-heat--${p.side === "buy" ? "buy" : p.side === "sell" ? "sell" : "spot"}`, style: { width: `${p.side === "spot" ? 8 : 25 + p.w / maxw * 65}%` } })), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, p.side))))));
+  return /* @__PURE__ */ React.createElement("div", { className: "smc-2col" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 6 } }, "ZONE RESPECT \xB7 replayed on ", m.bars, " bars"), /* @__PURE__ */ React.createElement("table", { className: "dtable" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Zone"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Tested"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Respected"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Rate"))), /* @__PURE__ */ React.createElement("tbody", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { className: "mono" }, "Demand OB"), /* @__PURE__ */ React.createElement("td", { className: "r mono" }, (_a = zs.demand.tested) != null ? _a : 0), /* @__PURE__ */ React.createElement("td", { className: "r mono" }, (_b = zs.demand.respected) != null ? _b : 0), /* @__PURE__ */ React.createElement("td", { className: `r mono kpi-tone--${rateTone(zs.demand.rate)}` }, zs.demand.rate != null ? zs.demand.rate + "%" : "\u2014")), /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { className: "mono" }, "Supply OB"), /* @__PURE__ */ React.createElement("td", { className: "r mono" }, (_c = zs.supply.tested) != null ? _c : 0), /* @__PURE__ */ React.createElement("td", { className: "r mono" }, (_d = zs.supply.respected) != null ? _d : 0), /* @__PURE__ */ React.createElement("td", { className: `r mono kpi-tone--${rateTone(zs.supply.rate)}` }, zs.supply.rate != null ? zs.supply.rate + "%" : "\u2014")), /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { className: "mono" }, "FVG fill"), /* @__PURE__ */ React.createElement("td", { className: "r mono" }, (_e = zs.fvg.total) != null ? _e : 0), /* @__PURE__ */ React.createElement("td", { className: "r mono" }, (_f = zs.fvg.filled) != null ? _f : 0), /* @__PURE__ */ React.createElement("td", { className: `r mono kpi-tone--amb` }, zs.fvg.rate != null ? zs.fvg.rate + "%" : "\u2014")))), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 10, marginTop: 6 } }, "Respect = price re-entered the zone then closed back out within 3 bars. Replayed on this timeframe's real bars (not a trade log).")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 6 } }, "RESTING LIQUIDITY \xB7 density"), /* @__PURE__ */ React.createElement("div", { className: "smc-heat" }, pools.map((p, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "smc-heat-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono smc-heat-px" }, smcMoney(p.price)), /* @__PURE__ */ React.createElement("div", { className: "smc-heat-bar" }, /* @__PURE__ */ React.createElement("div", { className: `smc-heat-fill smc-heat--${p.side === "buy" ? "buy" : p.side === "sell" ? "sell" : "spot"}`, style: { width: `${p.side === "spot" ? 8 : 25 + p.w / maxw * 65}%` } })), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, p.side))))));
 }
 function SMCAlerts({ m, state }) {
   if (!_smcUsable(m)) return /* @__PURE__ */ React.createElement(SmcEmpty, { state, what: "alert conditions" });
@@ -21194,7 +21238,16 @@ function SMCVoidOTE({ m, state }) {
   return /* @__PURE__ */ React.createElement("div", { className: "smc-sub" }, /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4,1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "Displacement leg", value: disp ? `+${disp.pct.toFixed(1)}%` : "\u2014", tone: "gn", sub: disp ? `${smcMoney(disp.lo)} \u2192 ${smcMoney(disp.hi)} \xB7 ${disp.bars} bars` : "no clear leg" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Liquidity void", value: v ? `${smcMoney(v.lo)}\u2013${smcMoney(v.hi)}` : "\u2014", tone: "violet", sub: v ? `${v.type} FVG \xB7 unfilled` : "none unfilled" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "OTE 62\u201379%", value: `${smcMoney(r.ote_lo)}\u2013${smcMoney(r.ote_hi)}`, tone: "copper", sub: "optimal entry zone" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "In OTE now?", value: r.ote_active ? "YES" : "NO", tone: r.ote_active ? "gn" : "amb", sub: `${r.pct}% of range` })), /* @__PURE__ */ React.createElement("div", { className: "mono dim", style: { fontSize: 11 } }, "OTE (0.62\u20130.79 retrace of the dealing range) sits at ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, smcMoney(r.ote_lo), "\u2013", smcMoney(r.ote_hi)), ". ", r.ote_active ? "Price is in the OTE zone now." : "Await a retrace into OTE for the highest-confluence entry."));
 }
 function SMCKillSMT({ m, state }) {
-  return /* @__PURE__ */ React.createElement("div", { className: "smc-sub smc-2col" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 6 } }, "KILL ZONES \xB7 session edge"), /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 session-timing kill-zones need intraday (1H) bars; this engine runs on ", _smcUsable(m) && m.tf || "higher-timeframe", " candles. Use the intraday chart for session edge.")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 6 } }, "SMT DIVERGENCE"), /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 SMT needs a synced correlated-pair / sector-ETF feed (not wired). Compare relative strength on the Technicals lens for now.")));
+  const sym = m && m.ticker || "";
+  const intr = useSmcIntraday(sym);
+  const kz = smcKillZones(intr && intr.bars);
+  const smt = m && m.smt;
+  return /* @__PURE__ */ React.createElement("div", { className: "smc-sub smc-2col" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 6 } }, "KILL ZONES \xB7 1H session edge (ET)"), !intr ? /* @__PURE__ */ React.createElement(SmcEmpty, { state: "loading", what: "intraday sessions" }) : kz && kz.sessions.length ? kz.sessions.map((s, i) => {
+    const active = s.z === kz.active && i === kz.sessions.length - 1;
+    const tone = active ? "gn" : s.sweptHigh ? "cy" : s.sweptLow ? "rd" : "ink";
+    const note = active ? "ACTIVE now" : s.sweptHigh ? `swept high ${smcMoney(s.hi)}` : s.sweptLow ? `swept low ${smcMoney(s.lo)}` : `${smcMoney(s.lo)}\u2013${smcMoney(s.hi)}`;
+    return /* @__PURE__ */ React.createElement("div", { key: i, className: `smc-row smc-row--${tone}` }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, s.z), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, s.day), /* @__PURE__ */ React.createElement("span", { className: `mono ${active ? "up" : "dim2"}` }, note));
+  }) : /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 no intraday bars returned for ", sym)), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 6 } }, "SMT DIVERGENCE \xB7 vs ", smt ? smt.ref : "SPY"), smt ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: `smc-row smc-row--${smt.type === "bullish" ? "gn" : smt.type === "bearish" ? "rd" : "ink"}` }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, sym), /* @__PURE__ */ React.createElement("span", { className: `mono ${smt.type === "bullish" ? "up" : smt.type === "bearish" ? "dn" : "dim2"}` }, smt.type.toUpperCase())), /* @__PURE__ */ React.createElement("div", { className: "mono dim", style: { fontSize: 11, marginTop: 6 } }, smt.note, ".")) : /* @__PURE__ */ React.createElement(SmcEmpty, { state, what: "SMT divergence" })));
 }
 function SMCEntryModel({ m, state }) {
   if (!_smcUsable(m)) return /* @__PURE__ */ React.createElement(SmcEmpty, { state, what: "entry model" });

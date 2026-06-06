@@ -315,6 +315,65 @@ def _mtf(df: pd.DataFrame, tf: str) -> List[Dict[str, Any]]:
     return rows
 
 
+# ── per-zone respect hit-rate, replayed over the real bars ───────────────────
+def _zone_stats(df: pd.DataFrame) -> Dict[str, Any]:
+    o = df["Open"].values; h = df["High"].values; l = df["Low"].values; c = df["Close"].values
+    n = len(df)
+    dem_t = dem_r = sup_t = sup_r = 0
+    for j in range(1, n - 2):
+        if c[j] < o[j] and c[j + 1] > h[j]:           # demand OB (down candle → up displacement)
+            hi = max(o[j], c[j])
+            for k in range(j + 2, n):
+                if l[k] <= hi:                          # price re-entered the zone
+                    dem_t += 1
+                    if any(c[k + x] > hi for x in range(0, min(4, n - k))):
+                        dem_r += 1
+                    break
+        if c[j] > o[j] and c[j + 1] < l[j]:           # supply OB (up candle → down displacement)
+            lo = min(o[j], c[j])
+            for k in range(j + 2, n):
+                if h[k] >= lo:
+                    sup_t += 1
+                    if any(c[k + x] < lo for x in range(0, min(4, n - k))):
+                        sup_r += 1
+                    break
+    fvg_t = fvg_f = 0
+    for i in range(2, n):
+        if h[i - 2] < l[i]:
+            fvg_t += 1; mid = (h[i - 2] + l[i]) / 2
+            if (c[i + 1:] <= mid).any(): fvg_f += 1
+        elif l[i - 2] > h[i]:
+            fvg_t += 1; mid = (h[i] + l[i - 2]) / 2
+            if (c[i + 1:] >= mid).any(): fvg_f += 1
+    pct = lambda a, b: round(a / b * 100) if b else None
+    return {
+        "demand": {"tested": dem_t, "respected": dem_r, "rate": pct(dem_r, dem_t)},
+        "supply": {"tested": sup_t, "respected": sup_r, "rate": pct(sup_r, sup_t)},
+        "fvg": {"total": fvg_t, "filled": fvg_f, "rate": pct(fvg_f, fvg_t)},
+    }
+
+
+# ── SMT divergence vs a reference (SPY): relative-strength tell ───────────────
+def _smt(df: pd.DataFrame, ref_df: Optional[pd.DataFrame], ref_name: str, ticker: str) -> Optional[Dict[str, Any]]:
+    if ref_df is None or len(ref_df) < 30:
+        return None
+    def lh(d):
+        ph, pl = _pivots(d, 2)
+        return ([float(d["Low"].iloc[i]) for i in pl][-2:], [float(d["High"].iloc[i]) for i in ph][-2:])
+    tl, th = lh(df); rl, rh = lh(ref_df)
+    if len(tl) == 2 and len(rl) == 2:
+        if tl[-1] > tl[-2] and rl[-1] < rl[-2]:
+            return {"type": "bullish", "ref": ref_name, "note": f"{ticker} held a higher low while {ref_name} made a lower low — relative strength"}
+        if tl[-1] < tl[-2] and rl[-1] > rl[-2]:
+            return {"type": "bearish", "ref": ref_name, "note": f"{ticker} made a lower low while {ref_name} held higher — relative weakness"}
+    if len(th) == 2 and len(rh) == 2:
+        if th[-1] < th[-2] and rh[-1] > rh[-2]:
+            return {"type": "bearish", "ref": ref_name, "note": f"{ticker} made a lower high while {ref_name} pushed higher — relative weakness"}
+        if th[-1] > th[-2] and rh[-1] < rh[-2]:
+            return {"type": "bullish", "ref": ref_name, "note": f"{ticker} pushed a higher high while {ref_name} stalled — relative strength"}
+    return {"type": "aligned", "ref": ref_name, "note": f"moving in line with {ref_name} — no divergence"}
+
+
 def detect(df: pd.DataFrame, meta: Dict[str, Any], ticker: str) -> Dict[str, Any]:
     tf = meta.get("tf", "Daily")
     if df is None or len(df) < 30:
@@ -366,8 +425,20 @@ def detect(df: pd.DataFrame, meta: Dict[str, Any], ticker: str) -> Dict[str, Any
 
     spark = [round(float(x), 2) for x in df["Close"].tail(48).tolist()]
 
+    zone_stats = _zone_stats(df)
+    smt = None
+    if (ticker or "").upper() != "SPY":
+        try:
+            from pattern_data import get_bars as _gb
+            ref_df, _t, _m = _gb("SPY", meta.get("mode", "SWING"))
+            smt = _smt(df, ref_df, "SPY", ticker)
+        except Exception:
+            smt = None
+
     return {
         "ok": True,
+        "zone_stats": zone_stats,
+        "smt": smt,
         "bars": int(len(df)),
         "cur_close": round(cur, 2),
         "spark": spark,

@@ -33,6 +33,37 @@ function SmcEmpty({ state, what }) {
 function smcMoney(v) { return (typeof v === "number" && isFinite(v)) ? "$" + v.toFixed(2) : "—"; }
 function smcTone(state) { return state === "fresh" ? "ink" : state === "held" ? "gn" : state === "mitigated" ? "amb" : "cy"; }
 
+// real 1h intraday bars (for kill-zone session timing) via /api/smc_bars
+function useSmcIntraday(sym) {
+  const [d, setD] = useStateSMC(null);
+  useEffSMC(() => {
+    let on = true; if (!sym) return;
+    fetch(`/api/smc_bars?t=${encodeURIComponent(sym)}&interval=1h`, { credentials: "same-origin" })
+      .then(r => r.ok ? r.json() : null).then(j => { if (on) setD(j || { bars: [] }); }).catch(() => { if (on) setD({ bars: [] }); });
+    return () => { on = false; };
+  }, [sym]);
+  return d;
+}
+
+// bucket recent 1h bars into ICT kill zones (ET) + prior-session sweep detection
+function smcKillZones(bars) {
+  if (!Array.isArray(bars) || !bars.length) return null;
+  const fmt = (t, o) => { try { return new Intl.DateTimeFormat("en-US", Object.assign({ timeZone: "America/New_York" }, o)).format(new Date(t * 1000)); } catch (e) { return ""; } };
+  const etHour = t => { const h = +fmt(t, { hour: "2-digit", hour12: false }); return isFinite(h) ? h : null; };
+  const etDay = t => fmt(t, { month: "2-digit", day: "2-digit" });
+  const zoneOf = h => h == null ? null : (h >= 2 && h < 5) ? "London" : (h >= 8 && h < 11) ? "NY AM" : (h >= 13 && h < 16) ? "NY PM" : (h >= 20 || h < 1) ? "Asia" : null;
+  const sess = {};
+  bars.forEach(b => {
+    const z = zoneOf(etHour(b.time)); if (!z) return;
+    const k = etDay(b.time) + "|" + z;
+    const s = sess[k] || (sess[k] = { z, day: etDay(b.time), hi: -1e9, lo: 1e9, last: 0 });
+    s.hi = Math.max(s.hi, b.high); s.lo = Math.min(s.lo, b.low); s.last = Math.max(s.last, b.time);
+  });
+  const arr = Object.values(sess).sort((a, b) => a.last - b.last);
+  for (let i = 1; i < arr.length; i++) { arr[i].sweptHigh = arr[i].hi > arr[i - 1].hi; arr[i].sweptLow = arr[i].lo < arr[i - 1].lo; }
+  return { sessions: arr.slice(-4), active: zoneOf(etHour(bars[bars.length - 1].time)) };
+}
+
 // Assemble the engine's structure into ONE tradeable decision: verdict + entry zone
 // (unmitigated OB) + stop (just beyond it) + target (draw on liquidity) + R:R +
 // plain invalidation. Resolves the bull-but-premium case into WAIT-for-pullback.
@@ -862,13 +893,8 @@ function SMCConfluence({ m, state }) {
 // Mitigation hit-rate + liquidity heatmap
 function SMCMitigationHeat({ m, state }) {
   if (!_smcUsable(m)) return <SmcEmpty state={state} what="liquidity density" />;
-  const obs = m.order_blocks || [];
-  const counts = {
-    demandFresh: obs.filter(o => o.type === "demand" && o.state !== "mitigated").length,
-    demandMit: obs.filter(o => o.type === "demand" && o.state === "mitigated").length,
-    supplyFresh: obs.filter(o => o.type === "supply" && o.state !== "mitigated").length,
-    fvgUnfilled: (m.fvgs || []).filter(g => g.state === "unfilled").length,
-  };
+  const zs = m.zone_stats || { demand: {}, supply: {}, fvg: {} };
+  const rateTone = v => v == null ? "ink" : v >= 70 ? "gn" : v >= 50 ? "amb" : "rd";
   // resting-liquidity density: each pool weighted by proximity to price + equal-touch count
   const L = m.liquidity, cur = m.cur_close;
   const pools = []
@@ -880,16 +906,16 @@ function SMCMitigationHeat({ m, state }) {
   return (
     <div className="smc-2col">
       <div>
-        <div className="label-cap" style={{ marginBottom: 6 }}>ZONE INVENTORY · this timeframe</div>
+        <div className="label-cap" style={{ marginBottom: 6 }}>ZONE RESPECT · replayed on {m.bars} bars</div>
         <table className="dtable">
-          <thead><tr><th>Zone type</th><th className="r">Unmitigated</th><th className="r">Mitigated</th></tr></thead>
+          <thead><tr><th>Zone</th><th className="r">Tested</th><th className="r">Respected</th><th className="r">Rate</th></tr></thead>
           <tbody>
-            <tr><td className="mono">Demand OB</td><td className="r mono kpi-tone--gn">{counts.demandFresh}</td><td className="r mono dim">{counts.demandMit}</td></tr>
-            <tr><td className="mono">Supply OB</td><td className="r mono kpi-tone--rd">{counts.supplyFresh}</td><td className="r mono dim">{obs.filter(o=>o.type==="supply"&&o.state==="mitigated").length}</td></tr>
-            <tr><td className="mono">FVG</td><td className="r mono kpi-tone--cy">{counts.fvgUnfilled}</td><td className="r mono dim">{(m.fvgs||[]).filter(g=>g.state==="filled").length}</td></tr>
+            <tr><td className="mono">Demand OB</td><td className="r mono">{zs.demand.tested ?? 0}</td><td className="r mono">{zs.demand.respected ?? 0}</td><td className={`r mono kpi-tone--${rateTone(zs.demand.rate)}`}>{zs.demand.rate != null ? zs.demand.rate + "%" : "—"}</td></tr>
+            <tr><td className="mono">Supply OB</td><td className="r mono">{zs.supply.tested ?? 0}</td><td className="r mono">{zs.supply.respected ?? 0}</td><td className={`r mono kpi-tone--${rateTone(zs.supply.rate)}`}>{zs.supply.rate != null ? zs.supply.rate + "%" : "—"}</td></tr>
+            <tr><td className="mono">FVG fill</td><td className="r mono">{zs.fvg.total ?? 0}</td><td className="r mono">{zs.fvg.filled ?? 0}</td><td className={`r mono kpi-tone--amb`}>{zs.fvg.rate != null ? zs.fvg.rate + "%" : "—"}</td></tr>
           </tbody>
         </table>
-        <div className="mono dim2" style={{ fontSize: 10, marginTop: 6 }}>Per-zone respect hit-rate needs a trade-outcome backtest (not computed here) — counts above are live structure only.</div>
+        <div className="mono dim2" style={{ fontSize: 10, marginTop: 6 }}>Respect = price re-entered the zone then closed back out within 3 bars. Replayed on this timeframe's real bars (not a trade log).</div>
       </div>
       <div>
         <div className="label-cap" style={{ marginBottom: 6 }}>RESTING LIQUIDITY · density</div>
@@ -1080,18 +1106,31 @@ function SMCVoidOTE({ m, state }) {
 }
 
 function SMCKillSMT({ m, state }) {
-  // Kill-zones need intraday session timestamps and SMT needs a correlated-pair
-  // feed — neither is available to this daily/weekly engine. Show honest status
-  // rather than fabricated session times / divergence.
+  const sym = (m && m.ticker) || "";
+  const intr = useSmcIntraday(sym);
+  const kz = smcKillZones(intr && intr.bars);
+  const smt = m && m.smt;
   return (
     <div className="smc-sub smc-2col">
       <div>
-        <div className="label-cap" style={{ marginBottom: 6 }}>KILL ZONES · session edge</div>
-        <div className="smc-empty mono dim2">— session-timing kill-zones need intraday (1H) bars; this engine runs on {(_smcUsable(m) && m.tf) || "higher-timeframe"} candles. Use the intraday chart for session edge.</div>
+        <div className="label-cap" style={{ marginBottom: 6 }}>KILL ZONES · 1H session edge (ET)</div>
+        {!intr ? <SmcEmpty state="loading" what="intraday sessions" />
+          : kz && kz.sessions.length ? kz.sessions.map((s, i) => {
+            const active = s.z === kz.active && i === kz.sessions.length - 1;
+            const tone = active ? "gn" : s.sweptHigh ? "cy" : s.sweptLow ? "rd" : "ink";
+            const note = active ? "ACTIVE now" : s.sweptHigh ? `swept high ${smcMoney(s.hi)}` : s.sweptLow ? `swept low ${smcMoney(s.lo)}` : `${smcMoney(s.lo)}–${smcMoney(s.hi)}`;
+            return <div key={i} className={`smc-row smc-row--${tone}`}><span className="mono">{s.z}</span><span className="mono dim2">{s.day}</span><span className={`mono ${active ? "up" : "dim2"}`}>{note}</span></div>;
+          }) : <div className="smc-empty mono dim2">— no intraday bars returned for {sym}</div>}
       </div>
       <div>
-        <div className="label-cap" style={{ marginBottom: 6 }}>SMT DIVERGENCE</div>
-        <div className="smc-empty mono dim2">— SMT needs a synced correlated-pair / sector-ETF feed (not wired). Compare relative strength on the Technicals lens for now.</div>
+        <div className="label-cap" style={{ marginBottom: 6 }}>SMT DIVERGENCE · vs {smt ? smt.ref : "SPY"}</div>
+        {smt ? <>
+          <div className={`smc-row smc-row--${smt.type === "bullish" ? "gn" : smt.type === "bearish" ? "rd" : "ink"}`}>
+            <span className="mono">{sym}</span>
+            <span className={`mono ${smt.type === "bullish" ? "up" : smt.type === "bearish" ? "dn" : "dim2"}`}>{smt.type.toUpperCase()}</span>
+          </div>
+          <div className="mono dim" style={{ fontSize: 11, marginTop: 6 }}>{smt.note}.</div>
+        </> : <SmcEmpty state={state} what="SMT divergence" />}
       </div>
     </div>
   );
