@@ -11,7 +11,7 @@ function lensSummary(ticker, mode, kind, techData, smc) {
   const money = v => (typeof v === "number" && isFinite(v)) ? "$" + v.toFixed(2) : "—";
   let score, label, verdict, bullets;
   if (kind === "smc") {
-    label = "SMC Entry Grade";
+    label = "SMC Structure Score";
     if (smc && smc.ok) {   // real engine model
       score = cl(smc.smc_score);
       verdict = score >= 80 ? "A" : score >= 70 ? "B+" : score >= 60 ? "B" : score >= 50 ? "C" : "D";

@@ -401,7 +401,9 @@ def _sector_etf(ticker: str) -> str:
     return "SPY"
 
 
-def detect(df: pd.DataFrame, meta: Dict[str, Any], ticker: str) -> Dict[str, Any]:
+def detect(df: pd.DataFrame, meta: Dict[str, Any], ticker: str, light: bool = False) -> Dict[str, Any]:
+    # light=True skips the SPY/sector SMT fetch, OHLC, spark and zone-stats replay —
+    # used by the score backtest to evaluate smc_score point-in-time at speed.
     tf = meta.get("tf", "Daily")
     if df is None or len(df) < 30:
         return {"ok": False, "message": "insufficient bars for SMC", "bars": 0}
@@ -426,6 +428,9 @@ def detect(df: pd.DataFrame, meta: Dict[str, Any], ticker: str) -> Dict[str, Any
 
     # composite SMC score (0-100): bias conviction + discount/premium alignment +
     # unmitigated OB present + structure freshness. Transparent, bar-derived.
+    # NOTE: this is a STRUCTURE-QUALITY score, not a return forecast — backtested
+    # corr to forward return ≈ 0 (see docs/smc_score_validation.md). Do not retune
+    # the discount/premium weights on a single regime.
     score = 50
     if struct["bias"] == "bull":
         score += 12
@@ -450,6 +455,11 @@ def detect(df: pd.DataFrame, meta: Dict[str, Any], ticker: str) -> Dict[str, Any
     headline = "BULL BoS" if (struct["bias"] == "bull" and bos and bos["dir"] == "up") else \
                "BEAR BoS" if (struct["bias"] == "bear" and bos and bos["dir"] == "down") else \
                ("CHoCH " + (struct["last_dir"] or "").upper() if choch else struct["bias"].upper())
+
+    if light:
+        return {"ok": True, "bars": int(len(df)), "cur_close": round(cur, 2),
+                "bias": struct["bias"], "smc_score": score, "range": rng,
+                "draw_on_liquidity": draw, "tf": tf}
 
     spark = [round(float(x), 2) for x in df["Close"].tail(48).tolist()]
     _tail = df.tail(60)

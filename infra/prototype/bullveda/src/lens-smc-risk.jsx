@@ -250,7 +250,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
               <Pill tone="gn" small>{nUnmit} fresh OB{nUnmit === 1 ? "" : "s"} · {bias === "bull" ? "dip-buy zones" : bias === "bear" ? "rip-sell zones" : "watch zones"}</Pill>
               {nFVGu > 0 ? <Pill tone="cy" small>{nFVGu} open gap{nFVGu === 1 ? "" : "s"} · price magnets</Pill> : <Pill tone="ink" small>no open gaps</Pill>}
               {draw && <Pill tone="amb" small>target {smcMoney(draw.price)}</Pill>}
-              <Pill tone={biasTone} small>conviction {m.smc_score}/100</Pill>
+              <Pill tone={biasTone} small>structure {m.smc_score}/100</Pill>
             </> : <Pill tone="amb" small>{state === "loading" ? "loading live bars…" : "no live structure"}</Pill>}
           </div>
         </div>
@@ -269,7 +269,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
               note: lastEvt ? `${lastEvt.dir} @ ${smcMoney(lastEvt.price)} · ${lastEvt.date}` : "no break of structure" },
             { lens: "Range", verdict: zone.toUpperCase(), tone: zoneTone, note: `${m.range.pct}% of ${smcMoney(m.range.lo)}–${smcMoney(m.range.hi)}` },
             { lens: "Draw", verdict: draw ? smcMoney(draw.price) : "—", tone: "cy", note: draw ? draw.side + " liquidity" : "none in bias direction" },
-            { lens: "Score", verdict: String(m.smc_score), tone: biasTone, note: "composite · bar-derived" },
+            { lens: "Score", verdict: String(m.smc_score), tone: biasTone, note: "structure quality (not a return forecast)" },
           ]} /> : <SmcEmpty state={state} what="SMC structure" />}
         </div>
       </div>
