@@ -140,7 +140,12 @@ if [ $EXIT_CODE -eq 0 ]; then
     # 09:30, 11:30, 13:30 (post-close). ml_edge_predictions.json persists between.
     ML_EXIT=0
     if [ "$_HHMM" -lt 615 ] || [ "$_HHMM" -eq 930 ] || [ "$_HHMM" -eq 1130 ] || [ "$_HHMM" -eq 1330 ]; then
-        "$PYTHON" -m ml.run_ml_edge >> "$LOG_FILE" 2>&1
+        # --max-tickers 500: ML inference extracts features per ticker (Parquet
+        # archive, else a live 400d EODHD fetch). all_scored grew to ~1,171, and the
+        # archive-miss fall-through made this take ~3h (2026-06-05). Cap to the top
+        # 500 (by scan order = highest-score/actionable) → minutes, covers every BUY/
+        # WATCH/Elite. The long tail doesn't need surfaced predictions.
+        "$PYTHON" -m ml.run_ml_edge --max-tickers 500 >> "$LOG_FILE" 2>&1
         ML_EXIT=$?
     else
         echo "ML inference skipped — not a 4x anchor (pre/09:30/11:30/13:30)" >> "$LOG_FILE"
