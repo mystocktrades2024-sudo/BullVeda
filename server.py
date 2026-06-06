@@ -7490,7 +7490,7 @@ async def options_chain_api(sym: str):
     # weeklies AND monthlies (term structure + position/invest horizons), not just 0-5 DTE.
     try:
         import datetime as _dt
-        _to = (_dt.date.today() + _dt.timedelta(days=140)).isoformat()
+        _to = (_dt.date.today() + _dt.timedelta(days=400)).isoformat()   # out to LEAPS
         chain = schwab_client.get_chains(sym, contract_type="ALL", strike_count=16,
                                          include_underlying=True, to_date=_to)
     except Exception as e:
@@ -7502,7 +7502,7 @@ async def options_chain_api(sym: str):
                 "spot": _schwab_spot_fallback(sym)}
 
     try:
-        greeks = schwab_client.extract_chain_greeks(chain, max_expirations=12)
+        greeks = schwab_client.extract_chain_greeks(chain, max_expirations=24)
     except Exception as e:
         return {"sym": sym, "error": f"extract_chain_greeks failed: {e}",
                 "spot": chain.get("underlyingPrice") or _schwab_spot_fallback(sym)}
@@ -7558,6 +7558,18 @@ async def options_chain_api(sym: str):
             "expiration": ex.get("expiration"),
             "strikes": strikes,
         })
+
+    # Sample expirations across the WHOLE curve (weeklies → monthlies → LEAPS) so
+    # Swing/Position/Invest each have real contracts — not just the nearest weeklies.
+    if len(out_exps) > 12:
+        targets = [0, 3, 7, 14, 30, 45, 60, 90, 120, 180, 270, 365]
+        picked, used = [], set()
+        for t in targets:
+            best = min(out_exps, key=lambda e: abs((e.get("dte") or 0) - t))
+            bd = best.get("dte")
+            if bd not in used:
+                used.add(bd); picked.append(best)
+        out_exps = sorted(picked, key=lambda e: e.get("dte") or 0)
 
     # ATM = strike closest to spot in the nearest expiration
     atm = None

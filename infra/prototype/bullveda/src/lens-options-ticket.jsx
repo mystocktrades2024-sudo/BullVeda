@@ -31,14 +31,16 @@ function LensOptions({ ticker, mode }) {
   const chain = useOptions(ticker.symbol);
   const loading = chain === null, none = chain === false;
   const exps = (chain && chain.expirations) || [];
-  // mode prefers longer-dated; real feed is near-term only → pick the longest available
-  const wantDte = mode === "POSITION" ? 9999 : mode === "INVESTMENT" ? 99999 : 4;
+  // mode → target DTE: swing = weekly, position = ~2-3mo, invest = LEAP (~9mo+)
+  const wantDte = mode === "POSITION" ? 75 : mode === "INVESTMENT" ? 270 : 5;
   const [dte, setDte] = useOT(null);
+  // mode is the driver: re-target the DTE whenever the horizon changes or the chain
+  // loads. Manual chip clicks set dte directly and persist until the next mode change.
   React.useEffect(() => {
     if (!exps.length) return;
     const pick = exps.reduce((a, e) => Math.abs(e.dte - wantDte) < Math.abs(a.dte - wantDte) ? e : a, exps[0]);
-    setDte(d => d == null || !exps.some(e => e.dte === d) ? pick.dte : d);
-  }, [chain, mode]);
+    setDte(pick.dte);
+  }, [mode, exps.length]);
 
   // build the REAL ATM ticket from the selected expiration
   const o = useOTm(() => {
