@@ -30,12 +30,13 @@ def _beta(a: np.ndarray, ref: np.ndarray) -> Optional[float]:
 
 def detect(df: pd.DataFrame, meta: Dict[str, Any], ticker: str) -> Dict[str, Any]:
     tf = meta.get("tf", "Daily")
-    if df is None or len(df) < 40:
-        return {"ok": False, "message": "insufficient bars for risk", "bars": 0}
+    min_bars = 24 if tf == "Monthly" else 40   # monthly history is naturally shorter
+    if df is None or len(df) < min_bars:
+        return {"ok": False, "message": f"needs ≥{min_bars} {tf.lower()} bars for risk metrics", "bars": int(len(df) if df is not None else 0)}
     c = df["Close"].astype(float)
     rets = c.pct_change().dropna().values
-    if len(rets) < 30:
-        return {"ok": False, "message": "insufficient returns", "bars": int(len(df))}
+    if len(rets) < min_bars - 4:
+        return {"ok": False, "message": f"needs ≥{min_bars} {tf.lower()} bars", "bars": int(len(df))}
     win = rets[-126:] if len(rets) >= 126 else rets
     sd = float(np.std(win, ddof=1))
     mean = float(np.mean(win))
@@ -49,8 +50,10 @@ def detect(df: pd.DataFrame, meta: Dict[str, Any], ticker: str) -> Dict[str, Any
     cvar95 = float(-np.mean(tail)) if len(tail) else -p5
     var95_h = float(-p5)
 
-    # annualized Sharpe / Sortino (rf≈0)
-    ann = np.sqrt(252.0)
+    # annualized Sharpe / Sortino (rf≈0) — annualization factor by BAR frequency
+    # (daily=252, weekly=52, monthly=12); using √252 on weekly/monthly over-states ~2-4×.
+    ann_n = {"Daily": 252.0, "Weekly": 52.0, "Monthly": 12.0}.get(tf, 252.0)
+    ann = np.sqrt(ann_n)
     sharpe = float(mean / sd * ann) if sd > 0 else 0.0
     downside = win[win < 0]
     dsd = float(np.std(downside, ddof=1)) if len(downside) > 1 else sd
@@ -74,21 +77,22 @@ def detect(df: pd.DataFrame, meta: Dict[str, Any], ticker: str) -> Dict[str, Any
         except Exception:
             beta = None
 
-    # horizon scaling for cones / VaR (1 = daily for swing)
-    hd = {"Daily": 1, "Weekly": 5, "Monthly": 21}.get(tf, 1)
-    sig_h = sd * np.sqrt(hd) if hd > 1 else sd
-
+    # cones = the natural per-bar σ for this timeframe (1σ/2σ/3σ of ONE daily/weekly/
+    # monthly move). No extra horizon scaling — sd is already the per-bar stdev.
+    period = {"Daily": "1d", "Weekly": "1wk", "Monthly": "1mo"}.get(tf, "1d")
     cones = []
     for k in (1, 2, 3):
-        cones.append({"k": k, "pct": round(sig_h * k * 100, 1),
-                      "lo": round(cur * (1 - sig_h * k), 2), "hi": round(cur * (1 + sig_h * k), 2)})
+        cones.append({"k": k, "pct": round(sd * k * 100, 1),
+                      "lo": round(cur * (1 - sd * k), 2), "hi": round(cur * (1 + sd * k), 2)})
 
     return {
         "ok": True,
         "bars": int(len(df)),
         "cur_close": round(cur, 2),
         "tf": tf,
-        "vol_1d_pct": round(sd * 100, 2),
+        "period": period,
+        "vol_bar_pct": round(sd * 100, 2),
+        "vol_1d_pct": round(sd * 100, 2),   # alias (per-bar) — kept for back-compat
         "vol_ann_pct": round(sd * ann * 100, 1),
         "var95_pct": round(var95_p * 100, 2),
         "var99_pct": round(var99_p * 100, 2),
@@ -98,6 +102,5 @@ def detect(df: pd.DataFrame, meta: Dict[str, Any], ticker: str) -> Dict[str, Any
         "sortino_126d": round(sortino, 2),
         "max_dd_pct": round(maxdd * 100, 1),
         "beta": beta,
-        "hd": hd,
         "cones": cones,
     }

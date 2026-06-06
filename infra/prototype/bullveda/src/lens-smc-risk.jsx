@@ -889,9 +889,9 @@ function RiskCones({ rm, state }) {
   return (
     <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
       {rm.cones.map((c, i) => (
-        <KpiTile key={i} label={`${rm.hd === 1 ? "1d" : rm.hd + "d"} · ${c.k}σ`} value={`±${c.pct}%`} tone={tone[i]} sub={band(c)} />
+        <KpiTile key={i} label={`${rm.period || "1d"} · ${c.k}σ`} value={`±${c.pct}%`} tone={tone[i]} sub={band(c)} />
       ))}
-      <KpiTile label="Vol · annualized" value={`${rm.vol_ann_pct}%`} tone="amb" sub={`${rm.vol_1d_pct}% daily`} />
+      <KpiTile label="Vol · annualized" value={`${rm.vol_ann_pct}%`} tone="amb" sub={`${rm.vol_bar_pct ?? rm.vol_1d_pct}% per ${rm.period || "1d"}`} />
     </div>
   );
 }
@@ -901,7 +901,7 @@ function VarTable({ rm, sz, state }) {
   const notional = sz.ok ? sz.notional : 0;
   const dollar = (p) => sz.ok ? `−$${Math.round(p / 100 * notional)} (${sz.shares} sh)` : "—";
   const rows = [
-    { metric: `VaR · ${rm.hd === 1 ? "1d" : rm.hd + "d"} · 95% (parametric)`, v: `−${rm.var95_pct}%`, abs: dollar(rm.var95_pct), tone: rm.var95_pct > 5 ? "rd" : "amb" },
+    { metric: `VaR · ${rm.period || "1d"} · 95% (parametric)`, v: `−${rm.var95_pct}%`, abs: dollar(rm.var95_pct), tone: rm.var95_pct > 5 ? "rd" : "amb" },
     { metric: "VaR · 95% (historical)", v: `−${rm.var95_hist_pct}%`, abs: dollar(rm.var95_hist_pct), tone: "amb" },
     { metric: "CVaR · 95% (tail avg)", v: `−${rm.cvar95_pct}%`, abs: dollar(rm.cvar95_pct), tone: "rd" },
     { metric: "VaR · 99% (parametric)", v: `−${rm.var99_pct}%`, abs: dollar(rm.var99_pct), tone: "rd" },
