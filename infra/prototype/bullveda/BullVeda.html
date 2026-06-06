@@ -21594,18 +21594,6 @@ function SMCEntryModel({ m, state }) {
 }
 </script>
 <script>/* src/lens-earnings-options.jsx */
-function PEADPanel({ ticker }) {
-  const rows = [
-    { sc: "After a BEAT", tone: "gn", pts: [["T+1", "+1.8%"], ["T+5", "+3.4%"], ["T+10", "+4.9%"]] },
-    { sc: "After a MISS", tone: "rd", pts: [["T+1", "\u22122.1%"], ["T+5", "\u22121.2%"], ["T+10", "+0.3%"]] },
-    { sc: "In-line", tone: "amb", pts: [["T+1", "+0.2%"], ["T+5", "+0.6%"], ["T+10", "+1.1%"]] }
-  ];
-  const sinceP = (ticker && ticker.symbol || "X").charCodeAt(0) % 9 + 1;
-  const inWindow = sinceP <= 10;
-  const pos = Math.min(100, sinceP / 10 * 100);
-  const realized = +(4.9 * (sinceP / 10)).toFixed(1);
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "pead-now" }, /* @__PURE__ */ React.createElement("div", { className: "pead-now-h mono dim2" }, "DRIFT WINDOW \xB7 last print ", sinceP, "d ago ", inWindow ? `\xB7 ${10 - sinceP} sessions of edge left` : "\xB7 window closed"), /* @__PURE__ */ React.createElement("div", { className: "pead-track" }, /* @__PURE__ */ React.createElement("span", { className: "pead-track-fill", style: { width: `${pos}%` } }), /* @__PURE__ */ React.createElement("span", { className: "pead-now-mark", style: { left: `${pos}%` }, title: `T+${sinceP} \xB7 ~${realized}% captured` }, /* @__PURE__ */ React.createElement("span", { className: "pead-now-dot" }), /* @__PURE__ */ React.createElement("span", { className: "pead-now-lbl mono" }, "NOW \xB7 T+", sinceP)), /* @__PURE__ */ React.createElement("span", { className: "pead-track-end mono dim" }, "T+0"), /* @__PURE__ */ React.createElement("span", { className: "pead-track-end pead-track-end--r mono dim" }, "T+10"))), /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "Beat \u2192 +10d drift", value: "+4.9%", tone: "gn", sub: "median \xB7 12-Q" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Miss \u2192 +10d drift", value: "+0.3%", tone: "amb", sub: "mean-reverts" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Beat continuation", value: "73%", tone: "gn", sub: "positive 10-day" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "PEAD edge", value: "TRADEABLE", tone: "gn", sub: "drift > noise floor" })), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 12, display: "flex", flexDirection: "column", gap: 8 } }, rows.map((r, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: { display: "grid", gridTemplateColumns: "118px 1fr", gap: 14, alignItems: "center" } }, /* @__PURE__ */ React.createElement(Pill, { tone: r.tone, small: true }, r.sc), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 16 } }, r.pts.map(([t, v], j) => /* @__PURE__ */ React.createElement("span", { key: j, className: "mono", style: { fontSize: 12 } }, /* @__PURE__ */ React.createElement("span", { className: "dim2", style: { fontSize: 10 } }, t), " ", /* @__PURE__ */ React.createElement("b", { className: v.indexOf("\u2212") === 0 ? "dn" : "up" }, v))))))), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { marginTop: 10, fontSize: 11, lineHeight: 1.5 } }, "Beats drift ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "+4.9% over 10 sessions"), " (9 of last 12 Q) while misses mean-revert \u2014 a positive post-earnings-announcement-drift edge. Add on a confirmed beat into the T+1 gap; the drift sits above the noise floor."));
-}
 function findEarnings(ticker) {
   const sym = (ticker && ticker.symbol || "").split(".")[0].toUpperCase();
   const list = window.__BV && window.__BV.earningsBeat || [];
@@ -21617,14 +21605,128 @@ function erMoney(v) {
 function erPct(v, d = 1) {
   return typeof v === "number" && isFinite(v) ? v.toFixed(d) + "%" : "\u2014";
 }
+function _en(v) {
+  const n = typeof v === "string" ? parseFloat(v) : v;
+  return typeof n === "number" && isFinite(n) ? n : null;
+}
+function _emid(leg) {
+  if (!leg) return null;
+  const b = _en(leg.bid), a = _en(leg.ask);
+  return b != null && a != null && a > 0 ? (b + a) / 2 : _en(leg.mark);
+}
+function useEarningsHistory(ticker) {
+  const pre = ticker._fund && ticker._fund.earnings_history || ticker.earningsHistory || null;
+  const [h, setH] = React.useState(pre);
+  React.useEffect(() => {
+    const p = ticker._fund && ticker._fund.earnings_history || ticker.earningsHistory;
+    if (p && p.length) {
+      setH(p);
+      return;
+    }
+    const BV = window.__BV;
+    if (!BV || !BV.get || !ticker.symbol) {
+      setH([]);
+      return;
+    }
+    let on = true;
+    setH(null);
+    BV.get("/api/fundamentals/" + encodeURIComponent(ticker.symbol)).then((f) => {
+      if (on) setH(f && f.earnings_history || []);
+    }).catch(() => {
+      if (on) setH([]);
+    });
+    return () => {
+      on = false;
+    };
+  }, [ticker.symbol]);
+  return h;
+}
+function earningsStats(hist) {
+  if (!hist) return null;
+  const surp = (e) => {
+    const a = _en(e.epsActual), es = _en(e.epsEstimate);
+    return a != null && es ? (a - es) / Math.abs(es) * 100 : _en(e.surprisePercent);
+  };
+  const upcoming = hist.filter((e) => _en(e.epsActual) == null && e.reportDate).slice(-2).reverse();
+  const past = hist.filter((e) => _en(e.epsActual) != null).slice(0, 8);
+  const surps = past.map(surp).filter((s) => s != null);
+  const beats = surps.filter((s) => s >= 0).length;
+  const next = upcoming[0] || null;
+  const nextDate = next ? (next.reportDate || "").slice(0, 10) : null;
+  const nextDays = nextDate ? Math.round((Date.parse(nextDate) - Date.now()) / 864e5) : null;
+  return {
+    upcoming,
+    past: past.map((e) => ({ date: (e.reportDate || "").slice(0, 10), est: _en(e.epsEstimate), act: _en(e.epsActual), surp: surp(e), baM: e.beforeAfterMarket || "" })),
+    n: surps.length,
+    beats,
+    beatRate: surps.length ? beats / surps.length * 100 : null,
+    avgSurp: surps.length ? surps.reduce((a, b) => a + b, 0) / surps.length : null,
+    next,
+    nextDate,
+    nextDays,
+    nextEst: next ? _en(next.epsEstimate) : null,
+    nextBaM: next ? next.beforeAfterMarket || "" : ""
+  };
+}
+function useEarningsImpliedMove(ticker, nextDate) {
+  const [im, setIm] = React.useState(null);
+  React.useEffect(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.get || !ticker.symbol) {
+      setIm(false);
+      return;
+    }
+    let on = true;
+    setIm(null);
+    BV.get("/api/options/" + encodeURIComponent(ticker.symbol)).then((ch) => {
+      if (!on) return;
+      if (!ch || !ch.expirations || !ch.expirations.length || !ch.spot) {
+        setIm(false);
+        return;
+      }
+      const spot = ch.spot, tgt = nextDate ? Date.parse(nextDate) / 1e3 : null;
+      let exp;
+      if (tgt) {
+        const after = ch.expirations.filter((e) => Date.parse(e.expiration) / 1e3 >= tgt - 86400);
+        exp = after.length ? after[0] : ch.expirations[ch.expirations.length - 1];
+      } else exp = ch.expirations[0];
+      const ss = (exp.strikes || []).filter((s) => s.call && s.put);
+      if (!ss.length) {
+        setIm(false);
+        return;
+      }
+      const atm = ss.reduce((a, s) => Math.abs(s.strike - spot) < Math.abs(a.strike - spot) ? s : a, ss[0]);
+      const cm = _emid(atm.call), pm = _emid(atm.put), straddle = (cm || 0) + (pm || 0);
+      setIm({ pct: spot ? straddle / spot * 100 : null, straddle, spot, strike: atm.strike, expiry: exp.expiration, dte: exp.dte, coversER: tgt ? Date.parse(exp.expiration) / 1e3 >= tgt - 86400 : true });
+    }).catch(() => {
+      if (on) setIm(false);
+    });
+    return () => {
+      on = false;
+    };
+  }, [ticker.symbol, nextDate]);
+  return im;
+}
+function EarningsHistoryReal({ es }) {
+  if (!es || !es.past.length) return /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2", style: { padding: 14 } }, "No reported-earnings history in the feed for this name.");
+  const ests = es.past.map((p) => p.est).filter((v) => v != null).reverse();
+  const w = 150, hh = 38, mn = Math.min(...ests), mx = Math.max(...ests);
+  const sx = (i) => 4 + i / Math.max(1, ests.length - 1) * (w - 8);
+  const sy = (v) => hh - 4 - (v - mn) / (mx - mn || 1) * (hh - 8);
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "er-bh-badge" }, /* @__PURE__ */ React.createElement(Pill, { tone: es.beatRate >= 60 ? "gn" : es.beatRate >= 40 ? "amb" : "rd", small: true, dot: true }, es.beats, " / ", es.n, " BEATS \xB7 ", es.beatRate != null ? es.beatRate.toFixed(0) + "% WR" : "\u2014"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "avg surprise ", es.avgSurp != null ? (es.avgSurp >= 0 ? "+" : "") + es.avgSurp.toFixed(1) + "%" : "\u2014", " \xB7 EPS actual vs estimate")), /* @__PURE__ */ React.createElement("table", { className: "dtable er-bh-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Report date"), /* @__PURE__ */ React.createElement("th", null, "Session"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "EPS est"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "EPS act"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Surprise"), /* @__PURE__ */ React.createElement("th", null, "Result"))), /* @__PURE__ */ React.createElement("tbody", null, es.past.map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, r.date)), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, r.baM || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim2" }, r.est != null ? "$" + r.est.toFixed(2) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, /* @__PURE__ */ React.createElement("b", null, r.act != null ? "$" + r.act.toFixed(2) : "\u2014")), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${r.surp >= 0 ? "up" : "dn"}` }, r.surp != null ? (r.surp >= 0 ? "+" : "") + r.surp.toFixed(1) + "%" : "\u2014"), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: r.surp >= 0 ? "gn" : "rd", small: true }, r.surp >= 0 ? "BEAT" : "MISS")))))), ests.length >= 3 && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, marginTop: 10, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 4 } }, "EPS estimate trend (oldest \u2192 newest)"), /* @__PURE__ */ React.createElement("svg", { width: w, height: hh, style: { display: "block" } }, /* @__PURE__ */ React.createElement("polyline", { points: ests.map((v, i) => `${sx(i)},${sy(v)}`).join(" "), fill: "none", stroke: ests[ests.length - 1] >= ests[0] ? "var(--gn)" : "var(--rd)", strokeWidth: "1.8" }), /* @__PURE__ */ React.createElement("circle", { cx: sx(ests.length - 1), cy: sy(ests[ests.length - 1]), r: "3", fill: ests[ests.length - 1] >= ests[0] ? "var(--gn)" : "var(--rd)" }))), /* @__PURE__ */ React.createElement("span", { className: "mono dim2", style: { fontSize: 11 } }, "Analyst EPS estimates have ", /* @__PURE__ */ React.createElement("b", { className: ests[ests.length - 1] >= ests[0] ? "up" : "dn" }, ests[ests.length - 1] >= ests[0] ? "risen" : "fallen"), " from $", ests[0].toFixed(2), " \u2192 $", ests[ests.length - 1].toFixed(2), " over the shown quarters \u2014 rising estimates tend to precede beats.")));
+}
 function LensEarnings({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("er-1");
   const s2 = useStateToggle("er-2");
   const s3 = useStateToggle("er-3");
   const s4 = useStateToggle("er-4");
   const row = findEarnings(ticker);
+  const ehist = useEarningsHistory(ticker);
+  const es = React.useMemo(() => earningsStats(ehist), [ehist]);
+  const im0 = useEarningsImpliedMove(ticker, es && es.nextDate);
   if (!row) {
-    return /* @__PURE__ */ React.createElement("div", { className: "lens lens--er" }, /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2", style: { padding: "16px" } }, "No scheduled-earnings prediction for ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, ticker && ticker.symbol || "this name"), " in the beat-watchlist (covers names reporting in the next ~2 weeks). Earnings analytics \u2014 implied move, beat probability, history and event sizing \u2014 appear here once a report is scheduled."))));
+    const loading = ehist === null;
+    return /* @__PURE__ */ React.createElement("div", { className: "lens lens--er" }, es && es.nextDate ? /* @__PURE__ */ React.createElement("div", { className: "er-ck" }, /* @__PURE__ */ React.createElement("div", { className: "er-ck-top" }, /* @__PURE__ */ React.createElement("span", { className: "er-ck-title mono" }, "\u231B NEXT EARNINGS"), /* @__PURE__ */ React.createElement("span", { className: "er-ck-meta mono" }, ticker.symbol, " \xB7 not in the 2-week beat-watchlist \u2014 real history + implied move")), /* @__PURE__ */ React.createElement("div", { className: "er-ck-stats" }, /* @__PURE__ */ React.createElement("div", { className: "er-ck-stat" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Days to report"), /* @__PURE__ */ React.createElement("div", { className: "er-ck-stat-v mono amb" }, es.nextDays != null ? es.nextDays : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, es.nextDate, " \xB7 ", es.nextBaM || "")), /* @__PURE__ */ React.createElement("div", { className: "er-ck-stat" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Consensus EPS"), /* @__PURE__ */ React.createElement("div", { className: "er-ck-stat-v mono" }, es.nextEst != null ? "$" + es.nextEst.toFixed(2) : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "street estimate")), /* @__PURE__ */ React.createElement("div", { className: "er-ck-stat" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, es.nextDays != null && es.nextDays <= 16 ? "Implied move \xB7 print" : "Implied range"), /* @__PURE__ */ React.createElement("div", { className: "er-ck-stat-v mono amb" }, im0 && im0.pct != null ? "\xB1" + im0.pct.toFixed(1) + "%" : im0 === null ? "\u2026" : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, im0 && im0.straddle != null ? `straddle $${im0.straddle.toFixed(2)} \xB7 ${im0.dte}d exp` : "ATM straddle")), /* @__PURE__ */ React.createElement("div", { className: "er-ck-stat" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Beat rate"), /* @__PURE__ */ React.createElement("div", { className: "er-ck-stat-v mono gn-c" }, es.beatRate != null ? es.beatRate.toFixed(0) + "%" : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, es.n, "Q history")))) : /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2", style: { padding: 16 } }, loading ? "Loading earnings history\u2026" : /* @__PURE__ */ React.createElement(React.Fragment, null, "No scheduled earnings or reported history found for ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, ticker.symbol), " (may be an ETF or a name outside coverage).")))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(SectionHeader, { n: 1, title: "Beat History", sub: `${es ? es.n : 0}-quarter EPS beat/miss record`, style: headerStyle }), /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(EarningsHistoryReal, { es }))), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 Earnings"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, es && es.nextDate ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("b", null, ticker.symbol), " reports ", /* @__PURE__ */ React.createElement("b", null, es.nextBaM || "", " ", es.nextDate), " (", es.nextDays, "d)", im0 && im0.pct != null ? es.nextDays != null && es.nextDays <= 16 ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 options price a ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "\xB1", im0.pct.toFixed(1), "%"), " move on the print") : /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 options price a ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "\xB1", im0.pct.toFixed(1), "%"), " range through the ", im0.dte, "d expiry (ER too far to isolate the jump)") : "", ". History: ", /* @__PURE__ */ React.createElement("b", { className: es.beatRate >= 60 ? "up" : "" }, es.beatRate != null ? es.beatRate.toFixed(0) + "%" : "\u2014"), " beat over ", es.n, "Q, avg surprise ", es.avgSurp != null ? (es.avgSurp >= 0 ? "+" : "") + es.avgSurp.toFixed(1) + "%" : "\u2014", ". Not in the 2-week beat-watchlist \u2014 no model beat-score yet.") : /* @__PURE__ */ React.createElement(React.Fragment, null, "No upcoming earnings date in the feed for ", ticker.symbol, "."))));
   }
   const b = row.breakdown || {};
   const im = b.implied_move || {}, hist = b.historical || {}, kel = b.kelly_sizing || {}, au = b.analyst_upside || {}, liq = b.liquidity || {};
@@ -21660,7 +21762,7 @@ function LensEarnings({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "er-3" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s3.value, source: "earnings history" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, patt.length ? /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } }, patt.map((ch, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: `pill pill--sm pill--${ch === "B" ? "gn" : "rd"}` }, ch === "B" ? "BEAT" : "MISS")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2", style: { marginLeft: 8 } }, hist.rate != null ? hist.rate.toFixed(0) + "% beat rate" : "", " \xB7 median +", hist.median_surprise_pct != null ? hist.median_surprise_pct.toFixed(1) : "\u2014", "% surprise (oldest \u2192 newest)")) : /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 no beat history in feed")))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s3.value, source: "EODHD \xB7 reported earnings history" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, es && es.past.length ? /* @__PURE__ */ React.createElement(EarningsHistoryReal, { es }) : patt.length ? /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } }, patt.map((ch, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: `pill pill--sm pill--${ch === "B" ? "gn" : "rd"}` }, ch === "B" ? "BEAT" : "MISS")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2", style: { marginLeft: 8 } }, hist.rate != null ? hist.rate.toFixed(0) + "% beat rate" : "", " (model pattern)")) : /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 no beat history in feed")))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 4,
@@ -21677,86 +21779,6 @@ function LensEarnings({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
     { lens: "Event size", verdict: kel.kelly_frac > 0 ? (kel.kelly_frac * 100).toFixed(0) + "%" : "0%", tone: kel.kelly_frac > 0 ? "gn" : "rd", note: kel.cap_reason ? kel.cap_reason.replace(/_/g, " ") : "Kelly" },
     { lens: "History", verdict: hist.pattern || "\u2014", tone: hist.rate >= 70 ? "gn" : "amb", note: `${hist.rate != null ? hist.rate.toFixed(0) + "%" : "\u2014"} beat` }
   ] }))), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 Earnings"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, row.tier ? /* @__PURE__ */ React.createElement("b", { className: `kpi-tone--${tierTone}` }, row.tier) : null, " beat-setup \xB7 reports ", /* @__PURE__ */ React.createElement("b", null, row.before_after || "", " ", row.report_date || ""), " (", row.days_to_earnings, "d). Options price a ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "\xB1", erPct(im.implied_move_pct, 1)), " move; model win-prob ", /* @__PURE__ */ React.createElement("b", { className: "up" }, kel.win_prob != null ? (kel.win_prob * 100).toFixed(0) + "%" : "\u2014"), ", history ", /* @__PURE__ */ React.createElement("b", { className: "up" }, hist.rate != null ? hist.rate.toFixed(0) + "%" : "\u2014"), " beat over ", hist.n_quarters || "\u2014", "Q.", kel.kelly_frac > 0 ? /* @__PURE__ */ React.createElement(React.Fragment, null, " Event-Kelly favors a ", /* @__PURE__ */ React.createElement("b", { className: "up" }, (kel.kelly_frac * 100).toFixed(0), "%"), " position.") : /* @__PURE__ */ React.createElement(React.Fragment, null, " Straddle too rich vs edge \u2014 ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "event-Kelly 0%"), " (don't pay up)."))));
-}
-function ImpliedMoveCone() {
-  return /* @__PURE__ */ React.createElement("svg", { viewBox: "0 0 300 130", width: "300", height: "130", style: { overflow: "visible" } }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("linearGradient", { id: "ic-gn", x1: "0", y1: "0", x2: "0", y2: "1" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: "var(--gn)", stopOpacity: "0.32" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: "var(--gn)", stopOpacity: "0" })), /* @__PURE__ */ React.createElement("linearGradient", { id: "ic-rd", x1: "0", y1: "1", x2: "0", y2: "0" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: "var(--rd)", stopOpacity: "0.30" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: "var(--rd)", stopOpacity: "0" }))), /* @__PURE__ */ React.createElement("line", { x1: "20", y1: "65", x2: "280", y2: "65", stroke: "var(--line)", strokeDasharray: "3 3" }), /* @__PURE__ */ React.createElement("path", { d: "M 20 65 Q 150 14 280 14 L 280 65 L 20 65 Z", fill: "url(#ic-gn)" }), /* @__PURE__ */ React.createElement("path", { d: "M 20 65 Q 150 116 280 116 L 280 65 L 20 65 Z", fill: "url(#ic-rd)" }), /* @__PURE__ */ React.createElement(
-    "path",
-    {
-      d: "M 20 65 Q 150 14 280 14",
-      stroke: "var(--gn)",
-      strokeWidth: "1.6",
-      fill: "none",
-      style: { filter: "drop-shadow(0 0 5px var(--gn))" }
-    }
-  ), /* @__PURE__ */ React.createElement(
-    "path",
-    {
-      d: "M 20 65 Q 150 116 280 116",
-      stroke: "var(--rd)",
-      strokeWidth: "1.6",
-      fill: "none",
-      style: { filter: "drop-shadow(0 0 5px var(--rd))" }
-    }
-  ), /* @__PURE__ */ React.createElement(
-    "circle",
-    {
-      cx: "20",
-      cy: "65",
-      r: "4",
-      fill: "var(--copper)",
-      style: { filter: "drop-shadow(0 0 8px var(--copper))" }
-    }
-  ), /* @__PURE__ */ React.createElement("text", { x: "20", y: "128", fontSize: "9", className: "mono", textAnchor: "start", fill: "var(--ink-2)" }, "T\u221211"), /* @__PURE__ */ React.createElement(
-    "line",
-    {
-      x1: "230",
-      y1: "0",
-      x2: "230",
-      y2: "130",
-      stroke: "var(--amb)",
-      strokeWidth: "1.4",
-      strokeDasharray: "2 3",
-      style: { filter: "drop-shadow(0 0 4px var(--amb))" }
-    }
-  ), /* @__PURE__ */ React.createElement(
-    "rect",
-    {
-      x: "200",
-      y: "0",
-      width: "62",
-      height: "14",
-      rx: "7",
-      fill: "color-mix(in oklab, var(--amb) 22%, transparent)",
-      stroke: "var(--amb)",
-      strokeWidth: "0.8"
-    }
-  ), /* @__PURE__ */ React.createElement("text", { x: "231", y: "10", fontSize: "8.5", className: "mono", textAnchor: "middle", fill: "var(--amb)", letterSpacing: "0.10em" }, "ER \xB7 JUN 09"), /* @__PURE__ */ React.createElement("text", { x: "276", y: "11", fontSize: "10", className: "mono", textAnchor: "end", fill: "var(--gn)", fontWeight: "500" }, "+6.4%"), /* @__PURE__ */ React.createElement("text", { x: "276", y: "125", fontSize: "10", className: "mono", textAnchor: "end", fill: "var(--rd)", fontWeight: "500" }, "\u22126.4%"));
-}
-function ERHistory() {
-  const rows = [
-    { q: "Q1 FY26", date: "03-Mar-2026", est: 1.5, act: 1.57, eps: "+4.6%", rev: "+2.8%", rx: "+5.4%", cont: "+2.1%", tape: "BEAT+GAP+DRIFT", t: "gn" },
-    { q: "Q4 FY25", date: "11-Dec-2025", est: 1.39, act: 1.49, eps: "+7.2%", rev: "+4.1%", rx: "+8.1%", cont: "+3.4%", tape: "BEAT+GAP+DRIFT", t: "gn" },
-    { q: "Q3 FY25", date: "04-Sep-2025", est: 1.28, act: 1.33, eps: "+3.9%", rev: "+1.6%", rx: "+1.2%", cont: "\u22121.8%", tape: "BEAT+FADE", t: "amb" },
-    { q: "Q2 FY25", date: "05-Jun-2025", est: 1.2, act: 1.28, eps: "+6.5%", rev: "+3.2%", rx: "+6.2%", cont: "+1.9%", tape: "BEAT+GAP+DRIFT", t: "gn" },
-    { q: "Q1 FY25", date: "06-Mar-2025", est: 1.06, act: 1.15, eps: "+8.4%", rev: "+5.0%", rx: "+9.6%", cont: "+4.3%", tape: "BEAT+RUNAWAY", t: "gn" },
-    { q: "Q4 FY24", date: "05-Dec-2024", est: 1.03, act: 1.07, eps: "+4.2%", rev: "+1.4%", rx: "+3.8%", cont: "+0.4%", tape: "BEAT+GAP", t: "gn" },
-    { q: "Q3 FY24", date: "05-Sep-2024", est: 0.92, act: 0.98, eps: "+6.1%", rev: "+2.3%", rx: "+4.1%", cont: "+1.6%", tape: "BEAT+GAP+DRIFT", t: "gn" },
-    { q: "Q2 FY24", date: "06-Jun-2024", est: 0.88, act: 0.93, eps: "+5.7%", rev: "+2.7%", rx: "+3.5%", cont: "+2.6%", tape: "BEAT+GAP+DRIFT", t: "gn" }
-  ];
-  const sgn = (v) => v.indexOf("\u2212") === 0 ? "dn" : "up";
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "er-bh-badge" }, /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true, dot: true }, "8 / 8 BEATS \xB7 WR 100%"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "avg surprise +5.8% \xB7 perfect beat record")), /* @__PURE__ */ React.createElement("table", { className: "dtable er-bh-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Quarter"), /* @__PURE__ */ React.createElement("th", null, "Report date"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "EPS est"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "EPS act"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "EPS surp"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Rev surp"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "1-day Rx"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "5-day cont"), /* @__PURE__ */ React.createElement("th", null, "Tape"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, r.q)), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, r.date), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim2" }, "$", r.est.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, /* @__PURE__ */ React.createElement("b", null, "$", r.act.toFixed(2))), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular up" }, r.eps), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular up" }, r.rev), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${sgn(r.rx)}` }, r.rx), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${sgn(r.cont)}` }, r.cont), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: r.t, small: true }, r.tape)))))));
-}
-function AnalystRevisions() {
-  const est = [1.41, 1.42, 1.44, 1.46, 1.48, 1.5];
-  const w = 150, hh = 38, mn = Math.min(...est), mx = Math.max(...est);
-  const sx = (i) => 4 + i / (est.length - 1) * (w - 8);
-  const sy = (v) => hh - 4 - (v - mn) / (mx - mn || 1) * (hh - 8);
-  const rows = [
-    { p: "Next Q \xB7 Q2 FY26", now: "$1.52", ago: "$1.44", d: "+5.6%", up: 9, dn: 1 },
-    { p: "FY26", now: "$6.05", ago: "$5.78", d: "+4.7%", up: 11, dn: 2 },
-    { p: "FY27", now: "$7.10", ago: "$6.80", d: "+4.4%", up: 8, dn: 1 }
-  ];
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "Consensus EPS \xB7 next Q", value: "$1.50", tone: "ink", sub: "from $1.44 \xB7 90d ago" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "90-day revision", value: "+6.4%", tone: "gn", sub: "estimate raised" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Up : Down revisions", value: "9 : 1", tone: "gn", sub: "last 90 days" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Revision trend", value: "RISING", tone: "gn", sub: "bullish lead" })), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 16, marginTop: 12, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 4 } }, "Consensus estimate \xB7 6-mo trend"), /* @__PURE__ */ React.createElement("svg", { width: w, height: hh, style: { display: "block" } }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("linearGradient", { id: "er-rev-g", x1: "0", y1: "0", x2: "0", y2: "1" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: "var(--gn)", stopOpacity: "0.3" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: "var(--gn)", stopOpacity: "0" }))), /* @__PURE__ */ React.createElement("path", { d: `M ${sx(0)},${hh - 4} L ${est.map((v, i) => `${sx(i)},${sy(v)}`).join(" L ")} L ${sx(est.length - 1)},${hh - 4} Z`, fill: "url(#er-rev-g)" }), /* @__PURE__ */ React.createElement("polyline", { points: est.map((v, i) => `${sx(i)},${sy(v)}`).join(" "), fill: "none", stroke: "var(--gn)", strokeWidth: "1.8" }), /* @__PURE__ */ React.createElement("circle", { cx: sx(est.length - 1), cy: sy(est[est.length - 1]), r: "3", fill: "var(--gn)" }))), /* @__PURE__ */ React.createElement("table", { className: "dtable", style: { flex: 1, minWidth: 280 } }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Horizon"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Now"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "90d ago"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "\u0394"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Up/Dn"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, r.p)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, r.now), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim2" }, r.ago), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular up" }, r.d), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, /* @__PURE__ */ React.createElement("span", { className: "up" }, r.up), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "/"), /* @__PURE__ */ React.createElement("span", { className: "dn" }, r.dn))))))), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { marginTop: 10, fontSize: 11, lineHeight: 1.5 } }, "Estimate revisions are the single best leading indicator of beats \u2014 ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "rising consensus"), " (+6.4% over 90d, 9 up vs 1 down) plus positive Zacks ESP (+4.1%) precede upside surprises. The drift in estimates is the early tell before the print."));
 }
 function ERCockpit({ row }) {
   const b = row && row.breakdown || {};
@@ -22261,67 +22283,78 @@ function FactorPanel() {
   ];
   return /* @__PURE__ */ React.createElement("table", { className: "dtable" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Factor"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Pre"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Post"), /* @__PURE__ */ React.createElement("th", null, "\u0394"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Cap"))), /* @__PURE__ */ React.createElement("tbody", null, factors.map((f, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, f.f), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, f.pre.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular kpi-tone--${f.tone}` }, f.post.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: `mono ${f.post > f.pre ? "up" : "dn"}` }, f.post - f.pre >= 0 ? "+" : "", (f.post - f.pre).toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, f.cap.toFixed(2))))));
 }
+function tapeData(ticker) {
+  const holders = Array.isArray(ticker.holders) ? ticker.holders : ticker.holders ? Object.values(ticker.holders) : [];
+  const insider = Array.isArray(ticker.insiderTx) ? ticker.insiderTx : ticker.insiderTx ? Object.values(ticker.insiderTx) : [];
+  const sp = ticker.pillars && typeof ticker.pillars.sentiment === "number" ? ticker.pillars.sentiment : ticker.pillarPct && typeof ticker.pillarPct.sentiment === "number" ? ticker.pillarPct.sentiment : null;
+  const sentNorm = typeof sp === "number" ? +(sp / 50 - 1).toFixed(2) : null;
+  const er = ticker.earnings && ticker.earnings.days != null ? ticker.earnings : null;
+  return { holders, insider, sentNorm, er, any: !!(holders.length || insider.length || sentNorm != null) };
+}
 function LensTape({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("tp-1");
   const s2 = useStateToggle("tp-2");
   const s3 = useStateToggle("tp-3");
   const s4 = useStateToggle("tp-4");
   const s5 = useStateToggle("tp-5");
-  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--tape" }, /* @__PURE__ */ React.createElement("div", { className: "hero tape-hero" }, /* @__PURE__ */ React.createElement("div", { className: "th-left" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Tape read \xB7 30 days"), /* @__PURE__ */ React.createElement("div", { className: "th-score" }, /* @__PURE__ */ React.createElement("div", { className: "th-score-num mono" }, "+12"), /* @__PURE__ */ React.createElement(Pill, { tone: "gn", dot: true }, "net insider buys"), /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true }, "Sentiment +0.42")), /* @__PURE__ */ React.createElement("div", { className: "th-pill-row" }, /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true }, "16 articles \xB7 12 pos / 3 neg"), /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true }, "4 13F adds \xB7 1 trim"), /* @__PURE__ */ React.createElement(Pill, { tone: "copper", small: true }, "3 catalysts in window"))), /* @__PURE__ */ React.createElement("div", { className: "th-right" }, /* @__PURE__ */ React.createElement(SentimentDial, null))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  const td = tapeData(ticker);
+  const insBuys = td.insider.filter((x) => /^(P|BUY)/i.test(x.transactionCode || x.action || "")).length;
+  const insSells = td.insider.filter((x) => /^(S|SELL)/i.test(x.transactionCode || x.action || "")).length;
+  const netIns = insBuys - insSells;
+  const sentTone = td.sentNorm == null ? "ink" : td.sentNorm > 0.15 ? "gn" : td.sentNorm < -0.15 ? "rd" : "amb";
+  if (!td.any) {
+    return /* @__PURE__ */ React.createElement("div", { className: "lens lens--tape" }, /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2", style: { padding: "16px" } }, "No tape data loaded for ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, ticker && ticker.symbol || "this name"), " yet \u2014 13F holders, insider transactions and the sentiment pillar come from the per-ticker fundamentals fetch. ", ticker && ticker._loading ? "Loading\u2026" : "Open from the scan (or wait for enrichment) to populate."))));
+  }
+  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--tape" }, /* @__PURE__ */ React.createElement("div", { className: "hero tape-hero" }, /* @__PURE__ */ React.createElement("div", { className: "th-left" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Tape read \xB7 ", ticker && ticker.symbol || ""), /* @__PURE__ */ React.createElement("div", { className: "th-score" }, /* @__PURE__ */ React.createElement("div", { className: "th-score-num mono" }, netIns >= 0 ? "+" : "", netIns), /* @__PURE__ */ React.createElement(Pill, { tone: netIns > 0 ? "gn" : netIns < 0 ? "rd" : "ink", dot: true }, "net insider ", netIns >= 0 ? "buys" : "sells"), td.sentNorm != null && /* @__PURE__ */ React.createElement(Pill, { tone: sentTone, small: true }, "sentiment ", td.sentNorm >= 0 ? "+" : "", td.sentNorm)), /* @__PURE__ */ React.createElement("div", { className: "th-pill-row" }, /* @__PURE__ */ React.createElement(Pill, { tone: td.insider.length ? "gn" : "ink", small: true }, td.insider.length, " insider tx"), /* @__PURE__ */ React.createElement(Pill, { tone: td.holders.length ? "gn" : "ink", small: true }, td.holders.length, " 13F holders"), td.er && /* @__PURE__ */ React.createElement(Pill, { tone: "copper", small: true }, "ER in ", td.er.days, "d"))), /* @__PURE__ */ React.createElement("div", { className: "th-right" }, /* @__PURE__ */ React.createElement(SentimentDial, { sentNorm: td.sentNorm }))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 1,
-      title: "News Timeline \xB7 30 days",
-      sub: "dated \xB7 scored \xB7 linked",
+      title: "News Timeline",
+      sub: "per-ticker dated \xB7 scored",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "tp-1" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s1.value, source: "EODHD \xB7 news + sentiment" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(NewsTimeline, null)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s1.value, source: "EODHD \xB7 per-ticker news" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(NewsTimeline, { ticker })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 2,
       title: "Insider Transactions",
-      sub: "Form 4 \xB7 last 90 days \xB7 net direction",
+      sub: "Form 4 \xB7 net direction",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "tp-2" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s2.value, source: "EODHD \xB7 InsiderTransactions" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(InsiderTable, null)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s2.value, source: "EODHD \xB7 InsiderTransactions" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(InsiderTable, { rows: td.insider })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 3,
-      title: "Sentiment Distribution",
-      sub: "article-level \xB7 publisher-weighted",
-      style: headerStyle,
-      right: /* @__PURE__ */ React.createElement(StateToggle, { name: "tp-3" })
-    }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s3.value, source: "EODHD \xB7 news sentiment + bespoke" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "Net sentiment 30d", value: "+0.42", tone: "gn", sub: "bullish" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Article count", value: "16", tone: "ink" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Source breadth", value: "11", tone: "ink", sub: "distinct outlets" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Tone trend", value: "\u2191 rising", tone: "gn" }))))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
-    SectionHeader,
-    {
-      n: 4,
       title: "13F Holders",
-      sub: "top 8 institutional \xB7 qty-on-qty changes",
+      sub: "institutional ownership \xB7 qty-on-qty change",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "tp-4" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s4.value, source: "EODHD \xB7 Holders" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(HoldersTable, null)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s4.value, source: "EODHD \xB7 Holders" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(HoldersTable, { rows: td.holders })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
-      n: 5,
-      title: "Catalyst Calendar \xB7 90d",
-      sub: "ER \xB7 industry events \xB7 regulatory \xB7 sector cycles",
+      n: 4,
+      title: "Earnings Catalyst",
+      sub: "next scheduled report in the hold window",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "tp-5" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s5.value, source: "EODHD \xB7 calendar + industry feed" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "catcal" }, /* @__PURE__ */ React.createElement("div", { className: "cat-countdown" }, /* @__PURE__ */ React.createElement("span", { className: "cat-cd-n mono" }, "11", /* @__PURE__ */ React.createElement("span", { className: "cat-cd-u" }, "d")), /* @__PURE__ */ React.createElement("div", { className: "cat-cd-body" }, /* @__PURE__ */ React.createElement("span", { className: "cat-cd-lbl mono dim2" }, "NEXT CATALYST \xB7 Jun 09"), /* @__PURE__ */ React.createElement("span", { className: "cat-cd-evt mono" }, "Q1 FY26 earnings \xB7 BMO ", /* @__PURE__ */ React.createElement("span", { className: "cat-cd-imp" }, "high impact"))), /* @__PURE__ */ React.createElement("span", { className: "cat-cd-warn mono" }, "\u26A0 inside swing window \u2014 size \u221225% / flatten T\u22122")), /* @__PURE__ */ React.createElement("div", { className: "cat-row cat-amb" }, /* @__PURE__ */ React.createElement("span", { className: "cat-when mono" }, "Jun 09 \xB7 11d"), /* @__PURE__ */ React.createElement("span", { className: "cat-label" }, "Q1 FY26 earnings \xB7 BMO"), /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "high")), /* @__PURE__ */ React.createElement("div", { className: "cat-row cat-copper" }, /* @__PURE__ */ React.createElement("span", { className: "cat-when mono" }, "Jun 27"), /* @__PURE__ */ React.createElement("span", { className: "cat-label" }, "BMO Materials conference \xB7 CEO presenting"), /* @__PURE__ */ React.createElement(Pill, { tone: "ink", small: true }, "med")), /* @__PURE__ */ React.createElement("div", { className: "cat-row cat-gn" }, /* @__PURE__ */ React.createElement("span", { className: "cat-when mono" }, "Aug 12 \xB7 78d"), /* @__PURE__ */ React.createElement("span", { className: "cat-label" }, "Akron capacity ribbon-cut \xB7 +18% volume"), /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "high")))))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(SectionHeader, { n: 6, title: "Cross-Lens Confluence", style: headerStyle }), /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CrossLens, { lead: "violet", cells: [
-    { lens: "Tape", verdict: "+12 INS", tone: "gn", note: "net insider buys 90d" },
-    { lens: "Sentiment", verdict: "+0.42", tone: "gn", note: "rising trend \xB7 16 art" },
-    { lens: "Holders", verdict: "4 ADDS", tone: "gn", note: "Citadel +2.1%, Two Sigma +1.4%" },
-    { lens: "Catalyst", verdict: "3 IN", tone: "amb", note: "ER + capacity event soon" },
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s5.value, source: "earnings calendar" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, td.er ? /* @__PURE__ */ React.createElement("div", { className: "catcal" }, /* @__PURE__ */ React.createElement("div", { className: "cat-countdown" }, /* @__PURE__ */ React.createElement("span", { className: "cat-cd-n mono" }, td.er.days, /* @__PURE__ */ React.createElement("span", { className: "cat-cd-u" }, "d")), /* @__PURE__ */ React.createElement("div", { className: "cat-cd-body" }, /* @__PURE__ */ React.createElement("span", { className: "cat-cd-lbl mono dim2" }, "NEXT EARNINGS", td.er.date ? " \xB7 " + td.er.date : ""), /* @__PURE__ */ React.createElement("span", { className: "cat-cd-evt mono" }, "scheduled report ", /* @__PURE__ */ React.createElement("span", { className: "cat-cd-imp" }, "high impact"))), td.er.days <= 7 && /* @__PURE__ */ React.createElement("span", { className: "cat-cd-warn mono" }, "\u26A0 inside swing window \u2014 size \u221225% / flatten T\u22122"))) : /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 no scheduled earnings in the window")))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(SectionHeader, { n: 5, title: "Cross-Lens Confluence", style: headerStyle }), /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CrossLens, { lead: "violet", cells: [
+    { lens: "Insider", verdict: `${netIns >= 0 ? "+" : ""}${netIns}`, tone: netIns > 0 ? "gn" : netIns < 0 ? "rd" : "ink", note: `${insBuys} buys / ${insSells} sells` },
+    { lens: "Sentiment", verdict: td.sentNorm != null ? `${td.sentNorm >= 0 ? "+" : ""}${td.sentNorm}` : "\u2014", tone: sentTone, note: "pillar score" },
+    { lens: "Holders", verdict: `${td.holders.length}`, tone: td.holders.length ? "gn" : "ink", note: "13F institutions" },
+    { lens: "Earnings", verdict: td.er ? `${td.er.days}d` : "\u2014", tone: "amb", note: td.er ? "in window" : "none scheduled" },
     { lens: "Risk", verdict: "OK", tone: "gn", note: "tape doesn't override risk" }
-  ] }))), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 Tape"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "Insider buys + holder adds + rising sentiment + 3 catalysts in window =", /* @__PURE__ */ React.createElement("b", { className: "copper" }, " confirming wind."), " Tape reads bullish.")));
+  ] }))), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 Tape"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "Insider net ", /* @__PURE__ */ React.createElement("b", { className: netIns > 0 ? "up" : netIns < 0 ? "dn" : "" }, netIns >= 0 ? "+" : "", netIns), " (", insBuys, " buys / ", insSells, " sells) \xB7", td.sentNorm != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " sentiment ", /* @__PURE__ */ React.createElement("b", { className: sentTone === "gn" ? "up" : sentTone === "rd" ? "dn" : "warn" }, td.sentNorm >= 0 ? "+" : "", td.sentNorm), " \xB7") : null, " ", td.holders.length, " institutional holders", td.er ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 earnings in ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, td.er.days, "d")) : "", ".")));
 }
-function SentimentDial() {
-  const v = 0.42;
+function SentimentDial({ sentNorm }) {
+  const have = typeof sentNorm === "number";
+  const v = have ? Math.max(-1, Math.min(1, sentNorm)) : 0;
+  const tone = !have ? "ink-3" : v > 0.15 ? "gn" : v < -0.15 ? "rd" : "amb";
+  const lbl = !have ? "NO DATA" : v > 0.15 ? "BULLISH" : v < -0.15 ? "BEARISH" : "NEUTRAL";
+  const txt = have ? (v >= 0 ? "+" : "") + v.toFixed(2) : "\u2014";
   const angle = -90 + v * 90;
   const tipX = 100 + 64 * Math.cos(angle * Math.PI / 180);
   const tipY = 110 + 64 * Math.sin(angle * Math.PI / 180);
@@ -22373,46 +22406,66 @@ function SentimentDial() {
       textAnchor: "middle",
       className: "mono",
       fontSize: "16",
-      fill: "var(--gn)",
+      fill: `var(--${tone})`,
       fontWeight: "500",
-      style: { filter: "drop-shadow(0 0 8px color-mix(in oklab, var(--gn) 40%, transparent))" }
+      style: { filter: `drop-shadow(0 0 8px color-mix(in oklab, var(--${tone}) 40%, transparent))` }
     },
-    "+0.42"
-  ), /* @__PURE__ */ React.createElement("text", { x: "100", y: "142", textAnchor: "middle", className: "mono", fontSize: "9", fill: "var(--ink-3)", letterSpacing: "0.18em" }, "BULLISH"));
+    txt
+  ), /* @__PURE__ */ React.createElement("text", { x: "100", y: "142", textAnchor: "middle", className: "mono", fontSize: "9", fill: "var(--ink-3)", letterSpacing: "0.18em" }, lbl));
 }
-function NewsTimeline() {
-  const items = [
-    { d: "May 26", t: "Q1 preview note \u2014 Truist", s: "+0.6", tone: "gn" },
-    { d: "May 22", t: "Capacity expansion progress update", s: "+0.8", tone: "gn" },
-    { d: "May 18", t: "Insider purchase \xB7 COO 8,200 sh", s: "+0.5", tone: "gn" },
-    { d: "May 14", t: "Sector specialty-chem cycle peak warning", s: "\u22120.4", tone: "rd" },
-    { d: "May 09", t: "Goldman initiates BUY \xB7 PT $78", s: "+0.7", tone: "gn" },
-    { d: "May 02", t: "Q4 results recap \xB7 margin expansion", s: "+0.6", tone: "gn" }
-  ];
+function NewsTimeline({ ticker }) {
+  const raw = ticker && Array.isArray(ticker.news_articles) ? ticker.news_articles : [];
+  if (!raw.length) {
+    return /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 per-ticker news not in this feed (market-level news lives on the Markets tab)");
+  }
+  const items = raw.slice(0, 8).map((a) => {
+    const sc = typeof a.sentiment === "number" ? a.sentiment : a.sentiment && a.sentiment.polarity || 0;
+    return {
+      d: (a.date || a.published || "").slice(5, 10).replace("-", "/"),
+      t: a.title || a.headline || "\u2014",
+      s: (sc >= 0 ? "+" : "") + sc.toFixed(1),
+      tone: sc > 0.15 ? "gn" : sc < -0.15 ? "rd" : "ink"
+    };
+  });
   return /* @__PURE__ */ React.createElement("div", { className: "news-tl" }, items.map((it, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `news-row news-${it.tone}` }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2 news-when" }, it.d), /* @__PURE__ */ React.createElement("span", { className: "mono news-title" }, it.t), /* @__PURE__ */ React.createElement("span", { className: `mono news-score kpi-tone--${it.tone}` }, it.s))));
 }
-function InsiderTable() {
-  const rows = [
-    { date: "May 22", who: "B. Hsiang \xB7 CFO", action: "BUY", sh: 5e3, px: 64.2, val: 321e3, tone: "gn" },
-    { date: "May 18", who: "K. Patel \xB7 COO", action: "BUY", sh: 8200, px: 63.1, val: 517420, tone: "gn" },
-    { date: "May 12", who: "J. Roeber \xB7 10%", action: "SELL", sh: 2400, px: 65.8, val: 157920, tone: "rd" },
-    { date: "May 05", who: "M. Vance \xB7 DIR", action: "BUY", sh: 1800, px: 60.5, val: 108900, tone: "gn" },
-    { date: "Apr 29", who: "B. Hsiang \xB7 CFO", action: "BUY", sh: 4e3, px: 59.1, val: 236400, tone: "gn" }
-  ];
-  return /* @__PURE__ */ React.createElement("table", { className: "dtable" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Date"), /* @__PURE__ */ React.createElement("th", null, "Who"), /* @__PURE__ */ React.createElement("th", null, "Action"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Shares"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Price"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Value"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, r.date), /* @__PURE__ */ React.createElement("td", { className: "mono" }, r.who), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: r.tone, small: true }, r.action)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, r.sh.toLocaleString()), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, "$", r.px.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular kpi-tone--${r.tone}` }, "$", r.val.toLocaleString())))));
+function InsiderTable({ rows }) {
+  const src = Array.isArray(rows) ? rows : [];
+  if (!src.length) return /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 no insider transactions on file");
+  const mapped = src.slice(0, 8).map((r) => {
+    var _a, _b, _c, _d, _e, _f;
+    const code = (r.transactionCode || r.action || "").toUpperCase();
+    const isBuy = /^(P|BUY|A)/.test(code);
+    const isSell = /^(S|SELL|D)/.test(code);
+    const sh = Number((_c = (_b = (_a = r.transactionAmount) != null ? _a : r.sh) != null ? _b : r.shares) != null ? _c : 0) || 0;
+    const px = Number((_f = (_e = (_d = r.transactionPrice) != null ? _d : r.px) != null ? _e : r.price) != null ? _f : 0) || 0;
+    return {
+      date: (r.transactionDate || r.date || "").slice(5, 10).replace("-", "/"),
+      who: r.ownerName || r.who || r.name || "\u2014",
+      action: isBuy ? "BUY" : isSell ? "SELL" : code || "\u2014",
+      sh,
+      px,
+      val: sh * px,
+      tone: isBuy ? "gn" : isSell ? "rd" : "ink"
+    };
+  });
+  return /* @__PURE__ */ React.createElement("table", { className: "dtable" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Date"), /* @__PURE__ */ React.createElement("th", null, "Who"), /* @__PURE__ */ React.createElement("th", null, "Action"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Shares"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Price"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Value"))), /* @__PURE__ */ React.createElement("tbody", null, mapped.map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, r.date), /* @__PURE__ */ React.createElement("td", { className: "mono" }, r.who), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: r.tone, small: true }, r.action)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, r.sh.toLocaleString()), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, r.px ? "$" + r.px.toFixed(2) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular kpi-tone--${r.tone}` }, r.val ? "$" + Math.round(r.val).toLocaleString() : "\u2014")))));
 }
-function HoldersTable() {
-  const rows = [
-    { name: "Vanguard", ownPct: 9.1, delta: "+0.4%", tone: "gn" },
-    { name: "BlackRock", ownPct: 8.4, delta: "+0.2%", tone: "gn" },
-    { name: "State Street", ownPct: 4.6, delta: "0.0%", tone: "ink" },
-    { name: "Citadel", ownPct: 2.8, delta: "+2.1%", tone: "gn" },
-    { name: "Two Sigma", ownPct: 1.9, delta: "+1.4%", tone: "gn" },
-    { name: "Fidelity", ownPct: 1.4, delta: "\u22120.3%", tone: "rd" },
-    { name: "Renaissance", ownPct: 1.1, delta: "+0.6%", tone: "gn" },
-    { name: "Wellington", ownPct: 0.9, delta: "\u22120.1%", tone: "ink" }
-  ];
-  return /* @__PURE__ */ React.createElement("table", { className: "dtable" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Holder"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Own %"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "QoQ \u0394"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, r.name), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, r.ownPct.toFixed(1), "%"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular kpi-tone--${r.tone}` }, r.delta)))));
+function HoldersTable({ rows }) {
+  const src = Array.isArray(rows) ? rows : [];
+  if (!src.length) return /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 no 13F holder data on file");
+  const mapped = src.map((r) => {
+    var _a, _b, _c, _d, _e;
+    const ownPct = Number((_c = (_b = (_a = r.totalShares) != null ? _a : r.ownPct) != null ? _b : r.pct) != null ? _c : 0) || 0;
+    const ch = Number((_e = (_d = r.change_p) != null ? _d : r.delta) != null ? _e : 0);
+    return {
+      name: r.name || r.holder || "\u2014",
+      ownPct,
+      ch: Number.isFinite(ch) ? ch : 0,
+      tone: ch > 0.05 ? "gn" : ch < -0.05 ? "rd" : "ink"
+    };
+  }).sort((a, b) => b.ownPct - a.ownPct).slice(0, 8);
+  return /* @__PURE__ */ React.createElement("table", { className: "dtable" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Holder"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Own %"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "QoQ \u0394"))), /* @__PURE__ */ React.createElement("tbody", null, mapped.map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, r.name), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, r.ownPct.toFixed(1), "%"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular kpi-tone--${r.tone}` }, r.ch >= 0 ? "+" : "", r.ch.toFixed(1), "%")))));
 }
 window.LensPortfolio = LensPortfolio;
 window.LensTape = LensTape;

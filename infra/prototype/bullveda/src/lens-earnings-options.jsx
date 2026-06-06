@@ -1,56 +1,8 @@
 // lens-earnings.jsx + lens-options.jsx
 
 // ────────────────────────────────────────────────────────────
-// EARNINGS — countdown, implied-move cone, beat probability
+// EARNINGS — countdown, implied-move cone, beat probability, real history
 // ────────────────────────────────────────────────────────────
-function PEADPanel({ ticker }) {
-  const rows = [
-    { sc: "After a BEAT", tone: "gn", pts: [["T+1", "+1.8%"], ["T+5", "+3.4%"], ["T+10", "+4.9%"]] },
-    { sc: "After a MISS", tone: "rd", pts: [["T+1", "−2.1%"], ["T+5", "−1.2%"], ["T+10", "+0.3%"]] },
-    { sc: "In-line", tone: "amb", pts: [["T+1", "+0.2%"], ["T+5", "+0.6%"], ["T+10", "+1.1%"]] },
-  ];
-  // days since last print → where we sit on the drift window (demo, per-ticker)
-  const sinceP = ((((ticker && ticker.symbol) || "X").charCodeAt(0)) % 9) + 1;   // 1–9 sessions ago
-  const inWindow = sinceP <= 10;
-  const pos = Math.min(100, sinceP / 10 * 100);
-  const realized = +(4.9 * (sinceP / 10)).toFixed(1);
-  return (
-    <div>
-      <div className="pead-now">
-        <div className="pead-now-h mono dim2">DRIFT WINDOW · last print {sinceP}d ago {inWindow ? `· ${10 - sinceP} sessions of edge left` : "· window closed"}</div>
-        <div className="pead-track">
-          <span className="pead-track-fill" style={{ width: `${pos}%` }} />
-          <span className="pead-now-mark" style={{ left: `${pos}%` }} title={`T+${sinceP} · ~${realized}% captured`}><span className="pead-now-dot" /><span className="pead-now-lbl mono">NOW · T+{sinceP}</span></span>
-          <span className="pead-track-end mono dim">T+0</span><span className="pead-track-end pead-track-end--r mono dim">T+10</span>
-        </div>
-      </div>
-      <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        <KpiTile label="Beat → +10d drift" value="+4.9%" tone="gn" sub="median · 12-Q" />
-        <KpiTile label="Miss → +10d drift" value="+0.3%" tone="amb" sub="mean-reverts" />
-        <KpiTile label="Beat continuation" value="73%" tone="gn" sub="positive 10-day" />
-        <KpiTile label="PEAD edge" value="TRADEABLE" tone="gn" sub="drift > noise floor" />
-      </div>
-      <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-        {rows.map((r, i) => (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: "118px 1fr", gap: 14, alignItems: "center" }}>
-            <Pill tone={r.tone} small>{r.sc}</Pill>
-            <div style={{ display: "flex", gap: 16 }}>
-              {r.pts.map(([t, v], j) => (
-                <span key={j} className="mono" style={{ fontSize: 12 }}>
-                  <span className="dim2" style={{ fontSize: 10 }}>{t}</span>{" "}
-                  <b className={v.indexOf("−") === 0 ? "dn" : "up"}>{v}</b>
-                </span>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="mono dim2" style={{ marginTop: 10, fontSize: 11, lineHeight: 1.5 }}>
-        Beats drift <b className="up">+4.9% over 10 sessions</b> (9 of last 12 Q) while misses mean-revert — a positive post-earnings-announcement-drift edge. Add on a confirmed beat into the T+1 gap; the drift sits above the noise floor.
-      </div>
-    </div>
-  );
-}
 
 // Real upcoming-earnings prediction for this ticker (cached data_earnings.json →
 // BV.earningsBeat, no live EODHD). null when the name has no scheduled report.
@@ -61,22 +13,140 @@ function findEarnings(ticker) {
 }
 function erMoney(v) { return (typeof v === "number" && isFinite(v)) ? "$" + v.toFixed(2) : "—"; }
 function erPct(v, d = 1) { return (typeof v === "number" && isFinite(v)) ? v.toFixed(d) + "%" : "—"; }
+function _en(v) { const n = typeof v === "string" ? parseFloat(v) : v; return (typeof n === "number" && isFinite(n)) ? n : null; }
+function _emid(leg) { if (!leg) return null; const b = _en(leg.bid), a = _en(leg.ask); return (b != null && a != null && a > 0) ? (b + a) / 2 : _en(leg.mark); }
+
+// real earnings history (8 quarters) for ANY ticker — _fund first, else fetch
+function useEarningsHistory(ticker) {
+  const pre = (ticker._fund && ticker._fund.earnings_history) || ticker.earningsHistory || null;
+  const [h, setH] = React.useState(pre);
+  React.useEffect(() => {
+    const p = (ticker._fund && ticker._fund.earnings_history) || ticker.earningsHistory;
+    if (p && p.length) { setH(p); return; }
+    const BV = window.__BV; if (!BV || !BV.get || !ticker.symbol) { setH([]); return; }
+    let on = true; setH(null);
+    BV.get("/api/fundamentals/" + encodeURIComponent(ticker.symbol)).then(f => { if (on) setH((f && f.earnings_history) || []); }).catch(() => { if (on) setH([]); });
+    return () => { on = false; };
+  }, [ticker.symbol]);
+  return h;
+}
+function earningsStats(hist) {
+  if (!hist) return null;
+  const surp = e => { const a = _en(e.epsActual), es = _en(e.epsEstimate); return (a != null && es) ? (a - es) / Math.abs(es) * 100 : _en(e.surprisePercent); };
+  const upcoming = hist.filter(e => _en(e.epsActual) == null && e.reportDate).slice(-2).reverse();
+  const past = hist.filter(e => _en(e.epsActual) != null).slice(0, 8);
+  const surps = past.map(surp).filter(s => s != null);
+  const beats = surps.filter(s => s >= 0).length;
+  const next = upcoming[0] || null;
+  const nextDate = next ? (next.reportDate || "").slice(0, 10) : null;
+  const nextDays = nextDate ? Math.round((Date.parse(nextDate) - Date.now()) / 86400000) : null;
+  return {
+    upcoming, past: past.map(e => ({ date: (e.reportDate || "").slice(0, 10), est: _en(e.epsEstimate), act: _en(e.epsActual), surp: surp(e), baM: (e.beforeAfterMarket || "") })),
+    n: surps.length, beats, beatRate: surps.length ? beats / surps.length * 100 : null,
+    avgSurp: surps.length ? surps.reduce((a, b) => a + b, 0) / surps.length : null,
+    next, nextDate, nextDays, nextEst: next ? _en(next.epsEstimate) : null, nextBaM: next ? (next.beforeAfterMarket || "") : "",
+  };
+}
+// implied move for the print = ATM straddle on the expiry just after the report (real chain)
+function useEarningsImpliedMove(ticker, nextDate) {
+  const [im, setIm] = React.useState(null);
+  React.useEffect(() => {
+    const BV = window.__BV; if (!BV || !BV.get || !ticker.symbol) { setIm(false); return; }
+    let on = true; setIm(null);
+    BV.get("/api/options/" + encodeURIComponent(ticker.symbol)).then(ch => {
+      if (!on) return;
+      if (!ch || !ch.expirations || !ch.expirations.length || !ch.spot) { setIm(false); return; }
+      const spot = ch.spot, tgt = nextDate ? Date.parse(nextDate) / 1000 : null;
+      let exp;
+      if (tgt) { const after = ch.expirations.filter(e => Date.parse(e.expiration) / 1000 >= tgt - 86400); exp = after.length ? after[0] : ch.expirations[ch.expirations.length - 1]; }
+      else exp = ch.expirations[0];
+      const ss = (exp.strikes || []).filter(s => s.call && s.put);
+      if (!ss.length) { setIm(false); return; }
+      const atm = ss.reduce((a, s) => Math.abs(s.strike - spot) < Math.abs(a.strike - spot) ? s : a, ss[0]);
+      const cm = _emid(atm.call), pm = _emid(atm.put), straddle = (cm || 0) + (pm || 0);
+      setIm({ pct: spot ? straddle / spot * 100 : null, straddle, spot, strike: atm.strike, expiry: exp.expiration, dte: exp.dte, coversER: tgt ? Date.parse(exp.expiration) / 1000 >= tgt - 86400 : true });
+    }).catch(() => { if (on) setIm(false); });
+    return () => { on = false; };
+  }, [ticker.symbol, nextDate]);
+  return im;
+}
+
+// real beat-history table + estimate trend (works for any ticker)
+function EarningsHistoryReal({ es }) {
+  if (!es || !es.past.length) return <div className="smc-empty mono dim2" style={{ padding: 14 }}>No reported-earnings history in the feed for this name.</div>;
+  const ests = es.past.map(p => p.est).filter(v => v != null).reverse();   // oldest→newest for the trend
+  const w = 150, hh = 38, mn = Math.min(...ests), mx = Math.max(...ests);
+  const sx = i => 4 + (i / Math.max(1, ests.length - 1)) * (w - 8);
+  const sy = v => hh - 4 - ((v - mn) / (mx - mn || 1)) * (hh - 8);
+  return (
+    <div>
+      <div className="er-bh-badge">
+        <Pill tone={es.beatRate >= 60 ? "gn" : es.beatRate >= 40 ? "amb" : "rd"} small dot>{es.beats} / {es.n} BEATS · {es.beatRate != null ? es.beatRate.toFixed(0) + "% WR" : "—"}</Pill>
+        <span className="mono dim2">avg surprise {es.avgSurp != null ? (es.avgSurp >= 0 ? "+" : "") + es.avgSurp.toFixed(1) + "%" : "—"} · EPS actual vs estimate</span>
+      </div>
+      <table className="dtable er-bh-tbl">
+        <thead><tr><th>Report date</th><th>Session</th><th className="r">EPS est</th><th className="r">EPS act</th><th className="r">Surprise</th><th>Result</th></tr></thead>
+        <tbody>{es.past.map((r, i) => (
+          <tr key={i}>
+            <td className="mono"><b>{r.date}</b></td>
+            <td className="mono dim2">{r.baM || "—"}</td>
+            <td className="r mono tabular dim2">{r.est != null ? "$" + r.est.toFixed(2) : "—"}</td>
+            <td className="r mono tabular"><b>{r.act != null ? "$" + r.act.toFixed(2) : "—"}</b></td>
+            <td className={`r mono tabular ${r.surp >= 0 ? "up" : "dn"}`}>{r.surp != null ? (r.surp >= 0 ? "+" : "") + r.surp.toFixed(1) + "%" : "—"}</td>
+            <td><Pill tone={r.surp >= 0 ? "gn" : "rd"} small>{r.surp >= 0 ? "BEAT" : "MISS"}</Pill></td>
+          </tr>
+        ))}</tbody>
+      </table>
+      {ests.length >= 3 && <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+        <div><div className="label-cap" style={{ marginBottom: 4 }}>EPS estimate trend (oldest → newest)</div>
+          <svg width={w} height={hh} style={{ display: "block" }}>
+            <polyline points={ests.map((v, i) => `${sx(i)},${sy(v)}`).join(" ")} fill="none" stroke={ests[ests.length - 1] >= ests[0] ? "var(--gn)" : "var(--rd)"} strokeWidth="1.8" />
+            <circle cx={sx(ests.length - 1)} cy={sy(ests[ests.length - 1])} r="3" fill={ests[ests.length - 1] >= ests[0] ? "var(--gn)" : "var(--rd)"} />
+          </svg>
+        </div>
+        <span className="mono dim2" style={{ fontSize: 11 }}>Analyst EPS estimates have <b className={ests[ests.length - 1] >= ests[0] ? "up" : "dn"}>{ests[ests.length - 1] >= ests[0] ? "risen" : "fallen"}</b> from ${ests[0].toFixed(2)} → ${ests[ests.length - 1].toFixed(2)} over the shown quarters — rising estimates tend to precede beats.</span>
+      </div>}
+    </div>
+  );
+}
 
 function LensEarnings({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("er-1"); const s2 = useStateToggle("er-2");
   const s3 = useStateToggle("er-3"); const s4 = useStateToggle("er-4");
   const row = findEarnings(ticker);
+  const ehist = useEarningsHistory(ticker);
+  const es = React.useMemo(() => earningsStats(ehist), [ehist]);
+  const im0 = useEarningsImpliedMove(ticker, es && es.nextDate);
 
+  // No beat-watchlist prediction → still show REAL earnings history + next print + implied move
   if (!row) {
+    const loading = ehist === null;
     return (
       <div className="lens lens--er">
-        <div className="lens-section"><div className="lens-pad">
-          <div className="smc-empty mono dim2" style={{ padding: "16px" }}>
-            No scheduled-earnings prediction for <b className="warn">{(ticker && ticker.symbol) || "this name"}</b> in the
-            beat-watchlist (covers names reporting in the next ~2 weeks). Earnings analytics — implied move, beat
-            probability, history and event sizing — appear here once a report is scheduled.
+        {es && es.nextDate ? (
+          <div className="er-ck">
+            <div className="er-ck-top">
+              <span className="er-ck-title mono">⌛ NEXT EARNINGS</span>
+              <span className="er-ck-meta mono">{ticker.symbol} · not in the 2-week beat-watchlist — real history + implied move</span>
+            </div>
+            <div className="er-ck-stats">
+              <div className="er-ck-stat"><div className="label-cap">Days to report</div><div className="er-ck-stat-v mono amb">{es.nextDays != null ? es.nextDays : "—"}</div><div className="mono dim2">{es.nextDate} · {es.nextBaM || ""}</div></div>
+              <div className="er-ck-stat"><div className="label-cap">Consensus EPS</div><div className="er-ck-stat-v mono">{es.nextEst != null ? "$" + es.nextEst.toFixed(2) : "—"}</div><div className="mono dim2">street estimate</div></div>
+              <div className="er-ck-stat"><div className="label-cap">{es.nextDays != null && es.nextDays <= 16 ? "Implied move · print" : "Implied range"}</div><div className="er-ck-stat-v mono amb">{im0 && im0.pct != null ? "±" + im0.pct.toFixed(1) + "%" : im0 === null ? "…" : "—"}</div><div className="mono dim2">{im0 && im0.straddle != null ? `straddle $${im0.straddle.toFixed(2)} · ${im0.dte}d exp` : "ATM straddle"}</div></div>
+              <div className="er-ck-stat"><div className="label-cap">Beat rate</div><div className="er-ck-stat-v mono gn-c">{es.beatRate != null ? es.beatRate.toFixed(0) + "%" : "—"}</div><div className="mono dim2">{es.n}Q history</div></div>
+            </div>
           </div>
-        </div></div>
+        ) : (
+          <div className="lens-section"><div className="lens-pad"><div className="smc-empty mono dim2" style={{ padding: 16 }}>{loading ? "Loading earnings history…" : <>No scheduled earnings or reported history found for <b className="warn">{ticker.symbol}</b> (may be an ETF or a name outside coverage).</>}</div></div></div>
+        )}
+        <div className="lens-section">
+          <SectionHeader n={1} title="Beat History" sub={`${es ? es.n : 0}-quarter EPS beat/miss record`} style={headerStyle} />
+          <div className="lens-pad"><EarningsHistoryReal es={es} /></div>
+        </div>
+        <div className="lens-call">
+          <span className="label-cap">The Read · Earnings</span>
+          <span className="mono">{es && es.nextDate ? <><b>{ticker.symbol}</b> reports <b>{es.nextBaM || ""} {es.nextDate}</b> ({es.nextDays}d){im0 && im0.pct != null ? (es.nextDays != null && es.nextDays <= 16 ? <> · options price a <b className="warn">±{im0.pct.toFixed(1)}%</b> move on the print</> : <> · options price a <b className="warn">±{im0.pct.toFixed(1)}%</b> range through the {im0.dte}d expiry (ER too far to isolate the jump)</>) : ""}. History: <b className={es.beatRate >= 60 ? "up" : ""}>{es.beatRate != null ? es.beatRate.toFixed(0) + "%" : "—"}</b> beat over {es.n}Q, avg surprise {es.avgSurp != null ? (es.avgSurp >= 0 ? "+" : "") + es.avgSurp.toFixed(1) + "%" : "—"}. Not in the 2-week beat-watchlist — no model beat-score yet.</> : <>No upcoming earnings date in the feed for {ticker.symbol}.</>}</span>
+        </div>
       </div>
     );
   }
@@ -126,14 +196,13 @@ function LensEarnings({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
         <SectionHeader n={3} title="Beat History"
           sub={`${hist.n_quarters || 0}-quarter EPS beat/miss pattern`}
           style={headerStyle} right={<StateToggle name="er-3" />} />
-        <StateWrap state={s3.value} source="earnings history">
+        <StateWrap state={s3.value} source="EODHD · reported earnings history">
           <div className="lens-pad">
-            {patt.length ? <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              {patt.map((ch, i) => (
-                <span key={i} className={`pill pill--sm pill--${ch === "B" ? "gn" : "rd"}`}>{ch === "B" ? "BEAT" : "MISS"}</span>
-              ))}
-              <span className="mono dim2" style={{ marginLeft: 8 }}>{hist.rate != null ? hist.rate.toFixed(0) + "% beat rate" : ""} · median +{hist.median_surprise_pct != null ? hist.median_surprise_pct.toFixed(1) : "—"}% surprise (oldest → newest)</span>
-            </div> : <div className="smc-empty mono dim2">— no beat history in feed</div>}
+            {(es && es.past.length) ? <EarningsHistoryReal es={es} />
+              : patt.length ? <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                {patt.map((ch, i) => (<span key={i} className={`pill pill--sm pill--${ch === "B" ? "gn" : "rd"}`}>{ch === "B" ? "BEAT" : "MISS"}</span>))}
+                <span className="mono dim2" style={{ marginLeft: 8 }}>{hist.rate != null ? hist.rate.toFixed(0) + "% beat rate" : ""} (model pattern)</span>
+              </div> : <div className="smc-empty mono dim2">— no beat history in feed</div>}
           </div>
         </StateWrap>
       </div>
@@ -179,139 +248,9 @@ function LensEarnings({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
   );
 }
 
-function ImpliedMoveCone() {
-  return (
-    <svg viewBox="0 0 300 130" width="300" height="130" style={{ overflow: "visible" }}>
-      <defs>
-        <linearGradient id="ic-gn" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--gn)" stopOpacity="0.32" />
-          <stop offset="100%" stopColor="var(--gn)" stopOpacity="0" />
-        </linearGradient>
-        <linearGradient id="ic-rd" x1="0" y1="1" x2="0" y2="0">
-          <stop offset="0%" stopColor="var(--rd)" stopOpacity="0.30" />
-          <stop offset="100%" stopColor="var(--rd)" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <line x1="20" y1="65" x2="280" y2="65" stroke="var(--line)" strokeDasharray="3 3" />
-      {/* Filled bands */}
-      <path d="M 20 65 Q 150 14 280 14 L 280 65 L 20 65 Z" fill="url(#ic-gn)" />
-      <path d="M 20 65 Q 150 116 280 116 L 280 65 L 20 65 Z" fill="url(#ic-rd)" />
-      {/* Cone outlines */}
-      <path d="M 20 65 Q 150 14 280 14" stroke="var(--gn)" strokeWidth="1.6" fill="none"
-            style={{ filter: "drop-shadow(0 0 5px var(--gn))" }} />
-      <path d="M 20 65 Q 150 116 280 116" stroke="var(--rd)" strokeWidth="1.6" fill="none"
-            style={{ filter: "drop-shadow(0 0 5px var(--rd))" }} />
-      {/* Today marker */}
-      <circle cx="20" cy="65" r="4" fill="var(--copper)"
-              style={{ filter: "drop-shadow(0 0 8px var(--copper))" }} />
-      <text x="20" y="128" fontSize="9" className="mono" textAnchor="start" fill="var(--ink-2)">T−11</text>
-      {/* ER day */}
-      <line x1="230" y1="0" x2="230" y2="130" stroke="var(--amb)" strokeWidth="1.4" strokeDasharray="2 3"
-            style={{ filter: "drop-shadow(0 0 4px var(--amb))" }} />
-      <rect x="200" y="0" width="62" height="14" rx="7" fill="color-mix(in oklab, var(--amb) 22%, transparent)"
-            stroke="var(--amb)" strokeWidth="0.8" />
-      <text x="231" y="10" fontSize="8.5" className="mono" textAnchor="middle" fill="var(--amb)" letterSpacing="0.10em">ER · JUN 09</text>
-      <text x="276" y="11" fontSize="10" className="mono" textAnchor="end" fill="var(--gn)" fontWeight="500">+6.4%</text>
-      <text x="276" y="125" fontSize="10" className="mono" textAnchor="end" fill="var(--rd)" fontWeight="500">−6.4%</text>
-    </svg>
-  );
-}
+// (removed dead hardcoded components: ImpliedMoveCone, ERHistory, AnalystRevisions —
+//  earnings history is now real via EarningsHistoryReal)
 
-function ERHistory() {
-  const rows = [
-    { q: "Q1 FY26", date: "03-Mar-2026", est: 1.50, act: 1.57, eps: "+4.6%", rev: "+2.8%", rx: "+5.4%", cont: "+2.1%", tape: "BEAT+GAP+DRIFT", t: "gn" },
-    { q: "Q4 FY25", date: "11-Dec-2025", est: 1.39, act: 1.49, eps: "+7.2%", rev: "+4.1%", rx: "+8.1%", cont: "+3.4%", tape: "BEAT+GAP+DRIFT", t: "gn" },
-    { q: "Q3 FY25", date: "04-Sep-2025", est: 1.28, act: 1.33, eps: "+3.9%", rev: "+1.6%", rx: "+1.2%", cont: "−1.8%", tape: "BEAT+FADE", t: "amb" },
-    { q: "Q2 FY25", date: "05-Jun-2025", est: 1.20, act: 1.28, eps: "+6.5%", rev: "+3.2%", rx: "+6.2%", cont: "+1.9%", tape: "BEAT+GAP+DRIFT", t: "gn" },
-    { q: "Q1 FY25", date: "06-Mar-2025", est: 1.06, act: 1.15, eps: "+8.4%", rev: "+5.0%", rx: "+9.6%", cont: "+4.3%", tape: "BEAT+RUNAWAY", t: "gn" },
-    { q: "Q4 FY24", date: "05-Dec-2024", est: 1.03, act: 1.07, eps: "+4.2%", rev: "+1.4%", rx: "+3.8%", cont: "+0.4%", tape: "BEAT+GAP", t: "gn" },
-    { q: "Q3 FY24", date: "05-Sep-2024", est: 0.92, act: 0.98, eps: "+6.1%", rev: "+2.3%", rx: "+4.1%", cont: "+1.6%", tape: "BEAT+GAP+DRIFT", t: "gn" },
-    { q: "Q2 FY24", date: "06-Jun-2024", est: 0.88, act: 0.93, eps: "+5.7%", rev: "+2.7%", rx: "+3.5%", cont: "+2.6%", tape: "BEAT+GAP+DRIFT", t: "gn" },
-  ];
-  const sgn = v => v.indexOf("−") === 0 ? "dn" : "up";
-  return (
-    <div>
-      <div className="er-bh-badge"><Pill tone="gn" small dot>8 / 8 BEATS · WR 100%</Pill><span className="mono dim2">avg surprise +5.8% · perfect beat record</span></div>
-      <table className="dtable er-bh-tbl">
-        <thead>
-          <tr>
-            <th>Quarter</th><th>Report date</th>
-            <th className="r">EPS est</th><th className="r">EPS act</th><th className="r">EPS surp</th>
-            <th className="r">Rev surp</th><th className="r">1-day Rx</th><th className="r">5-day cont</th><th>Tape</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i}>
-              <td className="mono"><b>{r.q}</b></td>
-              <td className="mono dim">{r.date}</td>
-              <td className="r mono tabular dim2">${r.est.toFixed(2)}</td>
-              <td className="r mono tabular"><b>${r.act.toFixed(2)}</b></td>
-              <td className="r mono tabular up">{r.eps}</td>
-              <td className="r mono tabular up">{r.rev}</td>
-              <td className={`r mono tabular ${sgn(r.rx)}`}>{r.rx}</td>
-              <td className={`r mono tabular ${sgn(r.cont)}`}>{r.cont}</td>
-              <td><Pill tone={r.t} small>{r.tape}</Pill></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// ─── §3 · Analyst EPS revisions — leading edge of beat probability ──
-function AnalystRevisions() {
-  const est = [1.41, 1.42, 1.44, 1.46, 1.48, 1.50];
-  const w = 150, hh = 38, mn = Math.min(...est), mx = Math.max(...est);
-  const sx = i => 4 + (i / (est.length - 1)) * (w - 8);
-  const sy = v => hh - 4 - ((v - mn) / (mx - mn || 1)) * (hh - 8);
-  const rows = [
-    { p: "Next Q · Q2 FY26", now: "$1.52", ago: "$1.44", d: "+5.6%", up: 9, dn: 1 },
-    { p: "FY26", now: "$6.05", ago: "$5.78", d: "+4.7%", up: 11, dn: 2 },
-    { p: "FY27", now: "$7.10", ago: "$6.80", d: "+4.4%", up: 8, dn: 1 },
-  ];
-  return (
-    <div>
-      <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        <KpiTile label="Consensus EPS · next Q" value="$1.50" tone="ink" sub="from $1.44 · 90d ago" />
-        <KpiTile label="90-day revision" value="+6.4%" tone="gn" sub="estimate raised" />
-        <KpiTile label="Up : Down revisions" value="9 : 1" tone="gn" sub="last 90 days" />
-        <KpiTile label="Revision trend" value="RISING" tone="gn" sub="bullish lead" />
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
-        <div>
-          <div className="label-cap" style={{ marginBottom: 4 }}>Consensus estimate · 6-mo trend</div>
-          <svg width={w} height={hh} style={{ display: "block" }}>
-            <defs><linearGradient id="er-rev-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--gn)" stopOpacity="0.3" /><stop offset="100%" stopColor="var(--gn)" stopOpacity="0" /></linearGradient></defs>
-            <path d={`M ${sx(0)},${hh - 4} L ${est.map((v, i) => `${sx(i)},${sy(v)}`).join(" L ")} L ${sx(est.length - 1)},${hh - 4} Z`} fill="url(#er-rev-g)" />
-            <polyline points={est.map((v, i) => `${sx(i)},${sy(v)}`).join(" ")} fill="none" stroke="var(--gn)" strokeWidth="1.8" />
-            <circle cx={sx(est.length - 1)} cy={sy(est[est.length - 1])} r="3" fill="var(--gn)" />
-          </svg>
-        </div>
-        <table className="dtable" style={{ flex: 1, minWidth: 280 }}>
-          <thead><tr><th>Horizon</th><th className="r">Now</th><th className="r">90d ago</th><th className="r">Δ</th><th className="r">Up/Dn</th></tr></thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i}>
-                <td className="mono"><b>{r.p}</b></td>
-                <td className="r mono tabular">{r.now}</td>
-                <td className="r mono tabular dim2">{r.ago}</td>
-                <td className="r mono tabular up">{r.d}</td>
-                <td className="r mono tabular"><span className="up">{r.up}</span><span className="dim2">/</span><span className="dn">{r.dn}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="mono dim2" style={{ marginTop: 10, fontSize: 11, lineHeight: 1.5 }}>
-        Estimate revisions are the single best leading indicator of beats — <b className="up">rising consensus</b> (+6.4% over 90d, 9 up vs 1 down) plus positive Zacks ESP (+4.1%) precede upside surprises. The drift in estimates is the early tell before the print.
-      </div>
-    </div>
-  );
-}
-
-// ─── §1 · ER countdown + implied-move cone cockpit ──────────────────
 function ERCockpit({ row }) {
   const b = (row && row.breakdown) || {};
   const imb = b.implied_move || {}, hist = b.historical || {}, kel = b.kelly_sizing || {};
