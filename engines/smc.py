@@ -377,12 +377,35 @@ def _smt(df: pd.DataFrame, ref_df: Optional[pd.DataFrame], ref_name: str, ticker
     return {"type": "aligned", "ref": ref_name, "note": f"moving in line with {ref_name} — no divergence"}
 
 
+# SPDR sector ETF map — SMT vs the stock's OWN sector is sharper than vs SPY
+_SECTOR_ETF = {
+    "technology": "XLK", "financial": "XLF", "financial services": "XLF",
+    "healthcare": "XLV", "health care": "XLV", "energy": "XLE", "industrials": "XLI",
+    "basic materials": "XLB", "materials": "XLB", "real estate": "XLRE",
+    "utilities": "XLU", "communication services": "XLC", "communication": "XLC",
+    "consumer defensive": "XLP", "consumer staples": "XLP",
+    "consumer cyclical": "XLY", "consumer discretionary": "XLY",
+}
+def _sector_etf(ticker: str) -> str:
+    try:
+        import eodhd_client as _e
+        f = _e.fundamentals(ticker) or {}
+        sec = ((f.get("General") or {}).get("Sector") or "").lower().strip()
+        for k, v in _SECTOR_ETF.items():
+            if k in sec:
+                return v
+    except Exception:
+        pass
+    return "SPY"
+
+
 def detect(df: pd.DataFrame, meta: Dict[str, Any], ticker: str) -> Dict[str, Any]:
     tf = meta.get("tf", "Daily")
     if df is None or len(df) < 30:
         return {"ok": False, "message": "insufficient bars for SMC", "bars": 0}
     atr = _atr(df) or (float(df["Close"].iloc[-1]) * 0.02)
-    ph, pl = _pivots(df, k=2)
+    k = {"Daily": 3, "Weekly": 2, "Monthly": 2}.get(tf, 2)   # higher TF = fewer bars → smaller k
+    ph, pl = _pivots(df, k)
     struct = _structure(df, ph, pl, tf)
     obs = _order_blocks(df, struct["events"], atr)
     fvgs = _fvgs(df, atr)
@@ -430,11 +453,14 @@ def detect(df: pd.DataFrame, meta: Dict[str, Any], ticker: str) -> Dict[str, Any
 
     zone_stats = _zone_stats(df)
     smt = None
-    if (ticker or "").upper() != "SPY":
+    etf = _sector_etf(ticker)
+    if (ticker or "").upper() == etf:
+        etf = "SPY"
+    if (ticker or "").upper() != etf:
         try:
             from pattern_data import get_bars as _gb
-            ref_df, _t, _m = _gb("SPY", meta.get("mode", "SWING"))
-            smt = _smt(df, ref_df, "SPY", ticker)
+            ref_df, _t, _m = _gb(etf, meta.get("mode", "SWING"))
+            smt = _smt(df, ref_df, etf, ticker)
         except Exception:
             smt = None
 

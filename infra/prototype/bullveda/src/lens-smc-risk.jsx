@@ -102,14 +102,17 @@ function smcDecision(m) {
     else { verdict = "WATCH"; vtone = "cy"; action = "Bullish at equilibrium — wait for a discount pullback or a fresh break of structure."; }
   } else { verdict = "AVOID"; vtone = "rd"; action = `Bearish structure — no long. ${r.zone === "premium" ? "Short setup from premium toward " + smcMoney(target) + "." : "Stand aside until structure flips."}`; }
   const invalid = (entry != null && stop != null) ? `price closes ${bull ? "below" : "above"} ${smcMoney(stop)}` : `${m.tf} close ${bull ? "below" : "above"} ${smcMoney(bull ? r.lo : r.hi)}`;
-  return { verdict, vtone, action, entry, stop, target, rr, ob, invalid, bull, bear };
+  // far target = the draw sits in a liquidity void (>20% away) → R:R is real but not a "first" target
+  const targetFar = (entry != null && target != null) && (Math.abs(target - entry) / entry > 0.20);
+  return { verdict, vtone, action, entry, stop, target, rr, ob, invalid, bull, bear, targetFar };
 }
 
 function SmcQuickCard({ m }) {
   if (!_smcUsable(m)) return null;
   const d = smcDecision(m);
   if (!d) return null;
-  const rrTone = d.rr == null ? "ink" : d.rr >= 2 ? "gn" : d.rr >= 1 ? "amb" : "rd";
+  // far target ⇒ the big R:R is a liquidity-void number, not a near target — tone it amber, not green
+  const rrTone = d.rr == null ? "ink" : d.targetFar ? "amb" : d.rr >= 2 ? "gn" : d.rr >= 1 ? "amb" : "rd";
   return (
     <div className={`smc-qc smc-qc--${d.vtone}`}>
       <div className="smc-qc-l">
@@ -129,8 +132,8 @@ function SmcQuickCard({ m }) {
             <span className="label-cap">Stop</span><span className="mono dn">{smcMoney(d.stop)}</span></div>
           <div className="smc-qc-tile" title="Target — the draw on liquidity the move is reaching for.">
             <span className="label-cap">Target</span><span className="mono up">{smcMoney(d.target)}</span></div>
-          <div className="smc-qc-tile" title="Reward-to-risk if filled at the entry zone.">
-            <span className="label-cap">R:R</span><span className={`mono kpi-tone--${rrTone}`}>{d.rr != null ? d.rr.toFixed(2) + "R" : "—"}</span></div>
+          <div className="smc-qc-tile" title={d.targetFar ? "Target is the next liquidity pool >20% away (a void) — large R:R, but it's a far target, not a near one." : "Reward-to-risk if filled at the entry zone."}>
+            <span className="label-cap">R:R{d.targetFar ? " · far" : ""}</span><span className={`mono kpi-tone--${rrTone}`}>{d.rr != null ? d.rr.toFixed(2) + "R" : "—"}</span></div>
         </div>
         <button className="smc-qc-btn" title="Open the Plan tab to size this and see $ risk"
           onClick={() => { try { window.__setLens && window.__setLens("plan"); } catch (e) {} }}>→ Size in Plan</button>
@@ -900,7 +903,14 @@ function SMCConfluence({ m, state }) {
 function SMCMitigationHeat({ m, state }) {
   if (!_smcUsable(m)) return <SmcEmpty state={state} what="liquidity density" />;
   const zs = m.zone_stats || { demand: {}, supply: {}, fvg: {} };
-  const rateTone = v => v == null ? "ink" : v >= 70 ? "gn" : v >= 50 ? "amb" : "rd";
+  // sample-aware: n<10 → greyed + asterisk (don't dress up a 5-sample rate as edge)
+  const rateCell = (rate, tested) => {
+    if (rate == null) return { tone: "ink", label: "—" };
+    const low = (tested || 0) < 10;
+    return { tone: low ? "ink" : rate >= 70 ? "gn" : rate >= 50 ? "amb" : "rd", label: rate + "%" + (low ? "*" : "") };
+  };
+  const dC = rateCell(zs.demand.rate, zs.demand.tested), sC = rateCell(zs.supply.rate, zs.supply.tested), fC = rateCell(zs.fvg.rate, zs.fvg.total);
+  const anyLow = [zs.demand.tested, zs.supply.tested, zs.fvg.total].some(t => (t || 0) < 10);
   // resting-liquidity density: each pool weighted by proximity to price + equal-touch count
   const L = m.liquidity, cur = m.cur_close;
   const pools = []
@@ -916,12 +926,12 @@ function SMCMitigationHeat({ m, state }) {
         <table className="dtable">
           <thead><tr><th>Zone</th><th className="r">Tested</th><th className="r">Respected</th><th className="r">Rate</th></tr></thead>
           <tbody>
-            <tr><td className="mono">Demand OB</td><td className="r mono">{zs.demand.tested ?? 0}</td><td className="r mono">{zs.demand.respected ?? 0}</td><td className={`r mono kpi-tone--${rateTone(zs.demand.rate)}`}>{zs.demand.rate != null ? zs.demand.rate + "%" : "—"}</td></tr>
-            <tr><td className="mono">Supply OB</td><td className="r mono">{zs.supply.tested ?? 0}</td><td className="r mono">{zs.supply.respected ?? 0}</td><td className={`r mono kpi-tone--${rateTone(zs.supply.rate)}`}>{zs.supply.rate != null ? zs.supply.rate + "%" : "—"}</td></tr>
-            <tr><td className="mono">FVG fill</td><td className="r mono">{zs.fvg.total ?? 0}</td><td className="r mono">{zs.fvg.filled ?? 0}</td><td className={`r mono kpi-tone--amb`}>{zs.fvg.rate != null ? zs.fvg.rate + "%" : "—"}</td></tr>
+            <tr><td className="mono">Demand OB</td><td className="r mono">{zs.demand.tested ?? 0}</td><td className="r mono">{zs.demand.respected ?? 0}</td><td className={`r mono kpi-tone--${dC.tone}`}>{dC.label}</td></tr>
+            <tr><td className="mono">Supply OB</td><td className="r mono">{zs.supply.tested ?? 0}</td><td className="r mono">{zs.supply.respected ?? 0}</td><td className={`r mono kpi-tone--${sC.tone}`}>{sC.label}</td></tr>
+            <tr><td className="mono">FVG fill</td><td className="r mono">{zs.fvg.total ?? 0}</td><td className="r mono">{zs.fvg.filled ?? 0}</td><td className={`r mono kpi-tone--${fC.tone}`}>{fC.label}</td></tr>
           </tbody>
         </table>
-        <div className="mono dim2" style={{ fontSize: 10, marginTop: 6 }}>Respect = price re-entered the zone then closed back out within 3 bars. Replayed on this timeframe's real bars (not a trade log).</div>
+        <div className="mono dim2" style={{ fontSize: 10, marginTop: 6 }}>Respect = price re-entered the zone then closed back out within 3 bars. Replayed on this timeframe's real bars.{anyLow ? " * n<10 — low confidence." : ""}</div>
       </div>
       <div>
         <div className="label-cap" style={{ marginBottom: 6 }}>RESTING LIQUIDITY · density</div>
@@ -1113,14 +1123,16 @@ function SMCVoidOTE({ m, state }) {
 
 function SMCKillSMT({ m, state }) {
   const sym = (m && m.ticker) || "";
-  const intr = useSmcIntraday(sym);
+  const isSwing = m && m.tf === "Daily";   // 1H session timing only matters for swing
+  const intr = useSmcIntraday(isSwing ? sym : null);
   const kz = smcKillZones(intr && intr.bars);
   const smt = m && m.smt;
   return (
     <div className="smc-sub smc-2col">
       <div>
         <div className="label-cap" style={{ marginBottom: 6 }}>KILL ZONES · 1H session edge (ET)</div>
-        {!intr ? <SmcEmpty state="loading" what="intraday sessions" />
+        {!isSwing ? <div className="smc-empty mono dim2">— session-timing edge is a swing concept; switch to SWING mode for 1H kill-zones ({m && m.tf} bars here)</div>
+          : !intr ? <SmcEmpty state="loading" what="intraday sessions" />
           : kz && kz.sessions.length ? kz.sessions.map((s, i) => {
             const active = s.z === kz.active && i === kz.sessions.length - 1;
             const tone = active ? "gn" : s.sweptHigh ? "cy" : s.sweptLow ? "rd" : "ink";
