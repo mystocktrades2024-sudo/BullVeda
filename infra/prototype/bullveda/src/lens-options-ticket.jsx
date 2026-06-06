@@ -65,6 +65,8 @@ function LensOptions({ ticker, mode }) {
       delta: _on(c.delta), gamma: _on(c.gamma), theta: _on(c.theta), vega: _on(c.vega),
       oi: _on(c.oi), vol: _on(c.vol), bid: _on(c.bid), ask: _on(c.ask), mark: _on(c.mark),
       putMark: _on(pu.mark), spread, spreadPct, impMove, pop, erDays, erInWindow,
+      hv20: _on(chain.hv20), hv30: _on(chain.hv30),
+      ivVsHv: (iv != null && _on(chain.hv20) != null) ? +(iv - chain.hv20).toFixed(1) : null,
       source: chain.source, ts: chain.ts,
     };
   }, [chain, dte, ticker]);
@@ -75,7 +77,7 @@ function LensOptions({ ticker, mode }) {
   const cost = (o.prem * 100 * contracts);
   const TABS = [["chain", "Contract & Pricing"], ["gex", "Where It Pins · GEX"], ["build", "Strategies & Journal"]];
   const maxDte = exps.length ? Math.max(...exps.map(e => e.dte)) : 0;
-  const horizonMismatch = (mode === "POSITION" || mode === "INVESTMENT") && maxDte < 20;
+  const horizonMismatch = (mode === "INVESTMENT" && maxDte < 120) || (mode === "POSITION" && maxDte < 45);
 
   return (
     <div className="lens lens--otk">
@@ -126,7 +128,10 @@ function LensOptions({ ticker, mode }) {
               text={o.spreadPct != null ? `Spread ${o.spreadPct}% of premium — ${o.spreadPct < 8 ? "tight, easy fill" : o.spreadPct < 15 ? "workable" : "wide, mind slippage"}` : "Spread n/a"} />
             <OtkCheck ok={o.oi != null && o.oi >= 500} warn={o.oi != null && o.oi < 500}
               text={o.oi != null ? `ATM open interest ${o.oi.toLocaleString()} · vol ${(o.vol || 0).toLocaleString()} — ${o.oi >= 500 ? "liquid" : "thin"}` : "OI n/a"} />
-            <OtkCheck neutral text={`ATM IV ${o.iv != null ? o.iv.toFixed(1) + "%" : "—"} — IV-rank still building (no cheap/rich call yet)`} />
+            {o.ivVsHv != null
+              ? <OtkCheck ok={o.ivVsHv <= -5} warn={o.ivVsHv > -5 && o.ivVsHv < 8} bad={o.ivVsHv >= 8}
+                  text={`IV ${o.iv.toFixed(0)}% vs realized HV20 ${o.hv20.toFixed(0)}% → vol is ${o.ivVsHv <= -5 ? "CHEAP — buying premium favorable" : o.ivVsHv >= 8 ? "RICH — you're overpaying for vol" : "fair vs realized"}`} />
+              : <OtkCheck neutral text={`ATM IV ${o.iv != null ? o.iv.toFixed(1) + "%" : "—"} — realized-vol comparison unavailable`} />}
             {o.erInWindow
               ? <OtkCheck bad text={`EARNINGS in ${o.erDays}d (inside this expiry) — expect IV crush post-print`} />
               : o.erDays != null ? <OtkCheck ok text={`No earnings before expiry (next in ${o.erDays}d) — clean theta`} />
@@ -171,6 +176,7 @@ function OptQuickTake({ ticker, mode, o }) {
   const F = [];
   if (net != null) F.push({ k: "Direction", v: biasBull ? 1 : biasBear ? -1 : 0, text: biasBull ? `stock reads bullish (${Math.round(net)}/100) — a call aligns with the trend` : biasBear ? `stock reads bearish (${Math.round(net)}/100) — a long call fights the trend` : `stock is mixed (${Math.round(net)}/100) — no directional tailwind` });
   if (achievable != null) F.push({ k: "Cost vs move", v: achievable ? 1 : -1, text: `needs ${beMove >= 0 ? "+" : ""}${beMove.toFixed(1)}% by expiry; the market prices ±${imp}% → breakeven is ${achievable ? "achievable" : "a stretch"}` });
+  if (o.ivVsHv != null) F.push({ k: "Volatility", v: o.ivVsHv <= -5 ? 1 : o.ivVsHv >= 8 ? -1 : 0, text: `IV ${o.iv.toFixed(0)}% vs realized ${o.hv20.toFixed(0)}% — ${o.ivVsHv <= -5 ? "cheap, good for buying premium" : o.ivVsHv >= 8 ? "rich, you overpay for vol" : "fair"}` });
   F.push({ k: "Time", v: o.dte >= 3 ? 0 : -1, text: o.dte <= 1 ? `${o.dte}-DTE — expiry-day gamma/theta, all-or-nothing` : o.dte < 3 ? `${o.dte}-DTE — theta bleeds fast, needs an immediate move` : `${o.dte}-DTE — short-dated; the move must come within days` });
   if (o.spreadPct != null) F.push({ k: "Liquidity", v: (o.spreadPct < 15 && (o.oi || 0) >= 500) ? 1 : (o.spreadPct < 25) ? 0 : -1, text: `spread ${o.spreadPct}% of premium · ATM OI ${(o.oi || 0).toLocaleString()}` });
   if (o.erInWindow) F.push({ k: "Earnings", v: -1, text: `earnings in ${o.erDays}d, inside this expiry — expect IV crush after the print` });
@@ -286,7 +292,7 @@ function OtkChainGreeks({ o, exps }) {
           {o.theta != null && <>Θ: bleeds ≈<b className="dn">${Math.abs(o.theta * 100).toFixed(0)}/day</b> to time.</>}
         </div>
         <div className="otk-stats" style={{ marginTop: 8 }}>
-          {[["ATM IV", o.iv != null ? o.iv.toFixed(1) + "%" : "—"], ["Imp move", o.impMove != null ? "±" + o.impMove + "%" : "—"], ["Breakeven", "$" + o.be.toFixed(2)], ["Put skew", putSkew != null ? (putSkew >= 0 ? "+" : "") + putSkew + "%" : "—"], ["Spread", o.spreadPct != null ? o.spreadPct + "%" : "—"], ["IV rank", "building"]].map(([k, v], i) => (
+          {[["ATM IV", o.iv != null ? o.iv.toFixed(1) + "%" : "—"], ["Realized HV20", o.hv20 != null ? o.hv20.toFixed(1) + "%" : "—"], ["IV − HV", o.ivVsHv != null ? (o.ivVsHv >= 0 ? "+" : "") + o.ivVsHv : "—"], ["Imp move", o.impMove != null ? "±" + o.impMove + "%" : "—"], ["Put skew", putSkew != null ? (putSkew >= 0 ? "+" : "") + putSkew + "%" : "—"], ["Spread", o.spreadPct != null ? o.spreadPct + "%" : "—"]].map(([k, v], i) => (
             <div key={i} className="otk-stat"><span className="mono dim2">{k}</span><span className="mono">{v}</span></div>
           ))}
         </div>

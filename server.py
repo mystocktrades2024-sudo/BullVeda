@@ -7486,10 +7486,13 @@ async def options_chain_api(sym: str):
     except Exception as e:
         return {"sym": sym, "error": f"schwab_client import failed: {e}", "spot": None}
 
-    # Fetch chain (calls+puts, a handful of strikes around the money, ~3 expirations)
+    # Fetch chain (calls+puts) — 16 strikes around the money out to ~140 days so we get
+    # weeklies AND monthlies (term structure + position/invest horizons), not just 0-5 DTE.
     try:
-        chain = schwab_client.get_chains(sym, contract_type="ALL", strike_count=8,
-                                         include_underlying=True)
+        import datetime as _dt
+        _to = (_dt.date.today() + _dt.timedelta(days=140)).isoformat()
+        chain = schwab_client.get_chains(sym, contract_type="ALL", strike_count=16,
+                                         include_underlying=True, to_date=_to)
     except Exception as e:
         return {"sym": sym, "error": f"get_chains failed: {e}",
                 "spot": _schwab_spot_fallback(sym)}
@@ -7499,7 +7502,7 @@ async def options_chain_api(sym: str):
                 "spot": _schwab_spot_fallback(sym)}
 
     try:
-        greeks = schwab_client.extract_chain_greeks(chain, max_expirations=3)
+        greeks = schwab_client.extract_chain_greeks(chain, max_expirations=8)
     except Exception as e:
         return {"sym": sym, "error": f"extract_chain_greeks failed: {e}",
                 "spot": chain.get("underlyingPrice") or _schwab_spot_fallback(sym)}
@@ -7572,12 +7575,29 @@ async def options_chain_api(sym: str):
             "put_mid": atm_row["put"].get("mark"),
         }
 
+    # realized (historical) volatility from daily closes → lets the lens call IV cheap/rich
+    # vs realized RIGHT NOW, without waiting for the IV-rank history to accrue.
+    hv = {"hv20": None, "hv30": None}
+    try:
+        import numpy as _np
+        from data_fetcher import fetch_ohlcv_with_failover as _fof
+        _df, _ = _fof(sym, days=60)
+        if _df is not None and not _df.empty:
+            _c = _df["Close"].squeeze().astype(float)
+            _r = _np.log(_c / _c.shift(1)).dropna()
+            if len(_r) >= 20:
+                hv["hv20"] = round(float(_r.tail(20).std() * (252 ** 0.5) * 100), 1)
+            if len(_r) >= 30:
+                hv["hv30"] = round(float(_r.tail(30).std() * (252 ** 0.5) * 100), 1)
+    except Exception:
+        pass
     payload = {
         "sym": sym,
         "spot": spot,
         "source": "schwab.marketdata.v1/chains",
         "ts": datetime.now(timezone.utc).isoformat(),
         "atm": atm,
+        "hv20": hv["hv20"], "hv30": hv["hv30"],
         "expirations": out_exps,
     }
     _OPTIONS_CHAIN_CACHE[sym] = {"ts": now, "payload": payload}
