@@ -740,6 +740,19 @@ function LensRisk({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s5 = useStateToggle("rk-5");
   const { rm, state } = useRiskModel(ticker, mode);
   const sz = riskSizing(ticker, mode);
+  const real = !!(rm && rm.ok);   // real risk needs real bars — no bars ⇒ no fabricated sizing
+  if (!real) {
+    return (
+      <div className="lens lens--risk">
+        <div className="lens-section"><div className="lens-pad">
+          <div className="smc-empty mono dim2" style={{ padding: "16px" }}>
+            {state === "loading" ? "Loading live price history…" :
+              <>No real price history for <b className="warn">{(ticker && ticker.symbol) || "this name"}</b> — VaR, volatility, beta and position risk can't be computed without fabricating data. (Off-universe or unsupported symbol.)</>}
+          </div>
+        </div></div>
+      </div>
+    );
+  }
   const erD = ticker.earnings && ticker.earnings.days != null ? ticker.earnings.days : null;
   const gatesOK = sz.ok && sz.lossNavPct <= 0.75 && sz.navPct <= 10;
   const hot = (rm && rm.ok && rm.beta != null && rm.beta > 2) || (sz.ok && sz.lossNavPct > 0.75);
