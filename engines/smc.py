@@ -232,29 +232,32 @@ def _liquidity(df: pd.DataFrame, ph: List[int], pl: List[int], atr: float) -> Di
 
 
 # ── premium / discount dealing range + OTE ───────────────────────────────────
-def _range(df: pd.DataFrame, ph: List[int], pl: List[int]) -> Dict[str, Any]:
-    # most recent major leg: last swing low → last swing high (or vice versa)
-    if not ph or not pl:
-        lo, hi = float(df["Low"].tail(60).min()), float(df["High"].tail(60).max())
-    else:
-        last_h_i, last_l_i = ph[-1], pl[-1]
-        hi = float(df["High"].iloc[last_h_i])
-        lo = float(df["Low"].iloc[last_l_i])
-        if lo >= hi:  # fall back to window extremes
-            lo, hi = float(df["Low"].tail(60).min()), float(df["High"].tail(60).max())
+def _range(df: pd.DataFrame, ph: List[int], pl: List[int], bias: str) -> Dict[str, Any]:
+    # Dealing range = the recent swing structure (last ~6 pivots) — tight enough to
+    # be actionable, wide enough to bracket the current leg. Avoids both the single-
+    # leg inversion bug and the over-wide 60-bar window. cur clamp only nudges at a
+    # genuine new extreme (correctly → 0%/100%).
     cur = float(df["Close"].iloc[-1])
-    # if price has broken the leg, re-anchor the range to include it (BoS/expansion)
-    if cur > hi:
-        hi = cur
-    elif cur < lo:
-        lo = cur
+    piv = sorted(ph + pl)[-6:]
+    if len(piv) >= 2:
+        lo = min(float(df["Low"].iloc[i]) for i in piv)
+        hi = max(float(df["High"].iloc[i]) for i in piv)
+    else:
+        seg = df.tail(20)
+        lo, hi = float(seg["Low"].min()), float(seg["High"].max())
+    lo = min(lo, cur)
+    hi = max(hi, cur)
     eq = (lo + hi) / 2
     span = max(hi - lo, 1e-6)
     pct = max(0.0, min(100.0, (cur - lo) / span * 100))
     zone = "discount" if pct < 45 else ("premium" if pct > 55 else "equilibrium")
-    # OTE 0.62–0.79 retracement of the leg (discount side for longs)
-    ote_lo = lo + span * 0.21
-    ote_hi = lo + span * 0.38
+    # OTE 0.62–0.79 retrace — bias-aware: discount side for longs, premium side for shorts
+    if bias == "bear":
+        ote_lo = lo + span * 0.62
+        ote_hi = lo + span * 0.79
+    else:
+        ote_lo = lo + span * 0.21
+        ote_hi = lo + span * 0.38
     return {"lo": round(lo, 2), "hi": round(hi, 2), "eq": round(eq, 2), "pct": round(pct, 1),
             "zone": zone, "ote_lo": round(ote_lo, 2), "ote_hi": round(ote_hi, 2),
             "ote_active": ote_lo <= cur <= ote_hi}
@@ -384,7 +387,7 @@ def detect(df: pd.DataFrame, meta: Dict[str, Any], ticker: str) -> Dict[str, Any
     obs = _order_blocks(df, struct["events"], atr)
     fvgs = _fvgs(df, atr)
     liq = _liquidity(df, ph, pl, atr)
-    rng = _range(df, ph, pl)
+    rng = _range(df, ph, pl, struct["bias"])
     htf = _htf_levels(df, tf)
     mtf = _mtf(df, tf)
     cur = float(df["Close"].iloc[-1])
