@@ -12986,16 +12986,67 @@ function Cone({ lo, mid, hi, current = 0, w = 280, h = 110 }) {
     }
   ), /* @__PURE__ */ React.createElement("text", { x: w - pad, y: yFor(hi) - 4, textAnchor: "end", className: "mono", fontSize: "10", fill: "var(--gn)" }, "+", hi.toFixed(1), "%"), /* @__PURE__ */ React.createElement("text", { x: w - pad, y: yFor(mid) - 4, textAnchor: "end", className: "mono", fontSize: "10", fill: "var(--ink-2)" }, "+", mid.toFixed(1), "%"), /* @__PURE__ */ React.createElement("text", { x: w - pad, y: yFor(lo) + 12, textAnchor: "end", className: "mono", fontSize: "10", fill: "var(--rd)" }, lo.toFixed(1), "%"));
 }
-function quickDecision(ticker, mode) {
-  if (!ticker || !window.coherentLevels) return null;
+function getAccountNav() {
+  try {
+    if (window.UserPrefs) {
+      const v = window.UserPrefs.get("accountNav", null);
+      if (typeof v === "number" && v > 0) return { nav: v, source: "user" };
+    }
+  } catch (e) {
+  }
+  return { nav: 1e5, source: "demo" };
+}
+function setAccountNav(v) {
+  try {
+    if (window.UserPrefs) window.UserPrefs.set("accountNav", +v > 0 ? +v : null);
+  } catch (e) {
+  }
+}
+function positionSizing(ticker, mode) {
+  const { nav, source } = getAccountNav();
+  if (!ticker || !window.coherentLevels) return { ok: false, nav, navSource: source };
   const md = (mode || "SWING").toUpperCase();
-  const t2t = window.modeAdjust ? window.modeAdjust(ticker, md) : ticker;
-  const L = window.coherentLevels(t2t);
-  if (!L || L.valid === false || !(L.stop > 0 && L.pivot > L.stop && L.t1 > L.pivot)) return null;
-  const entry = +(L.pivot * 1.002).toFixed(2);
-  const stop = L.stop, target = L.t1;
+  const t2 = window.modeAdjust ? window.modeAdjust(ticker, md) : ticker;
+  const L = window.coherentLevels(t2);
+  if (!L || L.valid === false || !(L.stop > 0 && L.pivot > L.stop && L.t1 > L.pivot)) return { ok: false, nav, navSource: source };
+  const RISK_PCT = 39e-4;
+  const entry = +(L.pivot * 1.002).toFixed(2), stop = L.stop, t1 = L.t1, t2lvl = L.t2;
   const risk = Math.max(0.01, entry - stop);
-  const rr = (target - entry) / risk;
+  const shares = Math.max(1, Math.round(nav * RISK_PCT / risk));
+  const notional = shares * entry, maxLoss = shares * risk;
+  const rr1 = (t1 - entry) / risk, rr2 = (t2lvl - entry) / risk;
+  const ss = ticker.setupStats || {}, wr = ss.winRate;
+  const kelly = wr != null && rr1 > 0 ? Math.max(0, (wr * rr1 - (1 - wr)) / rr1) : null;
+  return {
+    ok: true,
+    nav,
+    navSource: source,
+    demo: source !== "user",
+    entry,
+    stop,
+    t1,
+    t2: t2lvl,
+    risk,
+    shares,
+    notional,
+    maxLoss,
+    rr: rr1,
+    rr1,
+    rr2,
+    navPct: notional / nav * 100,
+    lossNavPct: maxLoss / nav * 100,
+    pctToStop: risk / entry * 100,
+    riskBudget: Math.round(nav * RISK_PCT),
+    kelly,
+    wr,
+    n: ss.n
+  };
+}
+function quickDecision(ticker, mode) {
+  const sz = positionSizing(ticker, mode);
+  if (!sz.ok) return null;
+  const md = (mode || "SWING").toUpperCase();
+  const entry = sz.entry, stop = sz.stop, target = sz.t1, rr = sz.rr;
   const cv = window.compositeVerdict ? window.compositeVerdict(ticker, md) : null;
   const verdict = cv ? cv.verdict : ticker.verdict || "\u2014";
   const vtone = cv ? cv.vtone : verdict === "BUY" ? "gn" : verdict === "AVOID" || verdict === "SHORT" ? "rd" : "amb";
@@ -13039,7 +13090,10 @@ Object.assign(window, {
   Radar,
   Cone,
   QuantQuickCard,
-  quickDecision
+  quickDecision,
+  positionSizing,
+  getAccountNav,
+  setAccountNav
 });
 </script>
 <script>/* src/ai-explain.jsx */
@@ -21179,18 +21233,6 @@ function MTFScreener({ m, state }) {
     return /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, r.tf)), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: t, small: true }, r.bias)), /* @__PURE__ */ React.createElement("td", { className: `mono ${t === "gn" ? "up" : t === "rd" ? "dn" : "warn"}` }, tr), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, r.note));
   })));
 }
-function _riskNav() {
-  const bv = window.__BV && typeof window.__BV.nav === "number" ? window.__BV.nav : null;
-  if (bv && bv > 0) return { nav: bv, demo: false };
-  try {
-    if (window.MyPF) {
-      const s = window.MyPF.summarize(window.MyPF.combined());
-      if (s && s.totalValue > 0) return { nav: s.totalValue, demo: false };
-    }
-  } catch (e) {
-  }
-  return { nav: 1e5, demo: true };
-}
 function useRiskModel(ticker, mode) {
   const sym = ticker && ticker.symbol || "", md = (mode || "SWING").toUpperCase();
   const key = "risk|" + sym + "|" + md;
@@ -21221,37 +21263,7 @@ function useRiskModel(ticker, mode) {
   return { rm: real, state: st };
 }
 function riskSizing(ticker, mode) {
-  const md = (mode || "SWING").toUpperCase();
-  const t2 = window.modeAdjust ? window.modeAdjust(ticker, md) : ticker;
-  const L = window.coherentLevels ? window.coherentLevels(t2) : null;
-  const { nav, demo } = _riskNav();
-  if (!L || L.valid === false || !(L.stop > 0 && L.pivot > L.stop && L.t1 > L.pivot)) return { nav, demo, ok: false };
-  const entry = +(L.pivot * 1.002).toFixed(2), stop = L.stop, t1 = L.t1;
-  const risk = Math.max(0.01, entry - stop);
-  const shares = Math.max(1, Math.round(Math.round(nav * 39e-4) / risk));
-  const notional = shares * entry, maxLoss = shares * risk;
-  const rr = (t1 - entry) / risk;
-  const ss = ticker.setupStats || {}, wr = ss.winRate;
-  const kelly = wr != null && rr > 0 ? Math.max(0, (wr * rr - (1 - wr)) / rr) : null;
-  return {
-    ok: true,
-    nav,
-    demo,
-    entry,
-    stop,
-    t1,
-    risk,
-    shares,
-    notional,
-    maxLoss,
-    rr,
-    kelly,
-    wr,
-    n: ss.n,
-    navPct: notional / nav * 100,
-    lossNavPct: maxLoss / nav * 100,
-    pctToStop: risk / entry * 100
-  };
+  return window.positionSizing ? window.positionSizing(ticker, mode) : { ok: false, nav: 1e5, demo: true };
 }
 function LensRisk({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("rk-1");
@@ -24787,8 +24799,20 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
   const s4 = useStateToggle("plv2-4");
   const s5 = useStateToggle("plv2-5");
   const s6 = useStateToggle("plv2-6");
-  const pm = useMemoP2(() => planMath(ticker), [ticker]);
+  const [navTick, setNavTick] = useStateP2(0);
+  const pm = useMemoP2(() => planMath(ticker), [ticker, navTick]);
   const size = useMemoP2(() => planSize(pm, sizeMult, kellyFrac), [pm, sizeMult, kellyFrac]);
+  const editNav = () => {
+    try {
+      const cur = window.getAccountNav ? window.getAccountNav().nav : 1e5;
+      const v = window.prompt("Your account size ($) \u2014 sizing scales to this:", String(Math.round(cur)));
+      if (v != null && +v > 0 && window.setAccountNav) {
+        window.setAccountNav(+v);
+        setNavTick((n) => n + 1);
+      }
+    } catch (e) {
+    }
+  };
   const fillLive = typeof pm.spread === "number" && pm.spread > 0 && (typeof pm.dvol === "number" && pm.dvol > 0);
   if (!pm.levelsValid) {
     return /* @__PURE__ */ React.createElement("div", { className: "lens lens--plan2" }, /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "fr-read mono dim2", style: { padding: "18px 16px" } }, /* @__PURE__ */ React.createElement("b", { className: "warn" }, "No coherent trade plan for ", ticker.symbol, " in ", mode, " mode."), " This name isn't in today's scan with a valid stop/entry/T1/T2 ladder (stop\xA0<\xA0entry\xA0<\xA0T1\xA0<\xA0T2), so the ticket, sizing and payoff geometry can't be computed without fabricating levels. Run a scan that surfaces it, or use the Chart / Patterns lens for structure."))));
@@ -24816,6 +24840,7 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
     {
       pm,
       size,
+      onEditNav: editNav,
       sizeMult,
       onSizeMult: setSizeMult,
       kellyFrac,
@@ -24929,25 +24954,14 @@ function modeAdjustP2(ticker, mode) {
   return { ...ticker, holdDays: holdPlot, _modeReal: false };
 }
 window.modeAdjust = modeAdjustP2;
-function getPlanNav() {
-  const bv = window.__BV && typeof window.__BV.nav === "number" ? window.__BV.nav : null;
-  if (bv && bv > 0) return { nav: bv, demo: false };
-  try {
-    if (window.MyPF) {
-      const s = window.MyPF.summarize(window.MyPF.combined());
-      if (s && s.totalValue > 0) return { nav: s.totalValue, demo: false };
-    }
-  } catch (e) {
-  }
-  return { nav: 1e5, demo: true };
-}
 function planMath(t) {
   const L = window.coherentLevels ? window.coherentLevels(t) : { price: t.price, pivot: t.pivot, stop: t.stop, t1: t.t1, t2: t.t2 };
   const entry = +(L.pivot * 1.002).toFixed(2);
   const risk = Math.max(0.01, entry - L.stop);
   const rr1 = (L.t1 - entry) / risk;
   const rr2 = (L.t2 - entry) / risk;
-  const { nav: PLAN_NAV, demo: navDemo } = getPlanNav();
+  const _nv = window.getAccountNav ? window.getAccountNav() : { nav: 1e5, source: "demo" };
+  const PLAN_NAV = _nv.nav, navDemo = _nv.source !== "user";
   const riskBudget = Math.round(PLAN_NAV * 39e-4);
   const baseShares = Math.max(1, Math.round(riskBudget / risk));
   const ss = t.setupStats || {};
@@ -25374,7 +25388,7 @@ function TradeBlueprint({ pm, size }) {
 function TbMetric({ label, value, sub, tone, big, primary, secondary, tip }) {
   return /* @__PURE__ */ React.createElement("div", { className: `tbv2-metric tbv2-metric--${tone} ${big ? "is-big" : ""} ${primary ? "is-primary" : ""} ${secondary ? "is-secondary" : ""} ${tip ? "has-tip" : ""}`, title: tip || void 0 }, /* @__PURE__ */ React.createElement("div", { className: "tbv2-metric-l label-cap" }, label), /* @__PURE__ */ React.createElement("div", { className: `tbv2-metric-v mono kpi-tone--${tone}` }, value), /* @__PURE__ */ React.createElement("div", { className: "tbv2-metric-s mono dim2" }, sub));
 }
-function SizingWorkbench({ pm, size, sizeMult, onSizeMult, kellyFrac, onKellyFrac }) {
+function SizingWorkbench({ pm, size, sizeMult, onSizeMult, kellyFrac, onKellyFrac, onEditNav }) {
   const entry = pm.entry;
   const risk = pm.risk;
   const reward = pm.t1 - entry;
@@ -25423,7 +25437,7 @@ function SizingWorkbench({ pm, size, sizeMult, onSizeMult, kellyFrac, onKellyFra
       sub: pm.evR != null ? `${pm.evR.toFixed(2)}R \xD7 ${sh} sh` : "no ledger edge",
       tip: "Average $ you'd expect per trade at this size = win% \xD7 reward \u2212 loss% \xD7 risk, using this setup's real win-rate. Needs ledger history."
     }
-  )), /* @__PURE__ */ React.createElement("div", { className: "sw-gates" }, /* @__PURE__ */ React.createElement("div", { className: "sw-gates-cap label-cap" }, "Live size caps \xB7 recompute as you size \xB7 full go/no-go in \xA73", pm.navDemo ? /* @__PURE__ */ React.createElement("span", { className: "sw-navtag is-demo" }, " NAV $100k (demo \u2014 connect account)") : /* @__PURE__ */ React.createElement("span", { className: "sw-navtag" }, " NAV $", Math.round(pm.NAV).toLocaleString(), " (live)")), /* @__PURE__ */ React.createElement(SwGate, { label: "Max loss \u2264 0.75% NAV", v: lossNavPct.toFixed(2) + "%", pass: lossNavPct <= 0.75 }), /* @__PURE__ */ React.createElement(SwGate, { label: "% NAV \u2264 10%", v: navPct.toFixed(1) + "%", pass: navPct <= 10 }), /* @__PURE__ */ React.createElement(SwGate, { label: "R-mult \u2265 1.5", v: (reward / risk).toFixed(2) + "R", pass: reward / risk >= 1.5 })));
+  )), /* @__PURE__ */ React.createElement("div", { className: "sw-gates" }, /* @__PURE__ */ React.createElement("div", { className: "sw-gates-cap label-cap" }, "Live size caps \xB7 recompute as you size \xB7 full go/no-go in \xA73", pm.navDemo ? /* @__PURE__ */ React.createElement("span", { className: "sw-navtag is-demo", onClick: onEditNav, style: { cursor: "pointer" }, title: "Click to set your account size" }, " NAV $100k (demo \xB7 click to set yours)") : /* @__PURE__ */ React.createElement("span", { className: "sw-navtag", onClick: onEditNav, style: { cursor: "pointer" }, title: "Click to change your account size" }, " NAV $", Math.round(pm.NAV).toLocaleString(), " (yours \xB7 edit)")), /* @__PURE__ */ React.createElement(SwGate, { label: "Max loss \u2264 0.75% NAV", v: lossNavPct.toFixed(2) + "%", pass: lossNavPct <= 0.75 }), /* @__PURE__ */ React.createElement(SwGate, { label: "% NAV \u2264 10%", v: navPct.toFixed(1) + "%", pass: navPct <= 10 }), /* @__PURE__ */ React.createElement(SwGate, { label: "R-mult \u2265 1.5", v: (reward / risk).toFixed(2) + "R", pass: reward / risk >= 1.5 })));
 }
 function SwTile({ label, value, tone, sub, tip }) {
   return /* @__PURE__ */ React.createElement("div", { className: `sw-tile sw-tile--${tone} ${tip ? "has-tip" : ""}`, title: tip || void 0 }, /* @__PURE__ */ React.createElement("div", { className: "sw-tile-l label-cap" }, label), /* @__PURE__ */ React.createElement("div", { className: `sw-tile-v mono kpi-tone--${tone}` }, value), sub && /* @__PURE__ */ React.createElement("div", { className: "sw-tile-s mono dim2" }, sub));

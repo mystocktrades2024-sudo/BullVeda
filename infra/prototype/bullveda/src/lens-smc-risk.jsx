@@ -693,13 +693,6 @@ function MTFScreener({ m, state }) {
 // ────────────────────────────────────────────────────────────
 // RISK — VaR, Kelly, drawdown, stress, liquidity
 // ────────────────────────────────────────────────────────────
-// real account NAV (live equity → MyPF rollup → labeled demo)
-function _riskNav() {
-  const bv = (window.__BV && typeof window.__BV.nav === "number") ? window.__BV.nav : null;
-  if (bv && bv > 0) return { nav: bv, demo: false };
-  try { if (window.MyPF) { const s = window.MyPF.summarize(window.MyPF.combined()); if (s && s.totalValue > 0) return { nav: s.totalValue, demo: false }; } } catch (e) {}
-  return { nav: 100000, demo: true };
-}
 // real risk model from engines/risk.py via /api/pattern/risk
 function useRiskModel(ticker, mode) {
   const sym = (ticker && ticker.symbol) || "", md = (mode || "SWING").toUpperCase();
@@ -716,22 +709,9 @@ function useRiskModel(ticker, mode) {
   else if (real === null && window.__BV && window.__BV.fetchPattern) st = "loading";
   return { rm: real, state: st };
 }
-// position sizing from the real coherent ladder + NAV + ledger (Kelly)
+// position sizing — delegates to the single shared source of truth (per-user NAV)
 function riskSizing(ticker, mode) {
-  const md = (mode || "SWING").toUpperCase();
-  const t2 = window.modeAdjust ? window.modeAdjust(ticker, md) : ticker;
-  const L = window.coherentLevels ? window.coherentLevels(t2) : null;
-  const { nav, demo } = _riskNav();
-  if (!L || L.valid === false || !(L.stop > 0 && L.pivot > L.stop && L.t1 > L.pivot)) return { nav, demo, ok: false };
-  const entry = +(L.pivot * 1.002).toFixed(2), stop = L.stop, t1 = L.t1;
-  const risk = Math.max(0.01, entry - stop);
-  const shares = Math.max(1, Math.round(Math.round(nav * 0.0039) / risk));
-  const notional = shares * entry, maxLoss = shares * risk;
-  const rr = (t1 - entry) / risk;
-  const ss = ticker.setupStats || {}, wr = ss.winRate;
-  const kelly = (wr != null && rr > 0) ? Math.max(0, (wr * rr - (1 - wr)) / rr) : null;
-  return { ok: true, nav, demo, entry, stop, t1, risk, shares, notional, maxLoss, rr, kelly, wr, n: ss.n,
-           navPct: notional / nav * 100, lossNavPct: maxLoss / nav * 100, pctToStop: risk / entry * 100 };
+  return window.positionSizing ? window.positionSizing(ticker, mode) : { ok: false, nav: 100000, demo: true };
 }
 
 function LensRisk({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {

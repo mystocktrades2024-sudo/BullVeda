@@ -371,22 +371,53 @@ function Cone({ lo, mid, hi, current = 0, w = 280, h = 110 }) {
   );
 }
 
+// ── Per-user account NAV (self-select) ───────────────────────────────────────
+// 500-user model: each user sizes against THEIR OWN account, stored per-user in
+// UserPrefs (keyed by auth id). No shared broker account; default to a labeled
+// demo until the user sets it. (Owner's Alpaca NAV is never shown to other users.)
+function getAccountNav() {
+  try { if (window.UserPrefs) { const v = window.UserPrefs.get("accountNav", null); if (typeof v === "number" && v > 0) return { nav: v, source: "user" }; } } catch (e) {}
+  return { nav: 100000, source: "demo" };
+}
+function setAccountNav(v) { try { if (window.UserPrefs) window.UserPrefs.set("accountNav", (+v > 0 ? +v : null)); } catch (e) {} }
+
+// ── positionSizing — THE single source of truth for sizing across all lenses ──
+// (Plan, Risk, Quick Card). Per-user NAV + the real coherent ladder. 0.39% risk
+// budget per trade. Replaces the 3 drifting copies that used to live in planMath,
+// riskSizing and quickDecision.
+function positionSizing(ticker, mode) {
+  const { nav, source } = getAccountNav();
+  if (!ticker || !window.coherentLevels) return { ok: false, nav, navSource: source };
+  const md = (mode || "SWING").toUpperCase();
+  const t2 = window.modeAdjust ? window.modeAdjust(ticker, md) : ticker;
+  const L = window.coherentLevels(t2);
+  if (!L || L.valid === false || !(L.stop > 0 && L.pivot > L.stop && L.t1 > L.pivot)) return { ok: false, nav, navSource: source };
+  const RISK_PCT = 0.0039;
+  const entry = +(L.pivot * 1.002).toFixed(2), stop = L.stop, t1 = L.t1, t2lvl = L.t2;
+  const risk = Math.max(0.01, entry - stop);
+  const shares = Math.max(1, Math.round(nav * RISK_PCT / risk));
+  const notional = shares * entry, maxLoss = shares * risk;
+  const rr1 = (t1 - entry) / risk, rr2 = (t2lvl - entry) / risk;
+  const ss = ticker.setupStats || {}, wr = ss.winRate;
+  const kelly = (wr != null && rr1 > 0) ? Math.max(0, (wr * rr1 - (1 - wr)) / rr1) : null;
+  return {
+    ok: true, nav, navSource: source, demo: source !== "user",
+    entry, stop, t1, t2: t2lvl, risk, shares, notional, maxLoss, rr: rr1, rr1, rr2,
+    navPct: notional / nav * 100, lossNavPct: maxLoss / nav * 100, pctToStop: risk / entry * 100,
+    riskBudget: Math.round(nav * RISK_PCT), kelly, wr, n: ss.n,
+  };
+}
+
 // ── Reusable Quick Decision Card ─────────────────────────────────────────────
 // One consistent decision header for any lens: VERDICT + plain action + Entry /
-// Stop / Target / R:R + invalidation + "Size in Plan". Levels come from the real
-// coherentLevels ladder (mode-adjusted), verdict from the composite engine — so
-// every lens shows the SAME call and the same tradeable numbers. Pass a custom
-// `d` (e.g. SMC's structure-derived decision) to override.
+// Stop / Target / R:R + invalidation + "Size in Plan". Levels + sizing come from
+// the single positionSizing() source; verdict from the composite engine — so every
+// lens shows the SAME call and numbers. Pass a custom `d` (e.g. SMC) to override.
 function quickDecision(ticker, mode) {
-  if (!ticker || !window.coherentLevels) return null;
+  const sz = positionSizing(ticker, mode);
+  if (!sz.ok) return null;
   const md = (mode || "SWING").toUpperCase();
-  const t2t = window.modeAdjust ? window.modeAdjust(ticker, md) : ticker;
-  const L = window.coherentLevels(t2t);
-  if (!L || L.valid === false || !(L.stop > 0 && L.pivot > L.stop && L.t1 > L.pivot)) return null;
-  const entry = +(L.pivot * 1.002).toFixed(2);
-  const stop = L.stop, target = L.t1;
-  const risk = Math.max(0.01, entry - stop);
-  const rr = (target - entry) / risk;
+  const entry = sz.entry, stop = sz.stop, target = sz.t1, rr = sz.rr;
   const cv = window.compositeVerdict ? window.compositeVerdict(ticker, md) : null;
   const verdict = cv ? cv.verdict : (ticker.verdict || "—");
   const vtone = cv ? cv.vtone : (verdict === "BUY" ? "gn" : (verdict === "AVOID" || verdict === "SHORT") ? "rd" : "amb");
@@ -434,4 +465,5 @@ function QuantQuickCard({ d, title, onSize }) {
 Object.assign(window, {
   SectionHeader, FreshnessPill, Pill, WilsonPill, KpiTile, CrossLens, StateWrap,
   Sparkline, Gauge, Radar, Cone, QuantQuickCard, quickDecision,
+  positionSizing, getAccountNav, setAccountNav,
 });

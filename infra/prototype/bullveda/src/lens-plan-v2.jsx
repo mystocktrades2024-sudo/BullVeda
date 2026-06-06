@@ -12,8 +12,16 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
   const s5 = useStateToggle("plv2-5"); const s6 = useStateToggle("plv2-6");
 
   // ── single source of truth — every level/size/R:R below reads from here ──
-  const pm = useMemoP2(() => planMath(ticker), [ticker]);
+  const [navTick, setNavTick] = useStateP2(0);   // bump to re-read per-user NAV after a self-select edit
+  const pm = useMemoP2(() => planMath(ticker), [ticker, navTick]);
   const size = useMemoP2(() => planSize(pm, sizeMult, kellyFrac), [pm, sizeMult, kellyFrac]);
+  const editNav = () => {
+    try {
+      const cur = window.getAccountNav ? window.getAccountNav().nav : 100000;
+      const v = window.prompt("Your account size ($) — sizing scales to this:", String(Math.round(cur)));
+      if (v != null && +v > 0 && window.setAccountNav) { window.setAccountNav(+v); setNavTick(n => n + 1); }
+    } catch (e) {}
+  };
   const fillLive = (typeof pm.spread === "number" && pm.spread > 0) && (typeof pm.dvol === "number" && pm.dvol > 0);
 
   if (!pm.levelsValid) {
@@ -60,7 +68,7 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
         <StateWrap state={s2.value} source="risk engine · portfolio_state">
           <div className="lens-pad">
             <SizingWorkbench
-              pm={pm} size={size}
+              pm={pm} size={size} onEditNav={editNav}
               sizeMult={sizeMult} onSizeMult={setSizeMult}
               kellyFrac={kellyFrac} onKellyFrac={setKellyFrac}
             />
@@ -187,22 +195,15 @@ window.modeAdjust = modeAdjustP2;
 // ── planMath — ONE source of truth for levels, geometry, base sizing ──
 // Reads coherentLevels (same as Overview), so the Plan tab can never drift
 // from the chart/ladder. All $ figures derive from a fixed risk budget.
-// Real account NAV: live portfolio equity (__BV.nav) → MyPF rollup → labeled demo.
-function getPlanNav() {
-  const bv = (window.__BV && typeof window.__BV.nav === "number") ? window.__BV.nav : null;
-  if (bv && bv > 0) return { nav: bv, demo: false };
-  try {
-    if (window.MyPF) { const s = window.MyPF.summarize(window.MyPF.combined()); if (s && s.totalValue > 0) return { nav: s.totalValue, demo: false }; }
-  } catch (e) {}
-  return { nav: 100000, demo: true };
-}
 function planMath(t) {
   const L = window.coherentLevels ? window.coherentLevels(t) : { price: t.price, pivot: t.pivot, stop: t.stop, t1: t.t1, t2: t.t2 };
   const entry = +(L.pivot * 1.002).toFixed(2);          // BUY-STOP just over the pivot
   const risk = Math.max(0.01, entry - L.stop);
   const rr1 = (L.t1 - entry) / risk;
   const rr2 = (L.t2 - entry) / risk;
-  const { nav: PLAN_NAV, demo: navDemo } = getPlanNav();
+  // per-user NAV from the single shared source (#2/#3) — never the owner's account
+  const _nv = window.getAccountNav ? window.getAccountNav() : { nav: 100000, source: "demo" };
+  const PLAN_NAV = _nv.nav, navDemo = _nv.source !== "user";
   const riskBudget = Math.round(PLAN_NAV * 0.0039);     // 0.39% NAV per trade
   const baseShares = Math.max(1, Math.round(riskBudget / risk));
   const ss = t.setupStats || {};
@@ -595,7 +596,7 @@ function TbMetric({ label, value, sub, tone, big, primary, secondary, tip }) {
 }
 
 // ─── §2 Sizing Workbench ───────────────────────────────────────
-function SizingWorkbench({ pm, size, sizeMult, onSizeMult, kellyFrac, onKellyFrac }) {
+function SizingWorkbench({ pm, size, sizeMult, onSizeMult, kellyFrac, onKellyFrac, onEditNav }) {
   const entry = pm.entry;
   const risk = pm.risk;
   const reward = pm.t1 - entry;
@@ -652,8 +653,8 @@ function SizingWorkbench({ pm, size, sizeMult, onSizeMult, kellyFrac, onKellyFra
         <div className="sw-gates-cap label-cap">
           Live size caps · recompute as you size · full go/no-go in §3
           {pm.navDemo
-            ? <span className="sw-navtag is-demo"> NAV $100k (demo — connect account)</span>
-            : <span className="sw-navtag"> NAV ${Math.round(pm.NAV).toLocaleString()} (live)</span>}
+            ? <span className="sw-navtag is-demo" onClick={onEditNav} style={{ cursor: "pointer" }} title="Click to set your account size"> NAV $100k (demo · click to set yours)</span>
+            : <span className="sw-navtag" onClick={onEditNav} style={{ cursor: "pointer" }} title="Click to change your account size"> NAV ${Math.round(pm.NAV).toLocaleString()} (yours · edit)</span>}
         </div>
         <SwGate label="Max loss ≤ 0.75% NAV" v={lossNavPct.toFixed(2)+"%"} pass={lossNavPct <= 0.75} />
         <SwGate label="% NAV ≤ 10%"          v={navPct.toFixed(1)+"%"}    pass={navPct <= 10} />
