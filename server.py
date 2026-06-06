@@ -2561,9 +2561,14 @@ async def ohlcv_api(ticker: str, days: int = 120, tf: str = "1D"):
         # return 404 rather than serving daily-as-intraday.
         if tf in ("1H", "4H"):
             try:
-                import schwab_client as _sch
-                ph = _sch.get_pricehistory(ticker, period_type="day", period=10,
-                                           frequency_type="minute", frequency=30)
+                import schwab_client as _sch, time as _t
+                # explicit startDate → Schwab serves minute history back ~250d+ (free),
+                # not the 10-day period cap. Honor the requested `days` (capped at 300).
+                _now = int(_t.time() * 1000)
+                _start = _now - min(max(days, 10), 300) * 86400 * 1000
+                ph = _sch.get_pricehistory(ticker, period_type="day",
+                                           frequency_type="minute", frequency=30,
+                                           start_date=_start, end_date=_now)
                 cdl = (ph or {}).get("candles") or []
                 if cdl:
                     df = pd.DataFrame(cdl)

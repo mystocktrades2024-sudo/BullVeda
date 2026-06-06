@@ -110,21 +110,31 @@ def get_pricehistory(
     frequency_type: str = "daily",
     frequency: int = 1,
     need_extended: bool = False,
+    start_date: Optional[int] = None,
+    end_date: Optional[int] = None,
 ) -> Optional[dict]:
     """
     OHLCV history. Returns {candles: [{open, high, low, close, volume, datetime}]}.
 
     Default = 1 year of daily bars (what the archive uses).
-    For intraday: period_type='day', period=10, frequency_type='minute', frequency=5.
+    For intraday: period_type='day', frequency_type='minute', frequency=30, and pass
+    start_date/end_date (epoch MS) for a wider window than the period=10 cap — Schwab
+    serves minute history back ~250d+ via explicit dates (free, no EODHD quota).
     """
     params = {
         "symbol":              symbol.upper(),
         "periodType":          period_type,
-        "period":              period,
         "frequencyType":       frequency_type,
         "frequency":           frequency,
         "needExtendedHoursData": str(need_extended).lower(),
     }
+    # explicit dates override `period` (Schwab ignores period when startDate is set)
+    if start_date is not None:
+        params["startDate"] = int(start_date)
+        if end_date is not None:
+            params["endDate"] = int(end_date)
+    else:
+        params["period"] = period
     return _get("/pricehistory", params=params)
 
 

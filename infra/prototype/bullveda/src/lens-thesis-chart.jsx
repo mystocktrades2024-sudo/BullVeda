@@ -6,7 +6,7 @@ const { useMemo: useTC, useState: useTCs, useRef: useTCr, useEffect: useTCe } = 
 
 // real-candle fetch config per timeframe (/api/ohlcv). 1W: endpoint returns daily → resample.
 const TF_FETCH = {
-  "1H": { tf: "1H", days: 30 }, "4H": { tf: "4H", days: 120 },
+  "1H": { tf: "1H", days: 90 }, "4H": { tf: "4H", days: 250 },
   "1D": { tf: "1D", days: 400 }, "1W": { tf: "1D", days: 1825, resample: "W" },
 };
 const TF_NOTE = { "1H": "execution timeframe", "4H": "swing-trigger timeframe", "1D": "thesis timeframe", "1W": "context timeframe" };
