@@ -60,6 +60,7 @@ function LensPatternsV2({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
   return (
     <div className="lens lens--patterns-v2">
       {window.LensSummaryBar && <LensSummaryBar ticker={ticker} mode={mode} kind="patterns" />}
+      {window.QuantQuickCard && <QuantQuickCard d={window.quickDecision(ticker, mode)} title={`Quick Read · Patterns · ${mode}`} />}
       <div className="pv-bar">
         <SubTabs tab={tab} onTab={setTab} items={PV_SUBTABS} />
         <DirSwitch dir={dir} onDir={setDir} />

@@ -371,7 +371,67 @@ function Cone({ lo, mid, hi, current = 0, w = 280, h = 110 }) {
   );
 }
 
+// ── Reusable Quick Decision Card ─────────────────────────────────────────────
+// One consistent decision header for any lens: VERDICT + plain action + Entry /
+// Stop / Target / R:R + invalidation + "Size in Plan". Levels come from the real
+// coherentLevels ladder (mode-adjusted), verdict from the composite engine — so
+// every lens shows the SAME call and the same tradeable numbers. Pass a custom
+// `d` (e.g. SMC's structure-derived decision) to override.
+function quickDecision(ticker, mode) {
+  if (!ticker || !window.coherentLevels) return null;
+  const md = (mode || "SWING").toUpperCase();
+  const t2t = window.modeAdjust ? window.modeAdjust(ticker, md) : ticker;
+  const L = window.coherentLevels(t2t);
+  if (!L || L.valid === false || !(L.stop > 0 && L.pivot > L.stop && L.t1 > L.pivot)) return null;
+  const entry = +(L.pivot * 1.002).toFixed(2);
+  const stop = L.stop, target = L.t1;
+  const risk = Math.max(0.01, entry - stop);
+  const rr = (target - entry) / risk;
+  const cv = window.compositeVerdict ? window.compositeVerdict(ticker, md) : null;
+  const verdict = cv ? cv.verdict : (ticker.verdict || "—");
+  const vtone = cv ? cv.vtone : (verdict === "BUY" ? "gn" : (verdict === "AVOID" || verdict === "SHORT") ? "rd" : "amb");
+  const money = v => (typeof v === "number" && isFinite(v)) ? "$" + v.toFixed(2) : "—";
+  const pct = (target - entry) / entry * 100;
+  const action = verdict === "BUY" ? `Entry near ${money(entry)} · first target ${money(target)} (+${pct.toFixed(1)}%).`
+    : (verdict === "WATCH" || verdict === "WAIT") ? `Not a trade yet — watch for entry near ${money(entry)} toward ${money(target)}.`
+    : (verdict === "AVOID") ? "No edge at this price — stand aside."
+    : (verdict === "SHORT") ? `Short bias — resistance near ${money(entry)}.`
+    : `Entry ${money(entry)} · target ${money(target)}.`;
+  return { verdict, vtone, action, entry, stop, target, rr,
+    invalid: `price closes below ${money(stop)}`,
+    badge: cv && cv.net != null ? `composite ${cv.net}/100` : null };
+}
+
+function QuantQuickCard({ d, title, onSize }) {
+  if (!d) return null;
+  const money = v => (typeof v === "number" && isFinite(v)) ? "$" + v.toFixed(2) : "—";
+  const rrTone = d.rr == null ? "ink" : d.rr >= 2 ? "gn" : d.rr >= 1 ? "amb" : "rd";
+  const size = onSize || (() => { try { window.__setLens && window.__setLens("plan"); } catch (e) {} });
+  return (
+    <div className={`smc-qc smc-qc--${d.vtone}`}>
+      <div className="smc-qc-l">
+        <div className="smc-qc-head">
+          <span className={`smc-qc-verdict smc-qc-verdict--${d.vtone}`}>{d.verdict}</span>
+          <span className="label-cap">{title || "Quick Read"}</span>
+          {d.badge && <span className="smc-qc-real mono">{d.badge}</span>}
+        </div>
+        <div className="smc-qc-action mono">{d.action}</div>
+        {d.invalid && <div className="smc-qc-invalid mono dim2">✕ Idea is wrong if {d.invalid}.</div>}
+      </div>
+      <div className="smc-qc-r">
+        <div className="smc-qc-tiles">
+          <div className="smc-qc-tile" title="Buy zone / trigger level."><span className="label-cap">Entry</span><span className="mono copper">{d.entryLabel || money(d.entry)}</span></div>
+          <div className="smc-qc-tile" title="Protective stop — a close past it invalidates the idea."><span className="label-cap">Stop</span><span className="mono dn">{money(d.stop)}</span></div>
+          <div className="smc-qc-tile" title="First target."><span className="label-cap">Target</span><span className="mono up">{money(d.target)}</span></div>
+          <div className="smc-qc-tile" title="Reward-to-risk to the first target."><span className="label-cap">R:R</span><span className={`mono kpi-tone--${rrTone}`}>{d.rr != null ? d.rr.toFixed(2) + "R" : "—"}</span></div>
+        </div>
+        <button className="smc-qc-btn" title="Open the Plan tab to size this and see $ risk" onClick={size}>→ Size in Plan</button>
+      </div>
+    </div>
+  );
+}
+
 Object.assign(window, {
   SectionHeader, FreshnessPill, Pill, WilsonPill, KpiTile, CrossLens, StateWrap,
-  Sparkline, Gauge, Radar, Cone,
+  Sparkline, Gauge, Radar, Cone, QuantQuickCard, quickDecision,
 });
