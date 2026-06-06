@@ -620,7 +620,7 @@ function OtkGEX({ o, exps }) {
 Spot: $${o.spot.toFixed(2)} · Net GEX: ${fmtMM(g.total)} (${pos ? "positive — moves dampened" : "negative — moves amplified"}) · Call wall: $${g.callWall} · Put wall: $${g.putWall} · Flip: $${g.flip} · Max pain: $${g.maxPain}`;
   return (
     <div className="otk-card otk-card--wide">
-      <div className="otk-card-h mono">DEALER GAMMA (GEX) · by strike · <span className="dim2">computed from chain OI × γ (all expirations)</span></div>
+      <div className="otk-card-h mono">DEALER GAMMA (GEX) · by strike · <span className="dim2">real Schwab OI × γ · curve-aggregated · dealer-short model</span></div>
       <div className="otk-gex-kpis">
         <div className="otk-gex-kpi"><span className="mono dim2">NET GEX</span><span className={`mono otk-gex-kv ${pos ? "up" : "dn"}`}>{fmtMM(g.total)}</span><span className="mono dim2" style={{ fontSize: 8 }}>{pos ? "stabilizing" : "amplifying"}</span></div>
         <div className="otk-gex-kpi"><span className="mono dim2">γ-FLIP</span><span className="mono otk-gex-kv warn">${g.flip}</span></div>
@@ -644,7 +644,7 @@ Spot: $${o.spot.toFixed(2)} · Net GEX: ${fmtMM(g.total)} (${pos ? "positive —
         <span className={pos ? "up" : "dn"}>{pos ? "POSITIVE γ" : "NEGATIVE γ"}</span> ·{" "}
         {pos ? <>dealers buy dips / sell rips → moves <b>dampened</b>; price gravitates toward <b className="copper">max-pain ${g.maxPain}</b>, pinning between <b className="dn">put wall ${g.putWall}</b> and <b className="up">call wall ${g.callWall}</b>. Below <b>γ-flip ${g.flip}</b> turns amplifying.</>
           : <>dealer hedging <b>amplifies</b> moves — expect bigger swings; reclaiming <b className="warn">γ-flip ${g.flip}</b> restores stability.</>}
-        <span className="dim2"> · {o.dte}-DTE chain · informational, not advice.</span>
+        <span className="dim2"> · assumes the standard dealer-short convention (OI shows how many contracts exist, not who's long/short) · informational, not advice.</span>
       </div>
       <div className="otk-gex-stock">
         <div className="otk-gex-stock-top"><span className="otk-gex-stock-tag mono">FOR THE STOCK</span></div>
