@@ -33,6 +33,76 @@ function SmcEmpty({ state, what }) {
 function smcMoney(v) { return (typeof v === "number" && isFinite(v)) ? "$" + v.toFixed(2) : "—"; }
 function smcTone(state) { return state === "fresh" ? "ink" : state === "held" ? "gn" : state === "mitigated" ? "amb" : "cy"; }
 
+// Assemble the engine's structure into ONE tradeable decision: verdict + entry zone
+// (unmitigated OB) + stop (just beyond it) + target (draw on liquidity) + R:R +
+// plain invalidation. Resolves the bull-but-premium case into WAIT-for-pullback.
+function smcDecision(m) {
+  if (!m || !m.ok) return null;
+  const cur = m.cur_close, r = m.range, draw = m.draw_on_liquidity;
+  const bull = m.bias === "bull", bear = m.bias === "bear";
+  const obs = m.order_blocks || [];
+  let ob = null;
+  if (bull) ob = obs.filter(o => o.type === "demand" && o.hi <= cur * 1.005 && o.state !== "mitigated").sort((a, b) => b.hi - a.hi)[0]
+                || obs.filter(o => o.type === "demand").sort((a, b) => b.hi - a.hi)[0];
+  else if (bear) ob = obs.filter(o => o.type === "supply" && o.lo >= cur * 0.995 && o.state !== "mitigated").sort((a, b) => a.lo - b.lo)[0]
+                || obs.filter(o => o.type === "supply").sort((a, b) => a.lo - b.lo)[0];
+  let entry = null, stop = null;
+  if (ob) {
+    entry = +(((ob.lo + ob.hi) / 2)).toFixed(2);
+    stop = bull ? +(ob.lo * 0.99).toFixed(2) : +(ob.hi * 1.01).toFixed(2);
+  }
+  const target = draw ? draw.price : (bull ? r.hi : bear ? r.lo : null);
+  let rr = null;
+  if (entry != null && stop != null && target != null) {
+    const risk = Math.abs(entry - stop), rew = Math.abs(target - entry);
+    const valid = bull ? (target > entry && entry > stop) : (target < entry && entry < stop);
+    rr = (valid && risk > 0) ? rew / risk : null;
+  }
+  let verdict, vtone, action;
+  if (!bull && !bear) { verdict = "NO EDGE"; vtone = "amb"; action = "Range-bound — no committed bias. Wait for a break of structure before trading."; }
+  else if (bull) {
+    if (r.zone === "discount" || r.ote_active) { verdict = "BUY"; vtone = "gn"; action = `Bullish and in ${r.ote_active ? "the OTE zone" : "discount"} — long the demand OB toward ${smcMoney(target)}.`; }
+    else if (r.zone === "premium") { verdict = "WAIT"; vtone = "amb"; action = `Bullish but extended (premium, ${r.pct}% of range). Don't chase — wait for a pullback into ${ob ? smcMoney(ob.lo) + "–" + smcMoney(ob.hi) : "the OB"} / OTE ${smcMoney(r.ote_lo)}–${smcMoney(r.ote_hi)}, then long.`; }
+    else { verdict = "WATCH"; vtone = "cy"; action = "Bullish at equilibrium — wait for a discount pullback or a fresh break of structure."; }
+  } else { verdict = "AVOID"; vtone = "rd"; action = `Bearish structure — no long. ${r.zone === "premium" ? "Short setup from premium toward " + smcMoney(target) + "." : "Stand aside until structure flips."}`; }
+  const invalid = (entry != null && stop != null) ? `price closes ${bull ? "below" : "above"} ${smcMoney(stop)}` : `${m.tf} close ${bull ? "below" : "above"} ${smcMoney(bull ? r.lo : r.hi)}`;
+  return { verdict, vtone, action, entry, stop, target, rr, ob, invalid, bull, bear };
+}
+
+function SmcQuickCard({ m }) {
+  if (!_smcUsable(m)) return null;
+  const d = smcDecision(m);
+  if (!d) return null;
+  const rrTone = d.rr == null ? "ink" : d.rr >= 2 ? "gn" : d.rr >= 1 ? "amb" : "rd";
+  return (
+    <div className={`smc-qc smc-qc--${d.vtone}`}>
+      <div className="smc-qc-l">
+        <div className="smc-qc-head">
+          <span className={`smc-qc-verdict smc-qc-verdict--${d.vtone}`}>{d.verdict}</span>
+          <span className="label-cap">Quick Read · SMC · {m.tf}</span>
+          <span className="smc-qc-real mono" title={`computed from ${m.bars} live ${m.tf} bars`}>● REAL · {m.bars} bars</span>
+        </div>
+        <div className="smc-qc-action mono">{d.action}</div>
+        <div className="smc-qc-invalid mono dim2">✕ Idea is wrong if {d.invalid}.</div>
+      </div>
+      <div className="smc-qc-r">
+        <div className="smc-qc-tiles">
+          <div className="smc-qc-tile" title="Buy zone — the unmitigated demand order block to enter on a pullback.">
+            <span className="label-cap">Entry zone</span><span className="mono copper">{d.ob ? `${smcMoney(d.ob.lo)}–${smcMoney(d.ob.hi)}` : smcMoney(d.entry)}</span></div>
+          <div className="smc-qc-tile" title="Protective stop — just beyond the order block; a close past it invalidates the setup.">
+            <span className="label-cap">Stop</span><span className="mono dn">{smcMoney(d.stop)}</span></div>
+          <div className="smc-qc-tile" title="Target — the draw on liquidity the move is reaching for.">
+            <span className="label-cap">Target</span><span className="mono up">{smcMoney(d.target)}</span></div>
+          <div className="smc-qc-tile" title="Reward-to-risk if filled at the entry zone.">
+            <span className="label-cap">R:R</span><span className={`mono kpi-tone--${rrTone}`}>{d.rr != null ? d.rr.toFixed(2) + "R" : "—"}</span></div>
+        </div>
+        <button className="smc-qc-btn" title="Open the Plan tab to size this and see $ risk"
+          onClick={() => { try { window.__setLens && window.__setLens("plan"); } catch (e) {} }}>→ Size in Plan</button>
+      </div>
+    </div>
+  );
+}
+
 // ────────────────────────────────────────────────────────────
 // SMC — order blocks, FVG, BoS/CHoCH, liquidity sweeps
 // ────────────────────────────────────────────────────────────
@@ -48,6 +118,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const nUnmit = obs.filter(o => o.state !== "mitigated").length;
   const nFVGu = ok ? m.fvgs.filter(g => g.state === "unfilled").length : 0;
   const lastEvt = ok && m.structure.events.length ? m.structure.events[m.structure.events.length - 1] : null;
+  const [adv, setAdv] = useStateSMC(false);
   const s1 = useStateToggle("sm-1"); const s2 = useStateToggle("sm-2");
   const s3 = useStateToggle("sm-3"); const s4 = useStateToggle("sm-4");
   const s0 = useStateToggle("sm-0"); const s5 = useStateToggle("sm-5");
@@ -60,6 +131,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   return (
     <div className="lens lens--smc">
       {window.LensSummaryBar && <LensSummaryBar ticker={ticker} mode={mode} kind="smc" smc={m} />}
+      <SmcQuickCard m={m} />
       <div className="hero smc-hero">
         <div className="th-left">
           <div className="label-cap">SMC structure read · {mode}{ok ? " · " + m.tf : ""}</div>
@@ -151,6 +223,10 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
         </StateWrap>
       </div>
 
+      <button className="smc-adv-toggle mono" onClick={() => setAdv(!adv)}>
+        {adv ? "▾ Hide advanced SMC" : "▸ Advanced SMC"} <span className="dim2">· inducement · breakers · OTE · kill-zones · entry model · confluence · heatmap · alerts</span>
+      </button>
+      {adv && (<>
       <div className="lens-section">
         <SectionHeader n={6} title="Inducement · Liquidity Engineering"
           sub="the trap before the move · minor liquidity swept first"
@@ -231,6 +307,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           <div className="lens-pad"><SMCAlerts m={m} state={state} /></div>
         </StateWrap>
       </div>
+      </>)}
 
       <div className="lens-section">
         <SectionHeader n={6} title="Cross-Lens Confluence" style={headerStyle} />

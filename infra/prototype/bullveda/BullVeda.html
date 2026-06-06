@@ -2606,6 +2606,30 @@ body { overflow: hidden; }
 /* ============================================================ */
 .smc-hero { gap: 16px; }
 .smc-empty { padding:12px 14px; font-size:11px; border:1px dashed var(--glass-line); border-radius:var(--r-2); background:color-mix(in oklab,var(--bg-2) 50%,transparent); }
+/* Quick Trade Card — the decision, above the fold */
+.smc-qc { display:grid; grid-template-columns:1fr auto; gap:18px; align-items:center; padding:14px 18px; margin:0 0 14px;
+  background:color-mix(in oklab,var(--bg-1) 92%,transparent); border:1px solid var(--glass-line); border-radius:var(--r-3); }
+.smc-qc--gn { border-left:3px solid var(--gn); } .smc-qc--amb { border-left:3px solid var(--amb); }
+.smc-qc--rd { border-left:3px solid var(--rd); } .smc-qc--cy { border-left:3px solid var(--cy); }
+.smc-qc-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.smc-qc-verdict { font-size:19px; font-weight:700; letter-spacing:0.04em; }
+.smc-qc-verdict--gn{color:var(--gn);} .smc-qc-verdict--amb{color:var(--amb);} .smc-qc-verdict--rd{color:var(--rd);} .smc-qc-verdict--cy{color:var(--cy);}
+.smc-qc-real { font-size:9px; letter-spacing:0.08em; color:var(--gn); border:1px solid color-mix(in oklab,var(--gn) 35%,transparent); border-radius:3px; padding:2px 6px; }
+.smc-qc-action { font-size:12.5px; line-height:1.5; margin-top:6px; color:var(--ink-1); }
+.smc-qc-invalid { font-size:11px; margin-top:4px; }
+.smc-qc-r { display:flex; flex-direction:column; gap:8px; align-items:flex-end; }
+.smc-qc-tiles { display:grid; grid-template-columns:repeat(4,auto); gap:8px; }
+.smc-qc-tile { display:flex; flex-direction:column; gap:2px; padding:6px 11px; min-width:78px; cursor:help;
+  background:var(--glass-bg-2); border:1px solid var(--glass-line); border-radius:var(--r-2); }
+.smc-qc-tile .label-cap { font-size:8.5px; }
+.smc-qc-tile .mono { font-size:13px; font-weight:600; }
+.smc-qc-btn { font:600 11px var(--mono); letter-spacing:0.06em; padding:8px 14px; border-radius:var(--r-pill); cursor:pointer;
+  background:linear-gradient(180deg,var(--copper),color-mix(in oklab,var(--copper) 78%,var(--bg))); color:var(--bg); border:none; }
+.smc-qc-btn:hover { box-shadow:0 0 18px color-mix(in oklab,var(--copper) 45%,transparent); }
+.smc-adv-toggle { width:100%; text-align:left; background:var(--glass-bg-1); border:1px dashed var(--glass-line); border-radius:var(--r-2);
+  padding:9px 14px; margin:2px 0 12px; color:var(--ink-1); font-size:11.5px; letter-spacing:0.03em; cursor:pointer; }
+.smc-adv-toggle:hover { border-color:var(--copper); }
+@media (max-width:760px){ .smc-qc{grid-template-columns:1fr;} .smc-qc-r{align-items:stretch;} .smc-qc-tiles{grid-template-columns:repeat(2,1fr);} }
 .smc-macro { display:flex; flex-direction:column; gap:10px; }
 .ob-mit { display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:10.5px; font-weight:600; letter-spacing:.03em; }
 .ob-mit-dot { width:7px; height:7px; border-radius:50%; }
@@ -20520,6 +20544,73 @@ function smcMoney(v) {
 function smcTone(state) {
   return state === "fresh" ? "ink" : state === "held" ? "gn" : state === "mitigated" ? "amb" : "cy";
 }
+function smcDecision(m) {
+  if (!m || !m.ok) return null;
+  const cur = m.cur_close, r = m.range, draw = m.draw_on_liquidity;
+  const bull = m.bias === "bull", bear = m.bias === "bear";
+  const obs = m.order_blocks || [];
+  let ob = null;
+  if (bull) ob = obs.filter((o) => o.type === "demand" && o.hi <= cur * 1.005 && o.state !== "mitigated").sort((a, b) => b.hi - a.hi)[0] || obs.filter((o) => o.type === "demand").sort((a, b) => b.hi - a.hi)[0];
+  else if (bear) ob = obs.filter((o) => o.type === "supply" && o.lo >= cur * 0.995 && o.state !== "mitigated").sort((a, b) => a.lo - b.lo)[0] || obs.filter((o) => o.type === "supply").sort((a, b) => a.lo - b.lo)[0];
+  let entry = null, stop = null;
+  if (ob) {
+    entry = +((ob.lo + ob.hi) / 2).toFixed(2);
+    stop = bull ? +(ob.lo * 0.99).toFixed(2) : +(ob.hi * 1.01).toFixed(2);
+  }
+  const target = draw ? draw.price : bull ? r.hi : bear ? r.lo : null;
+  let rr = null;
+  if (entry != null && stop != null && target != null) {
+    const risk = Math.abs(entry - stop), rew = Math.abs(target - entry);
+    const valid = bull ? target > entry && entry > stop : target < entry && entry < stop;
+    rr = valid && risk > 0 ? rew / risk : null;
+  }
+  let verdict, vtone, action;
+  if (!bull && !bear) {
+    verdict = "NO EDGE";
+    vtone = "amb";
+    action = "Range-bound \u2014 no committed bias. Wait for a break of structure before trading.";
+  } else if (bull) {
+    if (r.zone === "discount" || r.ote_active) {
+      verdict = "BUY";
+      vtone = "gn";
+      action = `Bullish and in ${r.ote_active ? "the OTE zone" : "discount"} \u2014 long the demand OB toward ${smcMoney(target)}.`;
+    } else if (r.zone === "premium") {
+      verdict = "WAIT";
+      vtone = "amb";
+      action = `Bullish but extended (premium, ${r.pct}% of range). Don't chase \u2014 wait for a pullback into ${ob ? smcMoney(ob.lo) + "\u2013" + smcMoney(ob.hi) : "the OB"} / OTE ${smcMoney(r.ote_lo)}\u2013${smcMoney(r.ote_hi)}, then long.`;
+    } else {
+      verdict = "WATCH";
+      vtone = "cy";
+      action = "Bullish at equilibrium \u2014 wait for a discount pullback or a fresh break of structure.";
+    }
+  } else {
+    verdict = "AVOID";
+    vtone = "rd";
+    action = `Bearish structure \u2014 no long. ${r.zone === "premium" ? "Short setup from premium toward " + smcMoney(target) + "." : "Stand aside until structure flips."}`;
+  }
+  const invalid = entry != null && stop != null ? `price closes ${bull ? "below" : "above"} ${smcMoney(stop)}` : `${m.tf} close ${bull ? "below" : "above"} ${smcMoney(bull ? r.lo : r.hi)}`;
+  return { verdict, vtone, action, entry, stop, target, rr, ob, invalid, bull, bear };
+}
+function SmcQuickCard({ m }) {
+  if (!_smcUsable(m)) return null;
+  const d = smcDecision(m);
+  if (!d) return null;
+  const rrTone = d.rr == null ? "ink" : d.rr >= 2 ? "gn" : d.rr >= 1 ? "amb" : "rd";
+  return /* @__PURE__ */ React.createElement("div", { className: `smc-qc smc-qc--${d.vtone}` }, /* @__PURE__ */ React.createElement("div", { className: "smc-qc-l" }, /* @__PURE__ */ React.createElement("div", { className: "smc-qc-head" }, /* @__PURE__ */ React.createElement("span", { className: `smc-qc-verdict smc-qc-verdict--${d.vtone}` }, d.verdict), /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Quick Read \xB7 SMC \xB7 ", m.tf), /* @__PURE__ */ React.createElement("span", { className: "smc-qc-real mono", title: `computed from ${m.bars} live ${m.tf} bars` }, "\u25CF REAL \xB7 ", m.bars, " bars")), /* @__PURE__ */ React.createElement("div", { className: "smc-qc-action mono" }, d.action), /* @__PURE__ */ React.createElement("div", { className: "smc-qc-invalid mono dim2" }, "\u2715 Idea is wrong if ", d.invalid, ".")), /* @__PURE__ */ React.createElement("div", { className: "smc-qc-r" }, /* @__PURE__ */ React.createElement("div", { className: "smc-qc-tiles" }, /* @__PURE__ */ React.createElement("div", { className: "smc-qc-tile", title: "Buy zone \u2014 the unmitigated demand order block to enter on a pullback." }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Entry zone"), /* @__PURE__ */ React.createElement("span", { className: "mono copper" }, d.ob ? `${smcMoney(d.ob.lo)}\u2013${smcMoney(d.ob.hi)}` : smcMoney(d.entry))), /* @__PURE__ */ React.createElement("div", { className: "smc-qc-tile", title: "Protective stop \u2014 just beyond the order block; a close past it invalidates the setup." }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Stop"), /* @__PURE__ */ React.createElement("span", { className: "mono dn" }, smcMoney(d.stop))), /* @__PURE__ */ React.createElement("div", { className: "smc-qc-tile", title: "Target \u2014 the draw on liquidity the move is reaching for." }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Target"), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, smcMoney(d.target))), /* @__PURE__ */ React.createElement("div", { className: "smc-qc-tile", title: "Reward-to-risk if filled at the entry zone." }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "R:R"), /* @__PURE__ */ React.createElement("span", { className: `mono kpi-tone--${rrTone}` }, d.rr != null ? d.rr.toFixed(2) + "R" : "\u2014"))), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      className: "smc-qc-btn",
+      title: "Open the Plan tab to size this and see $ risk",
+      onClick: () => {
+        try {
+          window.__setLens && window.__setLens("plan");
+        } catch (e) {
+        }
+      }
+    },
+    "\u2192 Size in Plan"
+  )));
+}
 function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const { m, state } = useSmcModel(ticker, mode);
   const ok = _smcUsable(m);
@@ -20532,6 +20623,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const nUnmit = obs.filter((o) => o.state !== "mitigated").length;
   const nFVGu = ok ? m.fvgs.filter((g) => g.state === "unfilled").length : 0;
   const lastEvt = ok && m.structure.events.length ? m.structure.events[m.structure.events.length - 1] : null;
+  const [adv, setAdv] = useStateSMC(false);
   const s1 = useStateToggle("sm-1");
   const s2 = useStateToggle("sm-2");
   const s3 = useStateToggle("sm-3");
@@ -20547,7 +20639,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s12b = useStateToggle("sm-12");
   const s13b = useStateToggle("sm-13");
   const s14b = useStateToggle("sm-14");
-  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--smc" }, window.LensSummaryBar && /* @__PURE__ */ React.createElement(LensSummaryBar, { ticker, mode, kind: "smc", smc: m }), /* @__PURE__ */ React.createElement("div", { className: "hero smc-hero" }, /* @__PURE__ */ React.createElement("div", { className: "th-left" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "SMC structure read \xB7 ", mode, ok ? " \xB7 " + m.tf : ""), /* @__PURE__ */ React.createElement("div", { className: "th-score" }, /* @__PURE__ */ React.createElement("div", { className: "th-score-num mono" }, ok ? m.smc_score >= 66 ? "PASS" : m.smc_score >= 50 ? "MIXED" : "WEAK" : "\u2014"), ok && /* @__PURE__ */ React.createElement(Pill, { tone: biasTone, dot: true }, m.headline), ok && /* @__PURE__ */ React.createElement(Pill, { tone: zoneTone, small: true }, zone)), /* @__PURE__ */ React.createElement("div", { className: "th-pill-row" }, ok ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true }, obs.length, " OB \xB7 ", nUnmit, " unmitigated"), /* @__PURE__ */ React.createElement(Pill, { tone: "cy", small: true }, nFVGu, " FVG unfilled"), draw && /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "draw ", draw.side, " ", smcMoney(draw.price)), /* @__PURE__ */ React.createElement(Pill, { tone: biasTone, small: true }, "SMC ", m.smc_score)) : /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, state === "loading" ? "loading live bars\u2026" : "no live structure"))), /* @__PURE__ */ React.createElement("div", { className: "th-right" }, /* @__PURE__ */ React.createElement(SMCMicroChart, { m }))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--smc" }, window.LensSummaryBar && /* @__PURE__ */ React.createElement(LensSummaryBar, { ticker, mode, kind: "smc", smc: m }), /* @__PURE__ */ React.createElement(SmcQuickCard, { m }), /* @__PURE__ */ React.createElement("div", { className: "hero smc-hero" }, /* @__PURE__ */ React.createElement("div", { className: "th-left" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "SMC structure read \xB7 ", mode, ok ? " \xB7 " + m.tf : ""), /* @__PURE__ */ React.createElement("div", { className: "th-score" }, /* @__PURE__ */ React.createElement("div", { className: "th-score-num mono" }, ok ? m.smc_score >= 66 ? "PASS" : m.smc_score >= 50 ? "MIXED" : "WEAK" : "\u2014"), ok && /* @__PURE__ */ React.createElement(Pill, { tone: biasTone, dot: true }, m.headline), ok && /* @__PURE__ */ React.createElement(Pill, { tone: zoneTone, small: true }, zone)), /* @__PURE__ */ React.createElement("div", { className: "th-pill-row" }, ok ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true }, obs.length, " OB \xB7 ", nUnmit, " unmitigated"), /* @__PURE__ */ React.createElement(Pill, { tone: "cy", small: true }, nFVGu, " FVG unfilled"), draw && /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "draw ", draw.side, " ", smcMoney(draw.price)), /* @__PURE__ */ React.createElement(Pill, { tone: biasTone, small: true }, "SMC ", m.smc_score)) : /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, state === "loading" ? "loading live bars\u2026" : "no live structure"))), /* @__PURE__ */ React.createElement("div", { className: "th-right" }, /* @__PURE__ */ React.createElement(SMCMicroChart, { m }))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       title: "SMC Snapshot",
@@ -20619,7 +20711,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "sm-4" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s4.value, source: "MTF aggregator \xB7 1H/4H/D/W structure" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(MTFScreener, { m, state })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s4.value, source: "MTF aggregator \xB7 1H/4H/D/W structure" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(MTFScreener, { m, state })))), /* @__PURE__ */ React.createElement("button", { className: "smc-adv-toggle mono", onClick: () => setAdv(!adv) }, adv ? "\u25BE Hide advanced SMC" : "\u25B8 Advanced SMC", " ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 inducement \xB7 breakers \xB7 OTE \xB7 kill-zones \xB7 entry model \xB7 confluence \xB7 heatmap \xB7 alerts")), adv && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 6,
@@ -20700,7 +20792,7 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "sm-14" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s14b.value, source: "alert engine \xB7 SMC conditions" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(SMCAlerts, { m, state })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(SectionHeader, { n: 6, title: "Cross-Lens Confluence", style: headerStyle }), /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, ok ? (() => {
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s14b.value, source: "alert engine \xB7 SMC conditions" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(SMCAlerts, { m, state }))))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(SectionHeader, { n: 6, title: "Cross-Lens Confluence", style: headerStyle }), /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, ok ? (() => {
     const px = ticker.pillars || {};
     const tech = px.technical;
     const mtfH = m.mtf && m.mtf.length > 1 ? m.mtf[1] : null;
@@ -23160,8 +23252,14 @@ window.LensSummaryBar = LensSummaryBar;
 })();
 window.coherentLevels = function(t) {
   const price = t.price || t.pivot || 0;
-  const pivot = t.pivot || price, stop = t.stop, t1 = t.t1, t2 = t.t2;
+  let pivot = t.pivot || price, stop = t.stop, t1 = t.t1, t2 = t.t2;
   const valid = stop > 0 && pivot > 0 && t1 > 0 && t2 > 0 && stop < pivot && pivot < t1 && t1 < t2;
+  if (!valid) {
+    pivot = price > 0 ? price : pivot;
+    if (!(stop > 0)) stop = +(price * 0.94).toFixed(2);
+    if (!(t1 > 0)) t1 = +(price * 1.06).toFixed(2);
+    if (!(t2 > 0)) t2 = +(price * 1.12).toFixed(2);
+  }
   return { price, pivot, stop, t1, t2, valid };
 };
 function discoveryFootprint(ticker) {
@@ -23545,11 +23643,15 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
   const held = (window.__BV && window.__BV.realHoldings && window.__BV.realHoldings() || []).find((p) => String(p.sym || "").toUpperCase() === String(ticker.symbol || "").toUpperCase());
   const scanTs = window.__BV && window.__BV.scanMeta && window.__BV.scanMeta.ts || null;
   const scanT = scanTs ? String(scanTs).split(" ").slice(-2).join(" ") : null;
-  const erTxt = ticker.earnings ? `earnings in ${ticker.earnings.days}d` : "a clean catalyst window";
+  const erTxt = ticker.earnings && ticker.earnings.days != null ? `earnings in ${ticker.earnings.days}d` : "a clean catalyst window";
   const dissenters = cv ? cv.dissenters.slice(0, 4) : [];
   const buyTop = entry * 1.03;
   let st, stTone, stNote;
-  if (L.price < entry) {
+  if (!L.valid) {
+    st = "NO PLAN";
+    stTone = "ink";
+    stNote = "off-universe \xB7 live quote only \u2014 levels below are price-estimates, not a scan plan";
+  } else if (L.price < entry) {
     st = "WATCH";
     stTone = "amb";
     stNote = `${((entry - L.price) / L.price * 100).toFixed(1)}% below trigger \xB7 arm alert at $${entry.toFixed(2)}`;
@@ -23573,7 +23675,7 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
     { k: "TRIGGER", v: entry, cls: "dh-rung--trig", d: dist(entry), field: "canonical_trade_plan.entry.low" },
     { k: "STOP", v: L.stop, cls: "dh-rung--stop", d: dist(L.stop), field: "canonical_trade_plan.stop" }
   ].sort((a, b) => b.v - a.v);
-  return /* @__PURE__ */ React.createElement("div", { className: `dh dh--${vtone}` }, /* @__PURE__ */ React.createElement("div", { className: "dh-grid" }, /* @__PURE__ */ React.createElement("div", { className: "dh-left" }, /* @__PURE__ */ React.createElement("div", { className: "dh-top" }, /* @__PURE__ */ React.createElement("div", { className: "dh-vis" }, heroStyle === "gauge" && /* @__PURE__ */ React.createElement(Gauge, { value: net, label: "COMPOSITE", size: sizeCat === "S" ? 108 : 124 }), heroStyle === "cone" && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6 } }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "10d cone \xB7 \xB1", ticker.ml.magnitude.hi.toFixed(0), "%"), /* @__PURE__ */ React.createElement(Cone, { lo: ticker.ml.magnitude.lo, mid: ticker.ml.magnitude.mid, hi: ticker.ml.magnitude.hi, w: 200, h: 100 })), (heroStyle === "radar" || !heroStyle) && /* @__PURE__ */ React.createElement(Radar, { pillars, size: sizeCat === "S" ? 124 : 144 })), /* @__PURE__ */ React.createElement("div", { className: "dh-main" }, /* @__PURE__ */ React.createElement("div", { className: "dh-eyebrow" }, /* @__PURE__ */ React.createElement("span", { className: "dh-eyebrow-l mono" }, "COMPOSITE BIAS \xB7 ", cv ? cv.lenses.length : 12, " LENSES \xB7 ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, mode)), /* @__PURE__ */ React.createElement(Pill, { tone: "gn", dot: true, small: true }, scanT ? "AS OF " + scanT + " PT" : "LIVE")), /* @__PURE__ */ React.createElement("div", { className: "dh-verdict" }, /* @__PURE__ */ React.createElement("span", { className: `dh-bias dh-bias--${vtone}` }, bias), /* @__PURE__ */ React.createElement("span", { className: "dh-net mono" }, net, /* @__PURE__ */ React.createElement("span", { className: "dh-net-of" }, "/100")), /* @__PURE__ */ React.createElement("span", { className: "dh-conf mono" }, "conf ", cv ? cv.conf : "\u2014"), cv && /* @__PURE__ */ React.createElement("span", { className: "dh-counts" }, /* @__PURE__ */ React.createElement("span", { className: "dh-cnt dh-cnt--gn" }, cv.agree, " agree"), /* @__PURE__ */ React.createElement("span", { className: "dh-cnt dh-cnt--amb" }, cv.caution, " caution"), /* @__PURE__ */ React.createElement("span", { className: "dh-cnt dh-cnt--rd" }, cv.fail, " against"))), /* @__PURE__ */ React.createElement("div", { className: "dh-setup mono" }, /* @__PURE__ */ React.createElement("b", { className: "copper" }, ticker.setupFamily || "\u2014"), /* @__PURE__ */ React.createElement("span", null, " \xB7 hold ~", ticker.holdDays || 9, "d \xB7 "), evR != null ? /* @__PURE__ */ React.createElement("b", { className: evR >= 0 ? "up" : "dn" }, evR >= 0 ? "+" : "", evR.toFixed(2), "R expectancy") : /* @__PURE__ */ React.createElement("b", { className: "dim2" }, "expectancy \u2014"), /* @__PURE__ */ React.createElement("span", null, " \xB7 edge LB ", /* @__PURE__ */ React.createElement("b", { className: lb != null ? "up" : "dim2" }, lb != null ? (lb * 100).toFixed(0) + "%" : "\u2014"), ss.n != null ? /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " n=", ss.n, ss.n < 30 ? " \u26A0" : "") : null, " \xB7 ", erTxt)), /* @__PURE__ */ React.createElement("div", { className: "dh-read" }, /* @__PURE__ */ React.createElement("b", { className: vtone === "gn" ? "up" : vtone === "rd" ? "dn" : "warn" }, ticker.symbol, " reads ", bias.toLowerCase()), " for a ", mode.toLowerCase(), " hold", ticker.setupFamily ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \u2014 a ", /* @__PURE__ */ React.createElement("b", null, ticker.setupFamily.toLowerCase()), " setup") : "", lb != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " with a ", ss.n != null && ss.n < 30 ? "preliminary" : "sample-validated", " edge (Wilson LB ", (lb * 100).toFixed(0), "%", ss.n != null ? `, n=${ss.n}` : "", evR != null ? `, ${evR >= 0 ? "+" : ""}${evR.toFixed(2)}R` : "", ")") : /* @__PURE__ */ React.createElement(React.Fragment, null, " (no per-setup track record yet)"), ". ", L.valid ? "Downside is bounded at one stop; " : "No complete trade plan for this name; ", erTxt, " is the live caveat to size around."), dissenters.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "dh-dissent mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "Watch the dissent:"), dissenters.map((d) => /* @__PURE__ */ React.createElement("button", { key: d.k, className: "dh-diss-pill", onClick: () => onLens && onLens(d.k), title: d.why }, d.k, " ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, d.v)))))), /* @__PURE__ */ React.createElement("div", { className: "dh-ladder" }, /* @__PURE__ */ React.createElement("div", { className: "dh-state" }, /* @__PURE__ */ React.createElement("span", { className: `dh-state-badge dh-state--${stTone} mono` }, "\u25B6 ", st), /* @__PURE__ */ React.createElement("span", { className: "dh-state-note mono" }, stNote)), /* @__PURE__ */ React.createElement("div", { className: "dh-rungs" }, rungs.map((r, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `dh-rung ${r.cls} mono` }, /* @__PURE__ */ React.createElement("span", { className: "dh-rung-k" }, r.k), /* @__PURE__ */ React.createElement("span", { className: "dh-rung-v", "data-field": r.field, "data-provenance": "comp" }, "$", r.v.toFixed(2)), /* @__PURE__ */ React.createElement("span", { className: "dh-rung-d" }, r.d)))), /* @__PURE__ */ React.createElement("div", { className: "dh-rail-stats" }, /* @__PURE__ */ React.createElement("div", { className: "dh-rs" }, /* @__PURE__ */ React.createElement("span", { className: "dh-rs-l mono" }, "R : R"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-v mono copper", "data-field": "canonical_trade_plan.rr_ratio" }, modeRR != null ? modeRR.toFixed(2) + "R" : "\u2014"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-sub mono" }, "reward \xF7 risk")), /* @__PURE__ */ React.createElement("div", { className: "dh-rs" }, /* @__PURE__ */ React.createElement("span", { className: "dh-rs-l mono" }, "SIZE"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-v mono" }, shares ? shares + " sh" : "\u2014"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-sub mono" }, shares ? `$${dollars.toLocaleString()}${navPct != null ? ` \xB7 ${navPct.toFixed(1)}% NAV` : ""}` : "no plan")), /* @__PURE__ */ React.createElement("div", { className: "dh-rs" }, /* @__PURE__ */ React.createElement("span", { className: "dh-rs-l mono" }, "EDGE"), /* @__PURE__ */ React.createElement("span", { className: `dh-rs-v mono ${lb != null ? "up" : "dim2"}` }, lb != null ? (lb * 100).toFixed(0) + "%" : "\u2014"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-sub mono" }, "Wilson LB", ss.pf != null ? ` \xB7 PF ${ss.pf.toFixed(2)}` : ""))), /* @__PURE__ */ React.createElement("div", { className: "dh-fit mono" }, L.valid ? /* @__PURE__ */ React.createElement("span", { className: "dh-fit-chip" }, "size = $", Math.round(navRisk).toLocaleString(), " risk \xF7 $", risk.toFixed(2), " stop") : null, /* @__PURE__ */ React.createElement("span", { className: "dh-fit-chip" }, held ? `in book \xB7 ${Math.abs(held.qty || 0)} sh` : "not held"), ticker.beta != null ? /* @__PURE__ */ React.createElement("span", { className: "dh-fit-chip" }, "\u03B2 ", ticker.beta.toFixed(2), " \u2192 market") : null, /* @__PURE__ */ React.createElement("span", null, NAV ? "\xBD-Kelly \xB7 0.5%-NAV risk" : "\xBD-Kelly reference")))), /* @__PURE__ */ React.createElement("div", { className: "dh-chart" }, /* @__PURE__ */ React.createElement("div", { className: "dh-chart-h" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap mono" }, chartView === "action" ? "THE SETUP \xB7 stop \xB7 trigger \xB7 EMA 9/21" : "THE SETUP \xB7 stop \xB7 trigger \xB7 T1 / T2 \xB7 EMA 9/21"), /* @__PURE__ */ React.createElement("div", { className: "dh-chart-hr" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2 dh-ema-leg" }, /* @__PURE__ */ React.createElement("b", { style: { color: "var(--cy)" } }, "\u2501"), " EMA9 ", /* @__PURE__ */ React.createElement("b", { style: { color: "var(--violet)" } }, "\u2501"), " EMA21"), /* @__PURE__ */ React.createElement("div", { className: "dh-chart-toggle mono" }, /* @__PURE__ */ React.createElement("button", { className: chartView === "action" ? "is-on" : "", onClick: () => pickChartView("action"), title: "Tight frame \u2014 bigger candles" }, "Action"), /* @__PURE__ */ React.createElement("button", { className: chartView === "full" ? "is-on" : "", onClick: () => pickChartView("full"), title: "Show the full trade \u2014 targets on chart" }, "Full trade")))), /* @__PURE__ */ React.createElement(SetupChart, { L, sym: ticker.symbol, view: chartView }))), /* @__PURE__ */ React.createElement("div", { className: "dh-actions" }, /* @__PURE__ */ React.createElement("button", { className: "dh-act dh-act--primary", onClick: actTrade, title: "Open Automated Trade to place a bracket order" }, "\u25B2 Place bracket"), /* @__PURE__ */ React.createElement("button", { className: `dh-act ${wlOn ? "dh-act--primary" : ""}`, onClick: actWatch }, wlOn ? "\u2713 Watchlisted" : "\uFF0B Watchlist"), /* @__PURE__ */ React.createElement("button", { className: "dh-act", onClick: actTrade, title: "Open Automated Trade to size the position" }, "\u2699 Adjust size"), /* @__PURE__ */ React.createElement("button", { className: "dh-act", onClick: actAlerts, title: "Open Alerts to arm a price alert" }, "\u{1F514} Alert at $", entry.toFixed(2)), /* @__PURE__ */ React.createElement("button", { className: "dh-act dh-act--rd dh-act--spacer", onClick: actTrade, title: "Open Automated Trade to place a short" }, "\u25BC Place short")));
+  return /* @__PURE__ */ React.createElement("div", { className: `dh dh--${vtone}` }, /* @__PURE__ */ React.createElement("div", { className: "dh-grid" }, /* @__PURE__ */ React.createElement("div", { className: "dh-left" }, /* @__PURE__ */ React.createElement("div", { className: "dh-top" }, /* @__PURE__ */ React.createElement("div", { className: "dh-vis" }, heroStyle === "gauge" && /* @__PURE__ */ React.createElement(Gauge, { value: net, label: "COMPOSITE", size: sizeCat === "S" ? 108 : 124 }), heroStyle === "cone" && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6 } }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "10d cone \xB7 \xB1", ticker.ml.magnitude.hi.toFixed(0), "%"), /* @__PURE__ */ React.createElement(Cone, { lo: ticker.ml.magnitude.lo, mid: ticker.ml.magnitude.mid, hi: ticker.ml.magnitude.hi, w: 200, h: 100 })), (heroStyle === "radar" || !heroStyle) && /* @__PURE__ */ React.createElement(Radar, { pillars, size: sizeCat === "S" ? 124 : 144 })), /* @__PURE__ */ React.createElement("div", { className: "dh-main" }, /* @__PURE__ */ React.createElement("div", { className: "dh-eyebrow" }, /* @__PURE__ */ React.createElement("span", { className: "dh-eyebrow-l mono" }, "COMPOSITE BIAS \xB7 ", cv ? cv.lenses.length : 12, " LENSES \xB7 ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, mode)), /* @__PURE__ */ React.createElement(Pill, { tone: "gn", dot: true, small: true }, scanT ? "AS OF " + scanT + " PT" : "LIVE")), /* @__PURE__ */ React.createElement("div", { className: "dh-verdict" }, /* @__PURE__ */ React.createElement("span", { className: `dh-bias dh-bias--${vtone}` }, bias), /* @__PURE__ */ React.createElement("span", { className: "dh-net mono" }, net, /* @__PURE__ */ React.createElement("span", { className: "dh-net-of" }, "/100")), /* @__PURE__ */ React.createElement("span", { className: "dh-conf mono" }, "conf ", cv ? cv.conf : "\u2014"), cv && /* @__PURE__ */ React.createElement("span", { className: "dh-counts" }, /* @__PURE__ */ React.createElement("span", { className: "dh-cnt dh-cnt--gn" }, cv.agree, " agree"), /* @__PURE__ */ React.createElement("span", { className: "dh-cnt dh-cnt--amb" }, cv.caution, " caution"), /* @__PURE__ */ React.createElement("span", { className: "dh-cnt dh-cnt--rd" }, cv.fail, " against"))), /* @__PURE__ */ React.createElement("div", { className: "dh-setup mono" }, /* @__PURE__ */ React.createElement("b", { className: "copper" }, ticker.setupFamily || "\u2014"), /* @__PURE__ */ React.createElement("span", null, " \xB7 hold ~", ticker.holdDays || 9, "d \xB7 "), evR != null ? /* @__PURE__ */ React.createElement("b", { className: evR >= 0 ? "up" : "dn" }, evR >= 0 ? "+" : "", evR.toFixed(2), "R expectancy") : /* @__PURE__ */ React.createElement("b", { className: "dim2" }, "expectancy \u2014"), /* @__PURE__ */ React.createElement("span", null, " \xB7 edge LB ", /* @__PURE__ */ React.createElement("b", { className: lb != null ? "up" : "dim2" }, lb != null ? (lb * 100).toFixed(0) + "%" : "\u2014"), ss.n != null ? /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " n=", ss.n, ss.n < 30 ? " \u26A0" : "") : null, " \xB7 ", erTxt)), /* @__PURE__ */ React.createElement("div", { className: "dh-read" }, /* @__PURE__ */ React.createElement("b", { className: vtone === "gn" ? "up" : vtone === "rd" ? "dn" : "warn" }, ticker.symbol, " reads ", bias.toLowerCase()), " for a ", mode.toLowerCase(), " hold", ticker.setupFamily ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \u2014 a ", /* @__PURE__ */ React.createElement("b", null, ticker.setupFamily.toLowerCase()), " setup") : "", lb != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " with a ", ss.n != null && ss.n < 30 ? "preliminary" : "sample-validated", " edge (Wilson LB ", (lb * 100).toFixed(0), "%", ss.n != null ? `, n=${ss.n}` : "", evR != null ? `, ${evR >= 0 ? "+" : ""}${evR.toFixed(2)}R` : "", ")") : /* @__PURE__ */ React.createElement(React.Fragment, null, " (no per-setup track record yet)"), ". ", L.valid ? "Downside is bounded at one stop; " : "No complete trade plan for this name; ", erTxt, " is the live caveat to size around."), dissenters.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "dh-dissent mono" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "Watch the dissent:"), dissenters.map((d) => /* @__PURE__ */ React.createElement("button", { key: d.k, className: "dh-diss-pill", onClick: () => onLens && onLens(d.k), title: d.why }, d.k, " ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, d.v)))))), /* @__PURE__ */ React.createElement("div", { className: "dh-ladder" }, /* @__PURE__ */ React.createElement("div", { className: "dh-state" }, /* @__PURE__ */ React.createElement("span", { className: `dh-state-badge dh-state--${stTone} mono` }, "\u25B6 ", st), /* @__PURE__ */ React.createElement("span", { className: "dh-state-note mono" }, stNote)), /* @__PURE__ */ React.createElement("div", { className: "dh-rungs" }, rungs.map((r, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `dh-rung ${r.cls} mono` }, /* @__PURE__ */ React.createElement("span", { className: "dh-rung-k" }, r.k), /* @__PURE__ */ React.createElement("span", { className: "dh-rung-v", "data-field": r.field, "data-provenance": "comp", title: !L.valid && r.k !== "NOW" ? "estimated from price \u2014 no scan trade plan for this off-universe name" : void 0 }, !L.valid && r.k !== "NOW" ? "~" : "", "$", r.v.toFixed(2)), /* @__PURE__ */ React.createElement("span", { className: "dh-rung-d" }, r.d)))), /* @__PURE__ */ React.createElement("div", { className: "dh-rail-stats" }, /* @__PURE__ */ React.createElement("div", { className: "dh-rs" }, /* @__PURE__ */ React.createElement("span", { className: "dh-rs-l mono" }, "R : R"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-v mono copper", "data-field": "canonical_trade_plan.rr_ratio" }, modeRR != null ? modeRR.toFixed(2) + "R" : "\u2014"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-sub mono" }, "reward \xF7 risk")), /* @__PURE__ */ React.createElement("div", { className: "dh-rs" }, /* @__PURE__ */ React.createElement("span", { className: "dh-rs-l mono" }, "SIZE"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-v mono" }, shares ? shares + " sh" : "\u2014"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-sub mono" }, shares ? `$${dollars.toLocaleString()}${navPct != null ? ` \xB7 ${navPct.toFixed(1)}% NAV` : ""}` : "no plan")), /* @__PURE__ */ React.createElement("div", { className: "dh-rs" }, /* @__PURE__ */ React.createElement("span", { className: "dh-rs-l mono" }, "EDGE"), /* @__PURE__ */ React.createElement("span", { className: `dh-rs-v mono ${lb != null ? "up" : "dim2"}` }, lb != null ? (lb * 100).toFixed(0) + "%" : "\u2014"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-sub mono" }, "Wilson LB", ss.pf != null ? ` \xB7 PF ${ss.pf.toFixed(2)}` : ""))), /* @__PURE__ */ React.createElement("div", { className: "dh-fit mono" }, L.valid ? /* @__PURE__ */ React.createElement("span", { className: "dh-fit-chip" }, "size = $", Math.round(navRisk).toLocaleString(), " risk \xF7 $", risk.toFixed(2), " stop") : null, /* @__PURE__ */ React.createElement("span", { className: "dh-fit-chip" }, held ? `in book \xB7 ${Math.abs(held.qty || 0)} sh` : "not held"), ticker.beta != null ? /* @__PURE__ */ React.createElement("span", { className: "dh-fit-chip" }, "\u03B2 ", ticker.beta.toFixed(2), " \u2192 market") : null, /* @__PURE__ */ React.createElement("span", null, NAV ? "\xBD-Kelly \xB7 0.5%-NAV risk" : "\xBD-Kelly reference")))), /* @__PURE__ */ React.createElement("div", { className: "dh-chart" }, /* @__PURE__ */ React.createElement("div", { className: "dh-chart-h" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap mono" }, chartView === "action" ? "THE SETUP \xB7 stop \xB7 trigger \xB7 EMA 9/21" : "THE SETUP \xB7 stop \xB7 trigger \xB7 T1 / T2 \xB7 EMA 9/21"), /* @__PURE__ */ React.createElement("div", { className: "dh-chart-hr" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2 dh-ema-leg" }, /* @__PURE__ */ React.createElement("b", { style: { color: "var(--cy)" } }, "\u2501"), " EMA9 ", /* @__PURE__ */ React.createElement("b", { style: { color: "var(--violet)" } }, "\u2501"), " EMA21"), /* @__PURE__ */ React.createElement("div", { className: "dh-chart-toggle mono" }, /* @__PURE__ */ React.createElement("button", { className: chartView === "action" ? "is-on" : "", onClick: () => pickChartView("action"), title: "Tight frame \u2014 bigger candles" }, "Action"), /* @__PURE__ */ React.createElement("button", { className: chartView === "full" ? "is-on" : "", onClick: () => pickChartView("full"), title: "Show the full trade \u2014 targets on chart" }, "Full trade")))), /* @__PURE__ */ React.createElement(SetupChart, { L, sym: ticker.symbol, view: chartView }))), /* @__PURE__ */ React.createElement("div", { className: "dh-actions" }, /* @__PURE__ */ React.createElement("button", { className: "dh-act dh-act--primary", onClick: actTrade, title: "Open Automated Trade to place a bracket order" }, "\u25B2 Place bracket"), /* @__PURE__ */ React.createElement("button", { className: `dh-act ${wlOn ? "dh-act--primary" : ""}`, onClick: actWatch }, wlOn ? "\u2713 Watchlisted" : "\uFF0B Watchlist"), /* @__PURE__ */ React.createElement("button", { className: "dh-act", onClick: actTrade, title: "Open Automated Trade to size the position" }, "\u2699 Adjust size"), /* @__PURE__ */ React.createElement("button", { className: "dh-act", onClick: actAlerts, title: "Open Alerts to arm a price alert" }, "\u{1F514} Alert at $", entry.toFixed(2)), /* @__PURE__ */ React.createElement("button", { className: "dh-act dh-act--rd dh-act--spacer", onClick: actTrade, title: "Open Automated Trade to place a short" }, "\u25BC Place short")));
 }
 window.DecisionHero = DecisionHero;
 (function() {
@@ -23622,7 +23724,7 @@ function ThesisCard({ ticker, mode }) {
   const sTone = (v) => v >= 62 ? "gn" : v >= 46 ? "amb" : "rd";
   const entry = (ticker.pivot || ticker.price || 0) * 1.002;
   const ss = ticker.setupStats || {};
-  const erTxt = ticker.earnings ? `earnings in ${ticker.earnings.days}d` : "a clean catalyst window";
+  const erTxt = ticker.earnings && ticker.earnings.days != null ? `earnings in ${ticker.earnings.days}d` : "a clean catalyst window";
   const bulls = cv ? cv.lenses.filter((l) => l.v >= 60).sort((a, b) => b.v - a.v).slice(0, 4) : [];
   const bears = cv ? cv.lenses.filter((l) => l.v < 48).sort((a, b) => a.v - b.v).slice(0, 3) : [];
   const ref = [
@@ -26786,6 +26888,16 @@ function NewsMarketsBoard({ onTicker, onSurface }) {
     return /* @__PURE__ */ React.createElement("button", { key: i, className: "nm-row nm-row--g", onClick: () => onTicker(r.sym) }, /* @__PURE__ */ React.createElement("span", { className: "nm-row-l" }, /* @__PURE__ */ React.createElement("b", { className: "nm-row-sym mono" }, r.sym), /* @__PURE__ */ React.createElement("span", { className: "nm-row-name dim2" }, dv || r.name)), /* @__PURE__ */ React.createElement("span", { className: "nm-row-r" }, /* @__PURE__ */ React.createElement("span", { className: "nm-row-px mono" }, r.px), /* @__PURE__ */ React.createElement("span", { className: `nm-row-chg mono ${r.chg >= 0 ? "up" : "dn"}` }, r.chg >= 0 ? "+" : "", r.chg.toFixed(1), "%")));
   }))));
 }
+function fgTone(v) {
+  if (v == null) return "amb";
+  if (v >= 55) return "gn";
+  if (v >= 45) return "amb";
+  return "rd";
+}
+function fgClass(v) {
+  const t = fgTone(v);
+  return t === "gn" ? "up" : t === "rd" ? "dn" : "amb";
+}
 function HomeHero({ mode, onSurface }) {
   const go = (id) => () => onSurface && onSurface(id);
   const scan = (f) => () => {
@@ -26799,7 +26911,7 @@ function HomeHero({ mode, onSurface }) {
   const flagged = buy + watch + avoid || 1;
   const seg = (n) => `${n / flagged * 100}%`;
   const mood = [
-    { l: "FEAR/GREED", v: M && M.fearGreed != null ? String(M.fearGreed) : "62", tone: "gn", pct: M && M.fearGreed != null ? M.fearGreed : 62 },
+    { l: "FEAR/GREED", v: M && M.fearGreed != null ? String(M.fearGreed) : "62", tone: fgTone(M && M.fearGreed != null ? M.fearGreed : 62), pct: M && M.fearGreed != null ? M.fearGreed : 62 },
     { l: "BREADTH", v: M && M.breadthPct != null ? Math.round(M.breadthPct) + "%" : "56%", tone: "gn", pct: M && M.breadthPct != null ? Math.round(M.breadthPct) : 56 },
     { l: "PUT/CALL", v: M && M.putCall != null ? M.putCall.toFixed(2) : "0.78", tone: "gn", pct: 60 },
     { l: "NEW HIGHS", v: M && M.newHighs != null ? String(M.newHighs) : "\u2014", tone: "gn", pct: 50 },
@@ -26832,7 +26944,7 @@ function HomeBrief() {
   const vix = typeof rg.vix_current === "number" ? rg.vix_current : rg.vix && rg.vix.vix_current;
   const spyChg = typeof rg.spy_daily_chg === "number" ? rg.spy_daily_chg : null;
   const dist = rg.distribution_state ? String(rg.distribution_state).replace(/_/g, " ") : null;
-  return /* @__PURE__ */ React.createElement("div", { className: "hh-brief" }, /* @__PURE__ */ React.createElement("span", { className: "hh-brief-tag mono" }, "MARKET STATE \xB7 NOW"), /* @__PURE__ */ React.createElement("span", { className: "hh-brief-txt mono" }, "Regime ", /* @__PURE__ */ React.createElement("b", { className: tone }, M.regimeLabel, " \xB7 ", M.regimeTrend), M.maxSize != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " (max size ", /* @__PURE__ */ React.createElement("b", null, M.maxSize, "%"), ")") : null, M.fearGreed != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 Fear/Greed ", /* @__PURE__ */ React.createElement("b", { className: "up" }, M.fearGreed)) : null, M.breadthPct != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 breadth ", /* @__PURE__ */ React.createElement("b", null, Math.round(M.breadthPct), "%")) : null, vix != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 VIX ", /* @__PURE__ */ React.createElement("b", null, vix.toFixed(1))) : null, spyChg != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 SPY ", /* @__PURE__ */ React.createElement("b", { className: spyChg >= 0 ? "up" : "dn" }, spyChg >= 0 ? "+" : "", spyChg.toFixed(1), "%")) : null, dist ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, dist)) : null, "."));
+  return /* @__PURE__ */ React.createElement("div", { className: "hh-brief" }, /* @__PURE__ */ React.createElement("span", { className: "hh-brief-tag mono" }, "MARKET STATE \xB7 NOW"), /* @__PURE__ */ React.createElement("span", { className: "hh-brief-txt mono" }, "Regime ", /* @__PURE__ */ React.createElement("b", { className: tone }, M.regimeLabel, " \xB7 ", M.regimeTrend), M.maxSize != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " (max size ", /* @__PURE__ */ React.createElement("b", null, M.maxSize, "%"), ")") : null, M.fearGreed != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 Fear/Greed ", /* @__PURE__ */ React.createElement("b", { className: fgClass(M.fearGreed) }, M.fearGreed)) : null, M.breadthPct != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 breadth ", /* @__PURE__ */ React.createElement("b", null, Math.round(M.breadthPct), "%")) : null, vix != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 VIX ", /* @__PURE__ */ React.createElement("b", null, vix.toFixed(1))) : null, spyChg != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 SPY ", /* @__PURE__ */ React.createElement("b", { className: spyChg >= 0 ? "up" : "dn" }, spyChg >= 0 ? "+" : "", spyChg.toFixed(1), "%")) : null, dist ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("b", { className: "dim2" }, dist)) : null, "."));
 }
 function HomeCard({ title, sub, cta, onCta, children }) {
   return /* @__PURE__ */ React.createElement("div", { className: "hc" }, /* @__PURE__ */ React.createElement("div", { className: "hc-hdr" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "hc-title mono" }, title), sub && /* @__PURE__ */ React.createElement("div", { className: "hc-sub mono dim" }, sub)), cta && /* @__PURE__ */ React.createElement("button", { className: "hc-cta mono", onClick: onCta }, cta)), /* @__PURE__ */ React.createElement("div", { className: "hc-body" }, children));
