@@ -56,8 +56,8 @@ function LensOptions({ ticker, mode }) {
     const spread = (_on(c.bid) != null && _on(c.ask) != null && c.ask > 0) ? c.ask - c.bid : null;
     const spreadPct = (spread != null && prem > 0) ? +(spread / prem * 100).toFixed(1) : null;
     const impMove = iv != null ? +(iv / 100 * Math.sqrt(Math.max(dte, 1) / 252) * 100).toFixed(1) : null;
-    // POP for a long call ≈ P(S_T > breakeven). delta is a reasonable first-order proxy.
-    const pop = _on(c.delta) != null ? Math.round(Math.max(2, Math.min(98, c.delta * 100 * 0.92))) : null;
+    // POP for a long call = risk-neutral P(S_T > breakeven) = N(d2) — real, not a delta proxy.
+    const pop = (iv != null && prem > 0 && spot > 0) ? bsPOP(spot, be, Math.max(dte, 1) / 252, iv / 100) : null;
     const erDays = ticker.earnings && ticker.earnings.days != null ? ticker.earnings.days : null;
     const erInWindow = erDays != null && erDays <= dte;
     return {
@@ -73,7 +73,9 @@ function LensOptions({ ticker, mode }) {
   if (none || !o) return <div className="lens lens--otk"><div className="mono dim2" style={{ padding: "48px 18px", textAlign: "center" }}>No live options chain for <b className="copper">{ticker.symbol}</b> — it may not be optionable, or the Schwab feed returned nothing.</div></div>;
 
   const cost = (o.prem * 100 * contracts);
-  const TABS = [["chain", "Chain & Greeks"], ["gex", "Dealer Gamma"], ["build", "Build & Journal"]];
+  const TABS = [["chain", "Contract & Pricing"], ["gex", "Where It Pins · GEX"], ["build", "Strategies & Journal"]];
+  const maxDte = exps.length ? Math.max(...exps.map(e => e.dte)) : 0;
+  const horizonMismatch = (mode === "POSITION" || mode === "INVESTMENT") && maxDte < 20;
 
   return (
     <div className="lens lens--otk">
@@ -139,6 +141,11 @@ function LensOptions({ ticker, mode }) {
         </div>
       </div>
 
+      {horizonMismatch && (
+        <div className="otk-horizon mono">⚑ {mode === "INVESTMENT" ? "Invest" : "Position"} horizon: the live feed only has near-term contracts (≤{maxDte} DTE). Options aren't suited to a multi-month thesis here — this shows the nearest weekly for context, not a {mode === "INVESTMENT" ? "long-term" : "multi-month"} holding.</div>
+      )}
+      <OptQuickTake ticker={ticker} mode={mode} o={o} />
+
       <div className="otk-tabs">
         {TABS.map(([id, l]) => <button key={id} className={`otk-tab ${tab === id ? "is-on" : ""}`} onClick={() => setTab(id)}>{l}</button>)}
       </div>
@@ -148,6 +155,57 @@ function LensOptions({ ticker, mode }) {
         {tab === "gex" && <OtkGEX o={o} />}
         {tab === "build" && <OtkBuild o={o} />}
       </div>
+    </div>
+  );
+}
+
+// ───── Options Quick Take — "should I do this trade?" decision layer ─────
+function OptQuickTake({ ticker, mode, o }) {
+  const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
+  const net = cv ? cv.net : null;
+  const biasBull = net != null ? net >= 55 : null, biasBear = net != null ? net < 45 : null;
+  const beMove = (o.be / o.spot - 1) * 100;            // % move to breakeven
+  const imp = o.impMove;                                // implied move over the DTE
+  const achievable = imp != null ? beMove <= imp : null;
+  const gex = useOTm(() => { try { return computeGEX(o); } catch (e) { return null; } }, [o]);
+  const F = [];
+  if (net != null) F.push({ k: "Direction", v: biasBull ? 1 : biasBear ? -1 : 0, text: biasBull ? `stock reads bullish (${Math.round(net)}/100) — a call aligns with the trend` : biasBear ? `stock reads bearish (${Math.round(net)}/100) — a long call fights the trend` : `stock is mixed (${Math.round(net)}/100) — no directional tailwind` });
+  if (achievable != null) F.push({ k: "Cost vs move", v: achievable ? 1 : -1, text: `needs ${beMove >= 0 ? "+" : ""}${beMove.toFixed(1)}% by expiry; the market prices ±${imp}% → breakeven is ${achievable ? "achievable" : "a stretch"}` });
+  F.push({ k: "Time", v: o.dte >= 3 ? 0 : -1, text: o.dte <= 1 ? `${o.dte}-DTE — expiry-day gamma/theta, all-or-nothing` : o.dte < 3 ? `${o.dte}-DTE — theta bleeds fast, needs an immediate move` : `${o.dte}-DTE — short-dated; the move must come within days` });
+  if (o.spreadPct != null) F.push({ k: "Liquidity", v: (o.spreadPct < 15 && (o.oi || 0) >= 500) ? 1 : (o.spreadPct < 25) ? 0 : -1, text: `spread ${o.spreadPct}% of premium · ATM OI ${(o.oi || 0).toLocaleString()}` });
+  if (o.erInWindow) F.push({ k: "Earnings", v: -1, text: `earnings in ${o.erDays}d, inside this expiry — expect IV crush after the print` });
+  const fails = F.filter(f => f.v < 0).length, passes = F.filter(f => f.v > 0).length;
+  const verdict = fails === 0 && passes >= 2 ? "REASONABLE SETUP" : fails <= 1 ? "TRADEABLE · WITH CARE" : "POOR SETUP";
+  const tone = fails === 0 ? "gn" : fails <= 1 ? "amb" : "rd";
+  const expShort = (o.exp.expiration || "").slice(5);
+  const plain = `A ${o.dte}-DTE ATM call costs $${(o.prem * 100).toFixed(0)} and needs ${ticker.symbol} to move ${beMove >= 0 ? "+" : ""}${beMove.toFixed(1)}% by ${expShort} just to break even` +
+    (imp != null ? ` — options are pricing a ±${imp}% move over that window, so breakeven is ${achievable ? "within reach" : "a stretch"}.` : ".") +
+    (biasBear ? ` The stock itself reads bearish, so a long call is fighting the trend.` : biasBull ? ` The stock's trend is supportive.` : "");
+  return (
+    <div className={`qt qt--${tone}`} style={{ margin: "0 0 12px" }}>
+      <div className="qt-grid" style={{ gridTemplateColumns: "150px 1fr 170px" }}>
+        <div className="qt-verdict">
+          <div className="label-cap">Trade read</div>
+          <div className={`qt-v mono kpi-tone--${tone}`} style={{ fontSize: 20 }}>{verdict}</div>
+          <div className="qt-conf mono dim2">{passes} green · {fails} red · long ATM call</div>
+        </div>
+        <div className="qt-tally">
+          {F.map((f, i) => (
+            <div key={i} className="otk-qt-factor mono">
+              <span className={`otk-qt-dot kpi-tone--${f.v > 0 ? "gn" : f.v < 0 ? "rd" : "amb"}`}>{f.v > 0 ? "✓" : f.v < 0 ? "✕" : "·"}</span>
+              <span className="otk-qt-k">{f.k}</span><span className="dim2"> — {f.text}</span>
+            </div>
+          ))}
+        </div>
+        <div className="qt-plan">
+          <div className="label-cap">Break-even vs move</div>
+          <div className="qt-plan-row"><span className="mono dim2">Breakeven</span><span className="mono copper">${o.be.toFixed(2)}</span></div>
+          <div className="qt-plan-row"><span className="mono dim2">Move needed</span><span className={`mono ${beMove <= (imp || 999) ? "up" : "dn"}`}>{beMove >= 0 ? "+" : ""}{beMove.toFixed(1)}%</span></div>
+          <div className="qt-plan-row"><span className="mono dim2">Implied move</span><span className="mono">±{imp != null ? imp : "—"}%</span></div>
+          <div className="qt-plan-row"><span className="mono dim2">POP (N·d₂)</span><span className="mono">{o.pop != null ? o.pop + "%" : "—"}</span></div>
+        </div>
+      </div>
+      <div className="qt-plain mono">{plain}{gex ? ` Dealer gamma is ${gex.total >= 0 ? (gex.putWall === gex.callWall ? `positive — price tends to pin near $${gex.maxPain}` : `positive — price tends to pin between $${Math.min(gex.putWall, gex.callWall)} and $${Math.max(gex.putWall, gex.callWall)}`) : `negative — expect amplified, trending moves`}.` : ""}</div>
     </div>
   );
 }
@@ -214,9 +272,18 @@ function OtkChainGreeks({ o, exps }) {
       <div className="otk-card">
         <div className="otk-card-h mono">GREEKS · ATM {o.strike}C · {o.dte}DTE</div>
         <div className="otk-greeks">
-          {[["Δ", o.delta != null ? (o.delta >= 0 ? "+" : "") + o.delta.toFixed(3) : "—"], ["Γ", o.gamma != null ? o.gamma.toFixed(4) : "—"], ["Θ/d", o.theta != null ? "$" + o.theta.toFixed(3) : "—"], ["ν", o.vega != null ? "$" + o.vega.toFixed(3) : "—"]].map(([k, v], i) => (
-            <div key={i} className="otk-greek"><span className="mono dim2">{k}</span><span className="mono otk-greek-v">{v}</span></div>
+          {[
+            ["Δ", o.delta != null ? (o.delta >= 0 ? "+" : "") + o.delta.toFixed(3) : "—", o.delta != null ? `moves ≈$${(o.delta).toFixed(2)} per $1 the stock moves` : "directional sensitivity"],
+            ["Γ", o.gamma != null ? o.gamma.toFixed(4) : "—", "how fast delta changes — higher = more responsive near the strike"],
+            ["Θ/d", o.theta != null ? "$" + o.theta.toFixed(3) : "—", o.theta != null ? `loses ≈$${Math.abs(o.theta * 100).toFixed(0)}/day to time if the stock sits still` : "time decay per day"],
+            ["ν", o.vega != null ? "$" + o.vega.toFixed(3) : "—", "gains/loses this per 1 IV point — volatility sensitivity"],
+          ].map(([k, v, help], i) => (
+            <div key={i} className="otk-greek" title={help}><span className="mono dim2">{k} <span style={{ fontSize: 8, color: "var(--ink-3)" }}>ⓘ</span></span><span className="mono otk-greek-v">{v}</span></div>
           ))}
+        </div>
+        <div className="mono dim2" style={{ fontSize: 10, marginTop: 6, lineHeight: 1.5 }}>
+          {o.delta != null && <>Δ <b>{o.delta.toFixed(2)}</b>: gains ≈<b className="up">${(o.delta).toFixed(2)}</b> per +$1 {o.sym}. </>}
+          {o.theta != null && <>Θ: bleeds ≈<b className="dn">${Math.abs(o.theta * 100).toFixed(0)}/day</b> to time.</>}
         </div>
         <div className="otk-stats" style={{ marginTop: 8 }}>
           {[["ATM IV", o.iv != null ? o.iv.toFixed(1) + "%" : "—"], ["Imp move", o.impMove != null ? "±" + o.impMove + "%" : "—"], ["Breakeven", "$" + o.be.toFixed(2)], ["Put skew", putSkew != null ? (putSkew >= 0 ? "+" : "") + putSkew + "%" : "—"], ["Spread", o.spreadPct != null ? o.spreadPct + "%" : "—"], ["IV rank", "building"]].map(([k, v], i) => (
@@ -298,6 +365,8 @@ function OtkThetaCurve({ o }) {
 // Black-Scholes (for the what-if profit grid)
 function bsNormCdf(x) { const t = 1 / (1 + 0.2316419 * Math.abs(x)); const d = 0.3989423 * Math.exp(-x * x / 2); let p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274)))); return x > 0 ? 1 - p : p; }
 function bsCall(S, K, T, sigma, r = 0.04) { if (T <= 0) return Math.max(S - K, 0); const v = sigma * Math.sqrt(T); const d1 = (Math.log(S / K) + (r + sigma * sigma / 2) * T) / v; const d2 = d1 - v; return S * bsNormCdf(d1) - K * Math.exp(-r * T) * bsNormCdf(d2); }
+// risk-neutral probability the call finishes above breakeven by expiry = N(d2|K=BE)
+function bsPOP(S, BE, T, sigma, r = 0.04) { if (T <= 0 || sigma <= 0 || S <= 0 || BE <= 0) return S > BE ? 100 : 0; const d2 = (Math.log(S / BE) + (r - sigma * sigma / 2) * T) / (sigma * Math.sqrt(T)); return Math.round(Math.max(1, Math.min(99, bsNormCdf(d2) * 100))); }
 
 function OtkProfitGrid({ o }) {
   const sigma = (o.iv != null ? o.iv : 40) / 100;
@@ -326,26 +395,26 @@ function OtkProfitGrid({ o }) {
 }
 
 // ───── TAB 2: DEALER GAMMA (real, from the live chain) ─────
+function computeGEX(o) {
+  const spot = o.spot;
+  const rows = o.strikes.map(s => {
+    const cOi = _on((s.call || {}).oi, 0), pOi = _on((s.put || {}).oi, 0);
+    const cG = _on((s.call || {}).gamma, 0), pG = _on((s.put || {}).gamma, 0);
+    const callGEX = -cOi * cG * spot * spot * 1e-4;   // dealer short calls (−), short puts (+)
+    const putGEX = pOi * pG * spot * spot * 1e-4;
+    return { k: s.strike, callOI: cOi, putOI: pOi, net: +(callGEX + putGEX).toFixed(2) };
+  });
+  if (!rows.length) return null;
+  let maxPain = rows[0].k, minPay = Infinity;
+  rows.forEach(r => { let p = 0; rows.forEach(s => { p += Math.max(0, r.k - s.k) * s.callOI + Math.max(0, s.k - r.k) * s.putOI; }); if (p < minPay) { minPay = p; maxPain = r.k; } });
+  const callWall = rows.reduce((a, b) => b.callOI > a.callOI ? b : a).k;
+  const putWall = rows.reduce((a, b) => b.putOI > a.putOI ? b : a).k;
+  let flip = spot; for (let i = 1; i < rows.length; i++) { if ((rows[i - 1].net < 0) !== (rows[i].net < 0)) { flip = rows[i].k; break; } }
+  const total = +rows.reduce((a, b) => a + b.net, 0).toFixed(2);
+  return { rows, maxPain, callWall, putWall, flip, total };
+}
 function OtkGEX({ o }) {
-  const g = useOTm(() => {
-    const spot = o.spot;
-    const rows = o.strikes.map(s => {
-      const cOi = _on((s.call || {}).oi, 0), pOi = _on((s.put || {}).oi, 0);
-      const cG = _on((s.call || {}).gamma, 0), pG = _on((s.put || {}).gamma, 0);
-      // dealer convention: short calls (−), short puts (+); $ per 1% move ≈ γ·OI·100·S²·0.01
-      const callGEX = -cOi * cG * spot * spot * 1e-4;
-      const putGEX = pOi * pG * spot * spot * 1e-4;
-      return { k: s.strike, callOI: cOi, putOI: pOi, net: +(callGEX + putGEX).toFixed(2) };
-    });
-    if (!rows.length) return null;
-    let maxPain = rows[0].k, minPay = Infinity;
-    rows.forEach(r => { let p = 0; rows.forEach(s => { p += Math.max(0, r.k - s.k) * s.callOI + Math.max(0, s.k - r.k) * s.putOI; }); if (p < minPay) { minPay = p; maxPain = r.k; } });
-    const callWall = rows.reduce((a, b) => b.callOI > a.callOI ? b : a).k;
-    const putWall = rows.reduce((a, b) => b.putOI > a.putOI ? b : a).k;
-    let flip = spot; for (let i = 1; i < rows.length; i++) { if ((rows[i - 1].net < 0) !== (rows[i].net < 0)) { flip = rows[i].k; break; } }
-    const total = +rows.reduce((a, b) => a + b.net, 0).toFixed(2);
-    return { rows, maxPain, callWall, putWall, flip, total };
-  }, [o]);
+  const g = useOTm(() => computeGEX(o), [o]);
   if (!g) return <div className="otk-card otk-card--wide"><div className="mono dim2" style={{ padding: 16 }}>Not enough open-interest in the live chain to compute dealer gamma.</div></div>;
   const W = 720, H = 220, padL = 16, padR = 16, padT = 16, padB = 30;
   const n = g.rows.length, bw = (W - padL - padR) / n;
