@@ -574,12 +574,13 @@ function LiquiditySweeps({ m, state }) {
   const L = m.liquidity;
   const buy = (L.buyside || [])[0];
   const sell = (L.sellside || [])[0];
-  const eqh = (L.equal_highs || [])[L.equal_highs ? L.equal_highs.length - 1 : 0];
+  // overhead resting liquidity = nearest equal-high cluster ABOVE price (none → honest "—")
+  const eqh = (L.equal_highs || []).filter(c => c.price > m.cur_close).sort((a, b) => a.price - b.price)[0] || null;
   return (
     <div className="kpi-row" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
       <KpiTile label="Sell-side · prior lows" value={sell ? smcMoney(sell.price) : "—"} tone="amb" sub={sell ? "resting below price" : "none below"} />
       <KpiTile label="Buy-side · prior highs" value={buy ? smcMoney(buy.price) : "—"} tone="copper" sub={buy ? ((buy.state || "untapped") + " · target above") : "none above"} />
-      <KpiTile label="Equal highs · resting liq" value={eqh ? smcMoney(eqh.price) : "—"} tone="amb" sub={eqh ? `${eqh.touches}-touch · magnet` : "none clustered"} />
+      <KpiTile label="Equal highs · resting liq" value={eqh ? smcMoney(eqh.price) : "—"} tone="amb" sub={eqh ? `${eqh.touches}-touch · magnet above` : "none above price"} />
     </div>
   );
 }
