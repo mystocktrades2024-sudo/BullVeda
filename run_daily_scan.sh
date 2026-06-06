@@ -120,43 +120,18 @@ if [ $EXIT_CODE -eq 0 ]; then
         set -e
     fi
 
-    # ── Run ML Edge inference (3-headed forecast: dir/mag/hit-net) ──────
-    # Cheap (~3s for 449 tickers). Writes cache/ml_edge_predictions.json +
-    # infra/prototype/ml_edge_predictions.json. Re-training runs only on the
-    # morning scan since closed-trade labels accumulate slowly.
-    echo "── Run ML Edge inference ──" >> "$LOG_FILE"
+    # ── ML Edge is DECOUPLED from the scan (2026-06-05) ────────────────────
+    # ML inference extracts features per-ticker (live 400d EODHD fetch on archive
+    # miss) and over the grown ~1,171-ticker universe took ~3h — which, run inside
+    # the scan, overran each run to 4-5h and blocked the cadence. ML now runs as a
+    # standalone job (com.swingtrade.ml-predict) 3x/24h, in its own process, so it
+    # can NEVER hold up a scan. The scan no longer touches ML at all.
     set +e
-    # Morning scan: refresh historical backfill + retrain all 9 models.
-    # Other intra-day scans: just re-run inference (uses prior models + cache).
-    if [ "$HOUR" -lt 7 ]; then
-        echo "Morning scan: refreshing historical_backfill.json (EODHD bulk EOD)" >> "$LOG_FILE"
-        "$PYTHON" -m ml.historical_backfill >> "$LOG_FILE" 2>&1 || echo "⚠ ml.historical_backfill failed (using prior backfill)" >> "$LOG_FILE"
-        echo "Morning scan: retraining all 9 ML Edge models (swing/position/invest × dir/mag/hit)" >> "$LOG_FILE"
-        "$PYTHON" -m ml.train_historical >> "$LOG_FILE" 2>&1 || echo "⚠ ml.train_historical failed (using prior model artifacts)" >> "$LOG_FILE"
-    fi
-    # ML inference runs only 4x/day (2026-06-03 · user) — pre-market / 2x session /
-    # post-market — NOT every 30-min scan. Predictions are stable enough intraday;
-    # 4 anchors keep them fresh without 16x compute. Anchors: <06:15 (pre/heavy),
-    # 09:30, 11:30, 13:30 (post-close). ml_edge_predictions.json persists between.
-    ML_EXIT=0
-    if [ "$_HHMM" -lt 615 ] || [ "$_HHMM" -eq 930 ] || [ "$_HHMM" -eq 1130 ] || [ "$_HHMM" -eq 1330 ]; then
-        # --max-tickers 500: ML inference extracts features per ticker (Parquet
-        # archive, else a live 400d EODHD fetch). all_scored grew to ~1,171, and the
-        # archive-miss fall-through made this take ~3h (2026-06-05). Cap to the top
-        # 500 (by scan order = highest-score/actionable) → minutes, covers every BUY/
-        # WATCH/Elite. The long tail doesn't need surfaced predictions.
-        "$PYTHON" -m ml.run_ml_edge --max-tickers 500 >> "$LOG_FILE" 2>&1
-        ML_EXIT=$?
-    else
-        echo "ML inference skipped — not a 4x anchor (pre/09:30/11:30/13:30)" >> "$LOG_FILE"
-    fi
     # Build setup_stats.json — Wilson CI per (setup × regime) for Technicals §6/§8
+    # (cheap, local, unrelated to ML — keep it in the scan).
     "$PYTHON" scripts/build_setup_stats.py >> "$LOG_FILE" 2>&1 || \
         echo "⚠ build_setup_stats failed (Technicals tab will show stale per-setup stats)" >> "$LOG_FILE"
     set -e
-    if [ $ML_EXIT -ne 0 ]; then
-        echo "⚠ ml.run_ml_edge exited $ML_EXIT (ML Edge sub-tab will show stale predictions)" >> "$LOG_FILE"
-    fi
 
     # ── SMC / Patterns scan (server-side smc_engine confluence) ──────────────
     # Morning-scan only — SMC is computed from DAILY bars (daily-stable); intraday
