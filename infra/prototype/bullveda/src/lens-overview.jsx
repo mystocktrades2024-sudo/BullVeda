@@ -101,8 +101,17 @@
 // callers show "—" / a "no plan" note when !valid instead of inventing numbers.
 window.coherentLevels = function (t) {
   const price = t.price || t.pivot || 0;
-  const pivot = t.pivot || price, stop = t.stop, t1 = t.t1, t2 = t.t2;
+  let pivot = t.pivot || price, stop = t.stop, t1 = t.t1, t2 = t.t2;
   const valid = stop > 0 && pivot > 0 && t1 > 0 && t2 > 0 && stop < pivot && pivot < t1 && t1 < t2;
+  if (!valid) {
+    // off-universe / no scan trade-plan: fill numeric placeholders from the real
+    // price so consumers never crash on null.toFixed. `valid:false` stays so
+    // sizing / EV / "estimated" labels can gate on it — these are NOT real S/R.
+    pivot = price > 0 ? price : pivot;
+    if (!(stop > 0)) stop = +(price * 0.94).toFixed(2);
+    if (!(t1 > 0)) t1 = +(price * 1.06).toFixed(2);
+    if (!(t2 > 0)) t2 = +(price * 1.12).toFixed(2);
+  }
   return { price, pivot, stop, t1, t2, valid };
 };
 
@@ -457,13 +466,14 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
   const held = ((window.__BV && window.__BV.realHoldings && window.__BV.realHoldings()) || []).find(p => String(p.sym || "").toUpperCase() === String(ticker.symbol || "").toUpperCase());
   const scanTs = (window.__BV && window.__BV.scanMeta && window.__BV.scanMeta.ts) || null;
   const scanT = scanTs ? String(scanTs).split(" ").slice(-2).join(" ") : null;
-  const erTxt = ticker.earnings ? `earnings in ${ticker.earnings.days}d` : "a clean catalyst window";
+  const erTxt = (ticker.earnings && ticker.earnings.days != null) ? `earnings in ${ticker.earnings.days}d` : "a clean catalyst window";
   const dissenters = cv ? cv.dissenters.slice(0, 4) : [];
 
   // ── live STATE relative to the trigger — the "what do I do now" crown ──
   const buyTop = entry * 1.03;
   let st, stTone, stNote;
-  if (L.price < entry) { st = "WATCH"; stTone = "amb"; stNote = `${((entry - L.price) / L.price * 100).toFixed(1)}% below trigger · arm alert at $${entry.toFixed(2)}`; }
+  if (!L.valid) { st = "NO PLAN"; stTone = "ink"; stNote = "off-universe · live quote only — levels below are price-estimates, not a scan plan"; }
+  else if (L.price < entry) { st = "WATCH"; stTone = "amb"; stNote = `${((entry - L.price) / L.price * 100).toFixed(1)}% below trigger · arm alert at $${entry.toFixed(2)}`; }
   else if (L.price <= buyTop) { st = "ACTIONABLE"; stTone = "gn"; stNote = "in the buy zone · trigger cleared"; }
   else { st = "EXTENDED"; stTone = "amb"; stNote = `${((L.price - entry) / entry * 100).toFixed(1)}% above trigger · wait for a pullback`; }
 
@@ -549,7 +559,7 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
             {rungs.map((r, i) => (
               <div key={i} className={`dh-rung ${r.cls} mono`}>
                 <span className="dh-rung-k">{r.k}</span>
-                <span className="dh-rung-v" data-field={r.field} data-provenance="comp">${r.v.toFixed(2)}</span>
+                <span className="dh-rung-v" data-field={r.field} data-provenance="comp" title={!L.valid && r.k !== "NOW" ? "estimated from price — no scan trade plan for this off-universe name" : undefined}>{!L.valid && r.k !== "NOW" ? "~" : ""}${r.v.toFixed(2)}</span>
                 <span className="dh-rung-d">{r.d}</span>
               </div>
             ))}
@@ -650,7 +660,7 @@ function ThesisCard({ ticker, mode }) {
   const sTone = v => v >= 62 ? "gn" : v >= 46 ? "amb" : "rd";
   const entry = (ticker.pivot || ticker.price || 0) * 1.002;
   const ss = ticker.setupStats || {};
-  const erTxt = ticker.earnings ? `earnings in ${ticker.earnings.days}d` : "a clean catalyst window";
+  const erTxt = (ticker.earnings && ticker.earnings.days != null) ? `earnings in ${ticker.earnings.days}d` : "a clean catalyst window";
   const bulls = cv ? cv.lenses.filter(l => l.v >= 60).sort((a, b) => b.v - a.v).slice(0, 4) : [];
   const bears = cv ? cv.lenses.filter(l => l.v < 48).sort((a, b) => a.v - b.v).slice(0, 3) : [];
   const ref = [
