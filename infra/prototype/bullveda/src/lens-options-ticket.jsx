@@ -42,36 +42,47 @@ function LensOptions({ ticker, mode }) {
     setDte(pick.dte);
   }, [mode, exps.length]);
 
-  // build the REAL ATM ticket from the selected expiration
+  // recommend the DIRECTION from the stock's own bias — a call shouldn't fight a
+  // bearish trend. User can override with the call/put toggle (side != null).
+  const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
+  const bias = cv ? (cv.net >= 55 ? "bull" : cv.net < 45 ? "bear" : "neutral") : "neutral";
+  const recSide = bias === "bear" ? "put" : "call";
+  const [side, setSide] = useOT(null);            // null = follow recommendation
+  const effSide = side || recSide;
+  React.useEffect(() => { setSide(null); }, [ticker.symbol, mode]);   // reset override on ticker/mode change
+
+  // build the REAL ATM ticket (call OR put) from the selected expiration
   const o = useOTm(() => {
     if (!chain || !exps.length) return null;
     const spot = _on(chain.spot, _on(ticker.price));
     const exp = exps.find(e => e.dte === dte) || exps[exps.length - 1];
-    const strikes = (exp.strikes || []).filter(s => s && s.call);
+    const isPut = effSide === "put";
+    const strikes = (exp.strikes || []).filter(s => s && (isPut ? s.put : s.call));
     if (!spot || !strikes.length) return null;
     const atm = strikes.reduce((a, s) => Math.abs(s.strike - spot) < Math.abs(a.strike - spot) ? s : a, strikes[0]);
-    const c = atm.call || {}, pu = atm.put || {};
-    const mid = (_on(c.bid) != null && _on(c.ask) != null && c.ask > 0) ? +(((c.bid + c.ask) / 2)).toFixed(2) : _on(c.mark);
-    const prem = mid != null ? mid : _on(c.mark, 0);
-    const iv = _on(c.iv, _on(chain.atm && chain.atm.iv));
-    const be = +(atm.strike + prem).toFixed(2);
-    const spread = (_on(c.bid) != null && _on(c.ask) != null && c.ask > 0) ? c.ask - c.bid : null;
+    const leg = (isPut ? atm.put : atm.call) || {}, other = (isPut ? atm.call : atm.put) || {};
+    const mid = (_on(leg.bid) != null && _on(leg.ask) != null && leg.ask > 0) ? +(((leg.bid + leg.ask) / 2)).toFixed(2) : _on(leg.mark);
+    const prem = mid != null ? mid : _on(leg.mark, 0);
+    const iv = _on(leg.iv, _on(chain.atm && chain.atm.iv));
+    const be = isPut ? +(atm.strike - prem).toFixed(2) : +(atm.strike + prem).toFixed(2);
+    const spread = (_on(leg.bid) != null && _on(leg.ask) != null && leg.ask > 0) ? leg.ask - leg.bid : null;
     const spreadPct = (spread != null && prem > 0) ? +(spread / prem * 100).toFixed(1) : null;
     const impMove = iv != null ? +(iv / 100 * Math.sqrt(Math.max(dte, 1) / 252) * 100).toFixed(1) : null;
-    // POP for a long call = risk-neutral P(S_T > breakeven) = N(d2) — real, not a delta proxy.
-    const pop = (iv != null && prem > 0 && spot > 0) ? bsPOP(spot, be, Math.max(dte, 1) / 252, iv / 100) : null;
+    // POP = P(profitable at expiry): call → P(S>BE) = N(d2); put → P(S<BE) = 1−N(d2).
+    const popRaw = (iv != null && prem > 0 && spot > 0) ? bsPOP(spot, be, Math.max(dte, 1) / 252, iv / 100) : null;
+    const pop = popRaw == null ? null : (isPut ? 100 - popRaw : popRaw);
     const erDays = ticker.earnings && ticker.earnings.days != null ? ticker.earnings.days : null;
     const erInWindow = erDays != null && erDays <= dte;
     return {
-      spot, strikes, exp, prem, strike: atm.strike, be, iv, dte, sym: ticker.symbol,
-      delta: _on(c.delta), gamma: _on(c.gamma), theta: _on(c.theta), vega: _on(c.vega),
-      oi: _on(c.oi), vol: _on(c.vol), bid: _on(c.bid), ask: _on(c.ask), mark: _on(c.mark),
-      putMark: _on(pu.mark), spread, spreadPct, impMove, pop, erDays, erInWindow,
+      spot, strikes, exp, prem, strike: atm.strike, be, iv, dte, sym: ticker.symbol, side: effSide, isPut,
+      delta: _on(leg.delta), gamma: _on(leg.gamma), theta: _on(leg.theta), vega: _on(leg.vega),
+      oi: _on(leg.oi), vol: _on(leg.vol), bid: _on(leg.bid), ask: _on(leg.ask), mark: _on(leg.mark),
+      putMark: _on(other.mark), spread, spreadPct, impMove, pop, erDays, erInWindow,
       hv20: _on(chain.hv20), hv30: _on(chain.hv30),
       ivVsHv: (iv != null && _on(chain.hv20) != null) ? +(iv - chain.hv20).toFixed(1) : null,
       source: chain.source, ts: chain.ts,
     };
-  }, [chain, dte, ticker]);
+  }, [chain, dte, ticker, effSide]);
 
   if (loading) return <div className="lens lens--otk"><div className="mono dim2" style={{ padding: "48px 18px", textAlign: "center" }}>Loading the live options chain for <b className="copper">{ticker.symbol}</b>…</div></div>;
   if (none || !o) return <div className="lens lens--otk"><div className="mono dim2" style={{ padding: "48px 18px", textAlign: "center" }}>No live options chain for <b className="copper">{ticker.symbol}</b> — it may not be optionable, or the Schwab feed returned nothing.</div></div>;
@@ -86,7 +97,13 @@ function LensOptions({ ticker, mode }) {
       {/* ───── DECISION STRIP ───── */}
       <div className="otk-strip">
         <div className="otk-ticket">
-          <div className="otk-ticket-h mono">⊞ TRADE TICKET · <span className="cy">Long Call (ATM)</span></div>
+          <div className="otk-ticket-h mono">⊞ TRADE TICKET · <span className="cy">Long {o.isPut ? "Put" : "Call"} (ATM)</span>
+            <span className="otk-side-toggle mono">
+              <button className={!o.isPut ? "is-on" : ""} onClick={() => setSide("call")}>Call</button>
+              <button className={o.isPut ? "is-on" : ""} onClick={() => setSide("put")}>Put</button>
+            </span>
+          </div>
+          {side == null && <div className="mono dim2" style={{ fontSize: 9, marginTop: 1 }}>auto-picked {recSide} to match the stock's {bias} read · tap to override</div>}
           <div className="otk-ticket-row">
             <span className="otk-buy mono">▶ BUY</span>
             <span className="otk-prem mono">${o.prem.toFixed(2)}</span>
@@ -142,7 +159,7 @@ function LensOptions({ ticker, mode }) {
           <div className="otk-heroes">
             <div className="otk-hero"><div className="mono dim2">PREMIUM</div><div className="mono otk-hero-v cy">${o.prem.toFixed(2)}</div></div>
             <div className="otk-hero"><div className="mono dim2">Δ DELTA</div><div className="mono otk-hero-v">{o.delta != null ? o.delta.toFixed(2) : "—"}</div></div>
-            <div className="otk-hero"><div className="mono dim2">POP*</div><div className="mono otk-hero-v">{o.pop != null ? o.pop + "%" : "—"}</div><div className="mono dim2" style={{ fontSize: 8 }}>≈ from Δ</div></div>
+            <div className="otk-hero"><div className="mono dim2">P(PROFIT)</div><div className="mono otk-hero-v">{o.pop != null ? o.pop + "%" : "—"}</div><div className="mono dim2" style={{ fontSize: 8 }}>at expiry</div></div>
             <div className="otk-hero"><div className="mono dim2">θ/DAY</div><div className="mono otk-hero-v dn">{o.theta != null ? "$" + o.theta.toFixed(2) : "—"}</div></div>
           </div>
         </div>
@@ -152,6 +169,7 @@ function LensOptions({ ticker, mode }) {
         <div className="otk-horizon mono">⚑ {mode === "INVESTMENT" ? "Invest" : "Position"} horizon: the live feed only has near-term contracts (≤{maxDte} DTE). Options aren't suited to a multi-month thesis here — this shows the nearest weekly for context, not a {mode === "INVESTMENT" ? "long-term" : "multi-month"} holding.</div>
       )}
       <OptQuickTake ticker={ticker} mode={mode} o={o} />
+      <RetailPlan o={o} contracts={contracts} />
 
       <div className="otk-tabs">
         {TABS.map(([id, l]) => <button key={id} className={`otk-tab ${tab === id ? "is-on" : ""}`} onClick={() => setTab(id)}>{l}</button>)}
@@ -171,31 +189,46 @@ function OptQuickTake({ ticker, mode, o }) {
   const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
   const net = cv ? cv.net : null;
   const biasBull = net != null ? net >= 55 : null, biasBear = net != null ? net < 45 : null;
-  const beMove = (o.be / o.spot - 1) * 100;            // % move to breakeven
+  const opt = o.isPut ? "put" : "call";
+  const beMove = (o.be / o.spot - 1) * 100;            // % to breakeven (neg for puts)
+  const beAbs = Math.abs(beMove);
   const imp = o.impMove;                                // implied move over the DTE
-  const achievable = imp != null ? beMove <= imp : null;
+  const achievable = imp != null ? beAbs <= imp : null;
+  const aligned = (o.isPut && biasBear) || (!o.isPut && biasBull);
+  const fights = (o.isPut && biasBull) || (!o.isPut && biasBear);
   const gex = useOTm(() => { try { return computeGEX(o); } catch (e) { return null; } }, [o]);
   const F = [];
-  if (net != null) F.push({ k: "Direction", v: biasBull ? 1 : biasBear ? -1 : 0, text: biasBull ? `stock reads bullish (${Math.round(net)}/100) — a call aligns with the trend` : biasBear ? `stock reads bearish (${Math.round(net)}/100) — a long call fights the trend` : `stock is mixed (${Math.round(net)}/100) — no directional tailwind` });
-  if (achievable != null) F.push({ k: "Cost vs move", v: achievable ? 1 : -1, text: `needs ${beMove >= 0 ? "+" : ""}${beMove.toFixed(1)}% by expiry; the market prices ±${imp}% → breakeven is ${achievable ? "achievable" : "a stretch"}` });
+  if (net != null) F.push({ k: "Direction", v: aligned ? 1 : fights ? -1 : 0, text: aligned ? `${opt} aligns with the stock's ${biasBull ? "bullish" : "bearish"} read (${Math.round(net)}/100)` : fights ? `${opt} fights the stock's ${biasBull ? "bullish" : "bearish"} read (${Math.round(net)}/100) — wrong direction` : `stock is mixed (${Math.round(net)}/100) — no directional tailwind` });
+  if (achievable != null) F.push({ k: "Cost vs move", v: achievable ? 1 : -1, text: `needs ${beMove >= 0 ? "+" : ""}${beMove.toFixed(1)}% (${o.isPut ? "a drop" : "a rise"}) by expiry; market prices ±${imp}% → ${achievable ? "achievable" : "a stretch"}` });
   if (o.ivVsHv != null) F.push({ k: "Volatility", v: o.ivVsHv <= -5 ? 1 : o.ivVsHv >= 8 ? -1 : 0, text: `IV ${o.iv.toFixed(0)}% vs realized ${o.hv20.toFixed(0)}% — ${o.ivVsHv <= -5 ? "cheap, good for buying premium" : o.ivVsHv >= 8 ? "rich, you overpay for vol" : "fair"}` });
-  F.push({ k: "Time", v: o.dte >= 3 ? 0 : -1, text: o.dte <= 1 ? `${o.dte}-DTE — expiry-day gamma/theta, all-or-nothing` : o.dte < 3 ? `${o.dte}-DTE — theta bleeds fast, needs an immediate move` : `${o.dte}-DTE — short-dated; the move must come within days` });
+  F.push({ k: "Time", v: o.dte >= 5 ? 0 : -1, text: o.dte <= 1 ? `${o.dte}-DTE — expiry-day gamma/theta, all-or-nothing` : o.dte < 5 ? `${o.dte}-DTE — theta bleeds fast, needs an immediate move` : `${o.dte}-DTE — time to be right` });
   if (o.spreadPct != null) F.push({ k: "Liquidity", v: (o.spreadPct < 15 && (o.oi || 0) >= 500) ? 1 : (o.spreadPct < 25) ? 0 : -1, text: `spread ${o.spreadPct}% of premium · ATM OI ${(o.oi || 0).toLocaleString()}` });
   if (o.erInWindow) F.push({ k: "Earnings", v: -1, text: `earnings in ${o.erDays}d, inside this expiry — expect IV crush after the print` });
   const fails = F.filter(f => f.v < 0).length, passes = F.filter(f => f.v > 0).length;
-  const verdict = fails === 0 && passes >= 2 ? "REASONABLE SETUP" : fails <= 1 ? "TRADEABLE · WITH CARE" : "POOR SETUP";
-  const tone = fails === 0 ? "gn" : fails <= 1 ? "amb" : "rd";
+  // a directional bet can't be "reasonable" without a directional edge
+  const dirOk = aligned, dirBad = fights;
+  const verdict = (fails === 0 && passes >= 2 && dirOk) ? "REASONABLE SETUP" : (fails <= 1 && !dirBad) ? "TRADEABLE · WITH CARE" : "POOR SETUP";
+  const tone = (fails === 0 && dirOk) ? "gn" : (fails <= 1 && !dirBad) ? "amb" : "rd";
   const expShort = (o.exp.expiration || "").slice(5);
-  const plain = `A ${o.dte}-DTE ATM call costs $${(o.prem * 100).toFixed(0)} and needs ${ticker.symbol} to move ${beMove >= 0 ? "+" : ""}${beMove.toFixed(1)}% by ${expShort} just to break even` +
-    (imp != null ? ` — options are pricing a ±${imp}% move over that window, so breakeven is ${achievable ? "within reach" : "a stretch"}.` : ".") +
-    (biasBear ? ` The stock itself reads bearish, so a long call is fighting the trend.` : biasBull ? ` The stock's trend is supportive.` : "");
+  // structure recommendation from bias × IV
+  const ivRich = o.ivVsHv != null && o.ivVsHv >= 8, ivCheap = o.ivVsHv != null && o.ivVsHv <= -5;
+  const rec = (net == null || (!biasBull && !biasBear))
+    ? `No clear directional edge — options aren't the obvious play here; consider a defined-risk spread or skip.`
+    : ivRich
+      ? `Vol is rich — instead of paying up for a single long ${opt}, a ${o.isPut ? "bear put" : "bull call"} debit spread cuts the vol cost.`
+      : ivCheap
+        ? `Bias is ${biasBull ? "bullish" : "bearish"} and vol is cheap — a long ${opt} is a clean way to express it.`
+        : `Bias is ${biasBull ? "bullish" : "bearish"}; a long ${opt} works, or a debit spread to lower cost.`;
+  const plain = `A ${o.dte}-DTE ATM ${opt} costs $${(o.prem * 100).toFixed(0)} and needs ${ticker.symbol} to ${o.isPut ? "fall" : "rise"} ${beAbs.toFixed(1)}% by ${expShort} just to break even` +
+    (imp != null ? ` — the market is pricing a ±${imp}% move, so breakeven is ${achievable ? "within reach" : "a stretch"}.` : ".") +
+    ` Buying options is a low-probability bet: P(profit) ≈ ${o.pop != null ? o.pop + "%" : "—"} — you're paying for a big, fast move.`;
   return (
     <div className={`qt qt--${tone}`} style={{ margin: "0 0 12px" }}>
       <div className="qt-grid" style={{ gridTemplateColumns: "150px 1fr 170px" }}>
         <div className="qt-verdict">
           <div className="label-cap">Trade read</div>
           <div className={`qt-v mono kpi-tone--${tone}`} style={{ fontSize: 20 }}>{verdict}</div>
-          <div className="qt-conf mono dim2">{passes} green · {fails} red · long ATM call</div>
+          <div className="qt-conf mono dim2">{passes} green · {fails} red · long ATM {opt}</div>
         </div>
         <div className="qt-tally">
           {F.map((f, i) => (
@@ -208,11 +241,12 @@ function OptQuickTake({ ticker, mode, o }) {
         <div className="qt-plan">
           <div className="label-cap">Break-even vs move</div>
           <div className="qt-plan-row"><span className="mono dim2">Breakeven</span><span className="mono copper">${o.be.toFixed(2)}</span></div>
-          <div className="qt-plan-row"><span className="mono dim2">Move needed</span><span className={`mono ${beMove <= (imp || 999) ? "up" : "dn"}`}>{beMove >= 0 ? "+" : ""}{beMove.toFixed(1)}%</span></div>
+          <div className="qt-plan-row"><span className="mono dim2">Move needed</span><span className={`mono ${achievable ? "up" : "dn"}`}>{beMove >= 0 ? "+" : ""}{beMove.toFixed(1)}%</span></div>
           <div className="qt-plan-row"><span className="mono dim2">Implied move</span><span className="mono">±{imp != null ? imp : "—"}%</span></div>
-          <div className="qt-plan-row"><span className="mono dim2">POP (N·d₂)</span><span className="mono">{o.pop != null ? o.pop + "%" : "—"}</span></div>
+          <div className="qt-plan-row"><span className="mono dim2">P(profit)</span><span className="mono">{o.pop != null ? o.pop + "%" : "—"}</span></div>
         </div>
       </div>
+      <div className={`otk-rec mono kpi-tone--${tone}`}>▸ {rec}</div>
       <div className="qt-plain mono">{plain}{gex ? ` Dealer gamma is ${gex.total >= 0 ? (gex.putWall === gex.callWall ? `positive — price tends to pin near $${gex.maxPain}` : `positive — price tends to pin between $${Math.min(gex.putWall, gex.callWall)} and $${Math.max(gex.putWall, gex.callWall)}`) : `negative — expect amplified, trending moves`}.` : ""}</div>
     </div>
   );
@@ -222,6 +256,64 @@ function OtkCheck({ ok, bad, warn, neutral, text }) {
   const cls = ok ? "ok" : bad ? "bad" : warn ? "warn" : "warn";
   const icon = ok ? "✓" : bad ? "⚠" : "·";
   return <div className={`otk-chk ${cls} mono`}><span>{icon}</span> {text}</div>;
+}
+
+// ───── Retail plan — 3 plain outcomes · sizing guardrail · vs-shares · exits ─────
+function RetailPlan({ o, contracts }) {
+  const sigma = (o.iv != null ? o.iv : 40) / 100, T = Math.max(o.dte, 1) / 252;
+  const cost = o.prem * 100 * contracts;
+  // if right: stock makes ~1 implied move in the trade's direction, value at expiry
+  const targetS = o.isPut ? o.spot * (1 - (o.impMove || 5) / 100) : o.spot * (1 + (o.impMove || 5) / 100);
+  const intrTgt = o.isPut ? Math.max(o.strike - targetS, 0) : Math.max(targetS - o.strike, 0);
+  const winPL = (intrTgt - o.prem) * 100 * contracts;
+  // if flat: BS value with half the time left, spot unchanged → theta cost
+  const flatVal = (o.isPut ? bsPut : bsCall)(o.spot, o.strike, T / 2, sigma);
+  const flatPL = (flatVal - o.prem) * 100 * contracts;
+  const shares100 = o.spot * 100 * contracts;
+  const lev = shares100 / cost;
+  const NAV = (window.__BV && typeof window.__BV.nav === "number") ? window.__BV.nav : null;
+  const riskBudget = NAV ? NAV * 0.02 : null;          // 2%-of-book per options trade
+  const maxCt = riskBudget ? Math.max(0, Math.floor(riskBudget / (o.prem * 100))) : null;
+  const bookPct = NAV ? (cost / NAV * 100) : null;
+  const oversized = maxCt != null && contracts > maxCt;
+  const M = v => (v >= 0 ? "+$" : "−$") + Math.abs(Math.round(v)).toLocaleString();
+  return (
+    <div className="otk-retail">
+      <div className="otk-rp-outcomes">
+        <div className="otk-rp-o otk-rp-o--gn">
+          <div className="label-cap">If you're right</div>
+          <div className="otk-rp-v mono up">{M(winPL)}</div>
+          <div className="mono dim2">{o.sym} {o.isPut ? "falls" : "rises"} to ~${targetS.toFixed(0)} (its implied move) by expiry</div>
+        </div>
+        <div className="otk-rp-o otk-rp-o--amb">
+          <div className="label-cap">If it sits still</div>
+          <div className="otk-rp-v mono dn">{M(flatPL)}</div>
+          <div className="mono dim2">theta bleed by the half-way point — time is working against you</div>
+        </div>
+        <div className="otk-rp-o otk-rp-o--rd">
+          <div className="label-cap">Worst case (max loss)</div>
+          <div className="otk-rp-v mono dn">−${Math.round(cost).toLocaleString()}</div>
+          <div className="mono dim2">the whole premium — a long {o.isPut ? "put" : "call"} can go to zero</div>
+        </div>
+      </div>
+      <div className="otk-rp-rows">
+        <div className={`otk-rp-row ${oversized ? "otk-rp-warn" : ""} mono`}>
+          <span className="otk-rp-k">Size</span>
+          {riskBudget != null
+            ? <span>Risking 2% of your ${Math.round(NAV).toLocaleString()} book is <b>${Math.round(riskBudget).toLocaleString()}</b> → up to <b className={oversized ? "dn" : "up"}>{maxCt}</b> contract{maxCt === 1 ? "" : "s"}. You have <b>{contracts}</b> = ${Math.round(cost).toLocaleString()}{bookPct != null ? ` (${bookPct.toFixed(1)}% of book)` : ""}.{oversized ? " ⚠ over the 2% guardrail." : ""}</span>
+            : <span>Max risk is the full <b>${Math.round(cost).toLocaleString()}</b> premium. Rule of thumb: risk ≤ 1–2% of your account per options trade.</span>}
+        </div>
+        <div className="otk-rp-row mono">
+          <span className="otk-rp-k">vs shares</span>
+          <span>${Math.round(cost).toLocaleString()} controls {100 * contracts} shares (worth ${Math.round(shares100).toLocaleString()}) — <b>{lev.toFixed(0)}×</b> leverage, but it expires {o.exp.expiration} and decays daily. Buying the shares can't go to zero on time.</span>
+        </div>
+        <div className="otk-rp-row mono">
+          <span className="otk-rp-k">Exit plan</span>
+          <span>Take profit at <b className="up">+50–100%</b> of premium · cut at <b className="dn">−50%</b> · close before expiry week ({Math.max(1, o.dte - 5)}+ days held = gamma/theta danger zone){o.erInWindow ? " · close before the earnings print (IV crush)" : ""}.</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ───── TAB 1: CHAIN & GREEKS (real) ─────
@@ -397,6 +489,7 @@ function OtkThetaCurve({ o }) {
 // Black-Scholes (for the what-if profit grid)
 function bsNormCdf(x) { const t = 1 / (1 + 0.2316419 * Math.abs(x)); const d = 0.3989423 * Math.exp(-x * x / 2); let p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274)))); return x > 0 ? 1 - p : p; }
 function bsCall(S, K, T, sigma, r = 0.04) { if (T <= 0) return Math.max(S - K, 0); const v = sigma * Math.sqrt(T); const d1 = (Math.log(S / K) + (r + sigma * sigma / 2) * T) / v; const d2 = d1 - v; return S * bsNormCdf(d1) - K * Math.exp(-r * T) * bsNormCdf(d2); }
+function bsPut(S, K, T, sigma, r = 0.04) { if (T <= 0) return Math.max(K - S, 0); return bsCall(S, K, T, sigma, r) - S + K * Math.exp(-r * T); }
 // risk-neutral probability the call finishes above breakeven by expiry = N(d2|K=BE)
 function bsPOP(S, BE, T, sigma, r = 0.04) { if (T <= 0 || sigma <= 0 || S <= 0 || BE <= 0) return S > BE ? 100 : 0; const d2 = (Math.log(S / BE) + (r - sigma * sigma / 2) * T) / (sigma * Math.sqrt(T)); return Math.round(Math.max(1, Math.min(99, bsNormCdf(d2) * 100))); }
 
