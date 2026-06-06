@@ -4,32 +4,128 @@
 
 const { useMemo: useTC, useState: useTCs, useRef: useTCr, useEffect: useTCe } = React;
 
-const TF_THESIS = {
-  "1H": { bias:"BULL", tone:"up", read:"Intraday uptrend — higher-lows, holding VWAP. Tactical entries on pullbacks to the rising 21-EMA.", struct:"BOS ↑ · OB holding", note:"execution timeframe" },
-  "4H": { bias:"BULL", tone:"up", read:"Swing leg intact — clean break of prior 4H range, no CHoCH. MACD above signal.", struct:"BOS ↑ · FVG below", note:"swing trigger timeframe" },
-  "1D": { bias:"BULL", tone:"up", read:"Primary trend up — base #2 breakout above pivot on +1.6× RVOL, stacked EMAs, above cloud.", struct:"BOS ↑ · above Kumo", note:"thesis timeframe" },
-  "1W": { bias:"NEUTRAL", tone:"amb", read:"Higher-timeframe still basing — range-bound. Bull thesis valid but HTF resistance overhead; size down.", struct:"range · no break", note:"context timeframe" },
+// real-candle fetch config per timeframe (/api/ohlcv). 1W: endpoint returns daily → resample.
+const TF_FETCH = {
+  "1H": { tf: "1H", days: 30 }, "4H": { tf: "4H", days: 120 },
+  "1D": { tf: "1D", days: 400 }, "1W": { tf: "1D", days: 1825, resample: "W" },
 };
-const TF_CFG = { "1H": {step:3600, n:120, vol:0.004}, "4H": {step:14400, n:120, vol:0.008}, "1D": {step:86400, n:160, vol:0.013}, "1W": {step:604800, n:120, vol:0.028} };
+const TF_NOTE = { "1H": "execution timeframe", "4H": "swing-trigger timeframe", "1D": "thesis timeframe", "1W": "context timeframe" };
 
-// news-on-chart overlay — sentiment-colored event flags along the timeline
-function NewsFlags() {
-  const events = [
-    { x: 8, tone: "gn", d: "Goldman BUY · PT raise", s: "+0.7" },
-    { x: 26, tone: "gn", d: "CFO open-market buy", s: "+0.5" },
-    { x: 44, tone: "rd", d: "Sector cycle-peak warning", s: "−0.4" },
-    { x: 61, tone: "gn", d: "Capacity expansion update", s: "+0.8" },
-    { x: 82, tone: "amb", d: "ER in 11d · implied ±6.4%", s: "ER" },
-  ];
+function resampleWeekly(bars) {
+  const wk = {};
+  bars.forEach(b => {
+    const dt = new Date(b.time * 1000);
+    const key = dt.getUTCFullYear() + "-W" + Math.floor((Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()) / 86400000 + 4) / 7);
+    const w = wk[key];
+    if (!w) wk[key] = { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close, value: b.value || 0 };
+    else { w.high = Math.max(w.high, b.high); w.low = Math.min(w.low, b.low); w.close = b.close; w.value += (b.value || 0); }
+  });
+  return Object.values(wk).sort((a, b) => a.time - b.time);
+}
+function _emaLast(bars, per) { const k = 2 / (per + 1); let v = bars[0].close; for (let i = 1; i < bars.length; i++) v = bars[i].close * k + v * (1 - k); return v; }
+function quickBias(bars) {
+  if (!bars || bars.length < 25) return null;
+  const last = bars[bars.length - 1].close, e9 = _emaLast(bars, 9), e21 = _emaLast(bars, 21), e50 = _emaLast(bars, 50);
+  if (e9 >= e21 && e21 >= e50 && last >= e21) return "BULL";
+  if (e9 <= e21 && e21 <= e50 && last <= e21) return "BEAR";
+  return "NEUTRAL";
+}
+function _barsFrom(res, cfg) {
+  const candles = (res && res.candles) || [], volArr = (res && res.volume) || [];
+  let b = candles.map((c, i) => { const vv = volArr[i]; const v = (vv && typeof vv === "object") ? (vv.value || 0) : (typeof vv === "number" ? vv : 0); return { time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, value: v }; });
+  if (cfg.resample === "W") b = resampleWeekly(b);
+  return b;
+}
+function useCandles(sym, tfKey) {
+  const [bars, setBars] = useTCs(null);
+  useTCe(() => {
+    const BV = window.__BV; if (!BV || !BV.get || !sym) { setBars(false); return; }
+    const cfg = TF_FETCH[tfKey] || TF_FETCH["1D"]; let on = true; setBars(null);
+    BV.get(`/api/ohlcv/${encodeURIComponent(sym)}?tf=${cfg.tf}&days=${cfg.days}`).then(res => { if (!on) return; const b = _barsFrom(res, cfg); setBars(b.length >= 5 ? b : false); }).catch(() => { if (on) setBars(false); });
+    return () => { on = false; };
+  }, [sym, tfKey]);
+  return bars;
+}
+function useMtfBias(sym) {
+  const [m, setM] = useTCs({});
+  useTCe(() => {
+    const BV = window.__BV; if (!BV || !BV.get || !sym) { setM({}); return; } let on = true; setM({});
+    Object.keys(TF_FETCH).forEach(k => { const cfg = TF_FETCH[k];
+      BV.get(`/api/ohlcv/${encodeURIComponent(sym)}?tf=${cfg.tf}&days=${cfg.days}`).then(res => { if (on) setM(prev => ({ ...prev, [k]: quickBias(_barsFrom(res, cfg)) })); }).catch(() => {});
+    });
+    return () => { on = false; };
+  }, [sym]);
+  return m;
+}
+function useChartNews(sym) {
+  const [n, setN] = useTCs([]);
+  useTCe(() => {
+    const BV = window.__BV; if (!BV || !BV.get || !sym) { setN([]); return; } let on = true;
+    BV.get(`/api/news?t=${encodeURIComponent(sym)}`).then(res => { if (on) setN((res && res.articles) || []); }).catch(() => { if (on) setN([]); });
+    return () => { on = false; };
+  }, [sym]);
+  return n;
+}
+
+// compute all overlays/indicators from REAL bars (logic unchanged — now fed real data)
+function computeIndicators(bars, lv) {
+  const ema = (per) => { const k = 2 / (per + 1); let pr = bars[0].close; return bars.map((b, i) => { pr = i === 0 ? b.close : b.close * k + pr * (1 - k); return { time: b.time, value: +pr.toFixed(2) }; }); };
+  const e9 = ema(9), e21 = ema(21), e50 = ema(50);
+  const bbU = [], bbM = [], bbL = [];
+  bars.forEach((b, i) => { const s = Math.max(0, i - 19), w = bars.slice(s, i + 1).map(x => x.close); const m = w.reduce((a, c) => a + c, 0) / w.length; const sd = Math.sqrt(w.reduce((a, c) => a + (c - m) ** 2, 0) / w.length); bbM.push({ time: b.time, value: +m.toFixed(2) }); bbU.push({ time: b.time, value: +(m + 2 * sd).toFixed(2) }); bbL.push({ time: b.time, value: +(m - 2 * sd).toFixed(2) }); });
+  const anchor = Math.floor(bars.length * 0.82); let pv = 0, cv = 0; const avwap = [];
+  bars.forEach((b, i) => { if (i >= anchor) { const tp = (b.high + b.low + b.close) / 3; pv += tp * b.value; cv += b.value; avwap.push({ time: b.time, value: +(cv ? pv / cv : b.close).toFixed(2) }); } });
+  const hh = (per, i) => Math.max(...bars.slice(Math.max(0, i - per + 1), i + 1).map(b => b.high));
+  const ll = (per, i) => Math.min(...bars.slice(Math.max(0, i - per + 1), i + 1).map(b => b.low));
+  const tenkan = [], kijun = [], spanA = [], spanB = [];
+  bars.forEach((b, i) => { const t = (hh(9, i) + ll(9, i)) / 2, k = (hh(26, i) + ll(26, i)) / 2; tenkan.push({ time: b.time, value: +t.toFixed(2) }); kijun.push({ time: b.time, value: +k.toFixed(2) }); spanA.push({ time: b.time, value: +((t + k) / 2).toFixed(2) }); spanB.push({ time: b.time, value: +((hh(52, i) + ll(52, i)) / 2).toFixed(2) }); });
+  const L = 5, piv = []; for (let i = L; i < bars.length - L; i++) { const isH = bars.slice(i - L, i + L + 1).every((b, j) => j === L || bars[i].high >= b.high); const isL = bars.slice(i - L, i + L + 1).every((b, j) => j === L || bars[i].low <= b.low); if (isH) piv.push({ i, price: bars[i].high, type: 'H' }); else if (isL) piv.push({ i, price: bars[i].low, type: 'L' }); }
+  const breaks = []; let lH = null, lL = null, tb = 0;
+  bars.forEach((b, i) => { if (lH != null && b.close > lH.price) { breaks.push({ time: b.time, price: lH.price, dir: 'bull', tag: tb === -1 ? 'CHoCH' : 'BOS' }); tb = 1; lH = null; } if (lL != null && b.close < lL.price) { breaks.push({ time: b.time, price: lL.price, dir: 'bear', tag: tb === 1 ? 'CHoCH' : 'BOS' }); tb = -1; lL = null; } const ph = piv.find(p => p.i === i && p.type === 'H'); if (ph) lH = ph; const pl = piv.find(p => p.i === i && p.type === 'L'); if (pl) lL = pl; });
+  const obs = []; breaks.slice(-3).forEach(bk => { const bi = bars.findIndex(b => b.time === bk.time); for (let j = bi; j > Math.max(0, bi - 10); j--) { if (bk.dir === 'bull' && bars[j].close < bars[j].open) { obs.push({ price: +((bars[j].high + bars[j].low) / 2).toFixed(2), bias: 'bull' }); break; } if (bk.dir === 'bear' && bars[j].close > bars[j].open) { obs.push({ price: +((bars[j].high + bars[j].low) / 2).toFixed(2), bias: 'bear' }); break; } } });
+  const vlo = Math.min(...bars.map(b => b.low)), vhi = Math.max(...bars.map(b => b.high)), VN = 22, vbin = (vhi - vlo) / VN || 1;
+  const vpb = Array.from({ length: VN }, (_, i) => ({ lo: vlo + i * vbin, hi: vlo + (i + 1) * vbin, mid: vlo + (i + 0.5) * vbin, v: 0 }));
+  bars.forEach(b => { const m = (b.high + b.low) / 2; const bi = Math.min(VN - 1, Math.max(0, Math.floor((m - vlo) / vbin))); vpb[bi].v += b.value; });
+  const vpMax = Math.max(...vpb.map(x => x.v), 1); const pocI = vpb.reduce((m, x, i) => x.v > vpb[m].v ? i : m, 0);
+  const vTot = vpb.reduce((a, x) => a + x.v, 0); let vacc = vpb[pocI].v, vloI = pocI, vhiI = pocI;
+  while (vacc < vTot * 0.7 && (vloI > 0 || vhiI < VN - 1)) { const dn = vloI > 0 ? vpb[vloI - 1].v : -1, up = vhiI < VN - 1 ? vpb[vhiI + 1].v : -1; if (up >= dn) { vhiI++; vacc += vpb[vhiI].v; } else { vloI--; vacc += vpb[vloI].v; } }
+  const last = bars[bars.length - 1].close;
+  return { spot: last, entry: +(lv.pivot || last).toFixed(2), stop: +(lv.stop || last * 0.94).toFixed(2), t1: +(lv.t1 || last * 1.06).toFixed(2), t2: +(lv.t2 || last * 1.12).toFixed(2), validPlan: !!lv.valid,
+    bars, e9, e21, e50, bbU, bbM, bbL, avwap, tenkan, kijun, spanA, spanB, breaks: breaks.slice(-6), obs, vpb, vpMax, poc: vpb[pocI].mid, vah: vpb[vhiI].hi, val: vpb[vloI].lo };
+}
+
+// per-timeframe thesis derived from the REAL EMA stack + most recent structure break
+function tfThesis(d) {
+  if (!d || !d.bars || d.bars.length < 20) return { bias: "—", tone: "amb", read: "Not enough history on this timeframe.", struct: "—" };
+  const last = d.bars[d.bars.length - 1].close;
+  const e9 = d.e9[d.e9.length - 1].value, e21 = d.e21[d.e21.length - 1].value, e50 = d.e50[d.e50.length - 1].value;
+  const above = [e9, e21, e50].filter(m => last >= m).length;
+  const lb = d.breaks.length ? d.breaks[d.breaks.length - 1] : null;
+  const struct = lb ? `${lb.tag} ${lb.dir === "bull" ? "↑" : "↓"} @ $${lb.price}` : "no recent structure break";
+  if (e9 >= e21 && e21 >= e50 && last >= e21) return { bias: "BULL", tone: "up", read: "Stacked EMAs with price leading — uptrend intact here; pullbacks to the rising 21-EMA are the spots.", struct };
+  if (e9 <= e21 && e21 <= e50 && last <= e21) return { bias: "BEAR", tone: "dn", read: "EMAs rolling down with price below — downtrend here; rallies into the falling 21-EMA tend to fail.", struct };
+  return { bias: "NEUTRAL", tone: "amb", read: `${above}/3 EMAs below price · no clean stack — choppy / range on this timeframe; wait for a decisive break.`, struct };
+}
+
+// real news flags positioned along the chart timeline by article date + sentiment
+function NewsFlags({ news, bars }) {
+  if (!bars || !bars.length) return null;
+  const t0 = bars[0].time, t1 = bars[bars.length - 1].time, span = (t1 - t0) || 1;
+  const flags = (news || []).map(a => {
+    const t = Date.parse(a.date) / 1000; if (!isFinite(t)) return null;
+    if (t < t0 - span * 0.08) return null;             // far older than the chart window → skip
+    const x = Math.max(1, Math.min(99, (t - t0) / span * 100));  // recent news clamps to the right edge
+    const pol = typeof a.polarity === "number" ? a.polarity : 0;
+    return { x, tone: pol > 0.05 ? "gn" : pol < -0.05 ? "rd" : "amb", d: a.title, s: pol >= 0 ? "+" + pol.toFixed(2) : pol.toFixed(2), url: a.url };
+  }).filter(Boolean).slice(0, 12).sort((a, b) => a.x - b.x);
+  for (let i = 1; i < flags.length; i++) if (flags[i].x - flags[i - 1].x < 2.5) flags[i].x = Math.min(99, flags[i - 1].x + 2.5);   // de-cluster
   return (
     <div className="tc-news">
       <span className="tc-news-lbl mono dim2">NEWS</span>
       <div className="tc-news-track">
-        {events.map((e, i) => (
-          <span key={i} className={`tc-news-flag tc-news-flag--${e.tone}`} style={{ left: `${e.x}%` }} title={`${e.d} · sentiment ${e.s}`}>
-            <span className="tc-news-dot" />
-          </span>
-        ))}
+        {flags.length ? flags.map((e, i) => (
+          <a key={i} className={`tc-news-flag tc-news-flag--${e.tone}`} style={{ left: `${e.x}%` }} href={e.url} target="_blank" rel="noopener noreferrer" title={`${e.d} · sentiment ${e.s}`}><span className="tc-news-dot" /></a>
+        )) : <span className="mono dim2" style={{ fontSize: 10, paddingLeft: 8 }}>no headlines within this window</span>}
       </div>
     </div>
   );
@@ -45,49 +141,17 @@ function LensChart({ ticker, mode }) {
   const [indMenu, setIndMenu] = useTCs(false);
   const [ind, setInd] = useTCs({ ema:false, bb:false, avwap:false, ichi:false, smc:false, vp:false });
   const togInd = (k) => setInd(s => ({ ...s, [k]: !s[k] }));
-  const tfx = TF_THESIS[tf];
 
-  const d = useTC(() => {
-    const spot = ticker.price;
-    const entry = +(spot*1.002).toFixed(2), stop=+(spot*0.943).toFixed(2), t1=+(spot*1.08).toFixed(2), t2=+(spot*1.16).toFixed(2);
-    const cfg = TF_CFG[tf];
-    const now = Math.floor(Date.now()/1000), start = now - cfg.n*cfg.step;
-    const bars=[]; let p = spot*0.80;
-    for(let i=0;i<cfg.n;i++){
-      const phase = i<cfg.n*0.35?0.004 : i<cfg.n*0.62?-0.0015 : i<cfg.n*0.83?0.0008 : 0.006;
-      const noise = (Math.sin(i*0.7)+Math.cos(i*0.33))*cfg.vol;
-      p = p*(1+phase+noise);
-      const o=p*(1-Math.random()*cfg.vol), c=p*(1+(Math.random()-0.45)*cfg.vol*1.6);
-      const hi=Math.max(o,c)*(1+Math.random()*cfg.vol), lo=Math.min(o,c)*(1-Math.random()*cfg.vol);
-      const v=(0.5+Math.abs(Math.sin(i*0.5))*0.7+(i>cfg.n*0.82?0.6:0))*1e6;
-      bars.push({ time:start+i*cfg.step, open:+o.toFixed(2), high:+hi.toFixed(2), low:+lo.toFixed(2), close:+c.toFixed(2), value:Math.round(v) });
-    }
-    bars[bars.length-1].close = spot;
-    const ema=(per)=>{ const k=2/(per+1); let pr=bars[0].close; return bars.map((b,i)=>{ pr=i===0?b.close:b.close*k+pr*(1-k); return {time:b.time,value:+pr.toFixed(2)}; }); };
-    const e9=ema(9),e21=ema(21),e50=ema(50);
-    const bbU=[],bbM=[],bbL=[];
-    bars.forEach((b,i)=>{ const s=Math.max(0,i-19),w=bars.slice(s,i+1).map(x=>x.close); const m=w.reduce((a,c)=>a+c,0)/w.length; const sd=Math.sqrt(w.reduce((a,c)=>a+(c-m)**2,0)/w.length); bbM.push({time:b.time,value:+m.toFixed(2)}); bbU.push({time:b.time,value:+(m+2*sd).toFixed(2)}); bbL.push({time:b.time,value:+(m-2*sd).toFixed(2)}); });
-    const anchor=Math.floor(cfg.n*0.82); let pv=0,cv=0; const avwap=[];
-    bars.forEach((b,i)=>{ if(i>=anchor){ const tp=(b.high+b.low+b.close)/3; pv+=tp*b.value; cv+=b.value; avwap.push({time:b.time,value:+(pv/cv).toFixed(2)}); } });
-    const hh=(per,i)=>Math.max(...bars.slice(Math.max(0,i-per+1),i+1).map(b=>b.high));
-    const ll=(per,i)=>Math.min(...bars.slice(Math.max(0,i-per+1),i+1).map(b=>b.low));
-    const tenkan=[],kijun=[],spanA=[],spanB=[];
-    bars.forEach((b,i)=>{ const t=(hh(9,i)+ll(9,i))/2,k=(hh(26,i)+ll(26,i))/2; tenkan.push({time:b.time,value:+t.toFixed(2)}); kijun.push({time:b.time,value:+k.toFixed(2)}); spanA.push({time:b.time,value:+((t+k)/2).toFixed(2)}); spanB.push({time:b.time,value:+((hh(52,i)+ll(52,i))/2).toFixed(2)}); });
-    // SMC: pivots, BOS/CHoCH markers, order block lines
-    const L=5,piv=[]; for(let i=L;i<bars.length-L;i++){ const isH=bars.slice(i-L,i+L+1).every((b,j)=>j===L||bars[i].high>=b.high); const isL=bars.slice(i-L,i+L+1).every((b,j)=>j===L||bars[i].low<=b.low); if(isH)piv.push({i,price:bars[i].high,type:'H'}); else if(isL)piv.push({i,price:bars[i].low,type:'L'}); }
-    const breaks=[]; let lH=null,lL=null,tb=0;
-    bars.forEach((b,i)=>{ if(lH!=null&&b.close>lH.price){breaks.push({time:b.time,price:lH.price,dir:'bull',tag:tb===-1?'CHoCH':'BOS'});tb=1;lH=null;} if(lL!=null&&b.close<lL.price){breaks.push({time:b.time,price:lL.price,dir:'bear',tag:tb===1?'CHoCH':'BOS'});tb=-1;lL=null;} const ph=piv.find(p=>p.i===i&&p.type==='H');if(ph)lH=ph; const pl=piv.find(p=>p.i===i&&p.type==='L');if(pl)lL=pl; });
-    const obs=[]; breaks.slice(-3).forEach(bk=>{ const bi=bars.findIndex(b=>b.time===bk.time); for(let j=bi;j>Math.max(0,bi-10);j--){ if(bk.dir==='bull'&&bars[j].close<bars[j].open){obs.push({price:+((bars[j].high+bars[j].low)/2).toFixed(2),bias:'bull'});break;} if(bk.dir==='bear'&&bars[j].close>bars[j].open){obs.push({price:+((bars[j].high+bars[j].low)/2).toFixed(2),bias:'bear'});break;} } });
-    // Volume profile bins over visible bars
-    const vlo=Math.min(...bars.map(b=>b.low)), vhi=Math.max(...bars.map(b=>b.high)), VN=22, vbin=(vhi-vlo)/VN;
-    const vpb=Array.from({length:VN},(_,i)=>({ lo:vlo+i*vbin, hi:vlo+(i+1)*vbin, mid:vlo+(i+0.5)*vbin, v:0 }));
-    bars.forEach(b=>{ const m=(b.high+b.low)/2; const bi=Math.min(VN-1,Math.max(0,Math.floor((m-vlo)/vbin))); vpb[bi].v+=b.value; });
-    const vpMax=Math.max(...vpb.map(x=>x.v)); const pocI=vpb.reduce((m,x,i)=>x.v>vpb[m].v?i:m,0);
-    const vTot=vpb.reduce((a,x)=>a+x.v,0); let vacc=vpb[pocI].v,vloI=pocI,vhiI=pocI;
-    while(vacc<vTot*0.7&&(vloI>0||vhiI<VN-1)){ const dn=vloI>0?vpb[vloI-1].v:-1,up=vhiI<VN-1?vpb[vhiI+1].v:-1; if(up>=dn){vhiI++;vacc+=vpb[vhiI].v;}else{vloI--;vacc+=vpb[vloI].v;} }
-    return { spot, entry, stop, t1, t2, bars, e9, e21, e50, bbU, bbM, bbL, avwap, tenkan, kijun, spanA, spanB, breaks: breaks.slice(-6), obs,
-      vpb, vpMax, poc:vpb[pocI].mid, vah:vpb[vhiI].hi, val:vpb[vloI].lo };
-  }, [ticker, tf]);
+  // REAL candles for the active timeframe + multi-timeframe biases + live news
+  const barsRaw = useCandles(ticker.symbol, tf);
+  const loading = barsRaw === null, failed = barsRaw === false;
+  const lv = window.coherentLevels ? window.coherentLevels(ticker) : { price: ticker.price, pivot: ticker.price, stop: ticker.price * 0.94, t1: ticker.price * 1.06, t2: ticker.price * 1.12, valid: false };
+  const d = useTC(() => (barsRaw && barsRaw.length >= 5) ? computeIndicators(barsRaw, lv) : null, [barsRaw, lv.pivot, lv.stop, lv.t1, lv.t2]);
+  const mtf = useMtfBias(ticker.symbol);
+  const news = useChartNews(ticker.symbol);
+  const tfx = tfThesis(d);
+  const tone3 = t => t === "up" ? "gn" : t === "dn" ? "rd" : "amb";
+  const biasTone = b => b === "BULL" ? "gn" : b === "BEAR" ? "rd" : "amb";
 
   return (
     <div className={`lens lens--tc ${full?"tc-full":""}`}>
@@ -117,20 +181,22 @@ function LensChart({ ticker, mode }) {
         {["1H","4H","1D","1W"].map(k=>(
           <button key={k} className={`tc-tf ${tf===k?"is-on":""}`} onClick={()=>{ setTfTouched(true); setTf(k); }}>
             <span className="mono">{k}</span>
-            <span className={`mono kpi-tone--${TF_THESIS[k].tone==="up"?"gn":"amb"}`}>{TF_THESIS[k].bias}</span>
+            <span className={`mono kpi-tone--${biasTone(mtf[k])}`}>{mtf[k] || "…"}</span>
           </button>
         ))}
         <div className="tc-tf-read">
-          <span className={`tc-tf-tag mono kpi-tone--${tfx.tone==="up"?"gn":"amb"}`}>{tf} · {tfx.bias}</span>
+          <span className={`tc-tf-tag mono kpi-tone--${tone3(tfx.tone)}`}>{tf} · {tfx.bias}</span>
           <span className="mono tc-tf-txt">{tfx.read}</span>
-          <span className="mono dim2 tc-tf-struct">{tfx.struct} · <i>{tfx.note}</i></span>
+          <span className="mono dim2 tc-tf-struct">{tfx.struct} · <i>{TF_NOTE[tf]}</i></span>
         </div>
       </div>
 
       <div className="tc-chart-card">
-        <LWChart d={d} ind={ind} full={full} />
-        <div className="tc-legend mono">
-          <span><i className="tc-sw tc-sw--cop"/>entry ${d.entry}</span>
+        {loading ? <div className="tc-lw" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}><span className="mono dim2">loading real {tf} candles…</span></div>
+          : (failed || !d) ? <div className="tc-lw" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}><span className="mono dim2">No {tf} candles available for {ticker.symbol}.</span></div>
+            : <LWChart d={d} ind={ind} full={full} />}
+        {d && <div className="tc-legend mono">
+          <span><i className="tc-sw tc-sw--cop"/>{d.validPlan ? "entry" : "~entry"} ${d.entry}</span>
           <span><i className="tc-sw tc-sw--rd"/>stop ${d.stop}</span>
           <span><i className="tc-sw tc-sw--gn"/>T1 ${d.t1} · T2 ${d.t2}</span>
           {ind.ema && <span><i className="tc-sw" style={{background:"var(--cy)"}}/>EMA 9/21/50</span>}
@@ -140,15 +206,15 @@ function LensChart({ ticker, mode }) {
           {ind.smc && <span><i className="tc-sw" style={{background:"var(--blue)"}}/>SMC · BOS/CHoCH/OB</span>}
           {ind.vp && <span><i className="tc-sw tc-sw--cop"/>POC <i className="tc-sw" style={{background:"var(--cy)"}}/>value area · volume profile</span>}
           <span className="dim2">drag to pan · scroll to zoom · hover for OHLC</span>
-        </div>
-        <NewsFlags />
+        </div>}
+        <NewsFlags news={news} bars={d ? d.bars : null} />
       </div>
 
       {!full && <ReplayPractice ticker={ticker} />}
 
-      {!full && <div className="lens-call">
-        <span className="label-cap">The Read · Chart</span>
-        <span className="mono">Price confirms the thesis — breakout above plan entry <b className="cy">${d.entry}</b>, risk to <b className="dn">${d.stop}</b>, reward to <b className="up">${d.t1}/${d.t2}</b>.</span>
+      {!full && d && <div className="lens-call">
+        <span className="label-cap">The Read · Chart · {tf}</span>
+        <span className="mono"><b className={`kpi-tone--${tone3(tfx.tone)}`}>{tfx.bias}</b> on {tf} — {tfx.read} {d.validPlan ? <>Plan: entry <b className="cy">${d.entry}</b>, stop <b className="dn">${d.stop}</b>, targets <b className="up">${d.t1}/${d.t2}</b>.</> : <>No active scan trade-plan — levels shown are price-estimates.</>}</span>
       </div>}
     </div>
   );
@@ -257,36 +323,31 @@ function LWChart({ d, ind, full }) {
 }
 // ─── Replay / Practice mode — step historical bars, place paper entries ──
 function ReplayPractice({ ticker }) {
-  const bars = useTC(() => {
-    const code = (ticker.symbol?.charCodeAt(0) || 70) + (ticker.symbol?.charCodeAt(1) || 70);
-    const rnd = (() => { let s = code * 9301 + 49297; return () => { s = (s * 9301 + 49297) % 233280; return s / 233280; }; })();
-    let p = ticker.price * 0.82; const out = [];
-    for (let i = 0; i < 72; i++) {
-      const drift = Math.sin(i * 0.18 + code) * 0.006 + (i > 48 ? 0.004 : 0.0009);
-      const noise = (Math.sin(i * 0.9 + code) + Math.cos(i * 0.5)) * 0.006 + (rnd() - 0.5) * 0.004;
-      p = Math.max(1, p * (1 + drift + noise));
-      const o = p * (1 - rnd() * 0.006), c = p * (1 + (rnd() - 0.45) * 0.012);
-      const h = Math.max(o, c) * (1 + rnd() * 0.006), l = Math.min(o, c) * (1 - rnd() * 0.006);
-      out.push({ o: +o.toFixed(2), h: +h.toFixed(2), l: +l.toFixed(2), c: +c.toFixed(2) });
-    }
-    return out;
-  }, [ticker]);
+  // REAL historical daily bars — step through actual price action, not a seeded curve
+  const raw = useCandles(ticker.symbol, "1D");
+  const bars = useTC(() => (raw && raw.length >= 40)
+    ? raw.slice(-90).map(b => ({ o: b.open, h: b.high, l: b.low, c: b.close }))
+    : null, [raw]);
 
   const START = 28;
   const [idx, setIdx] = useTCs(START);
   const [playing, setPlaying] = useTCs(false);
   const [entry, setEntry] = useTCs(null);     // { price, i }
   const [trades, setTrades] = useTCs([]);
-  const atEnd = idx >= bars.length - 1;
+  const nBars = bars ? bars.length : 0;
+  const atEnd = idx >= nBars - 1;
 
   React.useEffect(() => {
-    if (!playing) return;
-    const t = setInterval(() => setIdx(i => (i >= bars.length - 1 ? i : i + 1)), 650);
+    if (!playing || !nBars) return;
+    const t = setInterval(() => setIdx(i => (i >= nBars - 1 ? i : i + 1)), 650);
     return () => clearInterval(t);
-  }, [playing, bars.length]);
+  }, [playing, nBars]);
   React.useEffect(() => { if (atEnd) setPlaying(false); }, [atEnd]);
 
-  const cur = bars[idx];
+  if (!bars || !bars.length) return (
+    <div className="rp"><div className="rp-head"><div className="rp-head-l"><span className="rp-tag mono">PRACTICE · REPLAY</span><span className="rp-sub mono dim2">loading real historical bars…</span></div></div></div>
+  );
+  const cur = bars[Math.min(idx, bars.length - 1)];
   const livePct = entry ? (cur.c - entry.price) / entry.price * 100 : null;
   const buy = () => setEntry({ price: cur.c, i: idx });
   const sell = () => {
