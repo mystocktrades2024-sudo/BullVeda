@@ -10086,6 +10086,12 @@ async def smc_matrix(ticker: str):
 # SWING/POSITION/INVEST toggle drives the bar timeframe (daily/weekly/monthly).
 _PATTERN_CACHE: dict = {}
 _PATTERN_TTL = 6 * 3600  # 6h — daily/weekly/monthly structure is stable intraday
+# Nightly precompute (scripts/precompute_smc_risk.py) writes per-(engine,ticker,mode)
+# JSON here so the endpoint serves instantly with ZERO live EODHD calls during the
+# trading day (the 500-user scale fix). 12h TTL · refreshed by the overnight batch.
+_PATTERN_PRECOMPUTE_DIR = BASE_DIR / "cache" / "pattern_precompute"
+_PATTERN_PRECOMPUTE_TTL = 12 * 3600
+_PATTERN_PRECOMPUTE_ENGINES = {"smc", "risk"}  # engines with a nightly batch
 
 @app.get("/api/pattern/{engine}/{ticker}")
 async def pattern_api(engine: str, ticker: str, mode: str = "SWING"):
@@ -10100,6 +10106,20 @@ async def pattern_api(engine: str, ticker: str, mode: str = "SWING"):
     hit = _PATTERN_CACHE.get(key)
     if hit and (now - hit[0]) < _PATTERN_TTL:
         return hit[1]
+    # Disk precompute cache (nightly batch) — serve instantly, ZERO live EODHD.
+    if engine in _PATTERN_PRECOMPUTE_ENGINES:
+        try:
+            pcp = _PATTERN_PRECOMPUTE_DIR / f"{engine}_{ticker}_{mode}.json"
+            st = pcp.stat()
+            if (now - st.st_mtime) < _PATTERN_PRECOMPUTE_TTL:
+                import json as _pj
+                out = _pj.loads(pcp.read_text())
+                _PATTERN_CACHE[key] = (now, out)   # promote to memory
+                return out
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
     try:
         import pattern_engines
         out = pattern_engines.detect(engine, ticker, mode)
