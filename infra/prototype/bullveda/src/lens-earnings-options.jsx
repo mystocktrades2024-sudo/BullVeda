@@ -52,100 +52,116 @@ function PEADPanel({ ticker }) {
   );
 }
 
+// Real upcoming-earnings prediction for this ticker (cached data_earnings.json →
+// BV.earningsBeat, no live EODHD). null when the name has no scheduled report.
+function findEarnings(ticker) {
+  const sym = ((ticker && ticker.symbol) || "").split(".")[0].toUpperCase();
+  const list = (window.__BV && window.__BV.earningsBeat) || [];
+  return list.find(r => ((r.ticker || "").split(".")[0].toUpperCase()) === sym) || null;
+}
+function erMoney(v) { return (typeof v === "number" && isFinite(v)) ? "$" + v.toFixed(2) : "—"; }
+function erPct(v, d = 1) { return (typeof v === "number" && isFinite(v)) ? v.toFixed(d) + "%" : "—"; }
+
 function LensEarnings({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("er-1"); const s2 = useStateToggle("er-2");
   const s3 = useStateToggle("er-3"); const s4 = useStateToggle("er-4");
-  const s5 = useStateToggle("er-5"); const s6 = useStateToggle("er-6");
+  const row = findEarnings(ticker);
+
+  if (!row) {
+    return (
+      <div className="lens lens--er">
+        <div className="lens-section"><div className="lens-pad">
+          <div className="smc-empty mono dim2" style={{ padding: "16px" }}>
+            No scheduled-earnings prediction for <b className="warn">{(ticker && ticker.symbol) || "this name"}</b> in the
+            beat-watchlist (covers names reporting in the next ~2 weeks). Earnings analytics — implied move, beat
+            probability, history and event sizing — appear here once a report is scheduled.
+          </div>
+        </div></div>
+      </div>
+    );
+  }
+
+  const b = row.breakdown || {};
+  const im = b.implied_move || {}, hist = b.historical || {}, kel = b.kelly_sizing || {}, au = b.analyst_upside || {}, liq = b.liquidity || {};
+  const tierTone = row.tier === "STRONG" ? "gn" : row.tier === "SOLID" ? "cy" : row.tier === "MODERATE" ? "amb" : "ink";
+  const advFmt = liq.adv_dollar_60d ? (liq.adv_dollar_60d >= 1e9 ? "$" + (liq.adv_dollar_60d / 1e9).toFixed(1) + "B" : "$" + (liq.adv_dollar_60d / 1e6).toFixed(0) + "M") : "—";
+  const patt = (hist.pattern || "").split("");   // e.g. "BBBB" → beat/beat/beat/beat
 
   return (
     <div className="lens lens--er">
-      <ERCockpit ticker={ticker} />
+      <ERCockpit row={row} />
 
       <div className="lens-section">
-        <SectionHeader n={1} title="Implied Move · Cone"
-          sub="ATM straddle pricing the move · current vs 4-quarter realized"
-          style={headerStyle} right={<StateToggle name="er-1" />} />
-        <StateWrap state={s1.value} source="Schwab · options chain ATM">
-          <div className="lens-pad">
-            <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <KpiTile label="Implied 1-day" value="±6.4%" tone="amb" sub="$63.10 — $71.74" />
-              <KpiTile label="Realized 4Q avg" value="±5.8%" tone="ink" sub="historic move" />
-              <KpiTile label="Implied / realized" value="1.10×" tone="amb" sub="slightly rich" />
-              <KpiTile label="IV at ATM" value="48.2%" tone="ink" sub="vs 30d HV 34%" />
-            </div>
-          </div>
+        <SectionHeader n={1} title="Implied Move · ATM Straddle"
+          sub="the move options are pricing for the print"
+          style={headerStyle} right={<StateToggle name="er-1" />}
+          tip="The ATM straddle's cost as a % of price = the move the options market expects on earnings. Buy below it / sell above it if you have an edge." />
+        <StateWrap state={s1.value} source={`${im.source || "options"} · ATM ${im.expiry_date || ""}`}>
+          <div className="lens-pad"><div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+            <KpiTile label="Implied move" value={`±${erPct(im.implied_move_pct, 2)}`} tone="amb" sub={im.spot != null ? `${erMoney(im.spot * (1 - (im.implied_move_pct || 0) / 100))} — ${erMoney(im.spot * (1 + (im.implied_move_pct || 0) / 100))}` : "—"} />
+            <KpiTile label="ATM straddle" value={erMoney(im.straddle_cost)} tone="ink" sub={`exp ${im.expiry_date || "—"}`} />
+            <KpiTile label="ATM strike" value={erMoney(im.atm_strike)} tone="ink" sub={`spot ${erMoney(im.spot)}`} />
+            <KpiTile label="Source" value={(im.source || "—").toUpperCase()} tone="ink" sub="live chain" />
+          </div></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={2} title="Beat-Probability · ESP"
-          sub="Zacks ESP + earnings-surprise model"
-          style={headerStyle} right={<StateToggle name="er-2" />} />
-        <StateWrap state={s2.value} source="Zacks · ESP · proprietary blend">
-          <div className="lens-pad">
-            <div className="kpi-row" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
-              <KpiTile label="Zacks ESP" value="+4.1%" tone="gn" sub="most accurate est. − consensus" />
-              <KpiTile label="Whisper vs consensus" value="+2.7%" tone="gn" sub="$1.54 whisper · $1.50 est" />
-              <KpiTile label="Zacks rank" value="#2 BUY" tone="gn" sub="6 analyst rev up · 1 down" />
-              <KpiTile label="Model beat prob" value="64%" tone="gn" sub="Wilson LB 51%" />
-              <KpiTile label="Post-ER drift" value="+1.8%" tone="gn" sub="median · last 12 quarters" />
-            </div>
-          </div>
+        <SectionHeader n={2} title="Beat Probability · Score"
+          sub="composite beat-prediction model · historical + analyst + setup"
+          style={headerStyle} right={<StateToggle name="er-2" />}
+          tip="Composite beat score (0–100) and tier from this name's history, analyst upside and the model's win probability." />
+        <StateWrap state={s2.value} source="beat-prediction model">
+          <div className="lens-pad"><div className="kpi-row" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
+            <KpiTile label="Beat score" value={row.beat_score != null ? row.beat_score.toFixed(1) : "—"} tone={tierTone} sub={`tier ${row.tier || "—"}`} />
+            <KpiTile label="Win prob (model)" value={kel.win_prob != null ? (kel.win_prob * 100).toFixed(0) + "%" : "—"} tone={kel.win_prob >= 0.6 ? "gn" : "amb"} sub="P(beat)" />
+            <KpiTile label="Historical beat rate" value={hist.rate != null ? hist.rate.toFixed(0) + "%" : "—"} tone={hist.rate >= 70 ? "gn" : "amb"} sub={`${hist.n_quarters || "—"} quarters`} />
+            <KpiTile label="Median surprise" value={hist.median_surprise_pct != null ? "+" + hist.median_surprise_pct.toFixed(1) + "%" : "—"} tone="gn" sub="EPS vs est" />
+            <KpiTile label="Analyst upside" value={au.upside_pct != null ? "+" + au.upside_pct.toFixed(1) + "%" : "—"} tone="gn" sub="to mean PT" />
+          </div></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={3} title="Analyst EPS Revisions"
-          sub="the leading edge of beat probability · rising consensus precedes upside surprises"
-          style={headerStyle} right={<StateToggle name="er-6" />} />
-        <StateWrap state={s6.value} source="Zacks / EODHD · estimate revisions">
-          <div className="lens-pad"><AnalystRevisions /></div>
-        </StateWrap>
-      </div>
-
-      <div className="lens-section">
-        <SectionHeader n={4} title="8-Quarter Beat History"
-          sub="how flow reacted · EPS & rev surprise · 1-day reaction · 5-day continuation · PEAD drift?"
+        <SectionHeader n={3} title="Beat History"
+          sub={`${hist.n_quarters || 0}-quarter EPS beat/miss pattern`}
           style={headerStyle} right={<StateToggle name="er-3" />} />
-        <StateWrap state={s3.value} source="EODHD · Earnings history">
-          <div className="lens-pad"><ERHistory /></div>
-        </StateWrap>
-      </div>
-
-      <div className="lens-section">
-        <SectionHeader n={5} title="Pre-ER Drift · IV Crush"
-          sub="how the name typically behaves heading in & out of print"
-          style={headerStyle} right={<StateToggle name="er-4" />} />
-        <StateWrap state={s4.value} source="EODHD + Schwab · 12-Q backtest">
+        <StateWrap state={s3.value} source="earnings history">
           <div className="lens-pad">
-            <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <KpiTile label="Pre-ER drift T−5" value="+1.2%" tone="gn" sub="median · 12-Q" />
-              <KpiTile label="Pre-ER drift T−1" value="+0.4%" tone="gn" sub="last-day rally" />
-              <KpiTile label="IV crush · T+0" value="−42%" tone="rd" sub="ATM crush typical" />
-              <KpiTile label="Avg post-ER vol" value="22 → 32%" tone="amb" sub="vol expansion" />
-            </div>
+            {patt.length ? <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              {patt.map((ch, i) => (
+                <span key={i} className={`pill pill--sm pill--${ch === "B" ? "gn" : "rd"}`}>{ch === "B" ? "BEAT" : "MISS"}</span>
+              ))}
+              <span className="mono dim2" style={{ marginLeft: 8 }}>{hist.rate != null ? hist.rate.toFixed(0) + "% beat rate" : ""} · median +{hist.median_surprise_pct != null ? hist.median_surprise_pct.toFixed(1) : "—"}% surprise (oldest → newest)</span>
+            </div> : <div className="smc-empty mono dim2">— no beat history in feed</div>}
           </div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={6} title="Post-Earnings Drift · PEAD"
-          sub="how the stock drifts AFTER the print — the beat / miss edge"
-          style={headerStyle} right={<StateToggle name="er-5" />} />
-        <StateWrap state={s5.value} source="EODHD · 12-Q post-earnings backtest">
-          <div className="lens-pad"><PEADPanel ticker={ticker} /></div>
+        <SectionHeader n={4} title="Event Sizing · Kelly"
+          sub="how much to risk into a binary event"
+          style={headerStyle} right={<StateToggle name="er-4" />}
+          tip="Kelly bet size for the event using the model's win-prob and the implied-move payoff/risk. Capped (often to 0) when the straddle is too rich vs the edge." />
+        <StateWrap state={s4.value} source="event-Kelly · win-prob × payoff/risk">
+          <div className="lens-pad"><div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+            <KpiTile label="Kelly fraction" value={kel.kelly_frac != null ? (kel.kelly_frac * 100).toFixed(0) + "%" : "—"} tone={kel.kelly_frac > 0 ? "gn" : "rd"} sub={kel.cap_reason ? kel.cap_reason.replace(/_/g, " ") : "raw f*"} />
+            <KpiTile label="Payoff" value={erPct(kel.payoff_pct, 2)} tone="gn" sub="if right" />
+            <KpiTile label="Risk (implied move)" value={erPct(kel.risk_pct, 2)} tone="rd" sub="if wrong" />
+            <KpiTile label="Liquidity (ADV)" value={advFmt} tone="ink" sub="60d $-vol" />
+          </div></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={7} title="Cross-Lens Confluence" style={headerStyle} />
+        <SectionHeader n={5} title="Cross-Lens Confluence" style={headerStyle} />
         <div className="lens-pad">
           <CrossLens lead="amb" cells={[
-            { lens: "Earnings",   verdict: "11 d",   tone: "amb", note: "trim 25% T−2 · ESP +4.1%" },
-            { lens: "Options",    verdict: "RICH",   tone: "amb", note: "IV/HV 1.42 · post crush −42%" },
-            { lens: "Plan",       verdict: "ADJUST", tone: "amb", note: "scale down through window" },
-            { lens: "Risk",       verdict: "CAPPED", tone: "gn",  note: "max loss bounded at stop" },
-            { lens: "Track Rec",  verdict: "EDGE",   tone: "gn",  note: "beat-drift hist. positive" },
+            { lens: "Earnings", verdict: `${row.days_to_earnings} d`, tone: "amb", note: `${row.before_after || ""} · ${row.report_date || ""}` },
+            { lens: "Beat", verdict: row.tier || "—", tone: tierTone, note: `score ${row.beat_score != null ? row.beat_score.toFixed(0) : "—"} · ${kel.win_prob != null ? (kel.win_prob * 100).toFixed(0) + "% win" : "—"}` },
+            { lens: "Implied move", verdict: `±${erPct(im.implied_move_pct, 1)}`, tone: "amb", note: "straddle " + erMoney(im.straddle_cost) },
+            { lens: "Event size", verdict: kel.kelly_frac > 0 ? (kel.kelly_frac * 100).toFixed(0) + "%" : "0%", tone: kel.kelly_frac > 0 ? "gn" : "rd", note: kel.cap_reason ? kel.cap_reason.replace(/_/g, " ") : "Kelly" },
+            { lens: "History", verdict: hist.pattern || "—", tone: hist.rate >= 70 ? "gn" : "amb", note: `${hist.rate != null ? hist.rate.toFixed(0) + "%" : "—"} beat` },
           ]} />
         </div>
       </div>
@@ -153,8 +169,10 @@ function LensEarnings({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
       <div className="lens-call">
         <span className="label-cap">The Read · Earnings</span>
         <span className="mono">
-          Structure holds above the breakout · stats favor scaling 25% near T−2 sessions · vol crush post-ER
-          is where the edge historically re-rates if the thesis stays intact. Event risk is elevated into the print.
+          {row.tier ? <b className={`kpi-tone--${tierTone}`}>{row.tier}</b> : null} beat-setup · reports <b>{row.before_after || ""} {row.report_date || ""}</b> ({row.days_to_earnings}d).
+          Options price a <b className="warn">±{erPct(im.implied_move_pct, 1)}</b> move; model win-prob <b className="up">{kel.win_prob != null ? (kel.win_prob * 100).toFixed(0) + "%" : "—"}</b>,
+          history <b className="up">{hist.rate != null ? hist.rate.toFixed(0) + "%" : "—"}</b> beat over {hist.n_quarters || "—"}Q.
+          {kel.kelly_frac > 0 ? <> Event-Kelly favors a <b className="up">{(kel.kelly_frac * 100).toFixed(0)}%</b> position.</> : <> Straddle too rich vs edge — <b className="dn">event-Kelly 0%</b> (don't pay up).</>}
         </span>
       </div>
     </div>
@@ -294,12 +312,13 @@ function AnalystRevisions() {
 }
 
 // ─── §1 · ER countdown + implied-move cone cockpit ──────────────────
-function ERCockpit({ ticker }) {
-  const cur = (ticker && ticker.price) || 213.4;
+function ERCockpit({ row }) {
+  const b = (row && row.breakdown) || {};
+  const imb = b.implied_move || {}, hist = b.historical || {}, kel = b.kelly_sizing || {};
+  const cur = imb.spot || 100;
   const [ref, w] = useWidth(640);
-  const im = 0.064; // 1σ implied move
-  const surprises = [["Q2'24", 5.7], ["Q3'24", 6.1], ["Q4'24", 4.2], ["Q1'25", 8.4], ["Q2'25", 6.5], ["Q3'25", 3.9], ["Q4'25", 7.2], ["Q1'26", 4.6]];
-  const smax = Math.max(...surprises.map(s => s[1]));
+  const im = (imb.implied_move_pct || 0) / 100; // 1σ implied move (real)
+  const patt = (hist.pattern || "").split("");
   // cone geometry
   const h = 188, padT = 22, padB = 30, padR = 62, padL = 10;
   const plotW = Math.max(120, w - padL - padR), plotR = padL + plotW, plotH = h - padT - padB;
@@ -311,13 +330,13 @@ function ERCockpit({ ticker }) {
     <div className="er-ck">
       <div className="er-ck-top">
         <span className="er-ck-title mono">⌛ ER COUNTDOWN · IMPLIED-MOVE CONE</span>
-        <span className="er-ck-meta mono">cycle <b>Q2 FY26</b> · cadence Sep / Dec / Mar / Jun · last report <b>03-Mar-2026</b></span>
+        <span className="er-ck-meta mono">{(row && row.ticker) || ""} · beat-score <b>{row && row.beat_score != null ? row.beat_score.toFixed(0) : "—"}</b> · tier <b>{(row && row.tier) || "—"}</b></span>
       </div>
       <div className="er-ck-body">
         <div className="er-ck-days">
           <div className="label-cap">Days to report</div>
-          <div className="er-ck-days-num mono">11</div>
-          <div className="mono dim2">Jun 05 · AMC · conf-call 14:00 PT</div>
+          <div className="er-ck-days-num mono">{row && row.days_to_earnings != null ? row.days_to_earnings : "—"}</div>
+          <div className="mono dim2">{(row && row.report_date) || "—"} · {(row && row.before_after) || ""}</div>
         </div>
         <div className="er-ck-cone" ref={ref}>
           <svg width={w} height={h}>
@@ -332,7 +351,7 @@ function ERCockpit({ ticker }) {
             <line x1={padL} y1={yOf(cur)} x2={erX} y2={yOf(cur)} stroke="var(--ink-1)" strokeWidth="2" />
             <line x1={erX} y1={yOf(cur)} x2={plotR} y2={yOf(cur)} stroke="var(--copper)" strokeWidth="1.4" strokeDasharray="4 4" />
             <line x1={erX} y1={padT} x2={erX} y2={padT + plotH} stroke="var(--copper)" strokeDasharray="3 3" opacity="0.7" />
-            <text x={erX + 5} y={padT + 8} fontSize="9.5" className="mono" fill="var(--copper)" style={{ fontWeight: 700 }}>ER · 6/5 AMC</text>
+            <text x={erX + 5} y={padT + 8} fontSize="9.5" className="mono" fill="var(--copper)" style={{ fontWeight: 700 }}>ER · {(row && row.report_date) || ""}</text>
             <circle cx={padL} cy={yOf(cur)} r="3" fill="var(--ink-1)" />
             {lvls.map(([l, v], i) => (
               <text key={i} x={plotR + 4} y={yOf(v) + 3} fontSize="9" className="mono" fill={`var(--${l === "spot" ? "copper" : "violet"})`} style={{ fontWeight: l === "spot" ? 700 : 500 }}>{l} ${v.toFixed(0)}</text>
@@ -342,19 +361,19 @@ function ERCockpit({ ticker }) {
       </div>
       <div className="er-ck-stats">
         <div className="er-ck-stat"><div className="label-cap">Implied move</div><div className="er-ck-stat-v mono amb">±{(cur * im).toFixed(2)}</div><div className="mono dim2">±{(im * 100).toFixed(1)}% · ATM straddle</div></div>
-        <div className="er-ck-stat"><div className="label-cap">ATM straddle premium</div><div className="er-ck-stat-v mono">${(cur * im * 1.06).toFixed(2)}</div><div className="mono dim2">ATM C+P · exp 6/06 · 1d-post-ER</div></div>
-        <div className="er-ck-stat"><div className="label-cap">Beat probability</div><div className="er-ck-stat-v mono gn-c">64%</div><div className="mono dim2">Zacks ESP +4.1% · Rank #2</div></div>
+        <div className="er-ck-stat"><div className="label-cap">ATM straddle premium</div><div className="er-ck-stat-v mono">{imb.straddle_cost != null ? "$" + imb.straddle_cost.toFixed(2) : "—"}</div><div className="mono dim2">ATM C+P · exp {imb.expiry_date || "—"}</div></div>
+        <div className="er-ck-stat"><div className="label-cap">Beat probability</div><div className="er-ck-stat-v mono gn-c">{kel.win_prob != null ? (kel.win_prob * 100).toFixed(0) + "%" : "—"}</div><div className="mono dim2">model · {hist.rate != null ? hist.rate.toFixed(0) + "% hist" : "—"}</div></div>
       </div>
       <div className="er-ck-bars">
-        <div className="er-ck-bars-h"><span className="label-cap">8-Quarter EPS surprise</span><span className="mono dim2">beat-rate <b className="up">8/8 · 100%</b> · avg surprise <b className="up">+5.8%</b></span></div>
+        <div className="er-ck-bars-h"><span className="label-cap">{hist.n_quarters || 0}-Quarter beat pattern</span><span className="mono dim2">beat-rate <b className="up">{hist.rate != null ? hist.rate.toFixed(0) + "%" : "—"}</b> · median surprise <b className="up">+{hist.median_surprise_pct != null ? hist.median_surprise_pct.toFixed(1) : "—"}%</b></span></div>
         <div className="er-ck-bars-row">
-          {surprises.map(([q, v], i) => (
+          {patt.length ? patt.map((ch, i) => (
             <div key={i} className="er-ck-bar">
-              <div className="er-ck-bar-v mono">+{v.toFixed(1)}</div>
-              <div className="er-ck-bar-fill" style={{ height: `${(v / smax) * 100}%` }} />
-              <div className="er-ck-bar-q mono dim2">{q}</div>
+              <div className="er-ck-bar-v mono">{ch === "B" ? "✓" : "✕"}</div>
+              <div className="er-ck-bar-fill" style={{ height: ch === "B" ? "100%" : "30%", background: ch === "B" ? "var(--gn)" : "var(--rd)" }} />
+              <div className="er-ck-bar-q mono dim2">{i + 1}</div>
             </div>
-          ))}
+          )) : <div className="mono dim2">no beat history in feed</div>}
         </div>
       </div>
     </div>
