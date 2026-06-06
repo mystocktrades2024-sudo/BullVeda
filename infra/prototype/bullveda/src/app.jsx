@@ -195,7 +195,24 @@ function App() {
       }
       return;
     }
-    // ── offline fallback (mock) ──
+    // ── scan bundle unavailable (empty / failed scan, BV not ready) ──
+    // Do NOT fabricate the mock TICKER (fake $66 levels). Fetch a REAL per-symbol
+    // quote + fundamentals; ticker-object lenses (Plan/Overview) show honest "no scan
+    // ladder" states while per-symbol engines (Chart/SMC/Risk/Technicals) stay live.
+    if (BV && BV.detailLive) {
+      setTicker({ symbol: sym, name: sym, live: true, _loading: true, _noScan: true, _pulledAt: Date.now(),
+        price: null, chg: 0, mcap: null, verdict: "—", score: null,
+        pillars: { technical: 50, fundamental: 50, catalyst: 50, risk: 50, edge: 50 },
+        ml: { direction: 0.5, hitNet: 0, magnitude: { lo: 0, mid: 0, hi: 0 }, shap: null },
+        setupStats: { n: null }, earnings: { days: null, date: "" } });
+      BV.detailLive(sym).then(full => {
+        setTicker(cur => (cur && cur.symbol === sym
+          ? (full ? { ...full, _noScan: true } : { ...(cur || {}), _loading: false, _noData: true })
+          : cur));
+      }).catch(() => setTicker(cur => (cur && cur.symbol === sym ? { ...(cur || {}), _loading: false, _noData: true } : cur)));
+      return;
+    }
+    // ── true offline fallback (no BV at all) — mock ──
     const known = WATCHLIST.find(w => w.sym === sym);
     if (sym === TICKER.symbol) {
       setTicker(TICKER);
