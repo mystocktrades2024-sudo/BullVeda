@@ -47,6 +47,56 @@ function earningsStats(hist) {
     next, nextDate, nextDays, nextEst: next ? _en(next.epsEstimate) : null, nextBaM: next ? (next.beforeAfterMarket || "") : "",
   };
 }
+// REAL post-earnings price reaction for each past report — from daily OHLCV around
+// the report date. 1-day move (the gap) + 5-day drift (PEAD). Session-aware (AMC vs BMO).
+function useERReactions(ticker, past) {
+  const key = (past || []).map(p => p.date).join(",");
+  const [r, setR] = React.useState(null);
+  React.useEffect(() => {
+    if (!past || !past.length) { setR({}); return; }
+    const BV = window.__BV; if (!BV || !BV.get || !ticker.symbol) { setR({}); return; }
+    let on = true; setR(null);
+    BV.get("/api/ohlcv/" + encodeURIComponent(ticker.symbol) + "?tf=1D&days=900").then(res => {
+      if (!on) return;
+      const c = (res && res.candles) || [];
+      if (c.length < 10) { setR({}); return; }
+      const out = {};
+      past.forEach(p => {
+        const t = Date.parse(p.date) / 1000; if (!isFinite(t)) return;
+        let idx = -1, best = Infinity;
+        c.forEach((bar, i) => { const dd = Math.abs(bar.time - t); if (dd < best) { best = dd; idx = i; } });
+        if (idx < 1) return;
+        const amc = /after|amc/i.test(p.baM || "");   // AfterMarket reacts next session
+        const react = amc ? idx + 1 : idx, base = amc ? idx : idx - 1;
+        const m1 = (react < c.length && base >= 0 && c[base].close) ? (c[react].close / c[base].close - 1) * 100 : null;
+        const d5 = (react + 5 < c.length && react >= 0 && c[react].close) ? (c[react + 5].close / c[react].close - 1) * 100 : null;
+        out[p.date] = { move1d: m1 != null ? +m1.toFixed(1) : null, drift5d: d5 != null ? +d5.toFixed(1) : null };
+      });
+      setR(out);
+    }).catch(() => { if (on) setR({}); });
+    return () => { on = false; };
+  }, [ticker.symbol, key]);
+  return r;
+}
+// aggregate the real reactions: typical |move|, beat-and-rip tendency, avg drift
+function erAggregates(past, reactions) {
+  if (!past || !reactions) return null;
+  const rows = past.map(p => ({ ...p, ...(reactions[p.date] || {}) })).filter(p => p.move1d != null);
+  if (!rows.length) return { rows: past, n: 0 };
+  const typical = rows.reduce((a, p) => a + Math.abs(p.move1d), 0) / rows.length;
+  const beats = rows.filter(p => p.surp >= 0), beatRip = beats.filter(p => p.move1d > 0).length;
+  const avgDrift = rows.filter(p => p.drift5d != null).reduce((a, p, _, arr) => a + p.drift5d / arr.length, 0);
+  const beatDrifts = beats.filter(p => p.drift5d != null);
+  const beatAvgDrift = beatDrifts.length ? beatDrifts.reduce((a, p) => a + p.drift5d, 0) / beatDrifts.length : null;
+  return { rows: past.map(p => ({ ...p, ...(reactions[p.date] || {}) })), n: rows.length, typical: +typical.toFixed(1),
+    beatN: beats.length, beatRip, beatRipRate: beats.length ? beatRip / beats.length * 100 : null, avgDrift: +avgDrift.toFixed(1), beatAvgDrift: beatAvgDrift != null ? +beatAvgDrift.toFixed(1) : null };
+}
+function _tape(surp, m1) {
+  if (m1 == null) return { t: "—", tone: "ink" };
+  if (surp >= 0) return m1 >= 0 ? { t: "BEAT+RIP", tone: "gn" } : { t: "BEAT+FADE", tone: "amb" };
+  return m1 < 0 ? { t: "MISS+DROP", tone: "rd" } : { t: "MISS+POP", tone: "amb" };
+}
+
 // implied move for the print = ATM straddle on the expiry just after the report (real chain)
 function useEarningsImpliedMove(ticker, nextDate) {
   const [im, setIm] = React.useState(null);
@@ -71,31 +121,35 @@ function useEarningsImpliedMove(ticker, nextDate) {
   return im;
 }
 
-// real beat-history table + estimate trend (works for any ticker)
-function EarningsHistoryReal({ es }) {
+// real beat-history table + real post-ER reactions + estimate trend (any ticker)
+function EarningsHistoryReal({ es, agg }) {
   if (!es || !es.past.length) return <div className="smc-empty mono dim2" style={{ padding: 14 }}>No reported-earnings history in the feed for this name.</div>;
+  const rows = (agg && agg.rows) ? agg.rows : es.past;   // rows carry move1d/drift5d when reactions loaded
   const ests = es.past.map(p => p.est).filter(v => v != null).reverse();   // oldest→newest for the trend
   const w = 150, hh = 38, mn = Math.min(...ests), mx = Math.max(...ests);
   const sx = i => 4 + (i / Math.max(1, ests.length - 1)) * (w - 8);
   const sy = v => hh - 4 - ((v - mn) / (mx - mn || 1)) * (hh - 8);
+  const m = v => v == null ? "—" : (v >= 0 ? "+" : "") + v.toFixed(1) + "%";
   return (
     <div>
       <div className="er-bh-badge">
         <Pill tone={es.beatRate >= 60 ? "gn" : es.beatRate >= 40 ? "amb" : "rd"} small dot>{es.beats} / {es.n} BEATS · {es.beatRate != null ? es.beatRate.toFixed(0) + "% WR" : "—"}</Pill>
-        <span className="mono dim2">avg surprise {es.avgSurp != null ? (es.avgSurp >= 0 ? "+" : "") + es.avgSurp.toFixed(1) + "%" : "—"} · EPS actual vs estimate</span>
+        <span className="mono dim2">avg surprise {es.avgSurp != null ? (es.avgSurp >= 0 ? "+" : "") + es.avgSurp.toFixed(1) + "%" : "—"}{agg && agg.n ? ` · typical 1-day move ±${agg.typical}% · beats ripped ${agg.beatRip}/${agg.beatN}` : ""}</span>
       </div>
       <table className="dtable er-bh-tbl">
-        <thead><tr><th>Report date</th><th>Session</th><th className="r">EPS est</th><th className="r">EPS act</th><th className="r">Surprise</th><th>Result</th></tr></thead>
-        <tbody>{es.past.map((r, i) => (
+        <thead><tr><th>Report date</th><th>Session</th><th className="r">EPS est</th><th className="r">EPS act</th><th className="r">Surprise</th><th className="r">1-day</th><th className="r">5-day</th><th>Tape</th></tr></thead>
+        <tbody>{rows.map((r, i) => { const tp = _tape(r.surp, r.move1d); return (
           <tr key={i}>
             <td className="mono"><b>{r.date}</b></td>
             <td className="mono dim2">{r.baM || "—"}</td>
             <td className="r mono tabular dim2">{r.est != null ? "$" + r.est.toFixed(2) : "—"}</td>
             <td className="r mono tabular"><b>{r.act != null ? "$" + r.act.toFixed(2) : "—"}</b></td>
             <td className={`r mono tabular ${r.surp >= 0 ? "up" : "dn"}`}>{r.surp != null ? (r.surp >= 0 ? "+" : "") + r.surp.toFixed(1) + "%" : "—"}</td>
-            <td><Pill tone={r.surp >= 0 ? "gn" : "rd"} small>{r.surp >= 0 ? "BEAT" : "MISS"}</Pill></td>
+            <td className={`r mono tabular ${r.move1d == null ? "dim2" : r.move1d >= 0 ? "up" : "dn"}`}>{m(r.move1d)}</td>
+            <td className={`r mono tabular ${r.drift5d == null ? "dim2" : r.drift5d >= 0 ? "up" : "dn"}`}>{m(r.drift5d)}</td>
+            <td><Pill tone={tp.tone} small>{tp.t}</Pill></td>
           </tr>
-        ))}</tbody>
+        ); })}</tbody>
       </table>
       {ests.length >= 3 && <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
         <div><div className="label-cap" style={{ marginBottom: 4 }}>EPS estimate trend (oldest → newest)</div>
@@ -110,6 +164,54 @@ function EarningsHistoryReal({ es }) {
   );
 }
 
+// ── Earnings Quick Take — timing + binary-risk verdict + the key numbers ──
+function EarningsQuickTake({ ticker, es, im0, agg }) {
+  if (!es || !es.nextDate) return null;
+  const d = es.nextDays;
+  const imminent = d != null && d <= 2, near = d != null && d <= 16;
+  const verdict = imminent ? "EVENT LIVE · HIGH RISK" : near ? "EVENT APPROACHING" : "WATCH · ER FAR";
+  const tone = imminent ? "rd" : "amb";
+  const imp = im0 && im0.pct != null ? im0.pct : null;
+  const typ = agg && agg.n ? agg.typical : null;
+  const volRead = (near && imp != null && typ != null && typ > 0) ? (imp > typ * 1.2 ? "rich (overpaying for the move)" : imp < typ * 0.8 ? "cheap" : "fair") : null;
+  const F = [];
+  F.push({ k: "Timing", v: imminent ? -1 : near ? 0 : 1, text: imminent ? `reports in ${d}d — event risk is live` : near ? `reports in ${d}d — position carefully if at all` : `${d}d out — too early to trade the event` });
+  if (es.beatRate != null) F.push({ k: "Beat odds", v: es.beatRate >= 60 ? 1 : es.beatRate >= 40 ? 0 : -1, text: `${es.beatRate.toFixed(0)}% beat rate over ${es.n}Q${agg && agg.beatN ? ` · ${agg.beatRip}/${agg.beatN} beats ripped (rest faded)` : ""}` });
+  if (typ != null) F.push({ k: "Typical move", v: 0, text: `the stock realizes ±${typ}% on the print${imp != null && near ? ` vs options pricing ±${imp.toFixed(1)}% → straddle ${volRead}` : ""}` });
+  if (agg && agg.beatAvgDrift != null) F.push({ k: "Drift (PEAD)", v: agg.beatAvgDrift > 1 ? 1 : agg.beatAvgDrift < -1 ? -1 : 0, text: `after a beat, 5-day drift averages ${agg.beatAvgDrift >= 0 ? "+" : ""}${agg.beatAvgDrift}%` });
+  F.push({ k: "Nature", v: -1, text: "binary event — a beat can still drop; this is a coin-flip, not a setup" });
+  const plain = imminent || near
+    ? `${ticker.symbol} reports in ${d} days. ${imp != null ? `Options price a ±${imp.toFixed(1)}% move` : "Options price a move"}; the stock typically realizes ±${typ != null ? typ : "—"}%${volRead ? ` — so the straddle looks ${volRead}` : ""}. ${es.beatRate != null ? `${es.beatRate.toFixed(0)}% beat rate` : ""}, but earnings are binary — sizing should be small or zero.`
+    : `${ticker.symbol}'s next report is ${d} days out — too far to trade the event. Historically it moves ±${typ != null ? typ : "—"}% on the print and beats ${es.beatRate != null ? es.beatRate.toFixed(0) + "%" : "—"} of the time${agg && agg.beatN ? ` (${agg.beatRip}/${agg.beatN} beats kept rising)` : ""}. Revisit as the date approaches.`;
+  return (
+    <div className={`qt qt--${tone}`} style={{ margin: "0 0 12px" }}>
+      <div className="qt-grid" style={{ gridTemplateColumns: "160px 1fr 170px" }}>
+        <div className="qt-verdict">
+          <div className="label-cap">Earnings read</div>
+          <div className={`qt-v mono kpi-tone--${tone}`} style={{ fontSize: 18 }}>{verdict}</div>
+          <div className="qt-conf mono dim2">{d}d to report · binary event</div>
+        </div>
+        <div className="qt-tally">
+          {F.map((f, i) => (
+            <div key={i} className="otk-qt-factor mono">
+              <span className={`otk-qt-dot kpi-tone--${f.v > 0 ? "gn" : f.v < 0 ? "rd" : "amb"}`}>{f.v > 0 ? "✓" : f.v < 0 ? "✕" : "·"}</span>
+              <span className="otk-qt-k">{f.k}</span><span className="dim2"> — {f.text}</span>
+            </div>
+          ))}
+        </div>
+        <div className="qt-plan">
+          <div className="label-cap">The numbers</div>
+          <div className="qt-plan-row"><span className="mono dim2">Report</span><span className="mono copper">{es.nextDate}</span></div>
+          <div className="qt-plan-row"><span className="mono dim2">Implied {near ? "(print)" : "range"}</span><span className="mono">{imp != null ? "±" + imp.toFixed(1) + "%" : "—"}</span></div>
+          <div className="qt-plan-row"><span className="mono dim2">Typical move</span><span className="mono">{typ != null ? "±" + typ + "%" : "—"}</span></div>
+          <div className="qt-plan-row"><span className="mono dim2">Beat rate</span><span className="mono">{es.beatRate != null ? es.beatRate.toFixed(0) + "%" : "—"}</span></div>
+        </div>
+      </div>
+      <div className="qt-plain mono">{plain}</div>
+    </div>
+  );
+}
+
 function LensEarnings({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("er-1"); const s2 = useStateToggle("er-2");
   const s3 = useStateToggle("er-3"); const s4 = useStateToggle("er-4");
@@ -117,12 +219,15 @@ function LensEarnings({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
   const ehist = useEarningsHistory(ticker);
   const es = React.useMemo(() => earningsStats(ehist), [ehist]);
   const im0 = useEarningsImpliedMove(ticker, es && es.nextDate);
+  const reactions = useERReactions(ticker, es && es.past);
+  const agg = React.useMemo(() => (es && reactions) ? erAggregates(es.past, reactions) : null, [es, reactions]);
 
   // No beat-watchlist prediction → still show REAL earnings history + next print + implied move
   if (!row) {
     const loading = ehist === null;
     return (
       <div className="lens lens--er">
+        <EarningsQuickTake ticker={ticker} es={es} im0={im0} agg={agg} />
         {es && es.nextDate ? (
           <div className="er-ck">
             <div className="er-ck-top">
@@ -140,8 +245,8 @@ function LensEarnings({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
           <div className="lens-section"><div className="lens-pad"><div className="smc-empty mono dim2" style={{ padding: 16 }}>{loading ? "Loading earnings history…" : <>No scheduled earnings or reported history found for <b className="warn">{ticker.symbol}</b> (may be an ETF or a name outside coverage).</>}</div></div></div>
         )}
         <div className="lens-section">
-          <SectionHeader n={1} title="Beat History" sub={`${es ? es.n : 0}-quarter EPS beat/miss record`} style={headerStyle} />
-          <div className="lens-pad"><EarningsHistoryReal es={es} /></div>
+          <SectionHeader n={1} title="Beat History · Real Reactions" sub={`${es ? es.n : 0}Q EPS beat/miss + how the stock actually moved`} style={headerStyle} />
+          <div className="lens-pad"><EarningsHistoryReal es={es} agg={agg} /></div>
         </div>
         <div className="lens-call">
           <span className="label-cap">The Read · Earnings</span>
@@ -159,6 +264,7 @@ function LensEarnings({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
 
   return (
     <div className="lens lens--er">
+      <EarningsQuickTake ticker={ticker} es={es} im0={im0} agg={agg} />
       <ERCockpit row={row} />
 
       <div className="lens-section">
@@ -198,7 +304,7 @@ function LensEarnings({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
           style={headerStyle} right={<StateToggle name="er-3" />} />
         <StateWrap state={s3.value} source="EODHD · reported earnings history">
           <div className="lens-pad">
-            {(es && es.past.length) ? <EarningsHistoryReal es={es} />
+            {(es && es.past.length) ? <EarningsHistoryReal es={es} agg={agg} />
               : patt.length ? <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 {patt.map((ch, i) => (<span key={i} className={`pill pill--sm pill--${ch === "B" ? "gn" : "rd"}`}>{ch === "B" ? "BEAT" : "MISS"}</span>))}
                 <span className="mono dim2" style={{ marginLeft: 8 }}>{hist.rate != null ? hist.rate.toFixed(0) + "% beat rate" : ""} (model pattern)</span>
