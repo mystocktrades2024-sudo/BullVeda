@@ -81,7 +81,10 @@ const HR = (function () {
 
 function HomeView({ onTicker, onSurface, mode, surface }) {
   const uni = (window.__BV && window.__BV.market && window.__BV.market.funnel && window.__BV.market.funnel.universe) || null;
-  const uniStr = uni != null ? uni.toLocaleString() : "612";
+  // "TODAY'S SCAN" must reflect the LIVE scan rows — not a stale critical-bundle
+  // count. When the live universe is empty, show "—" so the label matches the
+  // honest-empty setups/discovery below it (instead of "1000 ranked · 0 setups").
+  const uniStr = (uni != null && HR.has()) ? uni.toLocaleString() : (window.__BV ? "—" : "612");
   const liveDown = !HR.has();  // live universe empty → sections fall back to a placeholder layout
   // Real "as of" stamp from the last scan bundle (same source the hero uses).
   const _sm = (window.__BV && window.__BV.scanMeta) || null;
@@ -1009,20 +1012,21 @@ function HomeHero({ mode, onSurface }) {
   // funnel from the live per-mode verdicts (consistent with TopSetups/Discovery);
   // falls back to the critical funnel only when no live universe is loaded.
   const F = realFunnel(mode) || (M ? M.funnel : null);
-  const buy = F ? F.bullish : 14, watch = F ? F.neutral : 8, avoid = F ? F.bearish : 31;
-  const universe = F ? F.universe : 612;
+  const SV = !!(typeof window !== "undefined" && window.__BV); // served (real deploy) → no demo numbers
+  const buy = F ? F.bullish : (SV ? 0 : 14), watch = F ? F.neutral : (SV ? 0 : 8), avoid = F ? F.bearish : (SV ? 0 : 31);
+  const universe = F ? F.universe : (SV ? 0 : 612);
   const flagged = buy + watch + avoid || 1;
   const seg = (n) => `${(n / flagged) * 100}%`;
   const mood = [
-    { l: "FEAR/GREED", v: M && M.fearGreed != null ? String(M.fearGreed) : "62", tone: fgTone(M && M.fearGreed != null ? M.fearGreed : 62), pct: M && M.fearGreed != null ? M.fearGreed : 62 },
-    { l: "BREADTH",    v: M && M.breadthPct != null ? Math.round(M.breadthPct) + "%" : "56%", tone: "gn", pct: M && M.breadthPct != null ? Math.round(M.breadthPct) : 56 },
-    { l: "PUT/CALL",   v: M && M.putCall != null ? M.putCall.toFixed(2) : "0.78", tone: "gn", pct: 60 },
+    { l: "FEAR/GREED", v: M && M.fearGreed != null ? String(M.fearGreed) : (SV ? "—" : "62"), tone: fgTone(M && M.fearGreed != null ? M.fearGreed : 62), pct: M && M.fearGreed != null ? M.fearGreed : (SV ? 0 : 62) },
+    { l: "BREADTH",    v: M && M.breadthPct != null ? Math.round(M.breadthPct) + "%" : (SV ? "—" : "56%"), tone: "gn", pct: M && M.breadthPct != null ? Math.round(M.breadthPct) : (SV ? 0 : 56) },
+    { l: "PUT/CALL",   v: M && M.putCall != null ? M.putCall.toFixed(2) : (SV ? "—" : "0.78"), tone: "gn", pct: SV && !(M && M.putCall != null) ? 0 : 60 },
     { l: "NEW HIGHS",  v: M && M.newHighs != null ? String(M.newHighs) : "—", tone: "gn", pct: 50 },
     { l: ">200-DMA",   v: M && M.breadth200 != null ? Math.round(M.breadth200) + "%" : "—", tone: "gn", pct: M && M.breadth200 != null ? Math.round(M.breadth200) : 55 },
-    { l: "MAX SIZE",   v: M && M.maxSize != null ? M.maxSize + "%" : "70%", tone: "amb", pct: M && M.maxSize != null ? M.maxSize : 70 },
+    { l: "MAX SIZE",   v: M && M.maxSize != null ? M.maxSize + "%" : (SV ? "—" : "70%"), tone: "amb", pct: M && M.maxSize != null ? M.maxSize : (SV ? 0 : 70) },
   ];
-  const regOn = M ? M.regimeLabel : "RISK-ON";
-  const regTrend = M ? M.regimeTrend : "CHOPPY";
+  const regOn = M && M.regimeLabel ? M.regimeLabel : (SV ? "—" : "RISK-ON");
+  const regTrend = M && M.regimeTrend ? M.regimeTrend : (SV ? "" : "CHOPPY");
   return (
     <div className="home-hero qhero">
       <div className="qh-top">
@@ -1046,7 +1050,7 @@ function HomeHero({ mode, onSurface }) {
       <div className="qh-band">
         <button className="qh-regime" onClick={go("signal-scanner")} title="Multi-factor regime → open Scanner">
           <span className="qh-cap mono">REGIME · TAPE</span>
-          <span className="qh-regime-v mono"><b className={regOn === "RISK-ON" ? "up" : "dn"}>{regOn}</b><span className="qh-sep">·</span><b className="amb">{regTrend}</b></span>
+          <span className="qh-regime-v mono"><b className={regOn === "—" ? "dim2" : regOn === "RISK-ON" ? "up" : "dn"}>{regOn}</b>{regTrend ? <><span className="qh-sep">·</span><b className="amb">{regTrend}</b></> : null}</span>
           <span className="qh-regime-wr mono dim2">multi-factor{M && M.maxSize != null ? ` · max size ${M.maxSize}%` : ""}</span>
         </button>
 
