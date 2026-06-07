@@ -42,12 +42,21 @@ def _fetch() -> dict | None:
         print("snapshot_eodhd_quota: no EODHD_API_KEY", file=sys.stderr)
         return None
     url = f"https://eodhd.com/api/user?api_token={key}&fmt=json"
-    try:
-        with urllib.request.urlopen(url, timeout=15) as r:
-            return json.loads(r.read().decode())
-    except Exception as e:
-        print(f"snapshot_eodhd_quota: fetch failed — {e}", file=sys.stderr)
-        return None
+    # Retry transient failures — the host has intermittent DNS blips ("[Errno 8]
+    # nodename nor servname") that killed the 06-06/06-07 captures with a single
+    # no-retry call. 5 attempts with backoff (and a fresh DNS lookup each time).
+    import time as _t
+    last = None
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(url, timeout=20) as r:
+                return json.loads(r.read().decode())
+        except Exception as e:
+            last = e
+            if attempt < 4:
+                _t.sleep(min(30, 3 * (attempt + 1)))  # 3s,6s,9s,12s
+    print(f"snapshot_eodhd_quota: fetch failed after 5 attempts — {last}", file=sys.stderr)
+    return None
 
 
 def snapshot() -> int:
