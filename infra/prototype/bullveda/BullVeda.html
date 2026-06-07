@@ -13421,7 +13421,7 @@ function DetailLens({ lensId, ticker, mode, sizeCat, headerStyle, kpiStyle, hero
   if (lensId === "options") return /* @__PURE__ */ React.createElement(LensOptions, { ...props });
   if (lensId === "tape") return /* @__PURE__ */ React.createElement(LensTape, { ...props });
   if (lensId === "time" && window.LensTime) return /* @__PURE__ */ React.createElement(window.LensTime, { ...props });
-  if (lensId === "mledge") return /* @__PURE__ */ React.createElement("div", { className: "lens-ml-wrap" }, window.AIAnalystView && React.createElement(window.AIAnalystView, { single: true, ticker: props.ticker, sym: props.ticker && (props.ticker.symbol || props.ticker.sym) }), /* @__PURE__ */ React.createElement(LensML, { ...props }));
+  if (lensId === "mledge") return /* @__PURE__ */ React.createElement("div", { className: "lens-ml-wrap" }, /* @__PURE__ */ React.createElement(LensML, { ...props }));
   return /* @__PURE__ */ React.createElement(LensStub, { lensId });
 }
 function LensStub({ lensId }) {
@@ -22574,183 +22574,219 @@ window.LensPortfolio = LensPortfolio;
 window.LensTape = LensTape;
 </script>
 <script>/* src/lens-track-ml.jsx */
+function useTrackData() {
+  const [d, setD] = React.useState(null);
+  React.useEffect(() => {
+    let live = true;
+    const J = (u) => fetch(u).then((r) => r.ok ? r.json() : null).catch(() => null);
+    Promise.all([J("/api/performance"), J("/api/calibration-history"), J("/api/ml-edge-stress-buckets")]).then(([perf, calib, buckets]) => {
+      if (live) setD({ perf, calib, buckets });
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  return d;
+}
 function LensTrack({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("tr-1");
   const s2 = useStateToggle("tr-2");
   const s3 = useStateToggle("tr-3");
   const s4 = useStateToggle("tr-4");
   const s5 = useStateToggle("tr-5");
-  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--track" }, /* @__PURE__ */ React.createElement("div", { className: "hero track-hero" }, /* @__PURE__ */ React.createElement("div", { className: "th-left" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, 'Setup edge \xB7 "', ticker.setupFamily, '"'), /* @__PURE__ */ React.createElement("div", { className: "th-score" }, /* @__PURE__ */ React.createElement("div", { className: "th-score-num mono" }, "EDGE"), /* @__PURE__ */ React.createElement(Pill, { tone: "gn", dot: true }, "Wilson LB 47.7%"), /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true }, "PF 1.84 (raw)"), /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "PF 1.41 (haircut)")), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 12 } }, /* @__PURE__ */ React.createElement(WilsonPill, { n: ticker.setupStats.n, winRate: ticker.setupStats.winRate, lb: ticker.setupStats.wilsonLB }))), /* @__PURE__ */ React.createElement("div", { className: "th-right" }, /* @__PURE__ */ React.createElement(EdgeDecayChart, null))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  const td = useTrackData();
+  const mk = mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "invest" : "swing";
+  const perf = td && td.perf;
+  const ss = ticker.setupStats || {};
+  const hasSetup = ss.n != null && ss.n > 0;
+  const calSeries = td && td.calib && Array.isArray(td.calib.series) ? td.calib.series.filter((x) => (x.mode || "swing") === mk) : [];
+  const card = calSeries.length ? calSeries[calSeries.length - 1] : null;
+  const bkt = td && td.buckets && td.buckets[mk] && td.buckets[mk].base ? td.buckets[mk].base : null;
+  const nObs = td && td.buckets && td.buckets._meta && td.buckets._meta.n_total || null;
+  const pctd = (v) => v == null ? "\u2014" : (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%";
+  const num = (v, d) => v == null ? "\u2014" : v.toFixed(d == null ? 2 : d);
+  if (!perf && !card && !bkt) {
+    return /* @__PURE__ */ React.createElement("div", { className: "lens lens--track" }, /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2", style: { padding: 16 } }, "Track-record stats not loaded \u2014 the system edge comes from the closed-trade ledger (", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/performance"), "). ", td ? "No data returned." : "Loading\u2026"))));
+  }
+  const wr = perf && perf.win_rate, lb = perf && perf.wilson_lb_pct, pf = perf && perf.pf;
+  const lbTone = lb == null ? "ink" : lb >= 45 ? "gn" : lb >= 40 ? "amb" : "rd";
+  const expR = perf && (perf.expectancy != null ? perf.expectancy : perf.avg_r);
+  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--track" }, /* @__PURE__ */ React.createElement("div", { className: "hero track-hero" }, /* @__PURE__ */ React.createElement("div", { className: "th-left" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "System track record \xB7 ", (perf && perf.closed) != null ? perf.closed.toLocaleString() : "\u2014", " closed trades"), /* @__PURE__ */ React.createElement("div", { className: "th-score" }, /* @__PURE__ */ React.createElement("div", { className: "th-score-num mono" }, lb != null ? lb.toFixed(1) + "%" : "\u2014"), /* @__PURE__ */ React.createElement(Pill, { tone: lbTone, dot: true }, "Wilson 95% LB"), pf != null && /* @__PURE__ */ React.createElement(Pill, { tone: pf >= 1.3 ? "gn" : pf >= 1.1 ? "amb" : "rd", small: true }, "PF ", pf.toFixed(2)), expR != null && /* @__PURE__ */ React.createElement(Pill, { tone: expR > 0 ? "gn" : "rd", small: true }, "expectancy ", expR >= 0 ? "+" : "", expR.toFixed(2), "R")), hasSetup && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 12 } }, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 4 } }, 'This setup \xB7 "', ticker.setupFamily, '"'), /* @__PURE__ */ React.createElement(WilsonPill, { n: ss.n, winRate: ss.winRate, lb: ss.wilsonLB }))), /* @__PURE__ */ React.createElement("div", { className: "th-right" }, /* @__PURE__ */ React.createElement(EdgeDecayChart, { series: calSeries }))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 1,
-      title: "Headline Edge",
-      sub: "Wilson CI \xB7 profit factor \xB7 median R \xB7 n",
+      title: "Headline Edge \xB7 System",
+      sub: "Wilson CI \xB7 profit factor \xB7 expectancy \xB7 all closed trades",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "tr-1" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s1.value, source: "setup_stats.json \xB7 per-family" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "Win rate", value: "61.7%", tone: "gn", sub: "n=47" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Wilson 95% LB", value: "47.7%", tone: "gn", sub: "above 45% gate" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Profit factor", value: "1.84", tone: "gn", sub: "haircut 1.41" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Median R", value: "+0.72", tone: "gn", sub: "per closed trade" }))))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s1.value, source: "/api/performance \xB7 closed-trade ledger" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "Win rate", value: wr != null ? wr.toFixed(1) + "%" : "\u2014", tone: wr >= 50 ? "gn" : "amb", sub: `n=${(perf && perf.closed) != null ? perf.closed.toLocaleString() : "\u2014"}` }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Wilson 95% LB", value: lb != null ? lb.toFixed(1) + "%" : "\u2014", tone: lbTone, sub: lb >= 45 ? "above 45% gate" : "below 45% gate" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Profit factor", value: pf != null ? pf.toFixed(2) : "\u2014", tone: pf >= 1.3 ? "gn" : pf >= 1.1 ? "amb" : "rd", sub: "gross win / gross loss" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Expectancy", value: expR != null ? (expR >= 0 ? "+" : "") + expR.toFixed(2) + "R" : "\u2014", tone: expR > 0 ? "gn" : "rd", sub: "per closed trade" }))))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 2,
-      title: "Forward Expectancy",
-      sub: "conditional on this exact setup, regime-matched",
+      title: "Outcome Quality",
+      sub: "average win vs loss \xB7 realized R:R \xB7 excursions",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "tr-2" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s2.value, source: "walk-forward \xB7 12-mo holdout" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "Median fwd 10d", value: "+2.4%", tone: "gn" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "P(T1 first)", value: "58.5%", tone: "gn" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "P(stop first)", value: "40.0%", tone: "amb" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Expectancy \xB7 R", value: "+0.51", tone: "gn", sub: "per trade" }))))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s2.value, source: "/api/performance \xB7 closed-trade ledger" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "Avg win", value: perf && perf.avg_win_pct != null ? "+" + perf.avg_win_pct.toFixed(1) + "%" : "\u2014", tone: "gn" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Avg loss", value: perf && perf.avg_loss_pct != null ? perf.avg_loss_pct.toFixed(1) + "%" : "\u2014", tone: "rd" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Realized R:R", value: perf && perf.rr_avg != null ? perf.rr_avg.toFixed(2) : "\u2014", tone: perf && perf.rr_avg >= 2.5 ? "gn" : "amb", sub: "planned" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "MFE / MAE", value: perf && perf.mfe_avg != null ? `+${perf.mfe_avg.toFixed(1)} / ${perf.mae_avg.toFixed(1)}` : "\u2014", tone: "ink", sub: "avg excursion %" }))))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 3,
-      title: "Edge Decay \xB7 12-mo Blocks",
-      sub: "rolling Wilson LB over trailing windows",
+      title: "Model Calibration \xB7 Latest Card",
+      sub: "classifier accuracy \xB7 AUC \xB7 Brier \xB7 log-loss",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "tr-3" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s3.value, source: "rolling-window backtest" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(EdgeDecayPanel, null)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s3.value, source: "/api/calibration-history \xB7 model card" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, card ? /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "Accuracy", value: card.accuracy != null ? (card.accuracy * 100).toFixed(1) + "%" : "\u2014", tone: card.accuracy >= 0.5 ? "gn" : "amb", sub: `${mk} \xB7 n=${((card.n_ok || 0) + (card.n_fail || 0)).toLocaleString()}` }), /* @__PURE__ */ React.createElement(KpiTile, { label: "AUC", value: num(card.auc, 3), tone: card.auc >= 0.6 ? "gn" : "amb", sub: "rank quality" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Brier", value: num(card.brier, 3), tone: card.brier <= 0.2 ? "gn" : "amb", sub: "lower = better" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Log-loss", value: num(card.log_loss, 3), tone: "ink", sub: card.date || "" })) : /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 no calibration card for ", mk)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 4,
-      title: "Walk-Forward Holdout",
-      sub: "train \xB7 validate \xB7 holdout slices \xB7 prevents over-fit",
+      title: "Forward Return Distribution",
+      sub: `realized ${mk} forward returns \xB7 quantile profile`,
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "tr-4" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s4.value, source: "walk-forward harness" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "In-sample WR", value: "63.2%", tone: "ink", sub: "train" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Out-of-sample WR", value: "61.7%", tone: "gn", sub: "holdout \u2014 no decay" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "KS drift", value: "0.08", tone: "gn", sub: "below 0.15 alert" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Stability score", value: "A\u2212", tone: "gn", sub: "stable last 4 blocks" }))))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
-    SectionHeader,
-    {
-      n: 5,
-      title: "Forward Monte Carlo",
-      sub: "2,000 paths \xB7 setup-conditional \xB7 10-day horizon",
-      style: headerStyle,
-      right: /* @__PURE__ */ React.createElement(StateToggle, { name: "tr-5" })
-    }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s5.value, source: "MC harness \xB7 holdout-trained" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(DistributionBars, null)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(SectionHeader, { n: 6, title: "Cross-Lens Confluence", style: headerStyle }), /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CrossLens, { lead: "gn", cells: [
-    { lens: "Track Rec.", verdict: "EDGE", tone: "gn", note: "Wilson 47.7% \xB7 PF 1.41 haircut" },
-    { lens: "Plan", verdict: "READY", tone: "gn", note: "R 1.74 \xB7 sized" },
-    { lens: "AI Edge", verdict: "+0.18", tone: "gn", note: "hit-net agrees" },
-    { lens: "Regime", verdict: "BULL", tone: "gn", note: "highest historical WR regime" },
-    { lens: "Risk", verdict: "OK", tone: "gn", note: "expectancy \xB7 half-Kelly fits" }
-  ] }))), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 Track Record"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "n=", /* @__PURE__ */ React.createElement("b", null, "47"), ", Wilson LB ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "47.7%"), ", expectancy", /* @__PURE__ */ React.createElement("b", { className: "up" }, "+0.51R"), " per trade. ", /* @__PURE__ */ React.createElement("b", null, "Edge is real and stable."))));
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s4.value, source: "/api/ml-edge-stress-buckets \xB7 base scenario" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(DistributionBars, { bkt, nObs, mk, td })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(SectionHeader, { n: 5, title: "Cross-Lens Confluence", style: headerStyle }), /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CrossLens, { lead: "gn", cells: [
+    { lens: "Track Rec.", verdict: lb != null ? lb.toFixed(0) + "%" : "\u2014", tone: lbTone, note: pf != null ? `Wilson LB \xB7 PF ${pf.toFixed(2)}` : "Wilson LB" },
+    { lens: "Expectancy", verdict: expR != null ? (expR >= 0 ? "+" : "") + expR.toFixed(2) + "R" : "\u2014", tone: expR > 0 ? "gn" : "rd", note: "per closed trade" },
+    { lens: "Model", verdict: card && card.accuracy != null ? (card.accuracy * 100).toFixed(0) + "%" : "\u2014", tone: card && card.accuracy >= 0.5 ? "gn" : "amb", note: card ? `AUC ${num(card.auc, 2)}` : "accuracy" },
+    { lens: "Fwd median", verdict: bkt ? pctd(bkt.q50) : "\u2014", tone: bkt && bkt.q50 >= 0 ? "gn" : "rd", note: `${mk} base` },
+    { lens: "This setup", verdict: hasSetup ? `n=${ss.n}` : "\u2014", tone: hasSetup ? "gn" : "ink", note: hasSetup ? ticker.setupFamily : "no per-setup sample" }
+  ] }))), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 Track Record"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "System: n=", /* @__PURE__ */ React.createElement("b", null, (perf && perf.closed) != null ? perf.closed.toLocaleString() : "\u2014"), " closed, Wilson LB ", /* @__PURE__ */ React.createElement("b", { className: lbTone === "gn" ? "up" : lbTone === "rd" ? "dn" : "warn" }, lb != null ? lb.toFixed(1) + "%" : "\u2014"), ", PF ", /* @__PURE__ */ React.createElement("b", { className: pf >= 1.3 ? "up" : "warn" }, pf != null ? pf.toFixed(2) : "\u2014"), ", expectancy ", /* @__PURE__ */ React.createElement("b", { className: expR > 0 ? "up" : "dn" }, expR != null ? (expR >= 0 ? "+" : "") + expR.toFixed(2) + "R" : "\u2014"), " per trade.", lb != null && lb < 45 ? /* @__PURE__ */ React.createElement(React.Fragment, null, " Edge is ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "modest"), " \u2014 below the 45% Wilson gate; size conservatively.") : /* @__PURE__ */ React.createElement(React.Fragment, null, " Edge clears the Wilson gate."))));
 }
-function EdgeDecayChart() {
+function EdgeDecayChart({ series }) {
   const w = 240, h = 90;
-  const data = [0.54, 0.58, 0.61, 0.59, 0.62, 0.65, 0.63, 0.6, 0.58, 0.61, 0.62, 0.617];
+  const data = (Array.isArray(series) ? series : []).map((s) => s.accuracy).filter((v) => typeof v === "number");
+  if (data.length < 2) {
+    return /* @__PURE__ */ React.createElement("svg", { width: w, height: h, viewBox: `0 0 ${w} ${h}` }, /* @__PURE__ */ React.createElement("text", { x: w / 2, y: h / 2, textAnchor: "middle", fontSize: "10", className: "mono", fill: "var(--ink-3)" }, "accuracy trend \xB7 n/a"));
+  }
+  const lo = Math.min(0.4, ...data) - 0.02, hi = Math.max(0.7, ...data) + 0.02;
   const xStep = (w - 24) / (data.length - 1);
-  const y = (v) => h - 14 - (v - 0.4) / 0.3 * (h - 24);
+  const y = (v) => h - 14 - (v - lo) / (hi - lo) * (h - 24);
   const pts = data.map((v, i) => [12 + i * xStep, y(v)]);
-  return /* @__PURE__ */ React.createElement("svg", { width: w, height: h, viewBox: `0 0 ${w} ${h}` }, /* @__PURE__ */ React.createElement("line", { x1: "0", y1: y(0.45), x2: w, y2: y(0.45), stroke: "var(--rd-dim)", strokeDasharray: "3 3" }), /* @__PURE__ */ React.createElement("text", { x: "2", y: y(0.45) - 3, fontSize: "9", className: "mono", fill: "var(--rd)" }, "45% gate"), /* @__PURE__ */ React.createElement("polyline", { points: pts.map((p) => p.join(",")).join(" "), stroke: "var(--gn)", strokeWidth: "1.6", fill: "none" }), pts.map((p, i) => /* @__PURE__ */ React.createElement("circle", { key: i, cx: p[0], cy: p[1], r: "2", fill: i === pts.length - 1 ? "var(--copper)" : "var(--gn)" })), /* @__PURE__ */ React.createElement("text", { x: w - 2, y: "12", fontSize: "9", className: "mono", textAnchor: "end", fill: "var(--gn)" }, "stable"));
+  const last = data[data.length - 1];
+  return /* @__PURE__ */ React.createElement("svg", { width: w, height: h, viewBox: `0 0 ${w} ${h}` }, /* @__PURE__ */ React.createElement("line", { x1: "0", y1: y(0.5), x2: w, y2: y(0.5), stroke: "var(--rd-dim)", strokeDasharray: "3 3" }), /* @__PURE__ */ React.createElement("text", { x: "2", y: y(0.5) - 3, fontSize: "9", className: "mono", fill: "var(--ink-3)" }, "50% coin-flip"), /* @__PURE__ */ React.createElement("polyline", { points: pts.map((p) => p.join(",")).join(" "), stroke: "var(--gn)", strokeWidth: "1.6", fill: "none" }), pts.map((p, i) => /* @__PURE__ */ React.createElement("circle", { key: i, cx: p[0], cy: p[1], r: "2", fill: i === pts.length - 1 ? "var(--copper)" : "var(--gn)" })), /* @__PURE__ */ React.createElement("text", { x: w - 2, y: "12", fontSize: "9", className: "mono", textAnchor: "end", fill: last >= 0.5 ? "var(--gn)" : "var(--amb)" }, (last * 100).toFixed(0), "% acc"));
 }
-function EdgeDecayPanel() {
-  const blocks = [
-    { period: "2023 H1", wr: 0.54, lb: 0.4, n: 16, tone: "amb" },
-    { period: "2023 H2", wr: 0.59, lb: 0.43, n: 19, tone: "gn" },
-    { period: "2024 H1", wr: 0.62, lb: 0.48, n: 22, tone: "gn" },
-    { period: "2024 H2", wr: 0.6, lb: 0.45, n: 18, tone: "gn" },
-    { period: "2025 H1", wr: 0.65, lb: 0.51, n: 24, tone: "gn" },
-    { period: "TTM", wr: 0.617, lb: 0.477, n: 47, tone: "gn", current: true }
-  ];
-  return /* @__PURE__ */ React.createElement("div", { className: "ed-grid" }, blocks.map((b, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `ed-cell ${b.current ? "is-current" : ""}` }, /* @__PURE__ */ React.createElement("div", { className: "ed-period mono dim" }, b.period), /* @__PURE__ */ React.createElement("div", { className: `ed-wr mono kpi-tone--${b.tone}` }, (b.wr * 100).toFixed(1), "%"), /* @__PURE__ */ React.createElement("div", { className: "ed-meta mono dim2" }, "LB ", (b.lb * 100).toFixed(0), "% \xB7 n=", b.n))));
+function DistributionBars({ bkt, nObs, mk, td }) {
+  if (!bkt || bkt.q50 == null) {
+    return /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 forward-return buckets not loaded", td ? "" : " (loading\u2026)");
+  }
+  const qs = [bkt.q10, bkt.q25, bkt.q50, bkt.q75, bkt.q90];
+  const lo = Math.min(...qs), hi = Math.max(...qs), span = hi - lo || 1;
+  const x = (v) => (v - lo) / span * 100;
+  const fmt = (v) => (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%";
+  const pos = (v) => v >= 0 ? "up" : "dn";
+  return /* @__PURE__ */ React.createElement("div", { className: "dist-block" }, /* @__PURE__ */ React.createElement("div", { style: { position: "relative", height: 56, margin: "6px 4px 2px" } }, lo < 0 && hi > 0 && /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", left: `${x(0)}%`, top: 0, bottom: 18, width: 1, background: "var(--ink-3)" } }), /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", left: `${x(bkt.q10)}%`, width: `${x(bkt.q90) - x(bkt.q10)}%`, top: 24, height: 2, background: "var(--line)" } }), /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", left: `${x(bkt.q25)}%`, width: `${x(bkt.q75) - x(bkt.q25)}%`, top: 16, height: 18, background: "color-mix(in oklab, var(--gn) 22%, transparent)", border: "1px solid var(--gn)", borderRadius: 3 } }), /* @__PURE__ */ React.createElement("div", { style: { position: "absolute", left: `${x(bkt.q50)}%`, top: 12, height: 26, width: 2, background: "var(--copper)" } }), [["q10", bkt.q10], ["q50", bkt.q50], ["q90", bkt.q90]].map(([k, v], i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "mono dim2", style: { position: "absolute", left: `${x(v)}%`, top: 40, fontSize: 9, transform: "translateX(-50%)" } }, fmt(v)))), /* @__PURE__ */ React.createElement("div", { className: "dist-stats" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "Median ", /* @__PURE__ */ React.createElement("b", { className: pos(bkt.q50) }, fmt(bkt.q50))), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "P25 ", /* @__PURE__ */ React.createElement("b", { className: pos(bkt.q25) }, fmt(bkt.q25))), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "P75 ", /* @__PURE__ */ React.createElement("b", { className: pos(bkt.q75) }, fmt(bkt.q75))), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, nObs ? nObs.toLocaleString() + " obs" : "", " \xB7 ", mk, " base")));
 }
-function DistributionBars() {
-  const buckets = [
-    { lo: -10, hi: -7, p: 4 },
-    { lo: -7, hi: -5, p: 8 },
-    { lo: -5, hi: -3, p: 12 },
-    { lo: -3, hi: -1, p: 16 },
-    { lo: -1, hi: 1, p: 14 },
-    { lo: 1, hi: 3, p: 16 },
-    { lo: 3, hi: 5, p: 14 },
-    { lo: 5, hi: 8, p: 10 },
-    { lo: 8, hi: 12, p: 6 }
-  ];
-  const max = Math.max(...buckets.map((b) => b.p));
-  return /* @__PURE__ */ React.createElement("div", { className: "dist-block" }, /* @__PURE__ */ React.createElement("div", { className: "dist-bars" }, buckets.map((b, i) => {
-    const positive = (b.lo + b.hi) / 2 >= 0;
-    return /* @__PURE__ */ React.createElement("div", { key: i, className: "dist-bar-col" }, /* @__PURE__ */ React.createElement("div", { className: "dist-bar", style: {
-      height: `${b.p / max * 100}%`,
-      background: positive ? "var(--gn)" : "var(--rd)",
-      opacity: 0.7
-    } }), /* @__PURE__ */ React.createElement("div", { className: "dist-bar-lbl mono dim" }, b.lo > 0 ? "+" : "", b.lo));
-  })), /* @__PURE__ */ React.createElement("div", { className: "dist-stats" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "Median ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "+2.4%")), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "P25 ", /* @__PURE__ */ React.createElement("b", null, "\u22121.1%")), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "P75 ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "+5.6%")), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "2,000 paths \xB7 holdout-trained")));
+function useMlEdge(sym, mode) {
+  const mk = mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "invest" : "swing";
+  const [d, setD] = React.useState(null);
+  React.useEffect(() => {
+    if (!sym) {
+      setD({ loading: false, me: null, card: null });
+      return;
+    }
+    let live = true;
+    setD(null);
+    const J = (u) => fetch(u).then((r) => r.ok ? r.json() : null).catch(() => null);
+    Promise.all([J(`/api/ml/${encodeURIComponent(sym)}?mode=${mk}`), J("/api/calibration-history")]).then(([me, calib]) => {
+      if (!live) return;
+      const found = me && me.direction && typeof me.direction.p_up === "number";
+      const series = calib && Array.isArray(calib.series) ? calib.series.filter((x) => (x.mode || "swing") === mk) : [];
+      setD({ loading: false, me: found ? me : null, card: series.length ? series[series.length - 1] : null });
+    });
+    return () => {
+      live = false;
+    };
+  }, [sym, mk]);
+  return d;
 }
 function LensML({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("ml-1");
   const s2 = useStateToggle("ml-2");
   const s3 = useStateToggle("ml-3");
   const s4 = useStateToggle("ml-4");
-  const moKey = mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "invest" : "swing";
-  const pj = window.AIPredict && ticker && ticker.symbol ? window.AIPredict.projection(ticker.symbol, moKey) : null;
-  const hz = pj ? pj.horizon : "10d";
-  const pUp = pj ? pj.pUp : 0.61;
-  const hitNet = pj ? +(pj.hit.p_t1_first - pj.hit.p_stop_first).toFixed(2) : 0.18;
+  const data = useMlEdge(ticker && ticker.symbol, mode);
+  const me = data && data.me;
+  const card = data && data.card;
+  if (!data) {
+    return /* @__PURE__ */ React.createElement("div", { className: "lens lens--ml" }, /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2", style: { padding: 16 } }, "Loading ML forecast\u2026"))));
+  }
+  if (!me) {
+    return /* @__PURE__ */ React.createElement("div", { className: "lens lens--ml" }, /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2", style: { padding: 16 } }, "No ML-edge forecast for ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, ticker && ticker.symbol || "this name"), " (", mode.toLowerCase(), ") \u2014 it isn't in the model universe yet. The 3-head model scores ~1,100 liquid names per horizon."))));
+  }
+  const hz = (me.horizon_days != null ? me.horizon_days : "\u2014") + "d";
+  const dir = me.direction || {}, mag = me.magnitude || {}, hit = me.hit_net || {};
+  const pUp = dir.p_up;
+  const hitNet = hit.p_t1_first != null && hit.p_stop_first != null ? +(hit.p_t1_first - hit.p_stop_first).toFixed(2) : null;
   const dirTone = pUp >= 0.6 ? "gn" : pUp >= 0.45 ? "amb" : "rd";
-  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--ml" }, /* @__PURE__ */ React.createElement("div", { className: "hero ml-hero" }, /* @__PURE__ */ React.createElement("div", { className: "th-left" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "3-head ML forecast \xB7 ", hz, " horizon \xB7 ", mode), /* @__PURE__ */ React.createElement("div", { className: "th-score" }, /* @__PURE__ */ React.createElement("div", { className: "th-score-num mono" }, hitNet >= 0 ? "+" : "", hitNet.toFixed(2)), /* @__PURE__ */ React.createElement(Pill, { tone: hitNet >= 0 ? "gn" : "rd", dot: true }, "hit-net edge"), /* @__PURE__ */ React.createElement(Pill, { tone: dirTone, small: true }, "Direction ", Math.round(pUp * 100), "%"), /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "Magnitude wide")), /* @__PURE__ */ React.createElement("div", { className: "th-pill-row" }, /* @__PURE__ */ React.createElement(Pill, { tone: "ink", small: true }, "Calibration \xB7 OK"), /* @__PURE__ */ React.createElement(Pill, { tone: "ink", small: true }, "Drift KS 0.07"), /* @__PURE__ */ React.createElement(Pill, { tone: "ink", small: true }, "Top-3 features"))), /* @__PURE__ */ React.createElement("div", { className: "th-right" }, /* @__PURE__ */ React.createElement(MLConeChart, { ticker, pj }))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  const vColor = { pass: "gn", warn: "amb", fail: "rd" }[me.verdict && me.verdict.color] || "ink";
+  const health = me.model_meta && me.model_meta.calibration_health;
+  const auc = hit.model_auc != null ? hit.model_auc : card && card.auc;
+  const fmt = (v) => v == null ? "\u2014" : (v >= 0 ? "+" : "") + v.toFixed(1) + "%";
+  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--ml" }, /* @__PURE__ */ React.createElement("div", { className: "hero ml-hero" }, /* @__PURE__ */ React.createElement("div", { className: "th-left" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "ML forecast \xB7 ", me.mode_label || hz, " \xB7 ", mode), /* @__PURE__ */ React.createElement("div", { className: "th-score" }, /* @__PURE__ */ React.createElement("div", { className: "th-score-num mono" }, hitNet == null ? "\u2014" : (hitNet >= 0 ? "+" : "") + hitNet.toFixed(2)), /* @__PURE__ */ React.createElement(Pill, { tone: hitNet == null ? "ink" : hitNet >= 0 ? "gn" : "rd", dot: true }, "hit-net edge"), /* @__PURE__ */ React.createElement(Pill, { tone: dirTone, small: true }, "P(up) ", pUp != null ? Math.round(pUp * 100) + "%" : "\u2014"), me.verdict && me.verdict.text && /* @__PURE__ */ React.createElement(Pill, { tone: vColor, small: true }, me.verdict.text)), /* @__PURE__ */ React.createElement("div", { className: "th-pill-row" }, health && /* @__PURE__ */ React.createElement(Pill, { tone: health === "ok" ? "gn" : "amb", small: true }, "Calibration ", health), auc != null && /* @__PURE__ */ React.createElement(Pill, { tone: auc >= 0.6 ? "gn" : "amb", small: true }, "Model AUC ", auc.toFixed(2)), me.verdict && me.verdict.confidence && /* @__PURE__ */ React.createElement(Pill, { tone: "ink", small: true }, "Conf ", me.verdict.confidence))), /* @__PURE__ */ React.createElement("div", { className: "th-right" }, /* @__PURE__ */ React.createElement(MLConeChart, { mag, hz }))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 1,
-      title: "Head 1 \xB7 Direction",
-      sub: `P(up) over next ${hz}`,
+      title: "Direction \xB7 P(up)",
+      sub: `classifier \xB7 over next ${hz}`,
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "ml-1" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s1.value, source: "ml_edge_predictions.json \xB7 classifier head" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(ProbBar, { v: pUp, label: `P(up \xB7 ${hz})` })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s1.value, source: "/api/ml \xB7 direction head" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(ProbBar, { v: pUp, label: `P(up \xB7 ${hz})` }), /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(3, 1fr)", marginTop: 10 } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "P(up)", value: pUp != null ? (pUp * 100).toFixed(0) + "%" : "\u2014", tone: dirTone }), /* @__PURE__ */ React.createElement(KpiTile, { label: "P(chop)", value: dir.p_chop != null ? (dir.p_chop * 100).toFixed(0) + "%" : "\u2014", tone: "ink" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "P(down)", value: dir.p_dn != null ? (dir.p_dn * 100).toFixed(0) + "%" : "\u2014", tone: dir.p_dn > 0.4 ? "rd" : "ink" }))))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 2,
-      title: "Head 2 \xB7 Magnitude Cone",
+      title: "Magnitude Cone",
       sub: `quantile regression \xB7 ${hz} return distribution`,
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "ml-2" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s2.value, source: "quantile regressor head" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "P10", value: `${pj ? (pj.mag.q10 >= 0 ? "+" : "") + pj.mag.q10 : "\u22124.2"}%`, tone: "rd" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "P50 (median)", value: `${pj ? (pj.mag.q50 >= 0 ? "+" : "") + pj.mag.q50 : "+6.4"}%`, tone: pj && pj.mag.q50 < 0 ? "rd" : "gn" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "P90", value: `${pj ? "+" + pj.mag.q90 : "+12.1"}%`, tone: "gn" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Skew", value: pj ? pj.mag.q90 + pj.mag.q10 >= 0 ? "+0.42" : "\u22120.31" : "+0.42", tone: "gn", sub: "right-skewed" }))))), window.AIProjectionChart && pj && /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
-    SectionHeader,
-    {
-      n: 2.5,
-      title: "Price Projection \xB7 annotated chart",
-      sub: `candles \xB7 MA20/50/200 \xB7 breakout base \xB7 forward AI zone \u2192 target +${pj.mag.q90}%`,
-      style: headerStyle,
-      right: /* @__PURE__ */ React.createElement(StateToggle, { name: "ml-25" })
-    }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s2.value, source: "OHLCV (demo) + ml_edge projection" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, React.createElement(window.AIProjectionChart, { P: { sym: ticker.symbol, px: ticker.price }, proj: pj })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s2.value, source: "/api/ml \xB7 quantile head" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "P10", value: fmt(mag.q10), tone: "rd" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "P50 (median)", value: fmt(mag.q50), tone: mag.q50 < 0 ? "rd" : "gn" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "P90", value: fmt(mag.q90), tone: "gn" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Skew", value: mag.skew != null ? (mag.skew >= 0 ? "+" : "") + mag.skew.toFixed(2) : "\u2014", tone: mag.skew >= 0 ? "gn" : "rd", sub: mag.skew >= 0 ? "right-skewed" : "left-skewed" }))))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 3,
-      title: "Head 3 \xB7 Hit-Net (T1 vs Stop)",
+      title: "Hit-Net (T1 vs Stop)",
       sub: "P(T1 first) \u2212 P(stop first) \u2014 the actionable edge",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "ml-3" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s3.value, source: "hit-net head \xB7 path-conditional" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(HitNetBar, null)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s3.value, source: "/api/ml \xB7 hit-net head" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(HitNetBar, { hit })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 4,
       title: "Calibration \xB7 Feature Importance",
-      sub: "reliability diagram + top features by SHAP",
+      sub: "model card metrics + top SHAP drivers",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "ml-4" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s4.value, source: "model card \xB7 monthly recalibrate" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CalibrationPanel, null)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(SectionHeader, { n: 5, title: "Cross-Lens Confluence", style: headerStyle }), /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CrossLens, { lead: "violet", cells: [
-    { lens: "AI Edge", verdict: `${hitNet >= 0 ? "+" : ""}${hitNet.toFixed(2)}`, tone: hitNet >= 0 ? "gn" : "rd", note: `hit-net \xB7 ${hz}` },
-    { lens: "Direction", verdict: `${Math.round(pUp * 100)}%`, tone: dirTone, note: `P(up) ${hz}` },
-    { lens: "Magnitude", verdict: "WIDE", tone: "amb", note: pj ? `q10 ${pj.mag.q10} / q90 +${pj.mag.q90}` : "P10 \u22124 / P90 +12" },
-    { lens: "Track Rec.", verdict: "EDGE", tone: "gn", note: "Wilson 47.7%" },
-    { lens: "Plan", verdict: "READY", tone: "gn", note: "R 1.74" }
-  ] }))), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 AI Edge \xB7 ", mode), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "P(T1 first) \u2212 P(stop first) = ", /* @__PURE__ */ React.createElement("b", { className: hitNet >= 0 ? "up" : "dn" }, hitNet >= 0 ? "+" : "", hitNet.toFixed(2)), " over the ", /* @__PURE__ */ React.createElement("b", null, hz), " horizon. Calibration OK, drift low. Model and rules agree.")));
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s4.value, source: "/api/ml \xB7 SHAP + /api/calibration-history" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CalibrationPanel, { shap: me.shap, card, auc })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(SectionHeader, { n: 5, title: "Cross-Lens Confluence", style: headerStyle }), /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CrossLens, { lead: "violet", cells: [
+    { lens: "AI Edge", verdict: hitNet == null ? "\u2014" : `${hitNet >= 0 ? "+" : ""}${hitNet.toFixed(2)}`, tone: hitNet == null ? "ink" : hitNet >= 0 ? "gn" : "rd", note: `hit-net \xB7 ${hz}` },
+    { lens: "Direction", verdict: pUp != null ? `${Math.round(pUp * 100)}%` : "\u2014", tone: dirTone, note: `P(up) ${hz}` },
+    { lens: "Magnitude", verdict: fmt(mag.q50), tone: mag.q50 >= 0 ? "gn" : "rd", note: `q10 ${fmt(mag.q10)} / q90 ${fmt(mag.q90)}` },
+    { lens: "Verdict", verdict: me.verdict ? me.verdict.text : "\u2014", tone: vColor, note: me.verdict ? me.verdict.confidence + " conf" : "" },
+    { lens: "Model", verdict: auc != null ? `AUC ${auc.toFixed(2)}` : "\u2014", tone: auc >= 0.6 ? "gn" : "amb", note: health ? "calib " + health : "" }
+  ] }))), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 AI Edge \xB7 ", mode), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "P(up) ", /* @__PURE__ */ React.createElement("b", { className: dirTone === "gn" ? "up" : dirTone === "rd" ? "dn" : "warn" }, pUp != null ? Math.round(pUp * 100) + "%" : "\u2014"), ", hit-net ", /* @__PURE__ */ React.createElement("b", { className: hitNet > 0 ? "up" : "dn" }, hitNet == null ? "\u2014" : (hitNet >= 0 ? "+" : "") + hitNet.toFixed(2)), " (P(T1) ", hit.p_t1_first != null ? Math.round(hit.p_t1_first * 100) + "%" : "\u2014", " vs P(stop) ", hit.p_stop_first != null ? Math.round(hit.p_stop_first * 100) + "%" : "\u2014", "), median ", /* @__PURE__ */ React.createElement("b", { className: mag.q50 >= 0 ? "up" : "dn" }, fmt(mag.q50)), " over ", hz, ".", hitNet != null && hitNet <= 0 ? /* @__PURE__ */ React.createElement(React.Fragment, null, " Path edge is ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "negative"), " \u2014 stop likely hit before target; no long edge here.") : /* @__PURE__ */ React.createElement(React.Fragment, null, " Verdict: ", /* @__PURE__ */ React.createElement("b", { className: vColor === "gn" ? "up" : "warn" }, me.verdict ? me.verdict.text : "\u2014"), "."))));
 }
 function ProbBar({ v, label }) {
-  return /* @__PURE__ */ React.createElement("div", { className: "probbar" }, /* @__PURE__ */ React.createElement("div", { className: "probbar-label mono dim2" }, label), /* @__PURE__ */ React.createElement("div", { className: "probbar-bar" }, /* @__PURE__ */ React.createElement("div", { className: "probbar-fill", style: { width: `${v * 100}%` } }), /* @__PURE__ */ React.createElement("div", { className: "probbar-mid" })), /* @__PURE__ */ React.createElement("div", { className: "probbar-val mono" }, /* @__PURE__ */ React.createElement("b", null, (v * 100).toFixed(0), "%")), /* @__PURE__ */ React.createElement("div", { className: "probbar-meta mono dim" }, "vs 50% baseline \xB7 +11pt edge"));
+  const have = typeof v === "number";
+  const pts = have ? Math.round((v - 0.5) * 100) : 0;
+  return /* @__PURE__ */ React.createElement("div", { className: "probbar" }, /* @__PURE__ */ React.createElement("div", { className: "probbar-label mono dim2" }, label), /* @__PURE__ */ React.createElement("div", { className: "probbar-bar" }, /* @__PURE__ */ React.createElement("div", { className: "probbar-fill", style: { width: `${(have ? v : 0) * 100}%` } }), /* @__PURE__ */ React.createElement("div", { className: "probbar-mid" })), /* @__PURE__ */ React.createElement("div", { className: "probbar-val mono" }, /* @__PURE__ */ React.createElement("b", null, have ? (v * 100).toFixed(0) + "%" : "\u2014")), /* @__PURE__ */ React.createElement("div", { className: "probbar-meta mono dim" }, "vs 50% baseline \xB7 ", pts >= 0 ? "+" : "", pts, "pt edge"));
 }
-function HitNetBar() {
-  const pT1 = 0.58, pStop = 0.4;
+function HitNetBar({ hit }) {
+  const pT1 = hit && hit.p_t1_first != null ? hit.p_t1_first : null;
+  const pStop = hit && hit.p_stop_first != null ? hit.p_stop_first : null;
+  if (pT1 == null || pStop == null) return /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 hit-net not available");
   return /* @__PURE__ */ React.createElement("div", { className: "hitnet" }, /* @__PURE__ */ React.createElement("div", { className: "hn-row" }, /* @__PURE__ */ React.createElement("span", { className: "hn-label mono" }, "P(T1 first)"), /* @__PURE__ */ React.createElement("div", { className: "hn-bar" }, /* @__PURE__ */ React.createElement("div", { className: "hn-fill hn-gn", style: { width: `${pT1 * 100}%` } })), /* @__PURE__ */ React.createElement("span", { className: "hn-val mono up" }, (pT1 * 100).toFixed(0), "%")), /* @__PURE__ */ React.createElement("div", { className: "hn-row" }, /* @__PURE__ */ React.createElement("span", { className: "hn-label mono" }, "P(stop first)"), /* @__PURE__ */ React.createElement("div", { className: "hn-bar" }, /* @__PURE__ */ React.createElement("div", { className: "hn-fill hn-rd", style: { width: `${pStop * 100}%` } })), /* @__PURE__ */ React.createElement("span", { className: "hn-val mono dn" }, (pStop * 100).toFixed(0), "%")), /* @__PURE__ */ React.createElement("div", { className: "hn-row hn-final" }, /* @__PURE__ */ React.createElement("span", { className: "hn-label mono" }, "Hit-net"), /* @__PURE__ */ React.createElement("div", { className: "hn-bar" }, /* @__PURE__ */ React.createElement("div", { className: "hn-fill", style: {
     width: `${(pT1 - pStop) * 100}%`,
     background: "linear-gradient(90deg, var(--copper), var(--violet))"
   } })), /* @__PURE__ */ React.createElement("span", { className: "hn-val mono copper" }, /* @__PURE__ */ React.createElement("b", null, "+", ((pT1 - pStop) * 100).toFixed(0), "%"))));
 }
-function MLConeChart({ ticker, pj }) {
-  const q90 = pj ? pj.mag.q90 : 12.1, q50 = pj ? pj.mag.q50 : 6.4, q10 = pj ? pj.mag.q10 : -4.2;
-  const hz = pj ? pj.horizon : "10d";
+function MLConeChart({ mag, hz }) {
+  const q90 = mag && mag.q90 != null ? +mag.q90.toFixed(1) : 0;
+  const q50 = mag && mag.q50 != null ? +mag.q50.toFixed(1) : 0;
+  const q10 = mag && mag.q10 != null ? +mag.q10.toFixed(1) : 0;
   return /* @__PURE__ */ React.createElement("svg", { viewBox: "0 0 300 120", width: "300", height: "120", style: { overflow: "visible" } }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("linearGradient", { id: "mlc-gn", x1: "0", y1: "0", x2: "0", y2: "1" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: "var(--gn)", stopOpacity: "0.35" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: "var(--gn)", stopOpacity: "0" })), /* @__PURE__ */ React.createElement("linearGradient", { id: "mlc-rd", x1: "0", y1: "1", x2: "0", y2: "0" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: "var(--rd)", stopOpacity: "0.30" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: "var(--rd)", stopOpacity: "0" }))), /* @__PURE__ */ React.createElement("line", { x1: "20", y1: "60", x2: "280", y2: "60", stroke: "var(--line)", strokeDasharray: "3 3" }), /* @__PURE__ */ React.createElement("path", { d: "M 20 60 Q 150 24 280 16 L 280 60 L 20 60 Z", fill: "url(#mlc-gn)" }), /* @__PURE__ */ React.createElement("path", { d: "M 20 60 Q 150 88 280 104 L 280 60 L 20 60 Z", fill: "url(#mlc-rd)" }), /* @__PURE__ */ React.createElement("path", { d: "M 20 60 Q 150 24 280 16", stroke: "var(--gn)", strokeWidth: "1.4", fill: "none", opacity: "0.55" }), /* @__PURE__ */ React.createElement(
     "path",
     {
@@ -22771,23 +22807,15 @@ function MLConeChart({ ticker, pj }) {
     }
   ), /* @__PURE__ */ React.createElement("text", { x: "276", y: "13", fontSize: "9.5", className: "mono", textAnchor: "end", fill: "var(--gn)" }, "P90 +", q90, "%"), /* @__PURE__ */ React.createElement("text", { x: "276", y: "35", fontSize: "9.5", className: "mono", textAnchor: "end", fill: "var(--gn)", fontWeight: "500" }, "P50 ", q50 >= 0 ? "+" : "", q50, "%"), /* @__PURE__ */ React.createElement("text", { x: "276", y: "113", fontSize: "9.5", className: "mono", textAnchor: "end", fill: "var(--rd)" }, "P10 ", q10, "%"), /* @__PURE__ */ React.createElement("text", { x: "20", y: "113", fontSize: "9", className: "mono", fill: "var(--ink-3)" }, "T+0"), /* @__PURE__ */ React.createElement("text", { x: "276", y: "60", fontSize: "9", className: "mono", textAnchor: "end", fill: "var(--ink-3)" }, hz));
 }
-function CalibrationPanel() {
-  const features = [
-    { f: "RVOL \xD7 pivot-distance", w: 0.28 },
-    { f: "Sector ETF 1M return", w: 0.18 },
-    { f: "Insider net 90d (z)", w: 0.14 },
-    { f: "VIX regime", w: 0.12 },
-    { f: "Wilson LB \xB7 same setup", w: 0.11 },
-    { f: "Earnings days \xB7 log", w: 0.09 }
-  ];
-  return /* @__PURE__ */ React.createElement("div", { className: "cal-grid" }, /* @__PURE__ */ React.createElement("div", { className: "cal-block" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 6 } }, "Reliability"), /* @__PURE__ */ React.createElement("svg", { viewBox: "0 0 200 110", width: "100%", height: "110" }, /* @__PURE__ */ React.createElement("line", { x1: "20", y1: "100", x2: "190", y2: "10", stroke: "var(--line)", strokeDasharray: "3 3" }), [
-    [30, 92],
-    [60, 78],
-    [90, 60],
-    [120, 44],
-    [150, 30],
-    [180, 14]
-  ].map((p, i) => /* @__PURE__ */ React.createElement("circle", { key: i, cx: p[0], cy: p[1], r: "3", fill: "var(--copper)" })), /* @__PURE__ */ React.createElement("text", { x: "190", y: "9", fontSize: "9", className: "mono", textAnchor: "end", fill: "var(--copper)" }, "obs \u2248 pred"), /* @__PURE__ */ React.createElement("text", { x: "20", y: "108", fontSize: "9", className: "mono", fill: "var(--ink-3)" }, "0"), /* @__PURE__ */ React.createElement("text", { x: "190", y: "108", fontSize: "9", className: "mono", textAnchor: "end", fill: "var(--ink-3)" }, "1.0")), /* @__PURE__ */ React.createElement("div", { className: "cal-note mono dim2", style: { marginTop: 6 } }, "Brier 0.21 \xB7 log-loss 0.59 \xB7 ECE 0.04")), /* @__PURE__ */ React.createElement("div", { className: "cal-block" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 6 } }, "Top features \xB7 SHAP"), /* @__PURE__ */ React.createElement("div", { className: "feat-list" }, features.map((f, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "feat-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, f.f), /* @__PURE__ */ React.createElement("div", { className: "feat-bar" }, /* @__PURE__ */ React.createElement("div", { className: "feat-fill", style: { width: `${f.w * 280}%` } })), /* @__PURE__ */ React.createElement("span", { className: "mono dim" }, (f.w * 100).toFixed(0), "%"))))));
+function CalibrationPanel({ shap, card, auc }) {
+  const feats = shap && Array.isArray(shap.dir_top) ? shap.dir_top.slice(0, 7) : [];
+  const maxAbs = feats.length ? Math.max(...feats.map((f) => Math.abs(f.shap || 0))) || 1 : 1;
+  const num = (v, d) => v == null ? "\u2014" : v.toFixed(d == null ? 3 : d);
+  return /* @__PURE__ */ React.createElement("div", { className: "cal-grid" }, /* @__PURE__ */ React.createElement("div", { className: "cal-block" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 6 } }, "Model card"), card || auc != null ? /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(2, 1fr)", gap: 8 } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "Accuracy", value: card && card.accuracy != null ? (card.accuracy * 100).toFixed(1) + "%" : "\u2014", tone: card && card.accuracy >= 0.5 ? "gn" : "amb" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "AUC", value: num(auc != null ? auc : card && card.auc, 3), tone: (auc || card && card.auc) >= 0.6 ? "gn" : "amb" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Brier", value: num(card && card.brier, 3), tone: card && card.brier <= 0.2 ? "gn" : "amb", sub: "lower better" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Log-loss", value: num(card && card.log_loss, 3), tone: "ink" })) : /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 model card not loaded"), card && card.date && /* @__PURE__ */ React.createElement("div", { className: "cal-note mono dim2", style: { marginTop: 6 } }, "as of ", card.date, " \xB7 n=", ((card.n_ok || 0) + (card.n_fail || 0)).toLocaleString())), /* @__PURE__ */ React.createElement("div", { className: "cal-block" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { marginBottom: 6 } }, "Top features \xB7 SHAP"), feats.length ? /* @__PURE__ */ React.createElement("div", { className: "feat-list" }, feats.map((f, i) => {
+    const w = Math.abs(f.shap || 0) / maxAbs;
+    const neg = (f.shap || 0) < 0;
+    return /* @__PURE__ */ React.createElement("div", { key: i, className: "feat-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 11 } }, f.feature), /* @__PURE__ */ React.createElement("div", { className: "feat-bar" }, /* @__PURE__ */ React.createElement("div", { className: "feat-fill", style: { width: `${w * 100}%`, background: neg ? "var(--rd)" : "var(--gn)" } })), /* @__PURE__ */ React.createElement("span", { className: `mono dim ${neg ? "dn" : "up"}` }, neg ? "\u2212" : "+", Math.abs(f.shap).toFixed(2)));
+  })) : /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 SHAP drivers not available")));
 }
 window.LensTrack = LensTrack;
 window.LensML = LensML;
@@ -26964,16 +26992,18 @@ function HomeView({ onTicker, onSurface, mode, surface }) {
   const uni = window.__BV && window.__BV.market && window.__BV.market.funnel && window.__BV.market.funnel.universe || null;
   const uniStr = uni != null ? uni.toLocaleString() : "612";
   const liveDown = !HR.has();
+  const _sm = window.__BV && window.__BV.scanMeta || null;
+  const _asOf = _sm && _sm.ts ? String(_sm.ts) + " PT" : "the last scan";
   return /* @__PURE__ */ React.createElement("div", { className: "home" }, liveDown && /* @__PURE__ */ React.createElement("div", { className: "home-feed-warn mono", style: {
     margin: "0 0 10px",
     padding: "10px 14px",
     borderRadius: 10,
     fontSize: 12.5,
     lineHeight: 1.5,
-    background: "color-mix(in oklab, var(--rd) 14%, var(--bg-1))",
-    border: "1px solid color-mix(in oklab, var(--rd) 45%, transparent)",
+    background: "color-mix(in oklab, var(--amb) 12%, var(--bg-1))",
+    border: "1px solid color-mix(in oklab, var(--amb) 42%, transparent)",
     color: "var(--ink-1)"
-  } }, /* @__PURE__ */ React.createElement("b", { className: "dn" }, "\u26A0 LIVE DATA UNAVAILABLE"), " \u2014 the market feed isn't reachable, so the tickers, prices and signals below are an ", /* @__PURE__ */ React.createElement("b", null, "illustrative sample layout, not real data"), ". Do not trade on them. Reload once the feed is back."), /* @__PURE__ */ React.createElement(HomeHero, { mode, onSurface }), /* @__PURE__ */ React.createElement(IndexStrip, null), window.__BV && window.__BV.portfolio && (window.__BV.portfolio.positions || []).length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "YOUR BOOK \xB7 LIVE P&L"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "open positions marked to market \xB7 click to open ticket")), /* @__PURE__ */ React.createElement(BookStrip, { onTicker })), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "MARKET CONTEXT \xB7 BEFORE YOU TRADE"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "top-down read \xB7 regime gates your size \xB7 click any card to go deeper")), /* @__PURE__ */ React.createElement(MarketBriefing, { onSurface, onTicker }), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "MARKETS \xB7 NEWS"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "the tape in words \xB7 trending names \xB7 today's movers")), /* @__PURE__ */ React.createElement(NewsMarketsBoard, { onTicker, onSurface }), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "OPPORTUNITY \xB7 TODAY'S SCAN"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, uniStr, " ranked \xB7 regime-fit \xB7 edge-validated")), /* @__PURE__ */ React.createElement("div", { className: "home-grid-3" }, /* @__PURE__ */ React.createElement(HomeCard, { title: "Top setups", sub: `top 5 of ${uniStr} universe \xB7 ranked by edge (R \xD7 Wilson LB)`, cta: "Scanner \u2192", onCta: () => onSurface && onSurface("signal-scanner") }, /* @__PURE__ */ React.createElement(TopSetups, { onTicker })), /* @__PURE__ */ React.createElement(HomeCard, { title: "\u25D0 Discovery", sub: "52w highs \xB7 squeezes \xB7 insider \xB7 UOA \xB7 emerging", cta: "Scanner \u2192", onCta: () => onSurface && onSurface("signal-scanner") }, /* @__PURE__ */ React.createElement(Discovery, { onTicker })), /* @__PURE__ */ React.createElement(HomeCard, { title: "Top movers", sub: "gainers \xB7 losers \xB7 in-scan universe" }, /* @__PURE__ */ React.createElement(TopMovers, { onTicker }))), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "BEST IDEAS \xB7 TOP 5 PER ENGINE"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "each discovery model's highest-conviction names today")), /* @__PURE__ */ React.createElement(TopByEngine, { onTicker, onSurface }), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "ATTENTION \xB7 CATALYSTS & FLOW"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "next 24h \xB7 sentiment-scored")), /* @__PURE__ */ React.createElement("div", { className: "home-grid-3" }, /* @__PURE__ */ React.createElement(HomeCard, { title: "Earnings today", sub: "reporting \xB7 implied move \xB7 your exposure", cta: "Calendar \u2192", onCta: () => onSurface && onSurface("premarket") }, /* @__PURE__ */ React.createElement(EarningsToday, { onTicker })), /* @__PURE__ */ React.createElement(HomeCard, { title: "Top stories", sub: "market-moving \xB7 last 6h \xB7 sentiment-scored", cta: "News \u2192", onCta: () => onSurface && onSurface("news") }, /* @__PURE__ */ React.createElement(TopStories, { onTicker })), /* @__PURE__ */ React.createElement(HomeCard, { title: "Overnight signals", sub: "bias shifts \xB7 alerts \xB7 insider \xB7 ML", cta: "View all \u2192", onCta: () => onSurface && onSurface("alerts") }, /* @__PURE__ */ React.createElement(SignalFeed, { onTicker }))));
+  } }, /* @__PURE__ */ React.createElement("b", { className: "amb" }, "DATA AS OF ", _asOf), " \u2014 the latest scan returned no live names yet, so the tickers and prices below are a ", /* @__PURE__ */ React.createElement("b", null, "placeholder layout, not real values"), ". They refresh automatically once the next scan lands."), /* @__PURE__ */ React.createElement(HomeHero, { mode, onSurface }), /* @__PURE__ */ React.createElement(IndexStrip, null), window.__BV && window.__BV.portfolio && (window.__BV.portfolio.positions || []).length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "YOUR BOOK \xB7 LIVE P&L"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "open positions marked to market \xB7 click to open ticket")), /* @__PURE__ */ React.createElement(BookStrip, { onTicker })), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "MARKET CONTEXT \xB7 BEFORE YOU TRADE"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "top-down read \xB7 regime gates your size \xB7 click any card to go deeper")), /* @__PURE__ */ React.createElement(MarketBriefing, { onSurface, onTicker }), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "MARKETS \xB7 NEWS"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "the tape in words \xB7 trending names \xB7 today's movers")), /* @__PURE__ */ React.createElement(NewsMarketsBoard, { onTicker, onSurface }), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "OPPORTUNITY \xB7 TODAY'S SCAN"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, uniStr, " ranked \xB7 regime-fit \xB7 edge-validated")), /* @__PURE__ */ React.createElement("div", { className: "home-grid-3" }, /* @__PURE__ */ React.createElement(HomeCard, { title: "Top setups", sub: `top 5 of ${uniStr} universe \xB7 ranked by edge (R \xD7 Wilson LB)`, cta: "Scanner \u2192", onCta: () => onSurface && onSurface("signal-scanner") }, /* @__PURE__ */ React.createElement(TopSetups, { onTicker })), /* @__PURE__ */ React.createElement(HomeCard, { title: "\u25D0 Discovery", sub: "52w highs \xB7 squeezes \xB7 insider \xB7 UOA \xB7 emerging", cta: "Scanner \u2192", onCta: () => onSurface && onSurface("signal-scanner") }, /* @__PURE__ */ React.createElement(Discovery, { onTicker })), /* @__PURE__ */ React.createElement(HomeCard, { title: "Top movers", sub: "gainers \xB7 losers \xB7 in-scan universe" }, /* @__PURE__ */ React.createElement(TopMovers, { onTicker }))), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "BEST IDEAS \xB7 TOP 5 PER ENGINE"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "each discovery model's highest-conviction names today")), /* @__PURE__ */ React.createElement(TopByEngine, { onTicker, onSurface }), /* @__PURE__ */ React.createElement("div", { className: "home-sec-label" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "ATTENTION \xB7 CATALYSTS & FLOW"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "next 24h \xB7 sentiment-scored")), /* @__PURE__ */ React.createElement("div", { className: "home-grid-3" }, /* @__PURE__ */ React.createElement(HomeCard, { title: "Earnings today", sub: "reporting \xB7 implied move \xB7 your exposure", cta: "Calendar \u2192", onCta: () => onSurface && onSurface("premarket") }, /* @__PURE__ */ React.createElement(EarningsToday, { onTicker })), /* @__PURE__ */ React.createElement(HomeCard, { title: "Top stories", sub: "market-moving \xB7 last 6h \xB7 sentiment-scored", cta: "News \u2192", onCta: () => onSurface && onSurface("news") }, /* @__PURE__ */ React.createElement(TopStories, { onTicker })), /* @__PURE__ */ React.createElement(HomeCard, { title: "Overnight signals", sub: "bias shifts \xB7 alerts \xB7 insider \xB7 ML", cta: "View all \u2192", onCta: () => onSurface && onSurface("alerts") }, /* @__PURE__ */ React.createElement(SignalFeed, { onTicker }))));
 }
 const IDXSTRIP_MOCK = [
   { s: "S&P 500", v: "6,148.2", c: 0.42 },

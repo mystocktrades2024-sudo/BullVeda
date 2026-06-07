@@ -275,9 +275,12 @@ function DetailLens({ lensId, ticker, mode, sizeCat, headerStyle, kpiStyle, hero
   if (lensId === "options") return <LensOptions {...props} />;
   if (lensId === "tape") return <LensTape {...props} />;
   if (lensId === "time" && window.LensTime) return <window.LensTime {...props} />;
+  // AI Edge lens = real per-ticker model forecast (LensML, /api/ml). The
+  // synthetic AIAnalystView (3-head vote + historical analogs — constructs the
+  // real model doesn't emit) was removed here 2026-06-07; it survives only on
+  // the AI Predictions board surface pending a real rebuild.
   if (lensId === "mledge") return (
     <div className="lens-ml-wrap">
-      {window.AIAnalystView && React.createElement(window.AIAnalystView, { single: true, ticker: props.ticker, sym: props.ticker && (props.ticker.symbol || props.ticker.sym) })}
       <LensML {...props} />
     </div>
   );

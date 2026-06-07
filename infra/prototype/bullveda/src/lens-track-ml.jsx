@@ -3,106 +3,145 @@
 // ────────────────────────────────────────────────────────────
 // TRACK RECORD — Wilson CI per setup, PF, median R, edge decay
 // ────────────────────────────────────────────────────────────
+// Real system track record from the closed-trade ledger + model card +
+// forward-return buckets. All three endpoints read LOCAL files (no quota):
+//   /api/performance            → WR / Wilson LB / PF / expectancy / avg win-loss
+//   /api/calibration-history    → model accuracy / AUC / Brier / log-loss (by mode)
+//   /api/ml-edge-stress-buckets → forward-return quantiles (by mode + scenario)
+function useTrackData() {
+  const [d, setD] = React.useState(null);
+  React.useEffect(() => {
+    let live = true;
+    const J = u => fetch(u).then(r => (r.ok ? r.json() : null)).catch(() => null);
+    Promise.all([J("/api/performance"), J("/api/calibration-history"), J("/api/ml-edge-stress-buckets")])
+      .then(([perf, calib, buckets]) => { if (live) setD({ perf, calib, buckets }); });
+    return () => { live = false; };
+  }, []);
+  return d;
+}
+
 function LensTrack({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("tr-1"); const s2 = useStateToggle("tr-2");
   const s3 = useStateToggle("tr-3"); const s4 = useStateToggle("tr-4");
   const s5 = useStateToggle("tr-5");
+  const td = useTrackData();
+  const mk = mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "invest" : "swing";
+  const perf = td && td.perf;
+  const ss = ticker.setupStats || {};
+  const hasSetup = ss.n != null && ss.n > 0;
+  const calSeries = (td && td.calib && Array.isArray(td.calib.series)) ? td.calib.series.filter(x => (x.mode || "swing") === mk) : [];
+  const card = calSeries.length ? calSeries[calSeries.length - 1] : null;
+  const bkt = (td && td.buckets && td.buckets[mk] && td.buckets[mk].base) ? td.buckets[mk].base : null;
+  const nObs = (td && td.buckets && td.buckets._meta && td.buckets._meta.n_total) || null;
+  const pctd = v => (v == null ? "—" : (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%");   // decimal→%
+  const num = (v, d) => (v == null ? "—" : v.toFixed(d == null ? 2 : d));
+
+  if (!perf && !card && !bkt) {
+    return (
+      <div className="lens lens--track"><div className="lens-section"><div className="lens-pad">
+        <div className="smc-empty mono dim2" style={{ padding: 16 }}>
+          Track-record stats not loaded — the system edge comes from the closed-trade ledger
+          (<span className="mono">/api/performance</span>). {td ? "No data returned." : "Loading…"}
+        </div>
+      </div></div></div>
+    );
+  }
+
+  const wr = perf && perf.win_rate, lb = perf && perf.wilson_lb_pct, pf = perf && perf.pf;
+  const lbTone = lb == null ? "ink" : lb >= 45 ? "gn" : lb >= 40 ? "amb" : "rd";
+  const expR = perf && (perf.expectancy != null ? perf.expectancy : perf.avg_r);
 
   return (
     <div className="lens lens--track">
       <div className="hero track-hero">
         <div className="th-left">
-          <div className="label-cap">Setup edge · "{ticker.setupFamily}"</div>
+          <div className="label-cap">System track record · {(perf && perf.closed) != null ? perf.closed.toLocaleString() : "—"} closed trades</div>
           <div className="th-score">
-            <div className="th-score-num mono">EDGE</div>
-            <Pill tone="gn" dot>Wilson LB 47.7%</Pill>
-            <Pill tone="gn" small>PF 1.84 (raw)</Pill>
-            <Pill tone="amb" small>PF 1.41 (haircut)</Pill>
+            <div className="th-score-num mono">{lb != null ? lb.toFixed(1) + "%" : "—"}</div>
+            <Pill tone={lbTone} dot>Wilson 95% LB</Pill>
+            {pf != null && <Pill tone={pf >= 1.3 ? "gn" : pf >= 1.1 ? "amb" : "rd"} small>PF {pf.toFixed(2)}</Pill>}
+            {expR != null && <Pill tone={expR > 0 ? "gn" : "rd"} small>expectancy {expR >= 0 ? "+" : ""}{expR.toFixed(2)}R</Pill>}
           </div>
-          <div style={{ marginTop: 12 }}>
-            <WilsonPill n={ticker.setupStats.n} winRate={ticker.setupStats.winRate} lb={ticker.setupStats.wilsonLB} />
-          </div>
+          {hasSetup && (
+            <div style={{ marginTop: 12 }}>
+              <div className="label-cap" style={{ marginBottom: 4 }}>This setup · "{ticker.setupFamily}"</div>
+              <WilsonPill n={ss.n} winRate={ss.winRate} lb={ss.wilsonLB} />
+            </div>
+          )}
         </div>
         <div className="th-right">
-          <EdgeDecayChart />
+          <EdgeDecayChart series={calSeries} />
         </div>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={1} title="Headline Edge"
-          sub="Wilson CI · profit factor · median R · n"
+        <SectionHeader n={1} title="Headline Edge · System"
+          sub="Wilson CI · profit factor · expectancy · all closed trades"
           style={headerStyle} right={<StateToggle name="tr-1" />} />
-        <StateWrap state={s1.value} source="setup_stats.json · per-family">
+        <StateWrap state={s1.value} source="/api/performance · closed-trade ledger">
           <div className="lens-pad">
             <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <KpiTile label="Win rate" value="61.7%" tone="gn" sub="n=47" />
-              <KpiTile label="Wilson 95% LB" value="47.7%" tone="gn" sub="above 45% gate" />
-              <KpiTile label="Profit factor" value="1.84" tone="gn" sub="haircut 1.41" />
-              <KpiTile label="Median R" value="+0.72" tone="gn" sub="per closed trade" />
+              <KpiTile label="Win rate" value={wr != null ? wr.toFixed(1) + "%" : "—"} tone={wr >= 50 ? "gn" : "amb"} sub={`n=${(perf && perf.closed) != null ? perf.closed.toLocaleString() : "—"}`} />
+              <KpiTile label="Wilson 95% LB" value={lb != null ? lb.toFixed(1) + "%" : "—"} tone={lbTone} sub={lb >= 45 ? "above 45% gate" : "below 45% gate"} />
+              <KpiTile label="Profit factor" value={pf != null ? pf.toFixed(2) : "—"} tone={pf >= 1.3 ? "gn" : pf >= 1.1 ? "amb" : "rd"} sub="gross win / gross loss" />
+              <KpiTile label="Expectancy" value={expR != null ? (expR >= 0 ? "+" : "") + expR.toFixed(2) + "R" : "—"} tone={expR > 0 ? "gn" : "rd"} sub="per closed trade" />
             </div>
           </div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={2} title="Forward Expectancy"
-          sub="conditional on this exact setup, regime-matched"
+        <SectionHeader n={2} title="Outcome Quality"
+          sub="average win vs loss · realized R:R · excursions"
           style={headerStyle} right={<StateToggle name="tr-2" />} />
-        <StateWrap state={s2.value} source="walk-forward · 12-mo holdout">
+        <StateWrap state={s2.value} source="/api/performance · closed-trade ledger">
           <div className="lens-pad">
             <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <KpiTile label="Median fwd 10d" value="+2.4%" tone="gn" />
-              <KpiTile label="P(T1 first)" value="58.5%" tone="gn" />
-              <KpiTile label="P(stop first)" value="40.0%" tone="amb" />
-              <KpiTile label="Expectancy · R" value="+0.51" tone="gn" sub="per trade" />
+              <KpiTile label="Avg win" value={perf && perf.avg_win_pct != null ? "+" + perf.avg_win_pct.toFixed(1) + "%" : "—"} tone="gn" />
+              <KpiTile label="Avg loss" value={perf && perf.avg_loss_pct != null ? perf.avg_loss_pct.toFixed(1) + "%" : "—"} tone="rd" />
+              <KpiTile label="Realized R:R" value={perf && perf.rr_avg != null ? perf.rr_avg.toFixed(2) : "—"} tone={perf && perf.rr_avg >= 2.5 ? "gn" : "amb"} sub="planned" />
+              <KpiTile label="MFE / MAE" value={perf && perf.mfe_avg != null ? `+${perf.mfe_avg.toFixed(1)} / ${perf.mae_avg.toFixed(1)}` : "—"} tone="ink" sub="avg excursion %" />
             </div>
           </div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={3} title="Edge Decay · 12-mo Blocks"
-          sub="rolling Wilson LB over trailing windows"
+        <SectionHeader n={3} title="Model Calibration · Latest Card"
+          sub="classifier accuracy · AUC · Brier · log-loss"
           style={headerStyle} right={<StateToggle name="tr-3" />} />
-        <StateWrap state={s3.value} source="rolling-window backtest">
-          <div className="lens-pad"><EdgeDecayPanel /></div>
-        </StateWrap>
-      </div>
-
-      <div className="lens-section">
-        <SectionHeader n={4} title="Walk-Forward Holdout"
-          sub="train · validate · holdout slices · prevents over-fit"
-          style={headerStyle} right={<StateToggle name="tr-4" />} />
-        <StateWrap state={s4.value} source="walk-forward harness">
+        <StateWrap state={s3.value} source="/api/calibration-history · model card">
           <div className="lens-pad">
-            <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <KpiTile label="In-sample WR" value="63.2%" tone="ink" sub="train" />
-              <KpiTile label="Out-of-sample WR" value="61.7%" tone="gn" sub="holdout — no decay" />
-              <KpiTile label="KS drift" value="0.08" tone="gn" sub="below 0.15 alert" />
-              <KpiTile label="Stability score" value="A−" tone="gn" sub="stable last 4 blocks" />
-            </div>
+            {card ? (
+              <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+                <KpiTile label="Accuracy" value={card.accuracy != null ? (card.accuracy * 100).toFixed(1) + "%" : "—"} tone={card.accuracy >= 0.5 ? "gn" : "amb"} sub={`${mk} · n=${((card.n_ok || 0) + (card.n_fail || 0)).toLocaleString()}`} />
+                <KpiTile label="AUC" value={num(card.auc, 3)} tone={card.auc >= 0.6 ? "gn" : "amb"} sub="rank quality" />
+                <KpiTile label="Brier" value={num(card.brier, 3)} tone={card.brier <= 0.2 ? "gn" : "amb"} sub="lower = better" />
+                <KpiTile label="Log-loss" value={num(card.log_loss, 3)} tone="ink" sub={card.date || ""} />
+              </div>
+            ) : <div className="smc-empty mono dim2">— no calibration card for {mk}</div>}
           </div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={5} title="Forward Monte Carlo"
-          sub="2,000 paths · setup-conditional · 10-day horizon"
-          style={headerStyle} right={<StateToggle name="tr-5" />} />
-        <StateWrap state={s5.value} source="MC harness · holdout-trained">
-          <div className="lens-pad"><DistributionBars /></div>
+        <SectionHeader n={4} title="Forward Return Distribution"
+          sub={`realized ${mk} forward returns · quantile profile`}
+          style={headerStyle} right={<StateToggle name="tr-4" />} />
+        <StateWrap state={s4.value} source="/api/ml-edge-stress-buckets · base scenario">
+          <div className="lens-pad"><DistributionBars bkt={bkt} nObs={nObs} mk={mk} td={td} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={6} title="Cross-Lens Confluence" style={headerStyle} />
+        <SectionHeader n={5} title="Cross-Lens Confluence" style={headerStyle} />
         <div className="lens-pad">
           <CrossLens lead="gn" cells={[
-            { lens: "Track Rec.",  verdict: "EDGE",  tone: "gn",  note: "Wilson 47.7% · PF 1.41 haircut" },
-            { lens: "Plan",        verdict: "READY", tone: "gn",  note: "R 1.74 · sized" },
-            { lens: "AI Edge",     verdict: "+0.18", tone: "gn",  note: "hit-net agrees" },
-            { lens: "Regime",      verdict: "BULL",  tone: "gn",  note: "highest historical WR regime" },
-            { lens: "Risk",        verdict: "OK",    tone: "gn",  note: "expectancy · half-Kelly fits" },
+            { lens: "Track Rec.", verdict: lb != null ? lb.toFixed(0) + "%" : "—", tone: lbTone, note: pf != null ? `Wilson LB · PF ${pf.toFixed(2)}` : "Wilson LB" },
+            { lens: "Expectancy", verdict: expR != null ? (expR >= 0 ? "+" : "") + expR.toFixed(2) + "R" : "—", tone: expR > 0 ? "gn" : "rd", note: "per closed trade" },
+            { lens: "Model", verdict: card && card.accuracy != null ? (card.accuracy * 100).toFixed(0) + "%" : "—", tone: card && card.accuracy >= 0.5 ? "gn" : "amb", note: card ? `AUC ${num(card.auc, 2)}` : "accuracy" },
+            { lens: "Fwd median", verdict: bkt ? pctd(bkt.q50) : "—", tone: bkt && bkt.q50 >= 0 ? "gn" : "rd", note: `${mk} base` },
+            { lens: "This setup", verdict: hasSetup ? `n=${ss.n}` : "—", tone: hasSetup ? "gn" : "ink", note: hasSetup ? ticker.setupFamily : "no per-setup sample" },
           ]} />
         </div>
       </div>
@@ -110,182 +149,202 @@ function LensTrack({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) 
       <div className="lens-call">
         <span className="label-cap">The Read · Track Record</span>
         <span className="mono">
-          n=<b>47</b>, Wilson LB <b className="up">47.7%</b>, expectancy
-          <b className="up">+0.51R</b> per trade. <b>Edge is real and stable.</b>
+          System: n=<b>{(perf && perf.closed) != null ? perf.closed.toLocaleString() : "—"}</b> closed,
+          Wilson LB <b className={lbTone === "gn" ? "up" : lbTone === "rd" ? "dn" : "warn"}>{lb != null ? lb.toFixed(1) + "%" : "—"}</b>,
+          PF <b className={pf >= 1.3 ? "up" : "warn"}>{pf != null ? pf.toFixed(2) : "—"}</b>,
+          expectancy <b className={expR > 0 ? "up" : "dn"}>{expR != null ? (expR >= 0 ? "+" : "") + expR.toFixed(2) + "R" : "—"}</b> per trade.
+          {lb != null && lb < 45 ? <> Edge is <b className="warn">modest</b> — below the 45% Wilson gate; size conservatively.</> : <> Edge clears the Wilson gate.</>}
         </span>
       </div>
     </div>
   );
 }
 
-function EdgeDecayChart() {
+// Real model-accuracy trend from /api/calibration-history (filtered to the mode).
+function EdgeDecayChart({ series }) {
   const w = 240, h = 90;
-  // 12 blocks of WR
-  const data = [0.54, 0.58, 0.61, 0.59, 0.62, 0.65, 0.63, 0.60, 0.58, 0.61, 0.62, 0.617];
+  const data = (Array.isArray(series) ? series : []).map(s => s.accuracy).filter(v => typeof v === "number");
+  if (data.length < 2) {
+    return <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}><text x={w/2} y={h/2} textAnchor="middle" fontSize="10" className="mono" fill="var(--ink-3)">accuracy trend · n/a</text></svg>;
+  }
+  const lo = Math.min(0.40, ...data) - 0.02, hi = Math.max(0.70, ...data) + 0.02;
   const xStep = (w - 24) / (data.length - 1);
-  const y = v => h - 14 - ((v - 0.40) / 0.30) * (h - 24);
+  const y = v => h - 14 - ((v - lo) / (hi - lo)) * (h - 24);
   const pts = data.map((v, i) => [12 + i * xStep, y(v)]);
+  const last = data[data.length - 1];
   return (
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
-      <line x1="0" y1={y(0.45)} x2={w} y2={y(0.45)} stroke="var(--rd-dim)" strokeDasharray="3 3" />
-      <text x="2" y={y(0.45) - 3} fontSize="9" className="mono" fill="var(--rd)">45% gate</text>
+      <line x1="0" y1={y(0.50)} x2={w} y2={y(0.50)} stroke="var(--rd-dim)" strokeDasharray="3 3" />
+      <text x="2" y={y(0.50) - 3} fontSize="9" className="mono" fill="var(--ink-3)">50% coin-flip</text>
       <polyline points={pts.map(p => p.join(",")).join(" ")} stroke="var(--gn)" strokeWidth="1.6" fill="none" />
       {pts.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r="2" fill={i === pts.length-1 ? "var(--copper)" : "var(--gn)"} />)}
-      <text x={w - 2} y="12" fontSize="9" className="mono" textAnchor="end" fill="var(--gn)">stable</text>
+      <text x={w - 2} y="12" fontSize="9" className="mono" textAnchor="end" fill={last >= 0.5 ? "var(--gn)" : "var(--amb)"}>{(last * 100).toFixed(0)}% acc</text>
     </svg>
   );
 }
 
-function EdgeDecayPanel() {
-  const blocks = [
-    { period: "2023 H1", wr: 0.54, lb: 0.40, n: 16, tone: "amb" },
-    { period: "2023 H2", wr: 0.59, lb: 0.43, n: 19, tone: "gn" },
-    { period: "2024 H1", wr: 0.62, lb: 0.48, n: 22, tone: "gn" },
-    { period: "2024 H2", wr: 0.60, lb: 0.45, n: 18, tone: "gn" },
-    { period: "2025 H1", wr: 0.65, lb: 0.51, n: 24, tone: "gn" },
-    { period: "TTM",     wr: 0.617, lb: 0.477, n: 47, tone: "gn", current: true },
-  ];
-  return (
-    <div className="ed-grid">
-      {blocks.map((b, i) => (
-        <div key={i} className={`ed-cell ${b.current ? "is-current" : ""}`}>
-          <div className="ed-period mono dim">{b.period}</div>
-          <div className={`ed-wr mono kpi-tone--${b.tone}`}>{(b.wr * 100).toFixed(1)}%</div>
-          <div className="ed-meta mono dim2">LB {(b.lb * 100).toFixed(0)}% · n={b.n}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function DistributionBars() {
-  // synthetic forward 10d return distribution (% buckets)
-  const buckets = [
-    { lo: -10, hi: -7, p: 4 },
-    { lo: -7,  hi: -5, p: 8 },
-    { lo: -5,  hi: -3, p: 12 },
-    { lo: -3,  hi: -1, p: 16 },
-    { lo: -1,  hi: 1,  p: 14 },
-    { lo: 1,   hi: 3,  p: 16 },
-    { lo: 3,   hi: 5,  p: 14 },
-    { lo: 5,   hi: 8,  p: 10 },
-    { lo: 8,   hi: 12, p: 6  },
-  ];
-  const max = Math.max(...buckets.map(b => b.p));
+// Real forward-return distribution from /api/ml-edge-stress-buckets (base scenario):
+// q10/q25/q50/q75/q90 as decimals → quantile-box viz + median/IQR stats.
+function DistributionBars({ bkt, nObs, mk, td }) {
+  if (!bkt || bkt.q50 == null) {
+    return <div className="smc-empty mono dim2">— forward-return buckets not loaded{td ? "" : " (loading…)"}</div>;
+  }
+  const qs = [bkt.q10, bkt.q25, bkt.q50, bkt.q75, bkt.q90];
+  const lo = Math.min(...qs), hi = Math.max(...qs), span = (hi - lo) || 1;
+  const x = v => ((v - lo) / span) * 100;
+  const fmt = v => (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%";
+  const pos = v => v >= 0 ? "up" : "dn";
   return (
     <div className="dist-block">
-      <div className="dist-bars">
-        {buckets.map((b, i) => {
-          const positive = (b.lo + b.hi) / 2 >= 0;
-          return (
-            <div key={i} className="dist-bar-col">
-              <div className="dist-bar" style={{
-                height: `${(b.p / max) * 100}%`,
-                background: positive ? "var(--gn)" : "var(--rd)",
-                opacity: 0.7,
-              }} />
-              <div className="dist-bar-lbl mono dim">{b.lo > 0 ? "+" : ""}{b.lo}</div>
-            </div>
-          );
-        })}
+      <div style={{ position: "relative", height: 56, margin: "6px 4px 2px" }}>
+        {/* zero line */}
+        {lo < 0 && hi > 0 && <div style={{ position: "absolute", left: `${x(0)}%`, top: 0, bottom: 18, width: 1, background: "var(--ink-3)" }} />}
+        {/* q10–q90 whisker */}
+        <div style={{ position: "absolute", left: `${x(bkt.q10)}%`, width: `${x(bkt.q90) - x(bkt.q10)}%`, top: 24, height: 2, background: "var(--line)" }} />
+        {/* q25–q75 box */}
+        <div style={{ position: "absolute", left: `${x(bkt.q25)}%`, width: `${x(bkt.q75) - x(bkt.q25)}%`, top: 16, height: 18, background: "color-mix(in oklab, var(--gn) 22%, transparent)", border: "1px solid var(--gn)", borderRadius: 3 }} />
+        {/* median */}
+        <div style={{ position: "absolute", left: `${x(bkt.q50)}%`, top: 12, height: 26, width: 2, background: "var(--copper)" }} />
+        {[["q10", bkt.q10], ["q50", bkt.q50], ["q90", bkt.q90]].map(([k, v], i) => (
+          <div key={i} className="mono dim2" style={{ position: "absolute", left: `${x(v)}%`, top: 40, fontSize: 9, transform: "translateX(-50%)" }}>{fmt(v)}</div>
+        ))}
       </div>
       <div className="dist-stats">
-        <span className="mono">Median <b className="up">+2.4%</b></span>
-        <span className="mono">P25 <b>−1.1%</b></span>
-        <span className="mono">P75 <b className="up">+5.6%</b></span>
-        <span className="mono dim2">2,000 paths · holdout-trained</span>
+        <span className="mono">Median <b className={pos(bkt.q50)}>{fmt(bkt.q50)}</b></span>
+        <span className="mono">P25 <b className={pos(bkt.q25)}>{fmt(bkt.q25)}</b></span>
+        <span className="mono">P75 <b className={pos(bkt.q75)}>{fmt(bkt.q75)}</b></span>
+        <span className="mono dim2">{nObs ? nObs.toLocaleString() + " obs" : ""} · {mk} base</span>
       </div>
     </div>
   );
 }
 
 // ────────────────────────────────────────────────────────────
-// ML EDGE — direction, magnitude cone, hit-net probability
+// ML EDGE — direction, magnitude cone, hit-net probability (REAL)
 // ────────────────────────────────────────────────────────────
+// Real per-ticker model forecast from /api/ml/{sym}?mode= (the same file the
+// AI Predictions surface reads — direction / magnitude quantiles / hit-net /
+// SHAP / model card). Mode-aware. Honest empty when the name isn't in the
+// model universe. + /api/calibration-history for the system model card.
+function useMlEdge(sym, mode) {
+  const mk = mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "invest" : "swing";
+  const [d, setD] = React.useState(null);
+  React.useEffect(() => {
+    if (!sym) { setD({ loading: false, me: null, card: null }); return; }
+    let live = true; setD(null);
+    const J = u => fetch(u).then(r => (r.ok ? r.json() : null)).catch(() => null);
+    Promise.all([J(`/api/ml/${encodeURIComponent(sym)}?mode=${mk}`), J("/api/calibration-history")])
+      .then(([me, calib]) => {
+        if (!live) return;
+        const found = me && me.direction && typeof me.direction.p_up === "number";
+        const series = (calib && Array.isArray(calib.series)) ? calib.series.filter(x => (x.mode || "swing") === mk) : [];
+        setD({ loading: false, me: found ? me : null, card: series.length ? series[series.length - 1] : null });
+      });
+    return () => { live = false; };
+  }, [sym, mk]);
+  return d;
+}
+
 function LensML({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("ml-1"); const s2 = useStateToggle("ml-2");
   const s3 = useStateToggle("ml-3"); const s4 = useStateToggle("ml-4");
-  // mode-aware forecast from the shared projection engine
-  const moKey = mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "invest" : "swing";
-  const pj = (window.AIPredict && ticker && ticker.symbol) ? window.AIPredict.projection(ticker.symbol, moKey) : null;
-  const hz = pj ? pj.horizon : "10d";
-  const pUp = pj ? pj.pUp : 0.61;
-  const hitNet = pj ? +(pj.hit.p_t1_first - pj.hit.p_stop_first).toFixed(2) : 0.18;
+  const data = useMlEdge(ticker && ticker.symbol, mode);
+  const me = data && data.me;
+  const card = data && data.card;
+
+  if (!data) {
+    return <div className="lens lens--ml"><div className="lens-section"><div className="lens-pad"><div className="smc-empty mono dim2" style={{ padding: 16 }}>Loading ML forecast…</div></div></div></div>;
+  }
+  if (!me) {
+    return (
+      <div className="lens lens--ml"><div className="lens-section"><div className="lens-pad">
+        <div className="smc-empty mono dim2" style={{ padding: 16 }}>
+          No ML-edge forecast for <b className="copper">{(ticker && ticker.symbol) || "this name"}</b> ({mode.toLowerCase()}) —
+          it isn't in the model universe yet. The 3-head model scores ~1,100 liquid names per horizon.
+        </div>
+      </div></div></div>
+    );
+  }
+
+  const hz = (me.horizon_days != null ? me.horizon_days : "—") + "d";
+  const dir = me.direction || {}, mag = me.magnitude || {}, hit = me.hit_net || {};
+  const pUp = dir.p_up;
+  const hitNet = (hit.p_t1_first != null && hit.p_stop_first != null) ? +(hit.p_t1_first - hit.p_stop_first).toFixed(2) : null;
   const dirTone = pUp >= 0.6 ? "gn" : pUp >= 0.45 ? "amb" : "rd";
+  const vColor = { pass: "gn", warn: "amb", fail: "rd" }[me.verdict && me.verdict.color] || "ink";
+  const health = me.model_meta && me.model_meta.calibration_health;
+  const auc = hit.model_auc != null ? hit.model_auc : (card && card.auc);
+  const fmt = v => v == null ? "—" : (v >= 0 ? "+" : "") + v.toFixed(1) + "%";
 
   return (
     <div className="lens lens--ml">
       <div className="hero ml-hero">
         <div className="th-left">
-          <div className="label-cap">3-head ML forecast · {hz} horizon · {mode}</div>
+          <div className="label-cap">ML forecast · {me.mode_label || hz} · {mode}</div>
           <div className="th-score">
-            <div className="th-score-num mono">{hitNet >= 0 ? "+" : ""}{hitNet.toFixed(2)}</div>
-            <Pill tone={hitNet >= 0 ? "gn" : "rd"} dot>hit-net edge</Pill>
-            <Pill tone={dirTone} small>Direction {Math.round(pUp * 100)}%</Pill>
-            <Pill tone="amb" small>Magnitude wide</Pill>
+            <div className="th-score-num mono">{hitNet == null ? "—" : (hitNet >= 0 ? "+" : "") + hitNet.toFixed(2)}</div>
+            <Pill tone={hitNet == null ? "ink" : hitNet >= 0 ? "gn" : "rd"} dot>hit-net edge</Pill>
+            <Pill tone={dirTone} small>P(up) {pUp != null ? Math.round(pUp * 100) + "%" : "—"}</Pill>
+            {me.verdict && me.verdict.text && <Pill tone={vColor} small>{me.verdict.text}</Pill>}
           </div>
           <div className="th-pill-row">
-            <Pill tone="ink" small>Calibration · OK</Pill>
-            <Pill tone="ink" small>Drift KS 0.07</Pill>
-            <Pill tone="ink" small>Top-3 features</Pill>
+            {health && <Pill tone={health === "ok" ? "gn" : "amb"} small>Calibration {health}</Pill>}
+            {auc != null && <Pill tone={auc >= 0.6 ? "gn" : "amb"} small>Model AUC {auc.toFixed(2)}</Pill>}
+            {me.verdict && me.verdict.confidence && <Pill tone="ink" small>Conf {me.verdict.confidence}</Pill>}
           </div>
         </div>
         <div className="th-right">
-          <MLConeChart ticker={ticker} pj={pj} />
+          <MLConeChart mag={mag} hz={hz} />
         </div>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={1} title="Head 1 · Direction"
-          sub={`P(up) over next ${hz}`}
+        <SectionHeader n={1} title="Direction · P(up)"
+          sub={`classifier · over next ${hz}`}
           style={headerStyle} right={<StateToggle name="ml-1" />} />
-        <StateWrap state={s1.value} source="ml_edge_predictions.json · classifier head">
-          <div className="lens-pad"><ProbBar v={pUp} label={`P(up · ${hz})`} /></div>
-        </StateWrap>
-      </div>
-
-      <div className="lens-section">
-        <SectionHeader n={2} title="Head 2 · Magnitude Cone"
-          sub={`quantile regression · ${hz} return distribution`}
-          style={headerStyle} right={<StateToggle name="ml-2" />} />
-        <StateWrap state={s2.value} source="quantile regressor head">
+        <StateWrap state={s1.value} source="/api/ml · direction head">
           <div className="lens-pad">
-            <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <KpiTile label="P10" value={`${pj ? (pj.mag.q10>=0?"+":"") + pj.mag.q10 : "−4.2"}%`} tone="rd" />
-              <KpiTile label="P50 (median)" value={`${pj ? (pj.mag.q50>=0?"+":"") + pj.mag.q50 : "+6.4"}%`} tone={pj && pj.mag.q50 < 0 ? "rd" : "gn"} />
-              <KpiTile label="P90" value={`${pj ? "+" + pj.mag.q90 : "+12.1"}%`} tone="gn" />
-              <KpiTile label="Skew" value={pj ? ((pj.mag.q90 + pj.mag.q10) >= 0 ? "+0.42" : "−0.31") : "+0.42"} tone="gn" sub="right-skewed" />
+            <ProbBar v={pUp} label={`P(up · ${hz})`} />
+            <div className="kpi-row" style={{ gridTemplateColumns: "repeat(3, 1fr)", marginTop: 10 }}>
+              <KpiTile label="P(up)" value={pUp != null ? (pUp * 100).toFixed(0) + "%" : "—"} tone={dirTone} />
+              <KpiTile label="P(chop)" value={dir.p_chop != null ? (dir.p_chop * 100).toFixed(0) + "%" : "—"} tone="ink" />
+              <KpiTile label="P(down)" value={dir.p_dn != null ? (dir.p_dn * 100).toFixed(0) + "%" : "—"} tone={dir.p_dn > 0.4 ? "rd" : "ink"} />
             </div>
           </div>
         </StateWrap>
       </div>
 
-      {window.AIProjectionChart && pj && (
-        <div className="lens-section">
-          <SectionHeader n={2.5} title="Price Projection · annotated chart"
-            sub={`candles · MA20/50/200 · breakout base · forward AI zone → target +${pj.mag.q90}%`}
-            style={headerStyle} right={<StateToggle name="ml-25" />} />
-          <StateWrap state={s2.value} source="OHLCV (demo) + ml_edge projection">
-            <div className="lens-pad">{React.createElement(window.AIProjectionChart, { P: { sym: ticker.symbol, px: ticker.price }, proj: pj })}</div>
-          </StateWrap>
-        </div>
-      )}
+      <div className="lens-section">
+        <SectionHeader n={2} title="Magnitude Cone"
+          sub={`quantile regression · ${hz} return distribution`}
+          style={headerStyle} right={<StateToggle name="ml-2" />} />
+        <StateWrap state={s2.value} source="/api/ml · quantile head">
+          <div className="lens-pad">
+            <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+              <KpiTile label="P10" value={fmt(mag.q10)} tone="rd" />
+              <KpiTile label="P50 (median)" value={fmt(mag.q50)} tone={mag.q50 < 0 ? "rd" : "gn"} />
+              <KpiTile label="P90" value={fmt(mag.q90)} tone="gn" />
+              <KpiTile label="Skew" value={mag.skew != null ? (mag.skew >= 0 ? "+" : "") + mag.skew.toFixed(2) : "—"} tone={mag.skew >= 0 ? "gn" : "rd"} sub={mag.skew >= 0 ? "right-skewed" : "left-skewed"} />
+            </div>
+          </div>
+        </StateWrap>
+      </div>
 
       <div className="lens-section">
-        <SectionHeader n={3} title="Head 3 · Hit-Net (T1 vs Stop)"
+        <SectionHeader n={3} title="Hit-Net (T1 vs Stop)"
           sub="P(T1 first) − P(stop first) — the actionable edge"
           style={headerStyle} right={<StateToggle name="ml-3" />} />
-        <StateWrap state={s3.value} source="hit-net head · path-conditional">
-          <div className="lens-pad"><HitNetBar /></div>
+        <StateWrap state={s3.value} source="/api/ml · hit-net head">
+          <div className="lens-pad"><HitNetBar hit={hit} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
         <SectionHeader n={4} title="Calibration · Feature Importance"
-          sub="reliability diagram + top features by SHAP"
+          sub="model card metrics + top SHAP drivers"
           style={headerStyle} right={<StateToggle name="ml-4" />} />
-        <StateWrap state={s4.value} source="model card · monthly recalibrate">
-          <div className="lens-pad"><CalibrationPanel /></div>
+        <StateWrap state={s4.value} source="/api/ml · SHAP + /api/calibration-history">
+          <div className="lens-pad"><CalibrationPanel shap={me.shap} card={card} auc={auc} /></div>
         </StateWrap>
       </div>
 
@@ -293,11 +352,11 @@ function LensML({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
         <SectionHeader n={5} title="Cross-Lens Confluence" style={headerStyle} />
         <div className="lens-pad">
           <CrossLens lead="violet" cells={[
-            { lens: "AI Edge",     verdict: `${hitNet >= 0 ? "+" : ""}${hitNet.toFixed(2)}`, tone: hitNet >= 0 ? "gn" : "rd", note: `hit-net · ${hz}` },
-            { lens: "Direction",   verdict: `${Math.round(pUp * 100)}%`,   tone: dirTone, note: `P(up) ${hz}` },
-            { lens: "Magnitude",   verdict: "WIDE",  tone: "amb",note: pj ? `q10 ${pj.mag.q10} / q90 +${pj.mag.q90}` : "P10 −4 / P90 +12" },
-            { lens: "Track Rec.",  verdict: "EDGE",  tone: "gn", note: "Wilson 47.7%" },
-            { lens: "Plan",        verdict: "READY", tone: "gn", note: "R 1.74" },
+            { lens: "AI Edge", verdict: hitNet == null ? "—" : `${hitNet >= 0 ? "+" : ""}${hitNet.toFixed(2)}`, tone: hitNet == null ? "ink" : hitNet >= 0 ? "gn" : "rd", note: `hit-net · ${hz}` },
+            { lens: "Direction", verdict: pUp != null ? `${Math.round(pUp * 100)}%` : "—", tone: dirTone, note: `P(up) ${hz}` },
+            { lens: "Magnitude", verdict: fmt(mag.q50), tone: mag.q50 >= 0 ? "gn" : "rd", note: `q10 ${fmt(mag.q10)} / q90 ${fmt(mag.q90)}` },
+            { lens: "Verdict", verdict: me.verdict ? me.verdict.text : "—", tone: vColor, note: me.verdict ? me.verdict.confidence + " conf" : "" },
+            { lens: "Model", verdict: auc != null ? `AUC ${auc.toFixed(2)}` : "—", tone: auc >= 0.6 ? "gn" : "amb", note: health ? "calib " + health : "" },
           ]} />
         </div>
       </div>
@@ -305,8 +364,10 @@ function LensML({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
       <div className="lens-call">
         <span className="label-cap">The Read · AI Edge · {mode}</span>
         <span className="mono">
-          P(T1 first) − P(stop first) = <b className={hitNet >= 0 ? "up" : "dn"}>{hitNet >= 0 ? "+" : ""}{hitNet.toFixed(2)}</b> over the <b>{hz}</b> horizon. Calibration OK,
-          drift low. Model and rules agree.
+          P(up) <b className={dirTone === "gn" ? "up" : dirTone === "rd" ? "dn" : "warn"}>{pUp != null ? Math.round(pUp * 100) + "%" : "—"}</b>,
+          hit-net <b className={hitNet > 0 ? "up" : "dn"}>{hitNet == null ? "—" : (hitNet >= 0 ? "+" : "") + hitNet.toFixed(2)}</b> (P(T1) {hit.p_t1_first != null ? Math.round(hit.p_t1_first * 100) + "%" : "—"} vs P(stop) {hit.p_stop_first != null ? Math.round(hit.p_stop_first * 100) + "%" : "—"}),
+          median <b className={mag.q50 >= 0 ? "up" : "dn"}>{fmt(mag.q50)}</b> over {hz}.
+          {hitNet != null && hitNet <= 0 ? <> Path edge is <b className="warn">negative</b> — stop likely hit before target; no long edge here.</> : <> Verdict: <b className={vColor === "gn" ? "up" : "warn"}>{me.verdict ? me.verdict.text : "—"}</b>.</>}
         </span>
       </div>
     </div>
@@ -314,21 +375,25 @@ function LensML({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
 }
 
 function ProbBar({ v, label }) {
+  const have = typeof v === "number";
+  const pts = have ? Math.round((v - 0.5) * 100) : 0;
   return (
     <div className="probbar">
       <div className="probbar-label mono dim2">{label}</div>
       <div className="probbar-bar">
-        <div className="probbar-fill" style={{ width: `${v * 100}%` }} />
+        <div className="probbar-fill" style={{ width: `${(have ? v : 0) * 100}%` }} />
         <div className="probbar-mid" />
       </div>
-      <div className="probbar-val mono"><b>{(v * 100).toFixed(0)}%</b></div>
-      <div className="probbar-meta mono dim">vs 50% baseline · +11pt edge</div>
+      <div className="probbar-val mono"><b>{have ? (v * 100).toFixed(0) + "%" : "—"}</b></div>
+      <div className="probbar-meta mono dim">vs 50% baseline · {pts >= 0 ? "+" : ""}{pts}pt edge</div>
     </div>
   );
 }
 
-function HitNetBar() {
-  const pT1 = 0.58, pStop = 0.40;
+function HitNetBar({ hit }) {
+  const pT1 = (hit && hit.p_t1_first != null) ? hit.p_t1_first : null;
+  const pStop = (hit && hit.p_stop_first != null) ? hit.p_stop_first : null;
+  if (pT1 == null || pStop == null) return <div className="smc-empty mono dim2">— hit-net not available</div>;
   return (
     <div className="hitnet">
       <div className="hn-row">
@@ -353,9 +418,10 @@ function HitNetBar() {
   );
 }
 
-function MLConeChart({ ticker, pj }) {
-  const q90 = pj ? pj.mag.q90 : 12.1, q50 = pj ? pj.mag.q50 : 6.4, q10 = pj ? pj.mag.q10 : -4.2;
-  const hz = pj ? pj.horizon : "10d";
+function MLConeChart({ mag, hz }) {
+  const q90 = mag && mag.q90 != null ? +mag.q90.toFixed(1) : 0;
+  const q50 = mag && mag.q50 != null ? +mag.q50.toFixed(1) : 0;
+  const q10 = mag && mag.q10 != null ? +mag.q10.toFixed(1) : 0;
   return (
     <svg viewBox="0 0 300 120" width="300" height="120" style={{ overflow: "visible" }}>
       <defs>
@@ -386,41 +452,44 @@ function MLConeChart({ ticker, pj }) {
   );
 }
 
-function CalibrationPanel() {
-  const features = [
-    { f: "RVOL × pivot-distance", w: 0.28 },
-    { f: "Sector ETF 1M return",  w: 0.18 },
-    { f: "Insider net 90d (z)",   w: 0.14 },
-    { f: "VIX regime",            w: 0.12 },
-    { f: "Wilson LB · same setup",w: 0.11 },
-    { f: "Earnings days · log",   w: 0.09 },
-  ];
+// Real SHAP (me.shap.dir_top) + real model card (calibration-history: accuracy /
+// AUC / Brier / log-loss). No fabricated reliability scatter — we don't have
+// per-bin reliability data, so we surface the real scalar metrics instead.
+function CalibrationPanel({ shap, card, auc }) {
+  const feats = (shap && Array.isArray(shap.dir_top)) ? shap.dir_top.slice(0, 7) : [];
+  const maxAbs = feats.length ? Math.max(...feats.map(f => Math.abs(f.shap || 0))) || 1 : 1;
+  const num = (v, d) => v == null ? "—" : v.toFixed(d == null ? 3 : d);
   return (
     <div className="cal-grid">
       <div className="cal-block">
-        <div className="label-cap" style={{ marginBottom: 6 }}>Reliability</div>
-        <svg viewBox="0 0 200 110" width="100%" height="110">
-          <line x1="20" y1="100" x2="190" y2="10" stroke="var(--line)" strokeDasharray="3 3" />
-          {[
-            [30, 92], [60, 78], [90, 60], [120, 44], [150, 30], [180, 14],
-          ].map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r="3" fill="var(--copper)" />)}
-          <text x="190" y="9" fontSize="9" className="mono" textAnchor="end" fill="var(--copper)">obs ≈ pred</text>
-          <text x="20" y="108" fontSize="9" className="mono" fill="var(--ink-3)">0</text>
-          <text x="190" y="108" fontSize="9" className="mono" textAnchor="end" fill="var(--ink-3)">1.0</text>
-        </svg>
-        <div className="cal-note mono dim2" style={{ marginTop: 6 }}>Brier 0.21 · log-loss 0.59 · ECE 0.04</div>
+        <div className="label-cap" style={{ marginBottom: 6 }}>Model card</div>
+        {(card || auc != null) ? (
+          <div className="kpi-row" style={{ gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
+            <KpiTile label="Accuracy" value={card && card.accuracy != null ? (card.accuracy * 100).toFixed(1) + "%" : "—"} tone={card && card.accuracy >= 0.5 ? "gn" : "amb"} />
+            <KpiTile label="AUC" value={num(auc != null ? auc : (card && card.auc), 3)} tone={(auc || (card && card.auc)) >= 0.6 ? "gn" : "amb"} />
+            <KpiTile label="Brier" value={num(card && card.brier, 3)} tone={card && card.brier <= 0.2 ? "gn" : "amb"} sub="lower better" />
+            <KpiTile label="Log-loss" value={num(card && card.log_loss, 3)} tone="ink" />
+          </div>
+        ) : <div className="smc-empty mono dim2">— model card not loaded</div>}
+        {card && card.date && <div className="cal-note mono dim2" style={{ marginTop: 6 }}>as of {card.date} · n={((card.n_ok || 0) + (card.n_fail || 0)).toLocaleString()}</div>}
       </div>
       <div className="cal-block">
         <div className="label-cap" style={{ marginBottom: 6 }}>Top features · SHAP</div>
-        <div className="feat-list">
-          {features.map((f, i) => (
-            <div key={i} className="feat-row">
-              <span className="mono">{f.f}</span>
-              <div className="feat-bar"><div className="feat-fill" style={{ width: `${f.w * 280}%` }} /></div>
-              <span className="mono dim">{(f.w * 100).toFixed(0)}%</span>
-            </div>
-          ))}
-        </div>
+        {feats.length ? (
+          <div className="feat-list">
+            {feats.map((f, i) => {
+              const w = Math.abs(f.shap || 0) / maxAbs;
+              const neg = (f.shap || 0) < 0;
+              return (
+                <div key={i} className="feat-row">
+                  <span className="mono" style={{ fontSize: 11 }}>{f.feature}</span>
+                  <div className="feat-bar"><div className="feat-fill" style={{ width: `${w * 100}%`, background: neg ? "var(--rd)" : "var(--gn)" }} /></div>
+                  <span className={`mono dim ${neg ? "dn" : "up"}`}>{neg ? "−" : "+"}{Math.abs(f.shap).toFixed(2)}</span>
+                </div>
+              );
+            })}
+          </div>
+        ) : <div className="smc-empty mono dim2">— SHAP drivers not available</div>}
       </div>
     </div>
   );

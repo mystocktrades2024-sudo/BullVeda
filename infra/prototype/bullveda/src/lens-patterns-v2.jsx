@@ -39,23 +39,35 @@ function LensPatternsV2({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyl
   const [dir, setDir] = usePatternsDir();
   const tk = ticker || { symbol: "ARGN", price: 213.4, pivot: 213.4 };
 
-  const theCall = {
-    ensemble: <span className="mono">Weighted composite <b className="up">{CE_COMPOSITE}/100</b> (≥ {CE_THRESHOLD}) · MTF consensus <b className="up">{CE_CONSENSUS}</b> · P(success) <b className="up">0.84</b>. Context → structure → projection align; TD warns of exhaustion near <b className="warn">$214–216</b>. Trigger above <b className="copper">$213.40</b>.</span>,
-    mlforecast: <span className="mono">Meta-model over all 7 theories → <b className="up">BUY bias</b>, P(up) high when 5+ theories stack. Cross-checked against the 3-head AI ensemble; size by the confidence band, not the point estimate.</span>,
-    wyckoff: window.WyckoffReadLine ? <WyckoffReadLine ticker={tk} mode={mode} /> : <span className="mono">Composite operator is <b className="copper">accumulating</b> — Phase D after a confirmed Spring + SOS. Mark-up on a close &gt; <b className="copper">$213.40</b>; P&amp;F count projects <b className="up">$221 → $237</b>. Invalid below <b className="dn">$187.60</b>.</span>,
-    elliott: <span className="mono">Impulse from $178; in <b className="violet">Wave 3 of 5</b> testing the 1.618× extension at <b className="up">$214.6</b>. W5 objective <b className="up">$221–224</b>. Count voids on a close &lt; <b className="dn">$184.90</b>.</span>,
-    fibonacci: <span className="mono">Major swing 178→214. Support <b className="warn">golden pocket $190–192</b> stacks .618 + Wyckoff ST + Gartley B (3-hit). Upside <b className="up">cluster $223–225</b> = 1.272 ext + Elliott W5 + P&amp;F. Void below $178.</span>,
-    volprofile: <span className="mono">Auction is <b className="up">accepting above VAH $209</b> with POC fair value at <b className="cy">$204</b>. Thin LVN at 211–212 clears the path to <b className="up">$218 → $224</b>. Rotation back below VAL <b className="dn">$199</b> shifts value down.</span>,
-    ichimoku: <span className="mono">Price <b className="up">above a green Kumo</b>, bullish TK cross, Chikou free — <b className="up">5/5 signals</b>. Kijun trails at <b className="copper">$201.4</b>; Kumo-break target <b className="up">$222</b>. Neutral on a close back inside the cloud (&lt;$205).</span>,
-    td: <span className="mono"><b className="warn">Sell Setup 8 of 9</b> — momentum maturing. A perfected bar-9 near <b className="warn">$214–216</b> flags a 1–4 bar pause; everyone else is bullish, so <b>trail stops, don't chase</b>. TDST support $196.</span>,
-    classical: <span className="mono"><b className="cy">VCP / ascending triangle</b> — 5 contractions into a pivot at <b className="copper">$205.20</b>, broken on 2.2× volume and retested. Measured move targets <b className="up">$225 → $235</b>. Fails below pivot.</span>,
-    harmonic: <span className="mono"><b className="violet">Bullish Gartley</b> completed at the PRZ (<b>$184–187.5</b>, 0.786 XA) and reversed up. T1/T2 hit; now testing the A retest at <b className="up">$212</b>. Voids below <b className="dn">$178</b>.</span>,
-    wolfe: <span className="mono"><b className="violet">Bullish Wolfe Wave</b> — valid 5-point structure, entry at the point-5 sweet spot <b className="copper">$176</b>. Price rides the 1-4 line to the <b className="up">EPA target $210</b> (R:R ≈ 5.7:1). Voids below <b className="dn">$171</b>.</span>,
-    candles: <span className="mono"><b className="up">Bullish engulfing</b> at the <b className="copper">$176 support</b> on 1.8× volume — confirmed reversal candle (63% historical WR, n=318). Confirmation layer; weight by location + volume, not the glyph alone.</span>,
-    altcharts: <span className="mono">Heikin-Ashi &amp; Renko show an <b className="up">unbroken uptrend</b>; a reversal needs a $3 down-brick / first filled HA candle. Best for a mechanical <b>trail-stop</b> — they confirm direction, they don't time entries.</span>,
-    gann: <span className="mono">Price rides just under the <b className="copper">1×1 master line ($216)</b>; next Square-of-Nine at <b className="violet">$219</b>, and the 60-bar price-time square lands <b>Jul 30</b>. Use as a confluence overlay.</span>,
-    montecarlo: <span className="mono">2,000-path simulation: right-skewed, median <b className="up">positive</b>, P(reach T1 before stop) <b className="up">≈58%</b> vs stop-first ≈40% — <b className="up">positive expectancy</b> conditional on the setup holding.</span>,
-  }[tab];
+  // "The Read" line is sourced from the active theory's REAL engine output
+  // (real.read — a per-ticker narrative the engine computes from this stock's
+  // bars: see engines/<theory>.py). Wyckoff has its own live WyckoffReadLine.
+  // When the live read isn't loaded (no server / insufficient bars / fetch
+  // pending) we fall back to mechanism-only text with NO fabricated price levels.
+  const pm = usePatternModel(tab, tk, mode);
+  const engineRead = (pm && pm.real && pm.real.state === "real" && typeof pm.real.read === "string" && pm.real.read.trim())
+    ? pm.real.read.trim() : null;
+  const MECH = {
+    ensemble: "Weighted composite across all theories — context → structure → projection. Trade only when the stack aligns; size by the confidence band, not the point estimate.",
+    mlforecast: "Meta-model over the theory stack → directional bias, cross-checked against the 3-head AI ensemble. Size by the confidence band, not the point estimate.",
+    elliott: "Elliott impulse/correction count — trade with the larger-degree trend; the count voids at its structural invalidation level.",
+    fibonacci: "Retracement + extension confluence — the golden pocket is the high-odds reaction zone; stacked ratios mark the target shelves.",
+    volprofile: "Auction value — acceptance above the value area is bullish, rotation below it shifts value down; the POC is fair value.",
+    ichimoku: "Cloud trend system — above a green Kumo with a bullish TK cross and a free Chikou is a full bullish stack.",
+    td: "Exhaustion timing — a completed 9-count flags a 1–4 bar pause; use it to trail and not chase, not as a standalone reversal.",
+    classical: "Chart-pattern structure — a measured move off the confirmed pivot; the setup fails on a close back through the breakout level.",
+    harmonic: "Harmonic PRZ reversal — the pattern completes at its D-leg ratio and voids beyond the X point.",
+    wolfe: "Wolfe Wave — entry at the point-5 sweet spot targeting the EPA line; voids beyond point 5.",
+    candles: "Candle confirmation — weight by location + volume, not the glyph alone.",
+    altcharts: "Heikin-Ashi / Renko — confirm direction and trail; they don't time entries.",
+    gann: "Gann price-time squares — a confluence overlay, not a standalone trigger.",
+    montecarlo: "Path simulation — P(reach T1 before stop) summarizes expectancy conditional on the setup holding.",
+  };
+  const theCall = (tab === "wyckoff" && window.WyckoffReadLine)
+    ? <WyckoffReadLine ticker={tk} mode={mode} />
+    : engineRead
+      ? <span className="mono">{engineRead}</span>
+      : <span className="mono">{MECH[tab] || "—"}<span className="dim2"> · live read pending data</span></span>;
 
   return (
     <div className="lens lens--patterns-v2">

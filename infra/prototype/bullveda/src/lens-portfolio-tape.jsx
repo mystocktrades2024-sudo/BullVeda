@@ -241,119 +241,120 @@ function FactorPanel() {
 // ────────────────────────────────────────────────────────────
 // TAPE · FLOW — news, insider, sentiment, 13F, catalysts
 // ────────────────────────────────────────────────────────────
+// Real tape data off the ticker's fundamentals (13F holders + insider) + sentiment
+// pillar + earnings catalyst. Per-ticker news isn't on the ticker object (only
+// market-level), so the news timeline shows an honest "not in feed" state.
+function tapeData(ticker) {
+  const holders = Array.isArray(ticker.holders) ? ticker.holders : (ticker.holders ? Object.values(ticker.holders) : []);
+  const insider = Array.isArray(ticker.insiderTx) ? ticker.insiderTx : (ticker.insiderTx ? Object.values(ticker.insiderTx) : []);
+  const sp = (ticker.pillars && typeof ticker.pillars.sentiment === "number") ? ticker.pillars.sentiment
+    : (ticker.pillarPct && typeof ticker.pillarPct.sentiment === "number") ? ticker.pillarPct.sentiment : null;
+  const sentNorm = (typeof sp === "number") ? +(sp / 50 - 1).toFixed(2) : null;   // 0-100 → −1..+1
+  const er = (ticker.earnings && ticker.earnings.days != null) ? ticker.earnings : null;
+  return { holders, insider, sentNorm, er, any: !!(holders.length || insider.length || sentNorm != null) };
+}
+
 function LensTape({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("tp-1"); const s2 = useStateToggle("tp-2");
   const s3 = useStateToggle("tp-3"); const s4 = useStateToggle("tp-4");
   const s5 = useStateToggle("tp-5");
+  const td = tapeData(ticker);
+  const insBuys = td.insider.filter(x => /^(P|BUY)/i.test(x.transactionCode || x.action || "")).length;
+  const insSells = td.insider.filter(x => /^(S|SELL)/i.test(x.transactionCode || x.action || "")).length;
+  const netIns = insBuys - insSells;
+  const sentTone = td.sentNorm == null ? "ink" : td.sentNorm > 0.15 ? "gn" : td.sentNorm < -0.15 ? "rd" : "amb";
+
+  if (!td.any) {
+    return (
+      <div className="lens lens--tape">
+        <div className="lens-section"><div className="lens-pad">
+          <div className="smc-empty mono dim2" style={{ padding: "16px" }}>
+            No tape data loaded for <b className="warn">{(ticker && ticker.symbol) || "this name"}</b> yet —
+            13F holders, insider transactions and the sentiment pillar come from the per-ticker fundamentals
+            fetch. {ticker && ticker._loading ? "Loading…" : "Open from the scan (or wait for enrichment) to populate."}
+          </div>
+        </div></div>
+      </div>
+    );
+  }
 
   return (
     <div className="lens lens--tape">
       <div className="hero tape-hero">
         <div className="th-left">
-          <div className="label-cap">Tape read · 30 days</div>
+          <div className="label-cap">Tape read · {(ticker && ticker.symbol) || ""}</div>
           <div className="th-score">
-            <div className="th-score-num mono">+12</div>
-            <Pill tone="gn" dot>net insider buys</Pill>
-            <Pill tone="gn" small>Sentiment +0.42</Pill>
+            <div className="th-score-num mono">{netIns >= 0 ? "+" : ""}{netIns}</div>
+            <Pill tone={netIns > 0 ? "gn" : netIns < 0 ? "rd" : "ink"} dot>net insider {netIns >= 0 ? "buys" : "sells"}</Pill>
+            {td.sentNorm != null && <Pill tone={sentTone} small>sentiment {td.sentNorm >= 0 ? "+" : ""}{td.sentNorm}</Pill>}
           </div>
           <div className="th-pill-row">
-            <Pill tone="gn" small>16 articles · 12 pos / 3 neg</Pill>
-            <Pill tone="gn" small>4 13F adds · 1 trim</Pill>
-            <Pill tone="copper" small>3 catalysts in window</Pill>
+            <Pill tone={td.insider.length ? "gn" : "ink"} small>{td.insider.length} insider tx</Pill>
+            <Pill tone={td.holders.length ? "gn" : "ink"} small>{td.holders.length} 13F holders</Pill>
+            {td.er && <Pill tone="copper" small>ER in {td.er.days}d</Pill>}
           </div>
         </div>
         <div className="th-right">
-          <SentimentDial />
+          <SentimentDial sentNorm={td.sentNorm} />
         </div>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={1} title="News Timeline · 30 days"
-          sub="dated · scored · linked"
+        <SectionHeader n={1} title="News Timeline"
+          sub="per-ticker dated · scored"
           style={headerStyle} right={<StateToggle name="tp-1" />} />
-        <StateWrap state={s1.value} source="EODHD · news + sentiment">
-          <div className="lens-pad"><NewsTimeline /></div>
+        <StateWrap state={s1.value} source="EODHD · per-ticker news">
+          <div className="lens-pad"><NewsTimeline ticker={ticker} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
         <SectionHeader n={2} title="Insider Transactions"
-          sub="Form 4 · last 90 days · net direction"
+          sub="Form 4 · net direction"
           style={headerStyle} right={<StateToggle name="tp-2" />} />
         <StateWrap state={s2.value} source="EODHD · InsiderTransactions">
-          <div className="lens-pad"><InsiderTable /></div>
+          <div className="lens-pad"><InsiderTable rows={td.insider} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={3} title="Sentiment Distribution"
-          sub="article-level · publisher-weighted"
-          style={headerStyle} right={<StateToggle name="tp-3" />} />
-        <StateWrap state={s3.value} source="EODHD · news sentiment + bespoke">
-          <div className="lens-pad">
-            <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <KpiTile label="Net sentiment 30d" value="+0.42" tone="gn" sub="bullish" />
-              <KpiTile label="Article count" value="16" tone="ink" />
-              <KpiTile label="Source breadth" value="11" tone="ink" sub="distinct outlets" />
-              <KpiTile label="Tone trend" value="↑ rising" tone="gn" />
-            </div>
-          </div>
-        </StateWrap>
-      </div>
-
-      <div className="lens-section">
-        <SectionHeader n={4} title="13F Holders"
-          sub="top 8 institutional · qty-on-qty changes"
+        <SectionHeader n={3} title="13F Holders"
+          sub="institutional ownership · qty-on-qty change"
           style={headerStyle} right={<StateToggle name="tp-4" />} />
         <StateWrap state={s4.value} source="EODHD · Holders">
-          <div className="lens-pad"><HoldersTable /></div>
+          <div className="lens-pad"><HoldersTable rows={td.holders} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={5} title="Catalyst Calendar · 90d"
-          sub="ER · industry events · regulatory · sector cycles"
+        <SectionHeader n={4} title="Earnings Catalyst"
+          sub="next scheduled report in the hold window"
           style={headerStyle} right={<StateToggle name="tp-5" />} />
-        <StateWrap state={s5.value} source="EODHD · calendar + industry feed">
+        <StateWrap state={s5.value} source="earnings calendar">
           <div className="lens-pad">
-            <div className="catcal">
+            {td.er ? <div className="catcal">
               <div className="cat-countdown">
-                <span className="cat-cd-n mono">11<span className="cat-cd-u">d</span></span>
+                <span className="cat-cd-n mono">{td.er.days}<span className="cat-cd-u">d</span></span>
                 <div className="cat-cd-body">
-                  <span className="cat-cd-lbl mono dim2">NEXT CATALYST · Jun 09</span>
-                  <span className="cat-cd-evt mono">Q1 FY26 earnings · BMO <span className="cat-cd-imp">high impact</span></span>
+                  <span className="cat-cd-lbl mono dim2">NEXT EARNINGS{td.er.date ? " · " + td.er.date : ""}</span>
+                  <span className="cat-cd-evt mono">scheduled report <span className="cat-cd-imp">high impact</span></span>
                 </div>
-                <span className="cat-cd-warn mono">⚠ inside swing window — size −25% / flatten T−2</span>
+                {td.er.days <= 7 && <span className="cat-cd-warn mono">⚠ inside swing window — size −25% / flatten T−2</span>}
               </div>
-              <div className="cat-row cat-amb">
-                <span className="cat-when mono">Jun 09 · 11d</span>
-                <span className="cat-label">Q1 FY26 earnings · BMO</span>
-                <Pill tone="amb" small>high</Pill>
-              </div>
-              <div className="cat-row cat-copper">
-                <span className="cat-when mono">Jun 27</span>
-                <span className="cat-label">BMO Materials conference · CEO presenting</span>
-                <Pill tone="ink" small>med</Pill>
-              </div>
-              <div className="cat-row cat-gn">
-                <span className="cat-when mono">Aug 12 · 78d</span>
-                <span className="cat-label">Akron capacity ribbon-cut · +18% volume</span>
-                <Pill tone="amb" small>high</Pill>
-              </div>
-            </div>
+            </div> : <div className="smc-empty mono dim2">— no scheduled earnings in the window</div>}
           </div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={6} title="Cross-Lens Confluence" style={headerStyle} />
+        <SectionHeader n={5} title="Cross-Lens Confluence" style={headerStyle} />
         <div className="lens-pad">
           <CrossLens lead="violet" cells={[
-            { lens: "Tape",       verdict: "+12 INS", tone: "gn", note: "net insider buys 90d" },
-            { lens: "Sentiment",  verdict: "+0.42",  tone: "gn", note: "rising trend · 16 art" },
-            { lens: "Holders",    verdict: "4 ADDS", tone: "gn", note: "Citadel +2.1%, Two Sigma +1.4%" },
-            { lens: "Catalyst",   verdict: "3 IN",   tone: "amb", note: "ER + capacity event soon" },
-            { lens: "Risk",       verdict: "OK",     tone: "gn", note: "tape doesn't override risk" },
+            { lens: "Insider", verdict: `${netIns >= 0 ? "+" : ""}${netIns}`, tone: netIns > 0 ? "gn" : netIns < 0 ? "rd" : "ink", note: `${insBuys} buys / ${insSells} sells` },
+            { lens: "Sentiment", verdict: td.sentNorm != null ? `${td.sentNorm >= 0 ? "+" : ""}${td.sentNorm}` : "—", tone: sentTone, note: "pillar score" },
+            { lens: "Holders", verdict: `${td.holders.length}`, tone: td.holders.length ? "gn" : "ink", note: "13F institutions" },
+            { lens: "Earnings", verdict: td.er ? `${td.er.days}d` : "—", tone: "amb", note: td.er ? "in window" : "none scheduled" },
+            { lens: "Risk", verdict: "OK", tone: "gn", note: "tape doesn't override risk" },
           ]} />
         </div>
       </div>
@@ -361,16 +362,21 @@ function LensTape({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
       <div className="lens-call">
         <span className="label-cap">The Read · Tape</span>
         <span className="mono">
-          Insider buys + holder adds + rising sentiment + 3 catalysts in window =
-          <b className="copper"> confirming wind.</b> Tape reads bullish.
+          Insider net <b className={netIns > 0 ? "up" : netIns < 0 ? "dn" : ""}>{netIns >= 0 ? "+" : ""}{netIns}</b> ({insBuys} buys / {insSells} sells) ·
+          {td.sentNorm != null ? <> sentiment <b className={sentTone === "gn" ? "up" : sentTone === "rd" ? "dn" : "warn"}>{td.sentNorm >= 0 ? "+" : ""}{td.sentNorm}</b> ·</> : null}
+          {" "}{td.holders.length} institutional holders{td.er ? <> · earnings in <b className="copper">{td.er.days}d</b></> : ""}.
         </span>
       </div>
     </div>
   );
 }
 
-function SentimentDial() {
-  const v = 0.42;
+function SentimentDial({ sentNorm }) {
+  const have = typeof sentNorm === "number";
+  const v = have ? Math.max(-1, Math.min(1, sentNorm)) : 0;
+  const tone = !have ? "ink-3" : v > 0.15 ? "gn" : v < -0.15 ? "rd" : "amb";
+  const lbl = !have ? "NO DATA" : v > 0.15 ? "BULLISH" : v < -0.15 ? "BEARISH" : "NEUTRAL";
+  const txt = have ? (v >= 0 ? "+" : "") + v.toFixed(2) : "—";
   const angle = -90 + v * 90;
   const tipX = 100 + 64 * Math.cos((angle * Math.PI) / 180);
   const tipY = 110 + 64 * Math.sin((angle * Math.PI) / 180);
@@ -401,22 +407,27 @@ function SentimentDial() {
       <circle cx="100" cy="110" r="7" fill="var(--bg-1)" stroke="var(--copper)" strokeWidth="2.5"
               style={{ filter: "drop-shadow(0 0 8px var(--copper))" }} />
       <circle cx="100" cy="110" r="3" fill="var(--copper)" />
-      <text x="100" y="128" textAnchor="middle" className="mono" fontSize="16" fill="var(--gn)" fontWeight="500"
-            style={{ filter: "drop-shadow(0 0 8px color-mix(in oklab, var(--gn) 40%, transparent))" }}>+0.42</text>
-      <text x="100" y="142" textAnchor="middle" className="mono" fontSize="9" fill="var(--ink-3)" letterSpacing="0.18em">BULLISH</text>
+      <text x="100" y="128" textAnchor="middle" className="mono" fontSize="16" fill={`var(--${tone})`} fontWeight="500"
+            style={{ filter: `drop-shadow(0 0 8px color-mix(in oklab, var(--${tone}) 40%, transparent))` }}>{txt}</text>
+      <text x="100" y="142" textAnchor="middle" className="mono" fontSize="9" fill="var(--ink-3)" letterSpacing="0.18em">{lbl}</text>
     </svg>
   );
 }
 
-function NewsTimeline() {
-  const items = [
-    { d: "May 26", t: "Q1 preview note — Truist", s: "+0.6", tone: "gn" },
-    { d: "May 22", t: "Capacity expansion progress update", s: "+0.8", tone: "gn" },
-    { d: "May 18", t: "Insider purchase · COO 8,200 sh", s: "+0.5", tone: "gn" },
-    { d: "May 14", t: "Sector specialty-chem cycle peak warning", s: "−0.4", tone: "rd" },
-    { d: "May 09", t: "Goldman initiates BUY · PT $78", s: "+0.7", tone: "gn" },
-    { d: "May 02", t: "Q4 results recap · margin expansion", s: "+0.6", tone: "gn" },
-  ];
+function NewsTimeline({ ticker }) {
+  const raw = (ticker && Array.isArray(ticker.news_articles)) ? ticker.news_articles : [];
+  if (!raw.length) {
+    return <div className="smc-empty mono dim2">— per-ticker news not in this feed (market-level news lives on the Markets tab)</div>;
+  }
+  const items = raw.slice(0, 8).map(a => {
+    const sc = typeof a.sentiment === "number" ? a.sentiment : (a.sentiment && a.sentiment.polarity) || 0;
+    return {
+      d: (a.date || a.published || "").slice(5, 10).replace("-", "/"),
+      t: a.title || a.headline || "—",
+      s: (sc >= 0 ? "+" : "") + sc.toFixed(1),
+      tone: sc > 0.15 ? "gn" : sc < -0.15 ? "rd" : "ink",
+    };
+  });
   return (
     <div className="news-tl">
       {items.map((it, i) => (
@@ -430,14 +441,23 @@ function NewsTimeline() {
   );
 }
 
-function InsiderTable() {
-  const rows = [
-    { date: "May 22", who: "B. Hsiang · CFO", action: "BUY",   sh: 5000,  px: 64.20, val: 321_000, tone: "gn" },
-    { date: "May 18", who: "K. Patel · COO", action: "BUY",   sh: 8200,  px: 63.10, val: 517_420, tone: "gn" },
-    { date: "May 12", who: "J. Roeber · 10%", action: "SELL",  sh: 2400,  px: 65.80, val: 157_920, tone: "rd" },
-    { date: "May 05", who: "M. Vance · DIR", action: "BUY",   sh: 1800,  px: 60.50, val: 108_900, tone: "gn" },
-    { date: "Apr 29", who: "B. Hsiang · CFO", action: "BUY",   sh: 4000,  px: 59.10, val: 236_400, tone: "gn" },
-  ];
+function InsiderTable({ rows }) {
+  const src = Array.isArray(rows) ? rows : [];
+  if (!src.length) return <div className="smc-empty mono dim2">— no insider transactions on file</div>;
+  const mapped = src.slice(0, 8).map(r => {
+    const code = (r.transactionCode || r.action || "").toUpperCase();
+    const isBuy = /^(P|BUY|A)/.test(code);
+    const isSell = /^(S|SELL|D)/.test(code);
+    const sh = Number(r.transactionAmount ?? r.sh ?? r.shares ?? 0) || 0;
+    const px = Number(r.transactionPrice ?? r.px ?? r.price ?? 0) || 0;
+    return {
+      date: (r.transactionDate || r.date || "").slice(5, 10).replace("-", "/"),
+      who: r.ownerName || r.who || r.name || "—",
+      action: isBuy ? "BUY" : isSell ? "SELL" : (code || "—"),
+      sh, px, val: sh * px,
+      tone: isBuy ? "gn" : isSell ? "rd" : "ink",
+    };
+  });
   return (
     <table className="dtable">
       <thead>
@@ -447,14 +467,14 @@ function InsiderTable() {
         </tr>
       </thead>
       <tbody>
-        {rows.map((r, i) => (
+        {mapped.map((r, i) => (
           <tr key={i}>
             <td className="mono dim">{r.date}</td>
             <td className="mono">{r.who}</td>
             <td><Pill tone={r.tone} small>{r.action}</Pill></td>
             <td className="r mono tabular">{r.sh.toLocaleString()}</td>
-            <td className="r mono tabular">${r.px.toFixed(2)}</td>
-            <td className={`r mono tabular kpi-tone--${r.tone}`}>${r.val.toLocaleString()}</td>
+            <td className="r mono tabular">{r.px ? "$" + r.px.toFixed(2) : "—"}</td>
+            <td className={`r mono tabular kpi-tone--${r.tone}`}>{r.val ? "$" + Math.round(r.val).toLocaleString() : "—"}</td>
           </tr>
         ))}
       </tbody>
@@ -462,26 +482,28 @@ function InsiderTable() {
   );
 }
 
-function HoldersTable() {
-  const rows = [
-    { name: "Vanguard",      ownPct: 9.1, delta: "+0.4%", tone: "gn" },
-    { name: "BlackRock",     ownPct: 8.4, delta: "+0.2%", tone: "gn" },
-    { name: "State Street",  ownPct: 4.6, delta: "0.0%",  tone: "ink" },
-    { name: "Citadel",       ownPct: 2.8, delta: "+2.1%", tone: "gn" },
-    { name: "Two Sigma",     ownPct: 1.9, delta: "+1.4%", tone: "gn" },
-    { name: "Fidelity",      ownPct: 1.4, delta: "−0.3%", tone: "rd" },
-    { name: "Renaissance",   ownPct: 1.1, delta: "+0.6%", tone: "gn" },
-    { name: "Wellington",    ownPct: 0.9, delta: "−0.1%", tone: "ink" },
-  ];
+function HoldersTable({ rows }) {
+  const src = Array.isArray(rows) ? rows : [];
+  if (!src.length) return <div className="smc-empty mono dim2">— no 13F holder data on file</div>;
+  const mapped = src.map(r => {
+    const ownPct = Number(r.totalShares ?? r.ownPct ?? r.pct ?? 0) || 0;
+    const ch = Number(r.change_p ?? r.delta ?? 0);
+    return {
+      name: r.name || r.holder || "—",
+      ownPct,
+      ch: Number.isFinite(ch) ? ch : 0,
+      tone: ch > 0.05 ? "gn" : ch < -0.05 ? "rd" : "ink",
+    };
+  }).sort((a, b) => b.ownPct - a.ownPct).slice(0, 8);
   return (
     <table className="dtable">
       <thead><tr><th>Holder</th><th className="r">Own %</th><th className="r">QoQ Δ</th></tr></thead>
       <tbody>
-        {rows.map((r, i) => (
+        {mapped.map((r, i) => (
           <tr key={i}>
             <td className="mono">{r.name}</td>
             <td className="r mono tabular">{r.ownPct.toFixed(1)}%</td>
-            <td className={`r mono tabular kpi-tone--${r.tone}`}>{r.delta}</td>
+            <td className={`r mono tabular kpi-tone--${r.tone}`}>{r.ch >= 0 ? "+" : ""}{r.ch.toFixed(1)}%</td>
           </tr>
         ))}
       </tbody>
