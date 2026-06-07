@@ -103,10 +103,12 @@ function HomeView({ onTicker, onSurface, mode, surface }) {
       <HomeHero mode={mode} onSurface={onSurface} />
       <IndexStrip />
 
-      {/* TIER 1.6 · YOUR BOOK — live open positions marked to market (real Alpaca paper) */}
+      {/* TIER 1.6 · AUTOMATED BOOK — the system's auto-traded paper account, shared
+          across all viewers (NOT the individual user's book). Per-user position
+          tracking isn't wired; this is the model/track-record portfolio. */}
       {(window.__BV && window.__BV.portfolio && (window.__BV.portfolio.positions || []).length > 0) && (
         <>
-          <div className="home-sec-label"><span className="mono">YOUR BOOK · LIVE P&L</span><span className="mono dim2">open positions marked to market · click to open ticket</span></div>
+          <div className="home-sec-label"><span className="mono">AUTOMATED BOOK · LIVE P&L</span><span className="mono dim2">system paper account · auto-traded · same for every viewer · click to open ticket</span></div>
           <BookStrip onTicker={onTicker} />
         </>
       )}
@@ -189,7 +191,7 @@ function resolveIndexStrip(liveIq) {
     if (bf["EURUSD.FOREX"]) push("EUR/USD", fmt(n(bf["EURUSD.FOREX"].price), 4), bfc("EURUSD.FOREX"), "EURUSD.FOREX");
     if (bf["USDJPY.FOREX"]) push("USD/JPY", fmt(n(bf["USDJPY.FOREX"].price), 2), bfc("USDJPY.FOREX"), "USDJPY.FOREX");
   }
-  return out.length >= 4 ? out : IDXSTRIP_MOCK.map(m => ({ ...m, spark: null }));
+  return out.length >= 4 ? out : (window.__BV ? out : IDXSTRIP_MOCK.map(m => ({ ...m, spark: null })));
 }
 function IndexStrip() {
   const { useState: uS, useEffect: uE } = React;
@@ -256,15 +258,19 @@ function MarketBriefing({ onSurface, onTicker }) {
     { k: "New lows", v: M.newLows != null ? String(M.newLows) : "—", tone: M.newLows > (M.newHighs || 0) ? "rd" : "gn" },
     { k: "F&G proxy", v: M.fearGreed != null ? String(M.fearGreed) : "—", tone: "gn" },
     { k: "Put/Call", v: M.putCall != null ? M.putCall.toFixed(2) : "—", tone: "amb" },
+  ] : (window.__BV ? [
+    { k: ">50-DMA", v: "—", tone: "ink" }, { k: ">200-DMA", v: "—", tone: "ink" },
+    { k: "New highs", v: "—", tone: "ink" }, { k: "New lows", v: "—", tone: "ink" },
+    { k: "F&G proxy", v: "—", tone: "ink" }, { k: "Put/Call", v: "—", tone: "ink" },
   ] : [
     { k: ">50-DMA", v: "62%", tone: "gn" }, { k: ">200-DMA", v: "58%", tone: "gn" },
     { k: "A/D line", v: "+1,240", tone: "gn" }, { k: "New H–L", v: "+86", tone: "gn" },
     { k: "VIX", v: "16.3", tone: "gn" }, { k: "Put/Call", v: "0.82", tone: "amb" },
-  ];
+  ]);
   // gappers — biggest movers from the live universe (audit-log intersected)
   const gappers = useMemoH(() => {
     const rows = HR.pool();
-    if (!rows.length) return [
+    if (!rows.length) return window.__BV ? [] : [
       { sym: "NVDA", pct: +4.2, why: "capex guide", held: false },
       { sym: "ARGN", pct: +2.1, why: "sector flows", held: true },
       { sym: "XOM", pct: -2.6, why: "crude −2%", held: false },
@@ -304,8 +310,8 @@ function MarketBriefing({ onSurface, onTicker }) {
         note: (/before/i.test(e.before_after || "") ? "BMO" : "AMC") + (e.beat_score != null ? " · beat " + Math.round(e.beat_score) : ""), held: held.has(HR.sym0(e.ticker)) }));
     const merged = [...macro, ...earn];
     if (merged.length) return merged;
-    // showcase fallback (no live feeds)
-    return [
+    // served → honest empty; standalone showcase → demo calendar
+    return window.__BV ? [] : [
       { d: "Tue", t: "CPI · MoM", imp: "high", note: "08:30 · core in focus" },
       { d: "Wed", t: "FOMC minutes", imp: "high", note: "14:00 · dot-plot" },
     ];
@@ -435,7 +441,7 @@ function realStories(limit) {
 // ─── Top Stories / news ──────────────────────────────────────────
 function TopStories({ onTicker }) {
   const real = useMemoH(() => realStories(5), [bvTok()]);
-  const stories = real || [
+  const stories = real || (window.__BV ? [] : [
     { t: "12:48", sym: "NVDA", sent: +0.8, tone: "gn", src: "Reuters", head: "Chipmakers rally as data-center capex guidance lifts sector",
       sum: "Three hyperscalers lifted FY capex guides on the same morning — direct read-through to GPU and networking suppliers. Group +2.8% on 1.6× volume.",
       impact: "Sector tailwind", affects: ["NVDA", "AVGO", "ARM"] },
@@ -451,8 +457,9 @@ function TopStories({ onTicker }) {
     { t: "08:20", sym: "GENO", sent: +0.5, tone: "gn", src: "FierceBio", head: "Genoa Bio Phase-2 readout expected ahead of next-week print",
       sum: "Topline due before earnings; options imply a ±18% event move. Binary catalyst — size for the gap, not the drift.",
       impact: "Binary catalyst", affects: ["GENO"] },
-  ];
+  ]);
   const impactTone = { "Sector tailwind": "gn", "Stock-specific": "gn", "Macro · rates": "amb", "Binary catalyst": "amb", "Sector risk": "rd", "Bullish": "gn", "Bearish": "rd", "Neutral": "amb" };
+  if (!stories.length) return <div className="ts"><span className="mono dim2">No market headlines in the feed right now.</span></div>;
   return (
     <div className="ts">
       {stories.map((s, i) => (
@@ -488,7 +495,7 @@ const EARNINGS_MOCK = [
 
 function resolveEarningsToday() {
   const eb = (window.__BV && window.__BV.earningsBeat) || [];
-  if (!eb.length) return EARNINGS_MOCK;
+  if (!eb.length) return window.__BV ? [] : EARNINGS_MOCK;
   const held = HR.held();
   const tierTone = (t) => /strong/i.test(t) ? "gn" : /solid/i.test(t) ? "amb" : "rd";
   const today = eb.filter(e => e.ticker && HR.num(e.days_to_earnings, 99) <= 1);
@@ -549,7 +556,7 @@ const DISCOVERY_MOCK = [
 // Real discovery groups from the live scan universe (audit-log intersected).
 function resolveDiscovery() {
   const rows = HR.pool();
-  if (!rows.length) return DISCOVERY_MOCK;
+  if (!rows.length) return window.__BV ? [] : DISCOVERY_MOCK;
   const pick = (arr, n) => HR.auditOnly(arr.map(x => x[0]).slice(0, n + 4))
     .slice(0, n).map(s => { const o = arr.find(a => a[0] === s); return o ? [o[0], o[1]] : [s, ""]; });
   const hi = rows.filter(r => r.off52 != null && r.off52 >= -3 && HR.num(r.chg, null) != null)
@@ -574,11 +581,12 @@ function resolveDiscovery() {
   ];
   // keep only groups that actually produced names; if all empty, fall back to mock
   const filled = groups.filter(g => g.items.length);
-  return filled.length ? groups.map(g => g.items.length ? g : { ...g, items: [] }) : DISCOVERY_MOCK;
+  return filled.length ? groups.map(g => g.items.length ? g : { ...g, items: [] }) : (window.__BV ? [] : DISCOVERY_MOCK);
 }
 
 function Discovery({ onTicker }) {
   const groups = useMemoH(() => resolveDiscovery(), [bvTok()]).filter(g => g.items.length);
+  if (!groups.length) return <div className="disc"><span className="mono dim2">No discovery signals yet — waiting on today's scan.</span></div>;
   return (
     <div className="disc">
       {groups.map((g, i) => (
@@ -740,7 +748,7 @@ function realEngineRows(id) {
 // Resolve engines with REAL rows when the live universe is available; keep the
 // curated sample rows otherwise (standalone showcase).
 function resolveEngines() {
-  const live = HR.has();
+  const live = HR.has() || !!(typeof window !== "undefined" && window.__BV); // served → honest empty, never curated
   return TBE_ENGINES.map(e => {
     const real = realEngineRows(e.id);
     if (real && real.length) return { ...e, rows: real, real: true };
@@ -752,7 +760,7 @@ function resolveEngines() {
 // Top setups = top BUY (then WATCH) scan rows by score, audit-log intersected.
 function resolveScannerPicks() {
   const rows = HR.pool();
-  if (!rows.length) return SCANNER_PICKS;
+  if (!rows.length) return window.__BV ? [] : SCANNER_PICKS;
   const rank = (v) => v === "BUY" ? 0 : v === "WATCH" ? 1 : v === "SHORT" ? 2 : 3;
   // per-mode verdict/score/R:R (Swing/Position/Invest) from decisions_by_mode —
   // so the WHOLE row reflects the active horizon, not a swing call with swing R:R.
@@ -777,7 +785,7 @@ function resolveScannerPicks() {
         v: vm,
       };
     });
-  return picks.length ? picks : SCANNER_PICKS;
+  return picks.length ? picks : (window.__BV ? [] : SCANNER_PICKS);
 }
 
 // Expose the discovery universe so the Consensus panel stays in sync.
@@ -823,6 +831,7 @@ function TopSetups({ onTicker }) {
     return parts.length ? parts.join(" · ") : "live scan";
   };
   const anyBuy = rows.some(r => r.v === "BUY");
+  if (!rows.length) return <div className="tset"><div className="tset-note mono dim2" style={{ padding: "8px" }}>No setups yet — waiting on today's scan bundle.</div></div>;
   return (
     <div className="tset">
       {!anyBuy && HR.has() && (
@@ -1126,7 +1135,9 @@ function HomeCard({ title, sub, cta, onCta, children }) {
   );
 }
 
-// ─── Your Book — REAL open positions (Alpaca paper) marked to market ─────
+// ─── Automated Book — REAL open positions from the shared auto-traded Alpaca
+//     paper account (system model portfolio · same for every viewer · NOT the
+//     individual user's book — per-user position tracking is not wired). ──────
 function BookStrip({ onTicker }) {
   const pf = (window.__BV && window.__BV.portfolio) || null;
   if (!pf) return null;
@@ -1196,8 +1207,12 @@ const SIGNALFEED_MOCK = [
 
 // Overnight signal feed from the live universe (audit-log tickers) + scan funnel.
 function resolveSignalFeed() {
+  // Served (real) mode: never fall back to the demo feed — return honest empty
+  // so 500 viewers don't see fabricated ARGN/ARCM signals during a scan outage.
+  // The SIGNALFEED_MOCK is the standalone-showcase default only (no window.__BV).
+  const SERVED = !!(typeof window !== "undefined" && window.__BV);
   const rows = HR.pool();
-  if (!rows.length) return SIGNALFEED_MOCK;
+  if (!rows.length) return SERVED ? [] : SIGNALFEED_MOCK;
   const inA = (r) => HR.inAudit(r.sym);
   const buys = rows.filter(r => HR.vmode(r) === "BUY" && inA(r)).sort((a, b) => b.score - a.score);
   const ins = rows.filter(r => HR.num(r.insNet, 0) > 0 && inA(r)).sort((a, b) => b.insNet - a.insNet);
@@ -1218,11 +1233,14 @@ function resolveSignalFeed() {
   if (_F) out.push({ t: scanT, tone: "ink", tag: "BUNDLE", sym: null, text: `Daily bundle · ${_F.universe} ranked · ${_F.bullish} Bullish · ${_F.neutral} Neutral · ${_F.bearish} Avoid` });
   if (ai[0]) out.push({ t: scanT, tone: "violet", tag: "AI", sym: ai[0].sym, text: `AI edge +${ai[0].aiEdge.toFixed(2)} · highest hit-net today` });
   if (ins[0]) out.push({ t: scanT, tone: "cy", tag: "INSIDER", sym: ins[0].sym, text: `Insider cluster · +${ins[0].insNet} net open-market buys` });
-  return out.length ? out : SIGNALFEED_MOCK;
+  return out.length ? out : (SERVED ? [] : SIGNALFEED_MOCK);
 }
 
 function SignalFeed({ onTicker }) {
   const events = useMemoH(() => resolveSignalFeed(), [bvTok()]);
+  if (!events.length) {
+    return <div className="sf"><div className="sf-row sf-ink"><span className="sf-text mono dim2">No signals yet — waiting on today's scan bundle.</span></div></div>;
+  }
   return (
     <div className="sf">
       {events.map((e, i) => (
