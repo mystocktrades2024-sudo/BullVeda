@@ -4208,9 +4208,18 @@ def run_daily_scan(force_fresh: bool = False):
         _cfg_thr = _de_cfg.get("regime4_thresholds")
         _bundle_regime = (bundle.get("regime") or {}).get("regime4") or "risk_on_choppy"
         # Phase 3.2: compute live setup-kill list from signal_tracker (auto-prune losing setups)
-        _setup_kills = compute_setup_kill_list()
-        # #7: stratified — also kill specific (setup, score_band) combos
-        _setup_band_kills = compute_setup_score_band_kills()
+        # PORTFOLIO-DECOUPLE (2026-06-07): compute_setup_kill_list / band_kills read the
+        # owner's signal_log. For a universal 500-user signal layer they must not shape the
+        # signal — skip when signal_layer_portfolio_blind is on. See config _note.
+        _portfolio_blind = bool((_de_cfg.get("signal_layer_portfolio_blind") or {}).get("_enabled", False))
+        if _portfolio_blind:
+            _setup_kills = {}
+            _setup_band_kills = {}
+            log.info("  Signal layer PORTFOLIO-BLIND: account-derived setup kills (signal_log) skipped")
+        else:
+            _setup_kills = compute_setup_kill_list()
+            # #7: stratified — also kill specific (setup, score_band) combos
+            _setup_band_kills = compute_setup_score_band_kills()
         if _setup_kills:
             log.info(f"  Decision engine: setup-kill list = {list(_setup_kills.keys())}")
         if _setup_band_kills:

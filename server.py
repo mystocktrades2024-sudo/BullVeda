@@ -3390,7 +3390,26 @@ async def universe_api(limit: int = 0):
         bundle = json.loads(path.read_text())
     except Exception as e:
         raise HTTPException(500, str(e))
-    allsc = bundle.get("all_scored") or []
+    # Full scored universe = gate-PASSED (all_scored) + gate-FAILED (killed).
+    # The scan splits names into all_scored (passed the pre-trade gate) vs killed
+    # (failed it). On risk-off days — e.g. a SPY crash-day entry gate, sector
+    # blocklists, earnings blackout — EVERY name can land in `killed`, which left
+    # the scanner blank even though a full ranked universe of REAL scored data
+    # exists. Merge both so the screener always shows the universe with honest
+    # verdicts (gate-failed names render as AVOID/WAIT carrying their reject_reason)
+    # instead of vanishing. Deduped by ticker (buckets are disjoint, but be safe).
+    _passed = bundle.get("all_scored") or []
+    _killed = bundle.get("killed") or []
+    _seen = set()
+    allsc = []
+    for _r in (list(_passed) + list(_killed)):
+        if not isinstance(_r, dict):
+            continue
+        _tk = _r.get("ticker")
+        if not _tk or _tk in _seen:
+            continue
+        _seen.add(_tk)
+        allsc.append(_r)
     # ML p_up join (cached ml_edge_predictions.json — real per-symbol direction,
     # swing mode default; no live EODHD needed). Powers the scanner P↑ chip.
     ml_pup = {}

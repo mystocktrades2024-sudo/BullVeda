@@ -10961,7 +10961,18 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     #     "Trend Continuation": 1.08
     #   }
     try:
-        _setup_mults = (config or {}).get("setup_score_multiplier") or {}
+        # PORTFOLIO-DECOUPLE (2026-06-07): the SIGNAL layer must be universal (500+
+        # users). When portfolio-blind, read the UNIVERSAL setup multiplier (derived
+        # from the system pick track record via scripts/build_universal_setup_kills.py)
+        # instead of setup_score_multiplier (owner's signal_log, n=550). The universal
+        # builder already applied n>=30 + Wilson/PF rigor, so the account-era demotion /
+        # recency / by-regime gates below are SKIPPED when blind (guarded on
+        # `not _portfolio_blind`). See config signal_layer_portfolio_blind._note.
+        _portfolio_blind = bool((config or {}).get("signal_layer_portfolio_blind", {}).get("_enabled", False))
+        if _portfolio_blind:
+            _setup_mults = (config or {}).get("universal_setup_multiplier") or {}
+        else:
+            _setup_mults = (config or {}).get("setup_score_multiplier") or {}
         _validations = _setup_mults.get("_validations") or {}
         _setup_for_mult = (plan.get("setup_type") or setup_family or "").strip()
         # MOMENTUM-SLEEVE BYPASS (2026-05-13): if family was overridden to
@@ -10989,8 +11000,11 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
             _setup_mult = 1.0
         else:
             _setup_mult = float(_setup_mults.get(_setup_for_mult, 1.0))
-        # Demotion gate: require validation entry with n>=30 AND wr_lb<0.30
-        if _setup_mult < 1.0:
+        # Demotion gate: require validation entry with n>=30 AND wr_lb<0.30.
+        # Skipped when portfolio-blind — the universal builder already gated on
+        # n>=30 + Wilson/PF, and its kills are PF-based (e.g. VCP wr_lb 0.39 but
+        # PF 0.84), which this WR-only gate would wrongly revert.
+        if _setup_mult < 1.0 and not _portfolio_blind:
             _v = _validations.get(_setup_for_mult) or {}
             _vn = int(_v.get("n") or 0)
             _vlb = float(_v.get("wr_lb") or 1.0)
@@ -11002,7 +11016,7 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         # 10W Pullback 1.5x backed by historical n=87/WR 73.6%) shouldn't
         # amplify a strategy that has been losing recently. If recent
         # evidence fails the floor OR is too sparse (n<10), silently revert.
-        if _setup_mult > 1.0:
+        if _setup_mult > 1.0 and not _portfolio_blind:
             try:
                 _recent = _recent_setup_wr_lb(_setup_for_mult, last_n=20)
                 # _recent returns (n_found, wr_lb) or (0, 0.0) if no data
@@ -11033,7 +11047,7 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         # When this block contains an entry, it OVERRIDES the global mult.
         # Same demotion gate applies (n>=30, wr_lb<0.30).
         _by_regime = (config or {}).get("setup_score_multiplier_by_regime") or {}
-        if _by_regime:
+        if _by_regime and not _portfolio_blind:
             _br_validations = _by_regime.get("_validations") or {}
             _setup_overrides = _by_regime.get(_setup_for_mult) or {}
             _regime_key = (regime_name or "neutral").lower()

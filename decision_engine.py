@@ -1032,7 +1032,11 @@ def compute_final_verdict(t: dict, regime: str | None = None,
     # Block re-entry for `cooldown_days` after most recent stop-out on same ticker.
     _ticker = t.get("ticker")
     _cooldown_cfg = (config or {}).get("scoring", {}).get("repeat_entry_cooldown") or {}
-    _cooldown_enabled = bool(_cooldown_cfg.get("_enabled", True))
+    # PORTFOLIO-DECOUPLE (2026-06-07): the cooldown reads the owner's signal_log
+    # stop-outs — account-specific, must not gate the universal signal layer.
+    # The master flag overrides the cooldown's own _enabled. See config _note.
+    _portfolio_blind = bool((config or {}).get("signal_layer_portfolio_blind", {}).get("_enabled", False))
+    _cooldown_enabled = bool(_cooldown_cfg.get("_enabled", True)) and not _portfolio_blind
     _cooldown_days = int(_cooldown_cfg.get("cooldown_days_after_stop", 5))
     if _cooldown_enabled and _ticker:
         try:
