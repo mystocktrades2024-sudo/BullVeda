@@ -1,83 +1,197 @@
 // lens-portfolio.jsx + lens-tape.jsx
 
-// ────────────────────────────────────────────────────────────
-// PORTFOLIO — held state, simulator, correlation, sleep-test
-// ────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════
+// PORTFOLIO — REAL book state from /api/portfolio (Alpaca paper sync).
+// Held positions, candidate sizing, correlation-to-book (real OHLCV),
+// sector exposure, sleep-test from realized book vol. No fabricated
+// positions — honest empty states when the book is flat or a feed is
+// absent. Seeded synchronously from window.__BV.portfolio (boot cache),
+// refreshed async from /api/portfolio.
+// ════════════════════════════════════════════════════════════════════
+
+function pfNum(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
+
+function useBook() {
+  const read = () => (window.__BV && window.__BV.portfolio) || (window.__BV && window.__BV._bookCache) || null;
+  const [book, setBook] = React.useState(read);
+  React.useEffect(() => {
+    let on = true;
+    try {
+      if (window.__BV && window.__BV.get) {
+        window.__BV.get("/api/portfolio").then(d => {
+          if (!on || !d) return;
+          window.__BV._bookCache = d; window.__BV.portfolio = d; setBook(d);
+        }).catch(() => {});
+      }
+    } catch (e) {}
+    return () => { on = false; };
+  }, []);
+  return book;
+}
+
+// sign-aware open-R multiple for a held position
+function pfOpenR(p) {
+  const entry = pfNum(p.entry_price), stop = pfNum(p.stop), cur = pfNum(p.current_price);
+  if (entry == null || stop == null || cur == null) return null;
+  const risk = Math.abs(entry - stop); if (!(risk > 0)) return null;
+  const short = (p.direction || "").toLowerCase() === "short";
+  return short ? (entry - cur) / risk : (cur - entry) / risk;
+}
+
+function pfDaysHeld(p) {
+  const s = p.entry_date || (p.entry_datetime || "").slice(0, 10); if (!s) return null;
+  const t = Date.parse(s); if (!Number.isFinite(t)) return null;
+  return Math.max(0, Math.round((Date.now() - t) / 86400000));
+}
+
+// max drawdown % from an equity curve [{equity}]
+function pfMaxDD(curve) {
+  let peak = -Infinity, mdd = 0;
+  for (const pt of curve) {
+    const e = pfNum(pt.equity); if (e == null) continue;
+    if (e > peak) peak = e;
+    if (peak > 0) mdd = Math.min(mdd, (e - peak) / peak);
+  }
+  return mdd * 100; // ≤ 0
+}
+
+function pfSectorOf(sym) {
+  try {
+    const r = window.__BV && window.__BV.findRow ? window.__BV.findRow(sym) : null;
+    if (r && r.sector) return r.sector;
+  } catch (e) {}
+  return null;
+}
+
+function pfPearson(a, b) {
+  const n = Math.min(a.length, b.length); if (n < 10) return null;
+  const A = a.slice(a.length - n), B = b.slice(b.length - n);
+  const ma = A.reduce((x, y) => x + y, 0) / n, mb = B.reduce((x, y) => x + y, 0) / n;
+  let num = 0, da = 0, db = 0;
+  for (let i = 0; i < n; i++) { const x = A[i] - ma, y = B[i] - mb; num += x * y; da += x * x; db += y * y; }
+  if (da <= 0 || db <= 0) return null;
+  return num / Math.sqrt(da * db);
+}
+
+// fetch 60-day daily returns for a set of symbols (real OHLCV)
+function usePfReturns(symbols) {
+  const key = symbols.slice().sort().join(",");
+  const [data, setData] = React.useState(null);
+  React.useEffect(() => {
+    let on = true;
+    if (!symbols.length || !(window.__BV && window.__BV.get)) { setData({}); return; }
+    Promise.all(symbols.map(s =>
+      window.__BV.get("/api/ohlcv/" + encodeURIComponent(s) + "?days=75")
+        .then(d => [s, (d && Array.isArray(d.candles)) ? d.candles : []])
+        .catch(() => [s, []])
+    )).then(pairs => {
+      if (!on) return;
+      const out = {};
+      for (const [s, candles] of pairs) {
+        const closes = candles.map(c => pfNum(c.close)).filter(v => v != null);
+        const rets = [];
+        for (let i = 1; i < closes.length; i++) rets.push(closes[i] / closes[i - 1] - 1);
+        out[s] = rets;
+      }
+      setData(out);
+    }).catch(() => { if (on) setData({}); });
+    return () => { on = false; };
+  }, [key]);
+  return data;
+}
+
 function LensPortfolio({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("pf-1"); const s2 = useStateToggle("pf-2");
   const s3 = useStateToggle("pf-3"); const s4 = useStateToggle("pf-4");
   const s5 = useStateToggle("pf-5");
+  const book = useBook();
+  const sz = (window.positionSizing && ticker) ? window.positionSizing(ticker, mode) : null;
+
+  if (!book) {
+    return (
+      <div className="lens lens--pf">
+        <div className="lens-section"><div className="lens-pad">
+          <div className="smc-empty mono dim2" style={{ padding: 16 }}>
+            Loading book from <b className="copper">/api/portfolio</b> (Alpaca paper sync)…
+          </div>
+        </div></div>
+      </div>
+    );
+  }
+
+  const equity = pfNum(book.equity);
+  const longExp = pfNum(book.invested), shortExp = pfNum(book.short_exposure);
+  const gross = (longExp != null && shortExp != null) ? longExp + shortExp : null;
+  const grossPct = (gross != null && equity) ? gross / equity * 100 : null;
+  const openCt = book.open_count, maxPos = book.max_positions;
+  const candPct = (sz && sz.ok) ? sz.navPct : null;
+  const wr = pfNum(book.win_rate);
 
   return (
     <div className="lens lens--pf">
       <div className="hero pf-hero">
         <div className="th-left">
-          <div className="label-cap">Position fit · post-fill</div>
+          <div className="label-cap">Book fit · {(ticker && ticker.symbol) || ""}</div>
           <div className="th-score">
-            <div className="th-score-num mono">FIT</div>
-            <Pill tone="gn" dot>within all gates</Pill>
+            <div className="th-score-num mono">{candPct != null ? "+" + candPct.toFixed(1) + "%" : "—"}</div>
+            <Pill tone={candPct == null ? "ink" : candPct > 10 ? "rd" : candPct > 7 ? "amb" : "gn"} dot>
+              {candPct == null ? "candidate not sizable" : "NAV this name would add"}
+            </Pill>
           </div>
           <div className="th-pill-row">
-            <Pill tone="gn" small>NAV use 6.8% / 7.0% cap</Pill>
-            <Pill tone="gn" small>Correl-to-book 0.34</Pill>
-            <Pill tone="amb" small>Materials 18% sector</Pill>
-            <Pill tone="gn" small>Tax: long-term eligible</Pill>
+            <Pill tone="ink" small>NAV ${equity != null ? Math.round(equity).toLocaleString() : "—"}{sz && sz.demo ? " · demo" : ""}</Pill>
+            <Pill tone={grossPct != null && grossPct > 100 ? "amb" : "gn"} small>gross {grossPct != null ? grossPct.toFixed(0) + "%" : "—"}</Pill>
+            <Pill tone="gn" small>{openCt != null ? openCt : "—"}/{maxPos != null ? maxPos : "—"} slots</Pill>
+            {wr != null && <Pill tone={wr >= 50 ? "gn" : "amb"} small>win rate {wr.toFixed(0)}%</Pill>}
           </div>
         </div>
         <div className="th-right">
-          <BookSparkline />
+          <BookSparkline book={book} />
         </div>
       </div>
 
       <div className="lens-section">
         <SectionHeader n={1} title="Held-Position State"
-          sub="cash · positions · open R · NAV"
+          sub="cash · positions · open R · live Alpaca paper sync"
           style={headerStyle} right={<StateToggle name="pf-1" />} />
-        <StateWrap state={s1.value} source="portfolio_state · paper account">
-          <div className="lens-pad"><HeldState /></div>
+        <StateWrap state={s1.value} source="portfolio_state · Alpaca paper">
+          <div className="lens-pad"><HeldState book={book} candidate={ticker} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
         <SectionHeader n={2} title="Position Simulator"
-          sub="live R:R · sizing · NAV-risk · what-if 1× / 1.5× / 2× size"
+          sub="this name · 0.5× / 1× / 1.5× / 2× the engine-sized risk"
           style={headerStyle} right={<StateToggle name="pf-2" />} />
-        <StateWrap state={s2.value} source="simulator · portfolio_state">
-          <div className="lens-pad"><PositionSim ticker={ticker} /></div>
+        <StateWrap state={s2.value} source="positionSizing · live NAV">
+          <div className="lens-pad"><PositionSim sz={sz} ticker={ticker} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
         <SectionHeader n={3} title="Correlation to Book"
-          sub="rolling 60-day · per-position pairwise"
+          sub="60-day daily-return correlation · candidate vs each held"
           style={headerStyle} right={<StateToggle name="pf-3" />} />
-        <StateWrap state={s3.value} source="correlation matrix · 60d">
-          <div className="lens-pad"><CorrTable /></div>
+        <StateWrap state={s3.value} source="EODHD OHLCV · 60d returns">
+          <div className="lens-pad"><CorrTable book={book} candidate={ticker} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={4} title="Factor Exposure · Sector Allocation"
-          sub="pre vs post fill · vs household policy"
+        <SectionHeader n={4} title="Sector Exposure"
+          sub="held notional by sector · pre vs post adding this name"
           style={headerStyle} right={<StateToggle name="pf-4" />} />
-        <StateWrap state={s4.value} source="factor decomposition">
-          <div className="lens-pad"><FactorPanel /></div>
+        <StateWrap state={s4.value} source="positions × sector map">
+          <div className="lens-pad"><SectorExposure book={book} candidate={ticker} sz={sz} /></div>
         </StateWrap>
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={5} title="Sleep-Test · Suitability"
-          sub="overnight max-drawdown · ER-week exposure · weekend gap risk"
+        <SectionHeader n={5} title="Sleep-Test · Overnight Risk"
+          sub="modeled from realized book volatility (equity curve) + candidate ER"
           style={headerStyle} right={<StateToggle name="pf-5" />} />
-        <StateWrap state={s5.value} source="risk engine · scenario sweep">
-          <div className="lens-pad">
-            <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <KpiTile label="Max overnight loss" value="−$680" tone="amb" sub="3σ down · post fill" />
-              <KpiTile label="Weekend gap risk" value="−$520" tone="amb" sub="historical median 3σ" />
-              <KpiTile label="ER-week max" value="−$870" tone="rd" sub="implied move down" />
-              <KpiTile label="Sleep score" value="A−" tone="gn" sub="below household tolerance" />
-            </div>
-          </div>
+        <StateWrap state={s5.value} source="realized book vol · scenario">
+          <div className="lens-pad"><SleepTest book={book} candidate={ticker} /></div>
         </StateWrap>
       </div>
 
@@ -85,11 +199,11 @@ function LensPortfolio({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle
         <SectionHeader n={6} title="Cross-Lens Confluence" style={headerStyle} />
         <div className="lens-pad">
           <CrossLens lead="copper" cells={[
-            { lens: "Portfolio",  verdict: "FIT",   tone: "gn",  note: "all caps · correl 0.34" },
-            { lens: "Risk",       verdict: "OK",    tone: "gn",  note: "VaR within limits" },
-            { lens: "Factor",     verdict: "TILT",  tone: "amb", note: "+0.18 momentum exposure" },
-            { lens: "Sleep",      verdict: "A−",    tone: "gn",  note: "tolerable overnight" },
-            { lens: "Plan",       verdict: "READY", tone: "gn",  note: "pre-sized ticket" },
+            { lens: "Book", verdict: openCt != null ? `${openCt}/${maxPos}` : "—", tone: "gn", note: "slots used" },
+            { lens: "Gross", verdict: grossPct != null ? `${grossPct.toFixed(0)}%` : "—", tone: grossPct != null && grossPct > 100 ? "amb" : "gn", note: "exposure / NAV" },
+            { lens: "Add", verdict: candPct != null ? `+${candPct.toFixed(1)}%` : "—", tone: candPct == null ? "ink" : candPct > 10 ? "rd" : candPct > 7 ? "amb" : "gn", note: "this name" },
+            { lens: "Win rate", verdict: wr != null ? `${wr.toFixed(0)}%` : "—", tone: wr != null && wr >= 50 ? "gn" : "amb", note: `${book.wins || 0}W / ${book.losses || 0}L` },
+            { lens: "Plan", verdict: sz && sz.ok ? "READY" : "—", tone: sz && sz.ok ? "gn" : "ink", note: sz && sz.ok ? "pre-sized ticket" : "no levels" },
           ]} />
         </div>
       </div>
@@ -97,60 +211,78 @@ function LensPortfolio({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle
       <div className="lens-call">
         <span className="label-cap">The Read · Portfolio</span>
         <span className="mono">
-          Adds 6.8% NAV at 0.34 correl · sector still under cap. Fits the book.
-          <b className="copper"> Ticket pre-filled for your review.</b>
+          Book at <b>${equity != null ? Math.round(equity).toLocaleString() : "—"}</b> · {openCt != null ? openCt : "—"}/{maxPos != null ? maxPos : "—"} slots used · gross {grossPct != null ? grossPct.toFixed(0) + "%" : "—"} of NAV.
+          {candPct != null
+            ? <> This name sizes to <b className={candPct > 10 ? "dn" : "copper"}>+{candPct.toFixed(1)}% NAV</b> at the engine risk budget{sz && sz.maxLoss ? <> (max loss ${Math.round(sz.maxLoss).toLocaleString()})</> : null}.</>
+            : <> No engine levels for this name — size it manually in <b className="copper">Plan</b>.</>}
         </span>
       </div>
     </div>
   );
 }
 
-function BookSparkline() {
-  const data = [];
-  let v = 100;
-  for (let i = 0; i < 30; i++) {
-    v += (Math.random() - 0.42) * 1.2 + 0.18;
-    data.push(v);
+function BookSparkline({ book }) {
+  const curve = (book && Array.isArray(book.equity_curve)) ? book.equity_curve : [];
+  if (curve.length < 2) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+        <div className="label-cap">Book equity</div>
+        <div className="mono" style={{ fontSize: 14 }}>{book && pfNum(book.equity) != null ? "$" + Math.round(book.equity).toLocaleString() : "—"}</div>
+        <div className="mono dim2" style={{ fontSize: 10 }}>equity curve &lt; 2 points</div>
+      </div>
+    );
   }
+  const data = curve.map(p => pfNum(p.equity)).filter(v => v != null);
+  const last = data[data.length - 1], prev = data[data.length - 2];
+  const dayChg = prev ? (last - prev) / prev * 100 : 0;
+  const mdd = pfMaxDD(curve);
+  const up = last >= data[0];
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-      <div className="label-cap">Book equity · 30d</div>
-      <Sparkline data={data} color="var(--gn)" w={220} h={56} />
-      <div className="mono dim2" style={{ fontSize: 11 }}>$108,420 · +1.20% today · max DD −2.1%</div>
+      <div className="label-cap">Book equity · {data.length}d</div>
+      <Sparkline data={data} color={up ? "var(--gn)" : "var(--rd)"} w={220} h={56} />
+      <div className="mono dim2" style={{ fontSize: 11 }}>
+        ${Math.round(last).toLocaleString()} · <span className={dayChg >= 0 ? "up" : "dn"}>{dayChg >= 0 ? "+" : ""}{dayChg.toFixed(2)}% today</span> · max DD {mdd.toFixed(1)}%
+      </div>
     </div>
   );
 }
 
-function HeldState() {
-  const rows = [
-    { sym: "BORA", name: "Bora Industries", qty: 240, entry: 28.40, last: 31.10, openR: "+1.30R", pl: "+$648", days: 8 },
-    { sym: "INPR", name: "Inpera Capital",  qty: 180, entry: 41.20, last: 39.80, openR: "−0.42R", pl: "−$252", days: 4 },
-    { sym: "FLNX", name: "Felinex Tech",    qty: 60,  entry: 162.00, last: 168.40, openR: "+0.71R", pl: "+$384", days: 12 },
-  ];
+function HeldState({ book, candidate }) {
+  const rows = (book && Array.isArray(book.positions)) ? book.positions : [];
+  if (!rows.length) {
+    return <div className="smc-empty mono dim2">Flat — no open positions in the paper book. Cash ${book && pfNum(book.cash) != null ? Math.round(book.cash).toLocaleString() : "—"}.</div>;
+  }
+  const candSym = (candidate && candidate.symbol || "").toUpperCase();
+  const totalPL = rows.reduce((a, p) => a + (pfNum(p.unrealized_pnl_dollars) || 0), 0);
+  const gross = (pfNum(book.invested) || 0) + (pfNum(book.short_exposure) || 0);
   return (
     <table className="dtable">
-      <thead>
-        <tr>
-          <th>Sym</th><th>Name</th><th className="r">Qty</th><th className="r">Entry</th>
-          <th className="r">Last</th><th className="r">Open R</th><th className="r">P/L</th><th className="r">Held d</th>
-        </tr>
-      </thead>
+      <thead><tr>
+        <th>Sym</th><th>Dir</th><th className="r">Qty</th><th className="r">Entry</th>
+        <th className="r">Last</th><th className="r">Open R</th><th className="r">P/L</th><th className="r">Held d</th>
+      </tr></thead>
       <tbody>
-        {rows.map(r => (
-          <tr key={r.sym}>
-            <td className="mono"><b>{r.sym}</b></td>
-            <td className="dim">{r.name}</td>
-            <td className="r mono tabular">{r.qty}</td>
-            <td className="r mono tabular">{r.entry.toFixed(2)}</td>
-            <td className="r mono tabular">{r.last.toFixed(2)}</td>
-            <td className={`r mono tabular ${r.openR.startsWith("+") ? "up" : "dn"}`}>{r.openR}</td>
-            <td className={`r mono tabular ${r.pl.startsWith("+") ? "up" : "dn"}`}>{r.pl}</td>
-            <td className="r mono tabular dim">{r.days}</td>
-          </tr>
-        ))}
+        {rows.map((p, i) => {
+          const oR = pfOpenR(p), pl = pfNum(p.unrealized_pnl_dollars), dh = pfDaysHeld(p);
+          const short = (p.direction || "").toLowerCase() === "short";
+          const isCand = (p.ticker || "").toUpperCase() === candSym;
+          return (
+            <tr key={i} className={isCand ? "is-current" : ""}>
+              <td className="mono"><b>{p.ticker}</b>{isCand ? <span className="dim2"> ◀ this name</span> : null}</td>
+              <td><Pill tone={short ? "rd" : "gn"} small>{short ? "SHORT" : "LONG"}</Pill></td>
+              <td className="r mono tabular">{Math.abs(pfNum(p.shares) || 0).toLocaleString()}</td>
+              <td className="r mono tabular">{pfNum(p.entry_price) != null ? p.entry_price.toFixed(2) : "—"}</td>
+              <td className="r mono tabular">{pfNum(p.current_price) != null ? p.current_price.toFixed(2) : "—"}</td>
+              <td className={`r mono tabular ${oR == null ? "dim" : oR >= 0 ? "up" : "dn"}`}>{oR == null ? "—" : (oR >= 0 ? "+" : "") + oR.toFixed(2) + "R"}</td>
+              <td className={`r mono tabular ${pl == null ? "dim" : pl >= 0 ? "up" : "dn"}`}>{pl == null ? "—" : (pl >= 0 ? "+" : "−") + "$" + Math.abs(Math.round(pl)).toLocaleString()}</td>
+              <td className="r mono tabular dim">{dh == null ? "—" : dh}</td>
+            </tr>
+          );
+        })}
         <tr style={{ borderTop: "1px solid var(--line)" }}>
-          <td colSpan={6} className="mono dim2"><b>Totals · 3 positions · 16.4% NAV deployed · cash $90,628</b></td>
-          <td className="r mono tabular up">+$780</td>
+          <td colSpan={6} className="mono dim2"><b>{rows.length} position{rows.length > 1 ? "s" : ""} · cash ${pfNum(book.cash) != null ? Math.round(book.cash).toLocaleString() : "—"} · gross ${Math.round(gross).toLocaleString()}</b></td>
+          <td className={`r mono tabular ${totalPL >= 0 ? "up" : "dn"}`}>{totalPL >= 0 ? "+" : "−"}${Math.abs(Math.round(totalPL)).toLocaleString()}</td>
           <td></td>
         </tr>
       </tbody>
@@ -158,39 +290,64 @@ function HeldState() {
   );
 }
 
-function PositionSim({ ticker }) {
-  const rows = [
-    { mult: "0.5×", sh: 55,  notional: 3708, navPct: 3.4, maxL: 210, ratio: "0.19% NAV", tone: "gn" },
-    { mult: "1.0×", sh: 110, notional: 7416, navPct: 6.8, maxL: 420, ratio: "0.39% NAV", tone: "copper", on: true },
-    { mult: "1.5×", sh: 165, notional: 11_124, navPct: 10.3, maxL: 630, ratio: "0.58% NAV", tone: "amb" },
-    { mult: "2.0×", sh: 220, notional: 14_832, navPct: 13.7, maxL: 840, ratio: "0.78% NAV", tone: "rd" },
-  ];
+function PositionSim({ sz, ticker }) {
+  if (!sz || !sz.ok) {
+    return <div className="smc-empty mono dim2">— no engine levels for {(ticker && ticker.symbol) || "this name"} (need a valid entry / stop / target to size). Set them in Plan.</div>;
+  }
+  const base = sz.shares, entry = sz.entry, risk = sz.risk, nav = sz.nav;
+  const rows = [0.5, 1, 1.5, 2].map(m => {
+    const sh = Math.max(1, Math.round(base * m));
+    const notional = sh * entry, maxL = sh * risk;
+    const navPct = notional / nav * 100;
+    return { m, sh, notional, navPct, maxL, lossPct: maxL / nav * 100,
+      tone: navPct > 13 ? "rd" : navPct > 10 ? "amb" : m === 1 ? "copper" : "gn", on: m === 1 };
+  });
   return (
-    <table className="dtable">
-      <thead><tr><th>Size mult</th><th className="r">Shares</th><th className="r">Notional</th><th className="r">% NAV</th><th className="r">Max loss</th><th>Risk ratio</th></tr></thead>
-      <tbody>
-        {rows.map((r, i) => (
-          <tr key={i} className={r.on ? "is-current" : ""}>
-            <td className="mono"><b>{r.mult}</b></td>
-            <td className="r mono tabular">{r.sh}</td>
-            <td className="r mono tabular">${r.notional.toLocaleString()}</td>
-            <td className={`r mono tabular kpi-tone--${r.tone}`}>{r.navPct.toFixed(1)}%</td>
-            <td className={`r mono tabular kpi-tone--${r.tone}`}>−${r.maxL}</td>
-            <td className="mono dim">{r.ratio}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div>
+      <table className="dtable">
+        <thead><tr><th>Size</th><th className="r">Shares</th><th className="r">Notional</th><th className="r">% NAV</th><th className="r">Max loss</th><th className="r">% NAV risk</th></tr></thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} className={r.on ? "is-current" : ""}>
+              <td className="mono"><b>{r.m.toFixed(1)}×</b>{r.on ? <span className="dim2"> engine</span> : null}</td>
+              <td className="r mono tabular">{r.sh.toLocaleString()}</td>
+              <td className="r mono tabular">${Math.round(r.notional).toLocaleString()}</td>
+              <td className={`r mono tabular kpi-tone--${r.tone}`}>{r.navPct.toFixed(1)}%</td>
+              <td className={`r mono tabular kpi-tone--${r.tone}`}>−${Math.round(r.maxL).toLocaleString()}</td>
+              <td className="mono dim r">{r.lossPct.toFixed(2)}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="corr-note mono dim2" style={{ marginTop: 6 }}>
+        Engine 1× risk budget = ${Math.round(sz.riskBudget || 0).toLocaleString()} ({(sz.lossNavPct || 0).toFixed(2)}% NAV) · entry ${entry.toFixed(2)} · stop ${sz.stop.toFixed(2)} ({(sz.pctToStop || 0).toFixed(1)}% away) · R:R {sz.rr != null ? sz.rr.toFixed(1) : "—"}{sz.wr != null ? ` · setup WR ${(sz.wr * 100).toFixed(0)}% (n=${sz.n || 0})` : ""}.
+      </div>
+    </div>
   );
 }
 
-function CorrTable() {
-  const rows = [
-    { sym: "BORA", c: 0.42, tone: "amb" },
-    { sym: "INPR", c: 0.18, tone: "gn" },
-    { sym: "FLNX", c: -0.12, tone: "gn" },
-    { sym: "Book composite", c: 0.34, tone: "amb", bold: true },
-  ];
+function CorrTable({ book, candidate }) {
+  const candSym = (candidate && candidate.symbol || "").toUpperCase();
+  const held = (book && Array.isArray(book.positions)) ? book.positions.map(p => (p.ticker || "").toUpperCase()).filter(Boolean) : [];
+  const heldUnique = held.filter((s, i) => s && held.indexOf(s) === i && s !== candSym);
+  const syms = candSym ? [candSym, ...heldUnique] : heldUnique;
+  const rets = usePfReturns(syms);
+  if (!candSym) return <div className="smc-empty mono dim2">— open a candidate from the scan to correlate it against the book.</div>;
+  if (!heldUnique.length) return <div className="smc-empty mono dim2">— book has no other open names to correlate against (flat or single-name).</div>;
+  if (rets == null) return <div className="smc-empty mono dim2">Fetching 60-day returns for {syms.join(", ")}…</div>;
+  const candR = rets[candSym] || [];
+  if (candR.length < 10) return <div className="smc-empty mono dim2">— not enough price history for {candSym} to correlate.</div>;
+  const posBySym = {};
+  (book.positions || []).forEach(p => { posBySym[(p.ticker || "").toUpperCase()] = Math.abs(pfNum(p.position_size) || 0); });
+  let wsum = 0, cwsum = 0;
+  const rows = heldUnique.map(s => {
+    const c = pfPearson(candR, rets[s] || []);
+    const w = posBySym[s] || 0;
+    if (c != null) { wsum += w; cwsum += c * w; }
+    return { sym: s, c, tone: c == null ? "ink" : c > 0.5 ? "rd" : c > 0.2 ? "amb" : "gn" };
+  });
+  const comp = wsum > 0 ? cwsum / wsum : null;
+  rows.push({ sym: "Book composite", c: comp, tone: comp == null ? "ink" : comp > 0.5 ? "rd" : comp > 0.2 ? "amb" : "gn", bold: true });
   return (
     <div className="corr-tbl">
       {rows.map((r, i) => (
@@ -198,43 +355,94 @@ function CorrTable() {
           <span className="mono">{r.sym}</span>
           <div className="corr-bar">
             <div className={`corr-bar-fill kpi-tone--${r.tone}`} style={{
-              width: `${Math.abs(r.c) * 50}%`,
-              marginLeft: r.c < 0 ? `${50 - Math.abs(r.c) * 50}%` : "50%",
+              width: r.c == null ? "0%" : `${Math.abs(r.c) * 50}%`,
+              marginLeft: r.c == null ? "50%" : r.c < 0 ? `${50 - Math.abs(r.c) * 50}%` : "50%",
               background: r.tone === "gn" ? "var(--gn)" : r.tone === "amb" ? "var(--amb)" : "var(--rd)",
             }} />
             <div className="corr-bar-axis" />
           </div>
-          <span className={`mono kpi-tone--${r.tone}`}>{r.c >= 0 ? "+" : ""}{r.c.toFixed(2)}</span>
+          <span className={`mono kpi-tone--${r.tone}`}>{r.c == null ? "—" : (r.c >= 0 ? "+" : "") + r.c.toFixed(2)}</span>
         </div>
       ))}
-      <div className="corr-note mono dim2">Correlation cap = 0.55 (book composite). ARCM adds within tolerance.</div>
+      <div className="corr-note mono dim2">Pearson on 60-day daily returns (EODHD), notional-weighted for the composite. High positive correlation to existing longs concentrates directional risk; a short leg flips the sign of the hedge.</div>
     </div>
   );
 }
 
-function FactorPanel() {
-  const factors = [
-    { f: "Momentum",  pre: 0.62, post: 0.80, tone: "amb", cap: 1.00 },
-    { f: "Value",     pre: -0.10, post: -0.08, tone: "gn",  cap: 0.50 },
-    { f: "Quality",   pre: 0.34, post: 0.41, tone: "gn",  cap: 1.00 },
-    { f: "Size",      pre: -0.20, post: -0.16, tone: "gn",  cap: 0.50 },
-    { f: "Vol",       pre: 0.18, post: 0.22, tone: "amb", cap: 0.40 },
+function SectorExposure({ book, candidate, sz }) {
+  const positions = (book && Array.isArray(book.positions)) ? book.positions : [];
+  const equity = pfNum(book.equity) || 1;
+  if (!positions.length && !(sz && sz.ok)) return <div className="smc-empty mono dim2">— flat book and no candidate sizing; nothing to allocate.</div>;
+  const pre = {}; let unknown = 0;
+  positions.forEach(p => {
+    const sec = pfSectorOf((p.ticker || "").toUpperCase()) || "Unknown";
+    const not = Math.abs(pfNum(p.position_size) || 0);
+    pre[sec] = (pre[sec] || 0) + not;
+    if (sec === "Unknown") unknown += not;
+  });
+  const post = Object.assign({}, pre);
+  const candSym = (candidate && candidate.symbol || "").toUpperCase();
+  const candSec = pfSectorOf(candSym) || (candidate && candidate.sector) || "Unknown";
+  const candNot = (sz && sz.ok) ? sz.notional : 0;
+  if (candNot) post[candSec] = (post[candSec] || 0) + candNot;
+  const secs = Object.keys(post).sort((a, b) => post[b] - post[a]);
+  if (!secs.length) return <div className="smc-empty mono dim2">— no sizable exposure.</div>;
+  return (
+    <div>
+      <table className="dtable">
+        <thead><tr><th>Sector</th><th className="r">Pre %NAV</th><th className="r">Post %NAV</th><th>Δ</th></tr></thead>
+        <tbody>
+          {secs.map((s, i) => {
+            const a = (pre[s] || 0) / equity * 100, b = (post[s] || 0) / equity * 100, d = b - a;
+            const tone = b > 40 ? "rd" : b > 25 ? "amb" : "gn";
+            return (
+              <tr key={i}>
+                <td className="mono">{s}{s === candSec && candNot ? <span className="dim2"> ◀ adds here</span> : null}</td>
+                <td className="r mono tabular dim">{a.toFixed(1)}%</td>
+                <td className={`r mono tabular kpi-tone--${tone}`}>{b.toFixed(1)}%</td>
+                <td className={`mono ${d > 0.05 ? "up" : d < -0.05 ? "dn" : "dim"}`}>{d >= 0 ? "+" : ""}{d.toFixed(1)}%</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div className="corr-note mono dim2" style={{ marginTop: 6 }}>
+        Gross notional ÷ NAV per sector (shorts counted gross). {unknown > 0 ? "“Unknown” = held name not in the current scan universe (no sector tag). " : ""}Sectors above ~25% NAV concentrate single-factor risk.
+      </div>
+    </div>
+  );
+}
+
+function SleepTest({ book, candidate }) {
+  const curve = (book && Array.isArray(book.equity_curve)) ? book.equity_curve.map(p => pfNum(p.equity)).filter(v => v != null) : [];
+  const equity = pfNum(book.equity) || 0;
+  let sigmaPct = null;
+  if (curve.length >= 8) {
+    const rets = [];
+    for (let i = 1; i < curve.length; i++) if (curve[i - 1] > 0) rets.push(curve[i] / curve[i - 1] - 1);
+    if (rets.length >= 5) {
+      const m = rets.reduce((a, b) => a + b, 0) / rets.length;
+      const v = rets.reduce((a, b) => a + (b - m) * (b - m), 0) / rets.length;
+      sigmaPct = Math.sqrt(v);
+    }
+  }
+  const sig$ = sigmaPct != null ? sigmaPct * equity : null;
+  const er = (candidate && candidate.earnings && candidate.earnings.days != null) ? candidate.earnings : null;
+  const tiles = [
+    { label: "Overnight 1σ", value: sig$ != null ? `−$${Math.round(sig$).toLocaleString()}` : "—", tone: "gn", sub: sigmaPct != null ? `${(sigmaPct * 100).toFixed(2)}% book σ/day` : "need ≥8d curve" },
+    { label: "Stress 3σ", value: sig$ != null ? `−$${Math.round(sig$ * 3).toLocaleString()}` : "—", tone: "amb", sub: "realized book vol ×3" },
+    { label: "ER-week", value: er ? `T−${er.days}d` : "none", tone: er && er.days <= 7 ? "rd" : er ? "amb" : "gn", sub: er ? (er.days <= 7 ? "candidate reports in window" : "candidate ER scheduled") : "no candidate ER" },
+    { label: "Sleep score", value: sigmaPct == null ? "—" : sigmaPct * 100 < 0.5 ? "A" : sigmaPct * 100 < 1.0 ? "B" : "C", tone: sigmaPct == null ? "ink" : sigmaPct * 100 < 0.5 ? "gn" : sigmaPct * 100 < 1.0 ? "amb" : "rd", sub: "from realized vol" },
   ];
   return (
-    <table className="dtable">
-      <thead><tr><th>Factor</th><th className="r">Pre</th><th className="r">Post</th><th>Δ</th><th className="r">Cap</th></tr></thead>
-      <tbody>
-        {factors.map((f, i) => (
-          <tr key={i}>
-            <td className="mono">{f.f}</td>
-            <td className="r mono tabular dim">{f.pre.toFixed(2)}</td>
-            <td className={`r mono tabular kpi-tone--${f.tone}`}>{f.post.toFixed(2)}</td>
-            <td className={`mono ${f.post > f.pre ? "up" : "dn"}`}>{(f.post - f.pre >= 0 ? "+" : "")}{(f.post - f.pre).toFixed(2)}</td>
-            <td className="r mono tabular dim">{f.cap.toFixed(2)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div>
+      <div className="kpi-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+        {tiles.map((t, i) => <KpiTile key={i} label={t.label} value={t.value} tone={t.tone} sub={t.sub} />)}
+      </div>
+      <div className="corr-note mono dim2" style={{ marginTop: 6 }}>
+        Overnight loss bands are the book's realized daily volatility (from the {curve.length}-point equity curve) scaled to NAV — a portfolio-level estimate, not a per-position Greek. ER-week flags the candidate's next report inside the swing window.
+      </div>
+    </div>
   );
 }
 

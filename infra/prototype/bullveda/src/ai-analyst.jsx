@@ -25,9 +25,9 @@ function AIAnalystView({ all, onTicker, pick, onPick, single, sym: symProp, tick
     const ctx = [
       `Ticker: ${P.sym} (${P.name}), sector ${P.sector}, price $${P.px}.`,
       `Quant engine read — composite score ${P.score}/100, verdict ${P.verdict}, P(up) ${Math.round(P.pUp * 100)}%, confidence ${P.conf}.`,
-      `3-model ensemble heads: ${heads} (agree ${P.agree}/3).`,
-      `Monte-Carlo 3M median return ${P.horizons[2].ret.toFixed(1)}%, target $${P.target}, modeled stop $${P.stop}.`,
-      `Top model features: ${feats}. Historical analogs resolved up ${Math.round((P.analogWin || 0) * 100)}% of the time.`,
+      `Model heads — Direction/Magnitude/Hit-Net: ${heads} (agree ${P.agree}/3).`,
+      `Model 3M median return ${P.horizons[2].ret.toFixed(1)}%, target $${P.target}, modeled stop $${P.stop}.`,
+      `Top SHAP drivers: ${feats}.`,
     ].join("\n");
     return `You are a disciplined swing-trading analyst. Using ONLY the quantitative signals below, write a concise, balanced read for a self-directed trader. Do NOT invent precise price predictions or probabilities beyond what's given; reason qualitatively about what the signals imply.
 

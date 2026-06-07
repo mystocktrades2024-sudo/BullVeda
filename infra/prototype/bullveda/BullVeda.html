@@ -12093,6 +12093,7 @@ const LENSES = [
   { id: "risk", label: "Risk", kbd: "R", q: "VaR \xB7 Kelly \xB7 drawdown \xB7 stress", accent: "rd", verdict: "amb" },
   { id: "options", label: "Options", kbd: "O", q: "IV \xB7 flow \xB7 payoff", accent: "amb", verdict: "amb" },
   { id: "tape", label: "Tape \xB7 Flow", kbd: "I", q: "News + insider + 13F", accent: "violet", verdict: "gn" },
+  { id: "portfolio", label: "Portfolio \xB7 Book", kbd: "P", q: "Does this fit my book?", accent: "copper", verdict: "gn" },
   { id: "mledge", label: "AI Edge", kbd: "M", q: "3-headed model forecast", accent: "violet", verdict: "gn" },
   { id: "time", label: "Time Anatomy", kbd: "8", q: "When does this resolve? (T1/T2)", accent: "copper", verdict: "gn" }
 ];
@@ -13420,6 +13421,7 @@ function DetailLens({ lensId, ticker, mode, sizeCat, headerStyle, kpiStyle, hero
   if (lensId === "risk") return /* @__PURE__ */ React.createElement(LensRisk, { ...props });
   if (lensId === "options") return /* @__PURE__ */ React.createElement(LensOptions, { ...props });
   if (lensId === "tape") return /* @__PURE__ */ React.createElement(LensTape, { ...props });
+  if (lensId === "portfolio") return /* @__PURE__ */ React.createElement(LensPortfolio, { ...props });
   if (lensId === "time" && window.LensTime) return /* @__PURE__ */ React.createElement(window.LensTime, { ...props });
   if (lensId === "mledge") return /* @__PURE__ */ React.createElement("div", { className: "lens-ml-wrap" }, /* @__PURE__ */ React.createElement(LensML, { ...props }));
   return /* @__PURE__ */ React.createElement(LensStub, { lensId });
@@ -22278,113 +22280,311 @@ window.LensEarnings = LensEarnings;
 window.LensOptions = LensOptions;
 </script>
 <script>/* src/lens-portfolio-tape.jsx */
+function pfNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+function useBook() {
+  const read = () => window.__BV && window.__BV.portfolio || window.__BV && window.__BV._bookCache || null;
+  const [book, setBook] = React.useState(read);
+  React.useEffect(() => {
+    let on = true;
+    try {
+      if (window.__BV && window.__BV.get) {
+        window.__BV.get("/api/portfolio").then((d) => {
+          if (!on || !d) return;
+          window.__BV._bookCache = d;
+          window.__BV.portfolio = d;
+          setBook(d);
+        }).catch(() => {
+        });
+      }
+    } catch (e) {
+    }
+    return () => {
+      on = false;
+    };
+  }, []);
+  return book;
+}
+function pfOpenR(p) {
+  const entry = pfNum(p.entry_price), stop = pfNum(p.stop), cur = pfNum(p.current_price);
+  if (entry == null || stop == null || cur == null) return null;
+  const risk = Math.abs(entry - stop);
+  if (!(risk > 0)) return null;
+  const short = (p.direction || "").toLowerCase() === "short";
+  return short ? (entry - cur) / risk : (cur - entry) / risk;
+}
+function pfDaysHeld(p) {
+  const s = p.entry_date || (p.entry_datetime || "").slice(0, 10);
+  if (!s) return null;
+  const t = Date.parse(s);
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, Math.round((Date.now() - t) / 864e5));
+}
+function pfMaxDD(curve) {
+  let peak = -Infinity, mdd = 0;
+  for (const pt of curve) {
+    const e = pfNum(pt.equity);
+    if (e == null) continue;
+    if (e > peak) peak = e;
+    if (peak > 0) mdd = Math.min(mdd, (e - peak) / peak);
+  }
+  return mdd * 100;
+}
+function pfSectorOf(sym) {
+  try {
+    const r = window.__BV && window.__BV.findRow ? window.__BV.findRow(sym) : null;
+    if (r && r.sector) return r.sector;
+  } catch (e) {
+  }
+  return null;
+}
+function pfPearson(a, b) {
+  const n = Math.min(a.length, b.length);
+  if (n < 10) return null;
+  const A = a.slice(a.length - n), B = b.slice(b.length - n);
+  const ma = A.reduce((x, y) => x + y, 0) / n, mb = B.reduce((x, y) => x + y, 0) / n;
+  let num = 0, da = 0, db = 0;
+  for (let i = 0; i < n; i++) {
+    const x = A[i] - ma, y = B[i] - mb;
+    num += x * y;
+    da += x * x;
+    db += y * y;
+  }
+  if (da <= 0 || db <= 0) return null;
+  return num / Math.sqrt(da * db);
+}
+function usePfReturns(symbols) {
+  const key = symbols.slice().sort().join(",");
+  const [data, setData] = React.useState(null);
+  React.useEffect(() => {
+    let on = true;
+    if (!symbols.length || !(window.__BV && window.__BV.get)) {
+      setData({});
+      return;
+    }
+    Promise.all(symbols.map(
+      (s) => window.__BV.get("/api/ohlcv/" + encodeURIComponent(s) + "?days=75").then((d) => [s, d && Array.isArray(d.candles) ? d.candles : []]).catch(() => [s, []])
+    )).then((pairs) => {
+      if (!on) return;
+      const out = {};
+      for (const [s, candles] of pairs) {
+        const closes = candles.map((c) => pfNum(c.close)).filter((v) => v != null);
+        const rets = [];
+        for (let i = 1; i < closes.length; i++) rets.push(closes[i] / closes[i - 1] - 1);
+        out[s] = rets;
+      }
+      setData(out);
+    }).catch(() => {
+      if (on) setData({});
+    });
+    return () => {
+      on = false;
+    };
+  }, [key]);
+  return data;
+}
 function LensPortfolio({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s1 = useStateToggle("pf-1");
   const s2 = useStateToggle("pf-2");
   const s3 = useStateToggle("pf-3");
   const s4 = useStateToggle("pf-4");
   const s5 = useStateToggle("pf-5");
-  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--pf" }, /* @__PURE__ */ React.createElement("div", { className: "hero pf-hero" }, /* @__PURE__ */ React.createElement("div", { className: "th-left" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Position fit \xB7 post-fill"), /* @__PURE__ */ React.createElement("div", { className: "th-score" }, /* @__PURE__ */ React.createElement("div", { className: "th-score-num mono" }, "FIT"), /* @__PURE__ */ React.createElement(Pill, { tone: "gn", dot: true }, "within all gates")), /* @__PURE__ */ React.createElement("div", { className: "th-pill-row" }, /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true }, "NAV use 6.8% / 7.0% cap"), /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true }, "Correl-to-book 0.34"), /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "Materials 18% sector"), /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true }, "Tax: long-term eligible"))), /* @__PURE__ */ React.createElement("div", { className: "th-right" }, /* @__PURE__ */ React.createElement(BookSparkline, null))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  const book = useBook();
+  const sz = window.positionSizing && ticker ? window.positionSizing(ticker, mode) : null;
+  if (!book) {
+    return /* @__PURE__ */ React.createElement("div", { className: "lens lens--pf" }, /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2", style: { padding: 16 } }, "Loading book from ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "/api/portfolio"), " (Alpaca paper sync)\u2026"))));
+  }
+  const equity = pfNum(book.equity);
+  const longExp = pfNum(book.invested), shortExp = pfNum(book.short_exposure);
+  const gross = longExp != null && shortExp != null ? longExp + shortExp : null;
+  const grossPct = gross != null && equity ? gross / equity * 100 : null;
+  const openCt = book.open_count, maxPos = book.max_positions;
+  const candPct = sz && sz.ok ? sz.navPct : null;
+  const wr = pfNum(book.win_rate);
+  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--pf" }, /* @__PURE__ */ React.createElement("div", { className: "hero pf-hero" }, /* @__PURE__ */ React.createElement("div", { className: "th-left" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Book fit \xB7 ", ticker && ticker.symbol || ""), /* @__PURE__ */ React.createElement("div", { className: "th-score" }, /* @__PURE__ */ React.createElement("div", { className: "th-score-num mono" }, candPct != null ? "+" + candPct.toFixed(1) + "%" : "\u2014"), /* @__PURE__ */ React.createElement(Pill, { tone: candPct == null ? "ink" : candPct > 10 ? "rd" : candPct > 7 ? "amb" : "gn", dot: true }, candPct == null ? "candidate not sizable" : "NAV this name would add")), /* @__PURE__ */ React.createElement("div", { className: "th-pill-row" }, /* @__PURE__ */ React.createElement(Pill, { tone: "ink", small: true }, "NAV $", equity != null ? Math.round(equity).toLocaleString() : "\u2014", sz && sz.demo ? " \xB7 demo" : ""), /* @__PURE__ */ React.createElement(Pill, { tone: grossPct != null && grossPct > 100 ? "amb" : "gn", small: true }, "gross ", grossPct != null ? grossPct.toFixed(0) + "%" : "\u2014"), /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true }, openCt != null ? openCt : "\u2014", "/", maxPos != null ? maxPos : "\u2014", " slots"), wr != null && /* @__PURE__ */ React.createElement(Pill, { tone: wr >= 50 ? "gn" : "amb", small: true }, "win rate ", wr.toFixed(0), "%"))), /* @__PURE__ */ React.createElement("div", { className: "th-right" }, /* @__PURE__ */ React.createElement(BookSparkline, { book }))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 1,
       title: "Held-Position State",
-      sub: "cash \xB7 positions \xB7 open R \xB7 NAV",
+      sub: "cash \xB7 positions \xB7 open R \xB7 live Alpaca paper sync",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "pf-1" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s1.value, source: "portfolio_state \xB7 paper account" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(HeldState, null)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s1.value, source: "portfolio_state \xB7 Alpaca paper" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(HeldState, { book, candidate: ticker })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 2,
       title: "Position Simulator",
-      sub: "live R:R \xB7 sizing \xB7 NAV-risk \xB7 what-if 1\xD7 / 1.5\xD7 / 2\xD7 size",
+      sub: "this name \xB7 0.5\xD7 / 1\xD7 / 1.5\xD7 / 2\xD7 the engine-sized risk",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "pf-2" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s2.value, source: "simulator \xB7 portfolio_state" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(PositionSim, { ticker })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s2.value, source: "positionSizing \xB7 live NAV" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(PositionSim, { sz, ticker })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 3,
       title: "Correlation to Book",
-      sub: "rolling 60-day \xB7 per-position pairwise",
+      sub: "60-day daily-return correlation \xB7 candidate vs each held",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "pf-3" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s3.value, source: "correlation matrix \xB7 60d" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CorrTable, null)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s3.value, source: "EODHD OHLCV \xB7 60d returns" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CorrTable, { book, candidate: ticker })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 4,
-      title: "Factor Exposure \xB7 Sector Allocation",
-      sub: "pre vs post fill \xB7 vs household policy",
+      title: "Sector Exposure",
+      sub: "held notional by sector \xB7 pre vs post adding this name",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "pf-4" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s4.value, source: "factor decomposition" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(FactorPanel, null)))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s4.value, source: "positions \xD7 sector map" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(SectorExposure, { book, candidate: ticker, sz })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       n: 5,
-      title: "Sleep-Test \xB7 Suitability",
-      sub: "overnight max-drawdown \xB7 ER-week exposure \xB7 weekend gap risk",
+      title: "Sleep-Test \xB7 Overnight Risk",
+      sub: "modeled from realized book volatility (equity curve) + candidate ER",
       style: headerStyle,
       right: /* @__PURE__ */ React.createElement(StateToggle, { name: "pf-5" })
     }
-  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s5.value, source: "risk engine \xB7 scenario sweep" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, /* @__PURE__ */ React.createElement(KpiTile, { label: "Max overnight loss", value: "\u2212$680", tone: "amb", sub: "3\u03C3 down \xB7 post fill" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Weekend gap risk", value: "\u2212$520", tone: "amb", sub: "historical median 3\u03C3" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "ER-week max", value: "\u2212$870", tone: "rd", sub: "implied move down" }), /* @__PURE__ */ React.createElement(KpiTile, { label: "Sleep score", value: "A\u2212", tone: "gn", sub: "below household tolerance" }))))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(SectionHeader, { n: 6, title: "Cross-Lens Confluence", style: headerStyle }), /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CrossLens, { lead: "copper", cells: [
-    { lens: "Portfolio", verdict: "FIT", tone: "gn", note: "all caps \xB7 correl 0.34" },
-    { lens: "Risk", verdict: "OK", tone: "gn", note: "VaR within limits" },
-    { lens: "Factor", verdict: "TILT", tone: "amb", note: "+0.18 momentum exposure" },
-    { lens: "Sleep", verdict: "A\u2212", tone: "gn", note: "tolerable overnight" },
-    { lens: "Plan", verdict: "READY", tone: "gn", note: "pre-sized ticket" }
-  ] }))), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 Portfolio"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "Adds 6.8% NAV at 0.34 correl \xB7 sector still under cap. Fits the book.", /* @__PURE__ */ React.createElement("b", { className: "copper" }, " Ticket pre-filled for your review."))));
+  ), /* @__PURE__ */ React.createElement(StateWrap, { state: s5.value, source: "realized book vol \xB7 scenario" }, /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(SleepTest, { book, candidate: ticker })))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(SectionHeader, { n: 6, title: "Cross-Lens Confluence", style: headerStyle }), /* @__PURE__ */ React.createElement("div", { className: "lens-pad" }, /* @__PURE__ */ React.createElement(CrossLens, { lead: "copper", cells: [
+    { lens: "Book", verdict: openCt != null ? `${openCt}/${maxPos}` : "\u2014", tone: "gn", note: "slots used" },
+    { lens: "Gross", verdict: grossPct != null ? `${grossPct.toFixed(0)}%` : "\u2014", tone: grossPct != null && grossPct > 100 ? "amb" : "gn", note: "exposure / NAV" },
+    { lens: "Add", verdict: candPct != null ? `+${candPct.toFixed(1)}%` : "\u2014", tone: candPct == null ? "ink" : candPct > 10 ? "rd" : candPct > 7 ? "amb" : "gn", note: "this name" },
+    { lens: "Win rate", verdict: wr != null ? `${wr.toFixed(0)}%` : "\u2014", tone: wr != null && wr >= 50 ? "gn" : "amb", note: `${book.wins || 0}W / ${book.losses || 0}L` },
+    { lens: "Plan", verdict: sz && sz.ok ? "READY" : "\u2014", tone: sz && sz.ok ? "gn" : "ink", note: sz && sz.ok ? "pre-sized ticket" : "no levels" }
+  ] }))), /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 Portfolio"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "Book at ", /* @__PURE__ */ React.createElement("b", null, "$", equity != null ? Math.round(equity).toLocaleString() : "\u2014"), " \xB7 ", openCt != null ? openCt : "\u2014", "/", maxPos != null ? maxPos : "\u2014", " slots used \xB7 gross ", grossPct != null ? grossPct.toFixed(0) + "%" : "\u2014", " of NAV.", candPct != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, " This name sizes to ", /* @__PURE__ */ React.createElement("b", { className: candPct > 10 ? "dn" : "copper" }, "+", candPct.toFixed(1), "% NAV"), " at the engine risk budget", sz && sz.maxLoss ? /* @__PURE__ */ React.createElement(React.Fragment, null, " (max loss $", Math.round(sz.maxLoss).toLocaleString(), ")") : null, ".") : /* @__PURE__ */ React.createElement(React.Fragment, null, " No engine levels for this name \u2014 size it manually in ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "Plan"), "."))));
 }
-function BookSparkline() {
-  const data = [];
-  let v = 100;
-  for (let i = 0; i < 30; i++) {
-    v += (Math.random() - 0.42) * 1.2 + 0.18;
-    data.push(v);
+function BookSparkline({ book }) {
+  const curve = book && Array.isArray(book.equity_curve) ? book.equity_curve : [];
+  if (curve.length < 2) {
+    return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 } }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Book equity"), /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 14 } }, book && pfNum(book.equity) != null ? "$" + Math.round(book.equity).toLocaleString() : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 10 } }, "equity curve < 2 points"));
   }
-  return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 } }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Book equity \xB7 30d"), /* @__PURE__ */ React.createElement(Sparkline, { data, color: "var(--gn)", w: 220, h: 56 }), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 11 } }, "$108,420 \xB7 +1.20% today \xB7 max DD \u22122.1%"));
+  const data = curve.map((p) => pfNum(p.equity)).filter((v) => v != null);
+  const last = data[data.length - 1], prev = data[data.length - 2];
+  const dayChg = prev ? (last - prev) / prev * 100 : 0;
+  const mdd = pfMaxDD(curve);
+  const up = last >= data[0];
+  return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 } }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Book equity \xB7 ", data.length, "d"), /* @__PURE__ */ React.createElement(Sparkline, { data, color: up ? "var(--gn)" : "var(--rd)", w: 220, h: 56 }), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 11 } }, "$", Math.round(last).toLocaleString(), " \xB7 ", /* @__PURE__ */ React.createElement("span", { className: dayChg >= 0 ? "up" : "dn" }, dayChg >= 0 ? "+" : "", dayChg.toFixed(2), "% today"), " \xB7 max DD ", mdd.toFixed(1), "%"));
 }
-function HeldState() {
-  const rows = [
-    { sym: "BORA", name: "Bora Industries", qty: 240, entry: 28.4, last: 31.1, openR: "+1.30R", pl: "+$648", days: 8 },
-    { sym: "INPR", name: "Inpera Capital", qty: 180, entry: 41.2, last: 39.8, openR: "\u22120.42R", pl: "\u2212$252", days: 4 },
-    { sym: "FLNX", name: "Felinex Tech", qty: 60, entry: 162, last: 168.4, openR: "+0.71R", pl: "+$384", days: 12 }
-  ];
-  return /* @__PURE__ */ React.createElement("table", { className: "dtable" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Sym"), /* @__PURE__ */ React.createElement("th", null, "Name"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Qty"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Entry"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Last"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Open R"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "P/L"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Held d"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r) => /* @__PURE__ */ React.createElement("tr", { key: r.sym }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, r.sym)), /* @__PURE__ */ React.createElement("td", { className: "dim" }, r.name), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, r.qty), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, r.entry.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, r.last.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${r.openR.startsWith("+") ? "up" : "dn"}` }, r.openR), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${r.pl.startsWith("+") ? "up" : "dn"}` }, r.pl), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, r.days))), /* @__PURE__ */ React.createElement("tr", { style: { borderTop: "1px solid var(--line)" } }, /* @__PURE__ */ React.createElement("td", { colSpan: 6, className: "mono dim2" }, /* @__PURE__ */ React.createElement("b", null, "Totals \xB7 3 positions \xB7 16.4% NAV deployed \xB7 cash $90,628")), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular up" }, "+$780"), /* @__PURE__ */ React.createElement("td", null))));
+function HeldState({ book, candidate }) {
+  const rows = book && Array.isArray(book.positions) ? book.positions : [];
+  if (!rows.length) {
+    return /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "Flat \u2014 no open positions in the paper book. Cash $", book && pfNum(book.cash) != null ? Math.round(book.cash).toLocaleString() : "\u2014", ".");
+  }
+  const candSym = (candidate && candidate.symbol || "").toUpperCase();
+  const totalPL = rows.reduce((a, p) => a + (pfNum(p.unrealized_pnl_dollars) || 0), 0);
+  const gross = (pfNum(book.invested) || 0) + (pfNum(book.short_exposure) || 0);
+  return /* @__PURE__ */ React.createElement("table", { className: "dtable" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Sym"), /* @__PURE__ */ React.createElement("th", null, "Dir"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Qty"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Entry"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Last"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Open R"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "P/L"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Held d"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((p, i) => {
+    const oR = pfOpenR(p), pl = pfNum(p.unrealized_pnl_dollars), dh = pfDaysHeld(p);
+    const short = (p.direction || "").toLowerCase() === "short";
+    const isCand = (p.ticker || "").toUpperCase() === candSym;
+    return /* @__PURE__ */ React.createElement("tr", { key: i, className: isCand ? "is-current" : "" }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, p.ticker), isCand ? /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " \u25C0 this name") : null), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: short ? "rd" : "gn", small: true }, short ? "SHORT" : "LONG")), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, Math.abs(pfNum(p.shares) || 0).toLocaleString()), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, pfNum(p.entry_price) != null ? p.entry_price.toFixed(2) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, pfNum(p.current_price) != null ? p.current_price.toFixed(2) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${oR == null ? "dim" : oR >= 0 ? "up" : "dn"}` }, oR == null ? "\u2014" : (oR >= 0 ? "+" : "") + oR.toFixed(2) + "R"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${pl == null ? "dim" : pl >= 0 ? "up" : "dn"}` }, pl == null ? "\u2014" : (pl >= 0 ? "+" : "\u2212") + "$" + Math.abs(Math.round(pl)).toLocaleString()), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, dh == null ? "\u2014" : dh));
+  }), /* @__PURE__ */ React.createElement("tr", { style: { borderTop: "1px solid var(--line)" } }, /* @__PURE__ */ React.createElement("td", { colSpan: 6, className: "mono dim2" }, /* @__PURE__ */ React.createElement("b", null, rows.length, " position", rows.length > 1 ? "s" : "", " \xB7 cash $", pfNum(book.cash) != null ? Math.round(book.cash).toLocaleString() : "\u2014", " \xB7 gross $", Math.round(gross).toLocaleString())), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${totalPL >= 0 ? "up" : "dn"}` }, totalPL >= 0 ? "+" : "\u2212", "$", Math.abs(Math.round(totalPL)).toLocaleString()), /* @__PURE__ */ React.createElement("td", null))));
 }
-function PositionSim({ ticker }) {
-  const rows = [
-    { mult: "0.5\xD7", sh: 55, notional: 3708, navPct: 3.4, maxL: 210, ratio: "0.19% NAV", tone: "gn" },
-    { mult: "1.0\xD7", sh: 110, notional: 7416, navPct: 6.8, maxL: 420, ratio: "0.39% NAV", tone: "copper", on: true },
-    { mult: "1.5\xD7", sh: 165, notional: 11124, navPct: 10.3, maxL: 630, ratio: "0.58% NAV", tone: "amb" },
-    { mult: "2.0\xD7", sh: 220, notional: 14832, navPct: 13.7, maxL: 840, ratio: "0.78% NAV", tone: "rd" }
-  ];
-  return /* @__PURE__ */ React.createElement("table", { className: "dtable" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Size mult"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Shares"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Notional"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "% NAV"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Max loss"), /* @__PURE__ */ React.createElement("th", null, "Risk ratio"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i, className: r.on ? "is-current" : "" }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, r.mult)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, r.sh), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, "$", r.notional.toLocaleString()), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular kpi-tone--${r.tone}` }, r.navPct.toFixed(1), "%"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular kpi-tone--${r.tone}` }, "\u2212$", r.maxL), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, r.ratio)))));
+function PositionSim({ sz, ticker }) {
+  if (!sz || !sz.ok) {
+    return /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 no engine levels for ", ticker && ticker.symbol || "this name", " (need a valid entry / stop / target to size). Set them in Plan.");
+  }
+  const base = sz.shares, entry = sz.entry, risk = sz.risk, nav = sz.nav;
+  const rows = [0.5, 1, 1.5, 2].map((m) => {
+    const sh = Math.max(1, Math.round(base * m));
+    const notional = sh * entry, maxL = sh * risk;
+    const navPct = notional / nav * 100;
+    return {
+      m,
+      sh,
+      notional,
+      navPct,
+      maxL,
+      lossPct: maxL / nav * 100,
+      tone: navPct > 13 ? "rd" : navPct > 10 ? "amb" : m === 1 ? "copper" : "gn",
+      on: m === 1
+    };
+  });
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("table", { className: "dtable" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Size"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Shares"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Notional"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "% NAV"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Max loss"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "% NAV risk"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i, className: r.on ? "is-current" : "" }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, r.m.toFixed(1), "\xD7"), r.on ? /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " engine") : null), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, r.sh.toLocaleString()), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, "$", Math.round(r.notional).toLocaleString()), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular kpi-tone--${r.tone}` }, r.navPct.toFixed(1), "%"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular kpi-tone--${r.tone}` }, "\u2212$", Math.round(r.maxL).toLocaleString()), /* @__PURE__ */ React.createElement("td", { className: "mono dim r" }, r.lossPct.toFixed(2), "%"))))), /* @__PURE__ */ React.createElement("div", { className: "corr-note mono dim2", style: { marginTop: 6 } }, "Engine 1\xD7 risk budget = $", Math.round(sz.riskBudget || 0).toLocaleString(), " (", (sz.lossNavPct || 0).toFixed(2), "% NAV) \xB7 entry $", entry.toFixed(2), " \xB7 stop $", sz.stop.toFixed(2), " (", (sz.pctToStop || 0).toFixed(1), "% away) \xB7 R:R ", sz.rr != null ? sz.rr.toFixed(1) : "\u2014", sz.wr != null ? ` \xB7 setup WR ${(sz.wr * 100).toFixed(0)}% (n=${sz.n || 0})` : "", "."));
 }
-function CorrTable() {
-  const rows = [
-    { sym: "BORA", c: 0.42, tone: "amb" },
-    { sym: "INPR", c: 0.18, tone: "gn" },
-    { sym: "FLNX", c: -0.12, tone: "gn" },
-    { sym: "Book composite", c: 0.34, tone: "amb", bold: true }
-  ];
+function CorrTable({ book, candidate }) {
+  const candSym = (candidate && candidate.symbol || "").toUpperCase();
+  const held = book && Array.isArray(book.positions) ? book.positions.map((p) => (p.ticker || "").toUpperCase()).filter(Boolean) : [];
+  const heldUnique = held.filter((s, i) => s && held.indexOf(s) === i && s !== candSym);
+  const syms = candSym ? [candSym, ...heldUnique] : heldUnique;
+  const rets = usePfReturns(syms);
+  if (!candSym) return /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 open a candidate from the scan to correlate it against the book.");
+  if (!heldUnique.length) return /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 book has no other open names to correlate against (flat or single-name).");
+  if (rets == null) return /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "Fetching 60-day returns for ", syms.join(", "), "\u2026");
+  const candR = rets[candSym] || [];
+  if (candR.length < 10) return /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 not enough price history for ", candSym, " to correlate.");
+  const posBySym = {};
+  (book.positions || []).forEach((p) => {
+    posBySym[(p.ticker || "").toUpperCase()] = Math.abs(pfNum(p.position_size) || 0);
+  });
+  let wsum = 0, cwsum = 0;
+  const rows = heldUnique.map((s) => {
+    const c = pfPearson(candR, rets[s] || []);
+    const w = posBySym[s] || 0;
+    if (c != null) {
+      wsum += w;
+      cwsum += c * w;
+    }
+    return { sym: s, c, tone: c == null ? "ink" : c > 0.5 ? "rd" : c > 0.2 ? "amb" : "gn" };
+  });
+  const comp = wsum > 0 ? cwsum / wsum : null;
+  rows.push({ sym: "Book composite", c: comp, tone: comp == null ? "ink" : comp > 0.5 ? "rd" : comp > 0.2 ? "amb" : "gn", bold: true });
   return /* @__PURE__ */ React.createElement("div", { className: "corr-tbl" }, rows.map((r, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `corr-row ${r.bold ? "is-bold" : ""}` }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, r.sym), /* @__PURE__ */ React.createElement("div", { className: "corr-bar" }, /* @__PURE__ */ React.createElement("div", { className: `corr-bar-fill kpi-tone--${r.tone}`, style: {
-    width: `${Math.abs(r.c) * 50}%`,
-    marginLeft: r.c < 0 ? `${50 - Math.abs(r.c) * 50}%` : "50%",
+    width: r.c == null ? "0%" : `${Math.abs(r.c) * 50}%`,
+    marginLeft: r.c == null ? "50%" : r.c < 0 ? `${50 - Math.abs(r.c) * 50}%` : "50%",
     background: r.tone === "gn" ? "var(--gn)" : r.tone === "amb" ? "var(--amb)" : "var(--rd)"
-  } }), /* @__PURE__ */ React.createElement("div", { className: "corr-bar-axis" })), /* @__PURE__ */ React.createElement("span", { className: `mono kpi-tone--${r.tone}` }, r.c >= 0 ? "+" : "", r.c.toFixed(2)))), /* @__PURE__ */ React.createElement("div", { className: "corr-note mono dim2" }, "Correlation cap = 0.55 (book composite). ARCM adds within tolerance."));
+  } }), /* @__PURE__ */ React.createElement("div", { className: "corr-bar-axis" })), /* @__PURE__ */ React.createElement("span", { className: `mono kpi-tone--${r.tone}` }, r.c == null ? "\u2014" : (r.c >= 0 ? "+" : "") + r.c.toFixed(2)))), /* @__PURE__ */ React.createElement("div", { className: "corr-note mono dim2" }, "Pearson on 60-day daily returns (EODHD), notional-weighted for the composite. High positive correlation to existing longs concentrates directional risk; a short leg flips the sign of the hedge."));
 }
-function FactorPanel() {
-  const factors = [
-    { f: "Momentum", pre: 0.62, post: 0.8, tone: "amb", cap: 1 },
-    { f: "Value", pre: -0.1, post: -0.08, tone: "gn", cap: 0.5 },
-    { f: "Quality", pre: 0.34, post: 0.41, tone: "gn", cap: 1 },
-    { f: "Size", pre: -0.2, post: -0.16, tone: "gn", cap: 0.5 },
-    { f: "Vol", pre: 0.18, post: 0.22, tone: "amb", cap: 0.4 }
+function SectorExposure({ book, candidate, sz }) {
+  const positions = book && Array.isArray(book.positions) ? book.positions : [];
+  const equity = pfNum(book.equity) || 1;
+  if (!positions.length && !(sz && sz.ok)) return /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 flat book and no candidate sizing; nothing to allocate.");
+  const pre = {};
+  let unknown = 0;
+  positions.forEach((p) => {
+    const sec = pfSectorOf((p.ticker || "").toUpperCase()) || "Unknown";
+    const not = Math.abs(pfNum(p.position_size) || 0);
+    pre[sec] = (pre[sec] || 0) + not;
+    if (sec === "Unknown") unknown += not;
+  });
+  const post = Object.assign({}, pre);
+  const candSym = (candidate && candidate.symbol || "").toUpperCase();
+  const candSec = pfSectorOf(candSym) || candidate && candidate.sector || "Unknown";
+  const candNot = sz && sz.ok ? sz.notional : 0;
+  if (candNot) post[candSec] = (post[candSec] || 0) + candNot;
+  const secs = Object.keys(post).sort((a, b) => post[b] - post[a]);
+  if (!secs.length) return /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 no sizable exposure.");
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("table", { className: "dtable" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Sector"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Pre %NAV"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Post %NAV"), /* @__PURE__ */ React.createElement("th", null, "\u0394"))), /* @__PURE__ */ React.createElement("tbody", null, secs.map((s, i) => {
+    const a = (pre[s] || 0) / equity * 100, b = (post[s] || 0) / equity * 100, d = b - a;
+    const tone = b > 40 ? "rd" : b > 25 ? "amb" : "gn";
+    return /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, s, s === candSec && candNot ? /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " \u25C0 adds here") : null), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, a.toFixed(1), "%"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular kpi-tone--${tone}` }, b.toFixed(1), "%"), /* @__PURE__ */ React.createElement("td", { className: `mono ${d > 0.05 ? "up" : d < -0.05 ? "dn" : "dim"}` }, d >= 0 ? "+" : "", d.toFixed(1), "%"));
+  }))), /* @__PURE__ */ React.createElement("div", { className: "corr-note mono dim2", style: { marginTop: 6 } }, "Gross notional \xF7 NAV per sector (shorts counted gross). ", unknown > 0 ? "\u201CUnknown\u201D = held name not in the current scan universe (no sector tag). " : "", "Sectors above ~25% NAV concentrate single-factor risk."));
+}
+function SleepTest({ book, candidate }) {
+  const curve = book && Array.isArray(book.equity_curve) ? book.equity_curve.map((p) => pfNum(p.equity)).filter((v) => v != null) : [];
+  const equity = pfNum(book.equity) || 0;
+  let sigmaPct = null;
+  if (curve.length >= 8) {
+    const rets = [];
+    for (let i = 1; i < curve.length; i++) if (curve[i - 1] > 0) rets.push(curve[i] / curve[i - 1] - 1);
+    if (rets.length >= 5) {
+      const m = rets.reduce((a, b) => a + b, 0) / rets.length;
+      const v = rets.reduce((a, b) => a + (b - m) * (b - m), 0) / rets.length;
+      sigmaPct = Math.sqrt(v);
+    }
+  }
+  const sig$ = sigmaPct != null ? sigmaPct * equity : null;
+  const er = candidate && candidate.earnings && candidate.earnings.days != null ? candidate.earnings : null;
+  const tiles = [
+    { label: "Overnight 1\u03C3", value: sig$ != null ? `\u2212$${Math.round(sig$).toLocaleString()}` : "\u2014", tone: "gn", sub: sigmaPct != null ? `${(sigmaPct * 100).toFixed(2)}% book \u03C3/day` : "need \u22658d curve" },
+    { label: "Stress 3\u03C3", value: sig$ != null ? `\u2212$${Math.round(sig$ * 3).toLocaleString()}` : "\u2014", tone: "amb", sub: "realized book vol \xD73" },
+    { label: "ER-week", value: er ? `T\u2212${er.days}d` : "none", tone: er && er.days <= 7 ? "rd" : er ? "amb" : "gn", sub: er ? er.days <= 7 ? "candidate reports in window" : "candidate ER scheduled" : "no candidate ER" },
+    { label: "Sleep score", value: sigmaPct == null ? "\u2014" : sigmaPct * 100 < 0.5 ? "A" : sigmaPct * 100 < 1 ? "B" : "C", tone: sigmaPct == null ? "ink" : sigmaPct * 100 < 0.5 ? "gn" : sigmaPct * 100 < 1 ? "amb" : "rd", sub: "from realized vol" }
   ];
-  return /* @__PURE__ */ React.createElement("table", { className: "dtable" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Factor"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Pre"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Post"), /* @__PURE__ */ React.createElement("th", null, "\u0394"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Cap"))), /* @__PURE__ */ React.createElement("tbody", null, factors.map((f, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, f.f), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, f.pre.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular kpi-tone--${f.tone}` }, f.post.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: `mono ${f.post > f.pre ? "up" : "dn"}` }, f.post - f.pre >= 0 ? "+" : "", (f.post - f.pre).toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, f.cap.toFixed(2))))));
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "kpi-row", style: { gridTemplateColumns: "repeat(4, 1fr)" } }, tiles.map((t, i) => /* @__PURE__ */ React.createElement(KpiTile, { key: i, label: t.label, value: t.value, tone: t.tone, sub: t.sub }))), /* @__PURE__ */ React.createElement("div", { className: "corr-note mono dim2", style: { marginTop: 6 } }, "Overnight loss bands are the book's realized daily volatility (from the ", curve.length, "-point equity curve) scaled to NAV \u2014 a portfolio-level estimate, not a per-position Greek. ER-week flags the candidate's next report inside the swing window."));
 }
 function tapeData(ticker) {
   const holders = Array.isArray(ticker.holders) ? ticker.holders : ticker.holders ? Object.values(ticker.holders) : [];
@@ -27859,212 +28059,151 @@ window.buildConsensus = buildConsensus;
 </script>
 <script>/* src/ai-predict-data.jsx */
 (function() {
-  function hash(s) {
-    let h = 2166136261;
-    for (let i = 0; i < s.length; i++) {
-      h ^= s.charCodeAt(i);
-      h = Math.imul(h, 16777619);
+  var BV = window.__BV;
+  function sg(url) {
+    try {
+      return BV && BV.syncGet ? BV.syncGet(url) : null;
+    } catch (e) {
+      return null;
     }
-    return h >>> 0;
   }
-  function mulberry(a) {
-    return function() {
-      a |= 0;
-      a = a + 1831565813 | 0;
-      let t = Math.imul(a ^ a >>> 15, 1 | a);
-      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-      return ((t ^ t >>> 14) >>> 0) / 4294967296;
-    };
-  }
-  function gauss(r) {
-    let u = 0, v = 0;
-    while (!u) u = r();
-    while (!v) v = r();
-    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-  }
-  const NAMES = {
-    ARGN: ["Argentum Robotics", 213.4, "Tech"],
-    ARCM: ["Arclight Materials", 67.42, "Materials"],
-    GENO: ["Genoa Biosystems", 29.4, "Healthcare"],
-    DRSH: ["Druseh Energy", 56.1, "Energy"],
-    NVRH: ["Novara Health", 142.1, "Healthcare"],
-    ZOTR: ["Zotran Industries", 41.8, "Industrials"],
-    FLNX: ["Flux Nexus", 88.3, "Tech"],
-    NEXO: ["Nexora Health", 53.9, "Healthcare"],
-    KARO: ["Karo Systems", 124.6, "Tech"],
-    BORA: ["Borealis Aero", 45.3, "Industrials"],
-    MERC: ["Mercia Semiconductor", 17.2, "Tech"],
-    VLCT: ["Velocity Capital", 198.2, "Finance"],
-    LIGN: ["Lignite Power", 112.4, "Energy"],
-    BIVO: ["Bivota Pharma", 72.55, "Healthcare"],
-    INPR: ["Inproova", 34.1, "Tech"],
-    AXLE: ["Axle Logistics", 45.3, "Industrials"]
-  };
-  const FEATURES = [
-    { k: "Momentum (12-1)", grp: "trend" },
-    { k: "RVOL / accumulation", grp: "flow" },
-    { k: "Pivot distance", grp: "trend" },
-    { k: "Sector RS (1M)", grp: "trend" },
-    { k: "Options skew / flow", grp: "flow" },
-    { k: "Insider net (90d)", grp: "flow" },
-    { k: "Earnings drift (PEAD)", grp: "event" },
-    { k: "Volatility regime", grp: "risk" },
-    { k: "Valuation z-score", grp: "value" },
-    { k: "Breadth / regime", grp: "risk" }
-  ];
-  function predict(sym) {
-    const _row = window.__BV && window.__BV.findRow ? window.__BV.findRow(sym) : null;
-    const _realPup = _row && _row._raw && typeof _row._raw.p_up === "number" ? _row._raw.p_up : null;
-    const meta = _row ? [_row.name, _row.price, _row.sector] : NAMES[sym] || [sym, 100, "Tech"];
-    const seed = hash(sym) ^ 24301;
-    const r = mulberry(seed);
-    const px = meta[1];
-    const gb = +(gauss(r) * 0.4 + 0.35).toFixed(2);
-    const seq = +(gauss(r) * 0.4 + 0.3).toFixed(2);
-    const reg = +(gauss(r) * 0.35 + 0.25).toFixed(2);
-    const heads = [
-      { id: "gb", label: "Gradient Boost", score: gb, w: 0.4, note: "tabular features \xB7 XGB" },
-      { id: "seq", label: "Sequence Model", score: seq, w: 0.35, note: "60-day OHLCV transformer" },
-      { id: "reg", label: "Regime Model", score: reg, w: 0.25, note: "HMM state-conditional" }
-    ];
-    let ens = heads.reduce((a, h) => a + h.score * h.w, 0);
-    if (_realPup != null) ens = Math.max(-1, Math.min(1, (_realPup - 0.5) * 2));
-    const pRaw = 0.5 + ens * 0.42 + (r() - 0.5) * 0.18;
-    const pUp = _realPup != null ? _realPup : Math.max(0.05, Math.min(0.95, pRaw));
-    const conf = Math.abs(ens) > 0.45 ? "HIGH" : Math.abs(ens) > 0.2 ? "MED" : "LOW";
-    const agree = heads.filter((h) => h.score > 0).length;
-    const magBoost = (r() - 0.4) * 14;
-    const score = Math.max(2, Math.min(99, Math.round(50 + ens * 40 + magBoost)));
-    const verdict = score >= 66 ? "BUY" : score <= 40 ? "SELL" : "HOLD";
-    const baseMag = Math.abs(ens) * 9 + 2;
-    const days = 63, drift = ens * 11e-4, vol = 0.014 + hash(sym) % 9 / 1e3;
-    const N = 300;
-    const paths = [];
-    for (let p = 0; p < N; p++) {
-      let v = px;
-      const arr = [v];
-      const rr = mulberry(seed ^ p * 2654435761);
-      for (let d = 0; d < days; d++) {
-        v = v * (1 + drift + vol * gauss(rr));
-        arr.push(v);
-      }
-      paths.push(arr);
+  var DOC = sg("/api/ai_predict?limit=300") || {};
+  var ROWS = Array.isArray(DOC.rows) ? DOC.rows : [];
+  var MODEL = DOC._model || {};
+  var BYSYM = {};
+  ROWS.forEach(function(r) {
+    if (r && r.sym) BYSYM[r.sym] = r;
+  });
+  var BACKTEST = MODEL.backtest || { auc: null, hit: null, n: null, brier: null, horizon: "5d" };
+  function parseBand(k) {
+    if (k.indexOf("<") === 0) {
+      var hi = +k.slice(1);
+      return [Math.max(0, hi - 20), hi];
     }
-    const band = (q) => {
-      const out = [];
-      for (let d = 0; d <= days; d++) {
-        const col = paths.map((p) => p[d]).sort((a, b) => a - b);
-        out.push(col[Math.floor(q * N)]);
-      }
-      return out;
-    };
-    const cone = { p10: band(0.1), p25: band(0.25), p50: band(0.5), p75: band(0.75), p90: band(0.9) };
-    const horizons = [["1W", 5], ["1M", 21], ["3M", 63]].map(([l, d]) => ({ l, med: cone.p50[d], lo: cone.p10[d], hi: cone.p90[d], ret: (cone.p50[d] / px - 1) * 100 }));
-    const target = +cone.p75[days].toFixed(2), stop = +cone.p10[21].toFixed(2);
-    const fr = mulberry(seed ^ 61453);
-    const feats = FEATURES.map((f) => ({ ...f, v: +((fr() - (ens < 0 ? 0.6 : 0.35)) * (0.5 + fr())).toFixed(3) })).sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
-    const featMax = Math.max(...feats.map((f) => Math.abs(f.v)));
-    const an = mulberry(seed ^ 2577);
-    const analogs = [
-      { when: "2024-Q3", sym: pickSym(an), sim: 0.94, fwd: +(gauss(an) * 6 + 7).toFixed(1) },
-      { when: "2023-Q4", sym: pickSym(an), sim: 0.91, fwd: +(gauss(an) * 6 + 5).toFixed(1) },
-      { when: "2024-Q1", sym: pickSym(an), sim: 0.88, fwd: +(gauss(an) * 7 + 3).toFixed(1) },
-      { when: "2023-Q2", sym: pickSym(an), sim: 0.85, fwd: +(gauss(an) * 7 - 1).toFixed(1) },
-      { when: "2022-Q4", sym: pickSym(an), sim: 0.82, fwd: +(gauss(an) * 8 + 4).toFixed(1) }
-    ];
-    const analogWin = analogs.filter((a) => a.fwd > 0).length / analogs.length;
-    const MODE_DEFS = [["swing", 5], ["position", 21], ["invest", 126]];
-    const modes = {};
-    MODE_DEFS.forEach(([mode, hd]) => {
-      const mr = mulberry(seed ^ mode.length * 40503 + hd);
-      const pu = Math.max(0.3, Math.min(0.78, 0.46 + ens * 0.18 + (mr() - 0.5) * 0.22));
-      const ciw = 0.05 + mr() * 0.06;
-      const sc = Math.sqrt(hd) * (0.9 + mr() * 0.5);
-      const m50 = (pu - 0.5) * 2 * sc;
-      modes[mode] = {
-        horizon: hd + "d",
-        direction: { p_up: +pu.toFixed(3), p_chop: +(0.5 - Math.abs(pu - 0.5) * 0.7).toFixed(3), p_dn: +(1 - pu - (0.5 - Math.abs(pu - 0.5) * 0.7)).toFixed(3) },
-        ci: [+Math.max(0.05, pu - ciw).toFixed(3), +Math.min(0.95, pu + ciw).toFixed(3)],
-        magnitude: { q10: +(m50 - sc * 1.3).toFixed(1), q25: +(m50 - sc * 0.6).toFixed(1), q50: +m50.toFixed(1), q75: +(m50 + sc * 0.7).toFixed(1), q90: +(m50 + sc * 1.5).toFixed(1) },
-        hit_net: { p_t1_first: +(0.3 + pu * 0.35).toFixed(2), p_stop_first: +(0.55 - pu * 0.35).toFixed(2) },
-        verdict: { color: pu >= 0.6 ? "bull" : pu <= 0.45 ? "bear" : "neutral" }
-      };
+    if (k.indexOf(">=") === 0) {
+      return [+k.slice(2), 100];
+    }
+    var m = k.split("-");
+    return [+m[0], +m[1]];
+  }
+  var CALIB = (function() {
+    var c = MODEL.calibration;
+    if (!c || typeof c !== "object" || Array.isArray(c)) return [];
+    return Object.keys(c).map(function(k) {
+      var b = parseBand(k), v = c[k] || {};
+      return { lo: b[0] / 100, hi: b[1] / 100, pred: (b[0] + b[1]) / 200, realized: (v.win_rate != null ? v.win_rate : 0) / 100, n: v.n || 0, expectancy: v.expectancy, pf: v.pf };
+    }).sort(function(a, z) {
+      return a.pred - z.pred;
     });
-    const pups = MODE_DEFS.map(([m]) => modes[m].direction.p_up);
-    const spread = +(Math.max(...pups) - Math.min(...pups)).toFixed(3);
-    const crossMode = { spread, agree: spread < 0.12 ? "ALIGNED" : spread < 0.22 ? "MIXED" : "DIVERGENT" };
-    return { sym, name: meta[0], sector: meta[2], px, heads, ens: +ens.toFixed(2), pUp: +pUp.toFixed(2), conf, agree, score, verdict, horizons, cone, days, target, stop, feats, featMax, analogs, analogWin, modes, crossMode };
+  })();
+  var _pc = {};
+  function predict(sym) {
+    if (!sym) return null;
+    if (BYSYM[sym]) return BYSYM[sym];
+    if (sym in _pc) return _pc[sym];
+    var r = sg("/api/ai_predict/" + encodeURIComponent(sym));
+    return _pc[sym] = r && r.sym ? r : null;
   }
-  function pickSym(r) {
-    const ks = Object.keys(NAMES);
-    return ks[Math.floor(r() * ks.length)];
+  function all() {
+    return ROWS;
   }
-  const _ALL_SYMS = window.__BV && window.__BV.ready ? window.__BV.scanRows().slice().sort((a, b) => b.score - a.score).slice(0, 80).map((r) => r.sym) : Object.keys(NAMES);
-  const ALL = _ALL_SYMS.map(predict).sort((a, b) => b.score - a.score);
-  const CALIB = [[0.5, 0.6, 0.57, 142], [0.6, 0.7, 0.66, 118], [0.7, 0.8, 0.76, 86], [0.8, 0.9, 0.88, 54], [0.9, 1.01, 0.91, 31]].map(([lo, hi, realized, n]) => ({ lo, hi, pred: (lo + hi) / 2, realized, n }));
-  const BACKTEST = { auc: 0.71, brier: 0.182, hit: 0.64, n: 431, sharpe: 1.6, horizon: "21d", since: "2022-01" };
-  window.AIPredict = { predict, all: () => ALL, FEATURES, CALIB, BACKTEST, NAMES, RESOLVED: resolved(), buyList, projection, MODES: ["swing", "position", "invest"] };
-  const MODE_META = { swing: { label: "Swing", horizon: "5d", hd: 5 }, position: { label: "Position", horizon: "21d", hd: 21 }, invest: { label: "Invest", horizon: "126d", hd: 126 } };
+  var MODE_META = { swing: ["Swing", "5d"], position: ["Position", "21d"], invest: ["Invest", "126d"] };
+  var _jc = {};
   function projection(sym, mode) {
-    const P = predict(sym);
-    const m = P.modes[mode];
-    const px = P.px;
-    const pc = (q) => +(px * (1 + q / 100)).toFixed(2);
-    const t1 = pc(m.magnitude.q75), t2 = pc(m.magnitude.q90);
-    const stop = pc(m.magnitude.q10), mid = pc(m.magnitude.q50);
-    const entry = px;
-    const reward = t1 - entry, risk = entry - stop;
-    const rr = risk > 0 ? +(reward / risk).toFixed(2) : null;
-    const ev = +((m.hit_net.p_t1_first * (t1 / entry - 1) - m.hit_net.p_stop_first * (1 - stop / entry)) * 100).toFixed(2);
-    const verdict = m.direction.p_up >= 0.6 ? "BUY" : m.direction.p_up <= 0.45 ? "AVOID" : "WATCH";
-    return {
+    var key = sym + ":" + mode;
+    if (key in _jc) return _jc[key];
+    var me = sg("/api/ml/" + encodeURIComponent(sym) + "?mode=" + encodeURIComponent(mode));
+    if (!me || !me.direction) return _jc[key] = null;
+    var base = predict(sym) || {};
+    var px = base.px || me.px || 0;
+    var mag = me.magnitude || {}, hit = me.hit_net || {}, dir = me.direction || {};
+    var pc = function(q) {
+      return +(px * (1 + (q || 0) / 100)).toFixed(2);
+    };
+    var entry = px, t1 = pc(mag.q75), t2 = pc(mag.q90), stop = pc(mag.q10), mid = pc(mag.q50);
+    var risk = entry - stop, reward = t1 - entry;
+    var rr = risk > 0 ? +(reward / risk).toFixed(2) : null;
+    var ev = hit.p_t1_first != null && hit.p_stop_first != null && entry > 0 ? +((hit.p_t1_first * (t1 / entry - 1) - hit.p_stop_first * (1 - stop / entry)) * 100).toFixed(2) : null;
+    var lab = MODE_META[mode] || MODE_META.swing;
+    var v = dir.p_up >= 0.6 ? "BUY" : dir.p_up <= 0.45 ? "AVOID" : "WATCH";
+    return _jc[key] = {
       sym,
       mode,
-      ...MODE_META[mode],
+      label: lab[0],
+      horizon: lab[1],
+      hd: me.horizon_days,
       px,
       entry,
       stop,
       t1,
       t2,
       mid,
-      projLow: pc(m.magnitude.q10),
+      projLow: pc(mag.q10),
       projMid: mid,
-      projHigh: pc(m.magnitude.q90),
-      pUp: m.direction.p_up,
-      ci: m.ci,
-      mag: m.magnitude,
-      hit: m.hit_net,
-      retMid: +m.magnitude.q50.toFixed(1),
+      projHigh: pc(mag.q90),
+      pUp: dir.p_up,
+      p_chop: dir.p_chop,
+      p_dn: dir.p_dn,
+      ci: null,
+      mag,
+      hit,
+      retMid: mag.q50 != null ? +mag.q50.toFixed(1) : 0,
       rr,
       ev,
-      verdict,
-      color: m.verdict.color
+      verdict: v,
+      color: me.verdict && me.verdict.color || "ink"
     };
   }
   function buyList(mode) {
-    const pool = ALL.map((p) => ({ sym: p.sym, name: p.name, pUp: p.modes[mode].direction.p_up, ci: p.modes[mode].ci, mag: p.modes[mode].magnitude, hit: p.modes[mode].hit_net, color: p.modes[mode].verdict.color }));
-    const poolMax = Math.max(...pool.map((p) => p.pUp));
-    const defensive = poolMax < 0.55;
-    const minPup = defensive ? Math.max(0.45, poolMax - 0.1) : 0.55;
-    const picks = pool.filter((p) => p.pUp >= minPup).sort((a, b) => b.pUp - a.pUp);
+    var pool = ROWS.map(function(p) {
+      return { sym: p.sym, name: p.name, pUp: p.pUp, color: p.verdict === "BUY" ? "bull" : p.verdict === "SELL" ? "bear" : "neutral" };
+    });
+    var poolMax = pool.length ? Math.max.apply(null, pool.map(function(p) {
+      return p.pUp || 0;
+    })) : 0;
+    var defensive = poolMax < 0.55;
+    var minPup = defensive ? Math.max(0.45, poolMax - 0.1) : 0.55;
+    var picks = pool.filter(function(p) {
+      return (p.pUp || 0) >= minPup;
+    }).sort(function(a, b) {
+      return b.pUp - a.pUp;
+    });
     return { picks, poolMax: +poolMax.toFixed(3), defensive, minPup: +minPup.toFixed(2) };
   }
   function resolved() {
-    const r = mulberry(2021095);
-    const syms = Object.keys(NAMES);
-    const out = [];
-    for (let i = 0; i < 28; i++) {
-      const sym = syms[Math.floor(r() * syms.length)];
-      const ageW = Math.floor(r() * 50) + 1;
-      const verdict = r() < 0.62 ? "BUY" : r() < 0.85 ? "HOLD" : "SELL";
-      const pUp = +(0.5 + (r() - 0.3) * 0.4).toFixed(2);
-      const score = Math.round(50 + (pUp - 0.5) * 90);
-      const fwd = +((r() - (score >= 60 ? 0.32 : score <= 42 ? 0.62 : 0.46)) * 18).toFixed(1);
-      const dirRight = verdict === "BUY" ? fwd > 0 : verdict === "SELL" ? fwd < 0 : Math.abs(fwd) < 3;
-      out.push({ sym, ageW, verdict, pUp, score, fwd, hit: dirRight });
-    }
-    return out.sort((a, b) => a.ageW - b.ageW);
+    var doc = sg("/api/ml-edge-track");
+    var arr = doc && Array.isArray(doc.resolved) ? doc.resolved : [];
+    var now = Date.now();
+    return arr.map(function(r) {
+      var fwd = r.realized_pct != null ? +(+r.realized_pct).toFixed(1) : null;
+      var pu = r.p_up != null ? +(+r.p_up).toFixed(2) : null;
+      var ageW = null;
+      try {
+        ageW = Math.max(1, Math.round((now - new Date(r.scan_date || r.scan_ts).getTime()) / 6048e5));
+      } catch (e) {
+      }
+      var verdict = r.side === "short" ? "SELL" : pu != null && pu >= 0.55 ? "BUY" : "HOLD";
+      var hit = fwd == null ? null : verdict === "SELL" ? fwd < 0 : fwd > 0;
+      return { sym: r.ticker, ageW, verdict, pUp: pu, score: pu != null ? Math.round(50 + (pu - 0.5) * 90) : null, fwd, hit, exit: r.exit_date };
+    }).filter(function(r) {
+      return r.fwd != null;
+    }).sort(function(a, b) {
+      return (a.ageW || 0) - (b.ageW || 0);
+    });
   }
+  var FEATURES = BACKTEST && BACKTEST.feature_cols || [];
+  window.AIPredict = {
+    predict,
+    all,
+    FEATURES,
+    CALIB,
+    BACKTEST,
+    RESOLVED: resolved(),
+    buyList,
+    projection,
+    MODES: ["swing", "position", "invest"],
+    _real: ROWS.length > 0
+  };
 })();
 </script>
 <script>/* src/surface-smc-patterns.jsx */
@@ -28609,20 +28748,29 @@ const vTone = (v) => v === "BUY" ? "gn" : v === "SELL" ? "rd" : "amb";
 const cTone = (c) => c === "HIGH" ? "gn" : c === "MED" ? "amb" : "ink";
 function SurfaceAIPredictions({ onTicker }) {
   const AP = window.AIPredict;
-  const [view, setView] = useStateAI("board");
-  const [pick, setPick] = useStateAI("ARGN");
   const all = AP.all();
-  const P = useMemoAI(() => AP.predict(pick), [pick]);
+  const [view, setView] = useStateAI("board");
+  const [pick, setPick] = useStateAI(() => {
+    const r = all.find((x) => x.px != null) || all[0];
+    return r && r.sym || "";
+  });
+  const P = useMemoAI(() => pick ? AP.predict(pick) : null, [pick]);
   const openDetail = (s) => {
     setPick(s);
     setView("detail");
   };
-  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--violet aip" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "ML PREDICTIONS \xB7 MULTI-MODEL FORECAST"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "ML Predictions"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "3-head ensemble \xB7 P(up) classifier \xB7 Monte-Carlo price cone \xB7 feature importances \xB7 analogs \xB7 forward edge \u2192 BUY / HOLD / SELL")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement("span", { className: "aip-bt mono", title: "Out-of-sample backtest" }, "AUC ", AP.BACKTEST.auc, " \xB7 hit ", Math.round(AP.BACKTEST.hit * 100), "% \xB7 n=", AP.BACKTEST.n), /* @__PURE__ */ React.createElement(FreshnessPill, { state: "live", age: "sim" }))), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpis" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--violet" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "TOP VERDICT"), /* @__PURE__ */ React.createElement("div", { className: `wsx-kpi-v mono kpi-tone--${vTone(all[0].verdict)}` }, all[0].sym, " ", all[0].verdict), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "edge ", all[0].score, "/100")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--gn" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "BUY SIGNALS"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--gn" }, all.filter((p) => p.verdict === "BUY").length), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "of ", all.length, " names")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--rd" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "SELL SIGNALS"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--rd" }, all.filter((p) => p.verdict === "SELL").length), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "downside edge")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--cy" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "AVG P(up)"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--cy" }, Math.round(all.reduce((a, p) => a + p.pUp, 0) / all.length * 100), "%"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "classifier mean")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--gn" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "MODEL AUC"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--gn" }, AP.BACKTEST.auc), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "out-of-sample")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--violet" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "HIT RATE"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--violet" }, Math.round(AP.BACKTEST.hit * 100), "%"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "n=", AP.BACKTEST.n, " \xB7 ", AP.BACKTEST.horizon))), /* @__PURE__ */ React.createElement("div", { className: "lab-tabs aip-tabs" }, [["board", "Ranked Board"], ["analyst", "\u2726 AI Analyst"], ["detail", `Forecast \xB7 ${pick}`], ["crossmode", "Cross-Mode"], ["track", "Track Record"], ["calib", "Model Accuracy"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `lab-tab ${view === id ? "is-on" : ""}`, onClick: () => setView(id) }, l))), view === "board" && /* @__PURE__ */ React.createElement(AIBoard, { all, onOpen: openDetail }), view === "analyst" && window.AIAnalystView && React.createElement(window.AIAnalystView, { all, onTicker, pick, onPick: setPick }), view === "detail" && /* @__PURE__ */ React.createElement(AIDetail, { P, all, onPick: setPick, onTicker }), view === "crossmode" && /* @__PURE__ */ React.createElement(AICrossMode, { all, onOpen: openDetail }), view === "track" && /* @__PURE__ */ React.createElement(AITrack, { AP, onTicker }), view === "calib" && /* @__PURE__ */ React.createElement(AICalib, { AP }), /* @__PURE__ */ React.createElement("div", { className: "pf-note mono dim2" }, "Ensemble of three model heads (gradient-boost on tabular features \xB7 sequence model on 60-day OHLCV \xB7 regime-conditional HMM) trained on EODHD history, scored on live quotes. Forward edge \u2192 verdict. ", /* @__PURE__ */ React.createElement("b", null, "Calibration & backtest are shown so predictions aren't oversold"), ' \u2014 a "70%" call should win ~70% of the time. Demo outputs; wire to your model server to go live.'));
+  if (!all.length) {
+    return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--violet aip" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("div", { className: "aia-empty mono dim2", style: { padding: 24 } }, "ML predictions unavailable \u2014 the model board (", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/ai_predict"), ") returned no rows. Serve from :7432 with a populated model file.")));
+  }
+  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--violet aip" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "ML PREDICTIONS \xB7 MULTI-MODEL FORECAST"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "ML Predictions"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "Direction \xB7 Magnitude \xB7 Hit-Net heads \xB7 P(up) classifier \xB7 quantile price cone \xB7 SHAP drivers \xB7 forward edge \u2192 BUY / HOLD / SELL")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement("span", { className: "aip-bt mono", title: "Out-of-sample backtest" }, AP.BACKTEST.auc != null ? "AUC " + (+AP.BACKTEST.auc).toFixed(2) : "AUC \u2014", AP.BACKTEST.hit != null ? " \xB7 hit " + Math.round(AP.BACKTEST.hit * 100) + "%" : "", AP.BACKTEST.n != null ? " \xB7 n=" + (+AP.BACKTEST.n).toLocaleString() : ""), /* @__PURE__ */ React.createElement(FreshnessPill, { state: "live", age: "live" }))), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpis" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--violet" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "TOP VERDICT"), /* @__PURE__ */ React.createElement("div", { className: `wsx-kpi-v mono kpi-tone--${vTone(all[0].verdict)}` }, all[0].sym, " ", all[0].verdict), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "edge ", all[0].score, "/100")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--gn" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "BUY SIGNALS"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--gn" }, all.filter((p) => p.verdict === "BUY").length), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "of ", all.length, " names")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--rd" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "SELL SIGNALS"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--rd" }, all.filter((p) => p.verdict === "SELL").length), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "downside edge")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--cy" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "AVG P(up)"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--cy" }, (() => {
+    const v = all.filter((p) => p.pUp != null);
+    return v.length ? Math.round(v.reduce((a, p) => a + p.pUp, 0) / v.length * 100) + "%" : "\u2014";
+  })()), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "classifier mean")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--gn" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "MODEL AUC"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--gn" }, AP.BACKTEST.auc), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "out-of-sample")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--violet" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "HIT RATE"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--violet" }, Math.round(AP.BACKTEST.hit * 100), "%"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "n=", AP.BACKTEST.n, " \xB7 ", AP.BACKTEST.horizon))), /* @__PURE__ */ React.createElement("div", { className: "lab-tabs aip-tabs" }, [["board", "Ranked Board"], ["analyst", "\u2726 AI Analyst"], ["detail", `Forecast \xB7 ${pick}`], ["crossmode", "Cross-Mode"], ["track", "Track Record"], ["calib", "Model Accuracy"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `lab-tab ${view === id ? "is-on" : ""}`, onClick: () => setView(id) }, l))), view === "board" && /* @__PURE__ */ React.createElement(AIBoard, { all, onOpen: openDetail }), view === "analyst" && window.AIAnalystView && React.createElement(window.AIAnalystView, { all, onTicker, pick, onPick: setPick }), view === "detail" && /* @__PURE__ */ React.createElement(AIDetail, { P, all, onPick: setPick, onTicker }), view === "crossmode" && /* @__PURE__ */ React.createElement(AICrossMode, { all, onOpen: openDetail }), view === "track" && /* @__PURE__ */ React.createElement(AITrack, { AP, onTicker }), view === "calib" && /* @__PURE__ */ React.createElement(AICalib, { AP }), /* @__PURE__ */ React.createElement("div", { className: "pf-note mono dim2" }, "Three real model heads \u2014 ", /* @__PURE__ */ React.createElement("b", null, "Direction"), " (classifier edge) \xB7 ", /* @__PURE__ */ React.createElement("b", null, "Magnitude"), " (quantile regression) \xB7 ", /* @__PURE__ */ React.createElement("b", null, "Hit-Net"), " (P(T1) vs P(stop)) \u2014 from the production model (", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/ai_predict"), ", ~1,100 names/horizon). Forward edge \u2192 verdict. ", /* @__PURE__ */ React.createElement("b", null, "Calibration & out-of-sample backtest are shown so predictions aren't oversold"), " \u2014 a top-decile call should beat the base rate. The per-ticker projection chart uses illustrative history with the live forward forecast; price cone, targets, SHAP and calibration are real."));
 }
 function AIBoard({ all, onOpen }) {
   const [sort, setSort] = useStateAI("score");
   const rows = useMemoAI(() => [...all].sort((a, b) => sort === "score" ? b.score - a.score : sort === "pup" ? b.pUp - a.pUp : b.ens - a.ens), [sort, all]);
-  return /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("div", { className: "aip-board-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, all.length, " names \xB7 ranked by ML forward-edge"), /* @__PURE__ */ React.createElement("div", { className: "seg" }, [["score", "Edge score"], ["pup", "P(up)"], ["ens", "Ensemble"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `seg-btn ${sort === id ? "is-on" : ""}`, onClick: () => setSort(id) }, l)))), /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl aip-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "#"), /* @__PURE__ */ React.createElement("th", null, "Symbol"), /* @__PURE__ */ React.createElement("th", null, "Verdict"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Edge"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "P(up)"), /* @__PURE__ */ React.createElement("th", null, "Ensemble vote"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "3M target"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Conf"), /* @__PURE__ */ React.createElement("th", null, "Top driver"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((p, i) => /* @__PURE__ */ React.createElement("tr", { key: p.sym, onClick: () => onOpen(p.sym), className: "aip-row" }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, /* @__PURE__ */ React.createElement("b", { className: i < 3 ? "vio" : "" }, i + 1)), /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, p.sym), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " $", p.px.toFixed(0))), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `aip-verdict aip-verdict--${vTone(p.verdict)}` }, p.verdict)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, /* @__PURE__ */ React.createElement("b", { className: `kpi-tone--${p.score >= 66 ? "gn" : p.score <= 40 ? "rd" : "amb"}` }, p.score)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, Math.round(p.pUp * 100), "%"), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: "aip-votes" }, p.heads.map((h, j) => /* @__PURE__ */ React.createElement("span", { key: j, className: `aip-vote ${h.score >= 0 ? "up" : "dn"}`, title: `${h.label}: ${h.score}` })), /* @__PURE__ */ React.createElement("span", { className: "mono dim2", style: { marginLeft: 6 } }, p.agree, "/3"))), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${p.horizons[2].ret >= 0 ? "up" : "dn"}` }, aiPct(p.horizons[2].ret)), /* @__PURE__ */ React.createElement("td", { className: "r" }, /* @__PURE__ */ React.createElement("span", { className: `aip-conf kpi-tone--${cTone(p.conf)}` }, p.conf)), /* @__PURE__ */ React.createElement("td", { className: "dim2", style: { fontSize: 11 } }, p.feats[0].k), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, "\u203A"))))));
+  return /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("div", { className: "aip-board-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, all.length, " names \xB7 ranked by ML forward-edge"), /* @__PURE__ */ React.createElement("div", { className: "seg" }, [["score", "Edge score"], ["pup", "P(up)"], ["ens", "Ensemble"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `seg-btn ${sort === id ? "is-on" : ""}`, onClick: () => setSort(id) }, l)))), /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl aip-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "#"), /* @__PURE__ */ React.createElement("th", null, "Symbol"), /* @__PURE__ */ React.createElement("th", null, "Verdict"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Edge"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "P(up)"), /* @__PURE__ */ React.createElement("th", null, "Ensemble vote"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "3M target"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Conf"), /* @__PURE__ */ React.createElement("th", null, "Top driver"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((p, i) => /* @__PURE__ */ React.createElement("tr", { key: p.sym, onClick: () => onOpen(p.sym), className: "aip-row" }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, /* @__PURE__ */ React.createElement("b", { className: i < 3 ? "vio" : "" }, i + 1)), /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, p.sym), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " ", p.px != null ? "$" + p.px.toFixed(0) : "")), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `aip-verdict aip-verdict--${vTone(p.verdict)}` }, p.verdict)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, /* @__PURE__ */ React.createElement("b", { className: `kpi-tone--${p.score >= 66 ? "gn" : p.score <= 40 ? "rd" : "amb"}` }, p.score != null ? p.score : "\u2014")), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, p.pUp != null ? Math.round(p.pUp * 100) + "%" : "\u2014"), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: "aip-votes" }, (p.heads || []).map((h, j) => /* @__PURE__ */ React.createElement("span", { key: j, className: `aip-vote ${h.score >= 0 ? "up" : "dn"}`, title: `${h.label}: ${h.score}` })), /* @__PURE__ */ React.createElement("span", { className: "mono dim2", style: { marginLeft: 6 } }, p.agree != null ? p.agree + "/3" : ""))), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${(p.horizons && p.horizons[2] && p.horizons[2].ret) >= 0 ? "up" : "dn"}` }, p.horizons && p.horizons[2] && p.horizons[2].ret != null ? aiPct(p.horizons[2].ret) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r" }, /* @__PURE__ */ React.createElement("span", { className: `aip-conf kpi-tone--${cTone(p.conf)}` }, p.conf || "\u2014")), /* @__PURE__ */ React.createElement("td", { className: "dim2", style: { fontSize: 11 } }, p.feats && p.feats[0] ? p.feats[0].k : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, "\u203A"))))));
 }
 function AIDetail({ P, all, onPick, onTicker }) {
   var _a;
@@ -28630,15 +28778,17 @@ function AIDetail({ P, all, onPick, onTicker }) {
     const m = (window.__tmode || "SWING").toLowerCase();
     return m.startsWith("pos") ? "position" : m.startsWith("inv") ? "invest" : "swing";
   });
-  const proj = useMemoAI(() => window.AIPredict ? window.AIPredict.projection(P.sym, mode) : null, [P.sym, mode]);
+  const proj = useMemoAI(() => window.AIPredict && P ? window.AIPredict.projection(P.sym, mode) : null, [P && P.sym, mode]);
   const pBand = (p) => p >= 0.6 ? "gn" : p >= 0.45 ? "amb" : "rd";
-  return /* @__PURE__ */ React.createElement("div", { className: "wsx-body aip-detail" }, /* @__PURE__ */ React.createElement("div", { className: "aip-pickbar" }, all.slice(0, 10).map((p) => /* @__PURE__ */ React.createElement("button", { key: p.sym, className: `aip-pick ${p.sym === P.sym ? "is-on" : ""}`, onClick: () => onPick(p.sym) }, p.sym))), proj && /* @__PURE__ */ React.createElement("div", { className: "aip-proj" }, /* @__PURE__ */ React.createElement("div", { className: "aip-proj-head" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Targets & projection \xB7 by holding period"), /* @__PURE__ */ React.createElement("div", { className: "aip-modeseg" }, ["swing", "position", "invest"].map((mo) => /* @__PURE__ */ React.createElement("button", { key: mo, className: `aip-modebtn ${mode === mo ? "is-on" : ""}`, onClick: () => setMode(mo) }, window.AIPredict ? null : null, mo === "swing" ? "Swing" : mo === "position" ? "Position" : "Invest", /* @__PURE__ */ React.createElement("span", { className: "aip-modebtn-h mono" }, mo === "swing" ? "5d" : mo === "position" ? "21d" : "126d"))))), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-grid" }, /* @__PURE__ */ React.createElement("div", { className: "aip-proj-cell" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Verdict \xB7 ", proj.horizon), /* @__PURE__ */ React.createElement("div", { className: `aip-proj-v kpi-tone--${proj.verdict === "BUY" ? "gn" : proj.verdict === "AVOID" ? "rd" : "amb"}` }, proj.verdict), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "P(up) ", Math.round(proj.pUp * 100), "% \xB7 CI ", Math.round(proj.ci[0] * 100), "\u2013", Math.round(proj.ci[1] * 100), "%")), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-cell" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Entry"), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-v mono" }, "$", proj.entry.toFixed(2)), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "spot")), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-cell" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Stop \xB7 q10"), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-v mono dn" }, "$", proj.stop.toFixed(2)), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, proj.mag.q10, "%")), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-cell" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Target T1 \xB7 q75"), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-v mono up" }, "$", proj.t1.toFixed(2)), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "+", proj.mag.q75, "%")), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-cell" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Target T2 \xB7 q90"), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-v mono up" }, "$", proj.t2.toFixed(2)), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "+", proj.mag.q90, "%")), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-cell" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "R:R"), /* @__PURE__ */ React.createElement("div", { className: `aip-proj-v mono ${proj.rr >= 2 ? "up" : "warn"}` }, (_a = proj.rr) != null ? _a : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "T1 vs stop")), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-cell" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Expected value"), /* @__PURE__ */ React.createElement("div", { className: `aip-proj-v mono ${proj.ev >= 0 ? "up" : "dn"}` }, proj.ev >= 0 ? "+" : "", proj.ev, "%"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "P(T1) ", Math.round(proj.hit.p_t1_first * 100), "% \xB7 P(stop) ", Math.round(proj.hit.p_stop_first * 100), "%")), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-cell" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Median proj"), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-v mono" }, "$", proj.projMid.toFixed(2)), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, proj.retMid >= 0 ? "+" : "", proj.retMid, "% \xB7 ", proj.horizon))), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mono dn" }, "$", proj.projLow.toFixed(0)), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-track" }, /* @__PURE__ */ React.createElement("span", { className: "aip-proj-stop", style: { left: 0 } }), /* @__PURE__ */ React.createElement("span", { className: "aip-proj-mid", style: { left: `${Math.max(2, Math.min(98, (proj.projMid - proj.projLow) / (proj.projHigh - proj.projLow) * 100))}%` } }), /* @__PURE__ */ React.createElement("span", { className: "aip-proj-spot", style: { left: `${Math.max(2, Math.min(98, (proj.entry - proj.projLow) / (proj.projHigh - proj.projLow) * 100))}%` }, title: "entry" })), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, "$", proj.projHigh.toFixed(0))), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 11, marginTop: 4 } }, "All fields recompute from the ", /* @__PURE__ */ React.createElement("b", null, proj.label, " (", proj.horizon, ")"), " model output \u2014 switch the toggle to see how targets, R:R and EV change by holding period. Nothing here is hardcoded; it's derived from the mode's magnitude quantiles + hit-net probabilities.")), proj && window.CandleChart && /* @__PURE__ */ React.createElement("div", { className: "aip-projchart" }, /* @__PURE__ */ React.createElement("div", { className: "aip-proj-head" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "AI price projection \xB7 ", P.sym, " \xB7 ", proj.label, " (", proj.horizon, ") ", /* @__PURE__ */ React.createElement("span", { className: "aip-pc-badge" }, "demo history \xB7 live forecast")), /* @__PURE__ */ React.createElement("span", { className: "mono aip-pc-leg" }, /* @__PURE__ */ React.createElement("i", { className: "aip-pc-sw", style: { background: "var(--cy)" } }), "MA20", /* @__PURE__ */ React.createElement("i", { className: "aip-pc-sw", style: { background: "var(--amb)" } }), "MA50", /* @__PURE__ */ React.createElement("i", { className: "aip-pc-sw", style: { background: "var(--ink-3)" } }), "MA200", /* @__PURE__ */ React.createElement("i", { className: "aip-pc-sw", style: { background: "color-mix(in oklab, var(--gn) 50%, transparent)" } }), "Breakout", /* @__PURE__ */ React.createElement("i", { className: "aip-pc-sw", style: { background: "color-mix(in oklab, var(--violet) 50%, transparent)" } }), "AI zone")), /* @__PURE__ */ React.createElement(AIProjectionChart, { P, proj })), /* @__PURE__ */ React.createElement("div", { className: "aip-hero" }, /* @__PURE__ */ React.createElement("div", { className: `aip-hero-verdict aip-hero-verdict--${vTone(P.verdict)}` }, /* @__PURE__ */ React.createElement("div", { className: "aip-hero-v mono" }, P.verdict), /* @__PURE__ */ React.createElement("div", { className: "aip-hero-score mono" }, P.score, /* @__PURE__ */ React.createElement("span", null, "/100")), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "forward-edge score")), /* @__PURE__ */ React.createElement("div", { className: "aip-hero-stats" }, /* @__PURE__ */ React.createElement("div", { className: "aip-hs" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Name"), /* @__PURE__ */ React.createElement("div", { className: "aip-hs-v", onClick: () => onTicker && onTicker(P.sym), style: { cursor: "pointer" } }, P.sym, " \xB7 ", P.name), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, P.sector, " \xB7 $", P.px.toFixed(2))), /* @__PURE__ */ React.createElement("div", { className: "aip-hs" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "P(up \xB7 21d)"), /* @__PURE__ */ React.createElement("div", { className: `aip-hs-v kpi-tone--${P.pUp >= 0.55 ? "gn" : P.pUp <= 0.45 ? "rd" : "amb"}` }, Math.round(P.pUp * 100), "%"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "classifier")), /* @__PURE__ */ React.createElement("div", { className: "aip-hs" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Ensemble"), /* @__PURE__ */ React.createElement("div", { className: `aip-hs-v ${P.ens >= 0 ? "up" : "dn"}` }, P.ens >= 0 ? "+" : "", P.ens), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, P.agree, "/3 heads agree")), /* @__PURE__ */ React.createElement("div", { className: "aip-hs" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Target / Stop"), /* @__PURE__ */ React.createElement("div", { className: "aip-hs-v mono" }, /* @__PURE__ */ React.createElement("span", { className: "up" }, "$", P.target), " ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "/"), " ", /* @__PURE__ */ React.createElement("span", { className: "dn" }, "$", P.stop)), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "P75 3M / P10 1M")), /* @__PURE__ */ React.createElement("div", { className: "aip-hs" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Confidence"), /* @__PURE__ */ React.createElement("div", { className: `aip-hs-v kpi-tone--${cTone(P.conf)}` }, P.conf), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "analog WR ", Math.round(P.analogWin * 100), "%")))), /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "PRICE-PATH FORECAST ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 Monte-Carlo \xB7 P10\u2013P90 cone \xB7 3 months")), /* @__PURE__ */ React.createElement(AIPriceCone, { P }), /* @__PURE__ */ React.createElement("div", { className: "aip-horizons" }, P.horizons.map((h) => /* @__PURE__ */ React.createElement("div", { key: h.l, className: "aip-hz" }, /* @__PURE__ */ React.createElement("span", { className: "aip-hz-l mono" }, h.l), /* @__PURE__ */ React.createElement("span", { className: `aip-hz-r mono ${h.ret >= 0 ? "up" : "dn"}` }, aiPct(h.ret)), /* @__PURE__ */ React.createElement("span", { className: "aip-hz-band mono dim2" }, "$", h.lo.toFixed(0), "\u2013$", h.hi.toFixed(0)))))), /* @__PURE__ */ React.createElement("div", { className: "aip-grid2" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "ENSEMBLE \xB7 3 MODEL HEADS"), /* @__PURE__ */ React.createElement("div", { className: "aip-heads" }, P.heads.map((h) => /* @__PURE__ */ React.createElement("div", { key: h.id, className: "aip-head" }, /* @__PURE__ */ React.createElement("div", { className: "aip-head-top" }, /* @__PURE__ */ React.createElement("span", { className: "aip-head-l" }, h.label), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "\xD7", h.w.toFixed(2)), /* @__PURE__ */ React.createElement("span", { className: `aip-head-s mono ${h.score >= 0 ? "up" : "dn"}` }, h.score >= 0 ? "+" : "", h.score)), /* @__PURE__ */ React.createElement("div", { className: "aip-head-track" }, /* @__PURE__ */ React.createElement("span", { className: "aip-head-zero" }), /* @__PURE__ */ React.createElement("div", { className: `aip-head-fill ${h.score >= 0 ? "up" : "dn"}`, style: h.score >= 0 ? { left: "50%", width: `${Math.min(50, h.score * 50)}%` } : { right: "50%", width: `${Math.min(50, -h.score * 50)}%` } })), /* @__PURE__ */ React.createElement("div", { className: "aip-head-note mono dim2" }, h.note))), /* @__PURE__ */ React.createElement("div", { className: "aip-ens-out mono" }, "weighted ensemble ", /* @__PURE__ */ React.createElement("b", { className: P.ens >= 0 ? "up" : "dn" }, P.ens >= 0 ? "+" : "", P.ens), " \u2192 P(up) ", /* @__PURE__ */ React.createElement("b", null, Math.round(P.pUp * 100), "%")))), /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "FEATURE IMPORTANCE ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 what's driving it (SHAP)")), /* @__PURE__ */ React.createElement("div", { className: "aip-feats" }, P.feats.map((f, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "aip-feat" }, /* @__PURE__ */ React.createElement("span", { className: "aip-feat-k" }, f.k), /* @__PURE__ */ React.createElement("div", { className: "aip-feat-track" }, /* @__PURE__ */ React.createElement("span", { className: "aip-feat-zero" }), /* @__PURE__ */ React.createElement("div", { className: `aip-feat-fill ${f.v >= 0 ? "up" : "dn"}`, style: f.v >= 0 ? { left: "50%", width: `${f.v / P.featMax * 48}%` } : { right: "50%", width: `${-f.v / P.featMax * 48}%` } })), /* @__PURE__ */ React.createElement("span", { className: `aip-feat-v mono ${f.v >= 0 ? "up" : "dn"}` }, f.v >= 0 ? "+" : "", f.v.toFixed(2))))))), /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "HISTORICAL ANALOGS ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 setups that looked like this & how they resolved (21d fwd)")), /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Period"), /* @__PURE__ */ React.createElement("th", null, "Analog"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Similarity"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Fwd 21d"), /* @__PURE__ */ React.createElement("th", null, "Outcome"))), /* @__PURE__ */ React.createElement("tbody", null, P.analogs.map((a, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, a.when), /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, a.sym)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, Math.round(a.sim * 100), "%"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${a.fwd >= 0 ? "up" : "dn"}` }, /* @__PURE__ */ React.createElement("b", null, aiPct(a.fwd))), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `aip-out kpi-tone--${a.fwd >= 0 ? "gn" : "rd"}` }, a.fwd >= 0 ? "RESOLVED UP" : "RESOLVED DOWN")))))), /* @__PURE__ */ React.createElement("div", { className: "lab-verdict mono dim2" }, Math.round(P.analogWin * 100), "% of the ", P.analogs.length, " closest historical analogs resolved upward over 21 days \u2014 ", P.analogWin >= 0.6 ? "supportive of the bullish read" : P.analogWin <= 0.4 ? "a caution flag on the long thesis" : "mixed precedent, size accordingly", ".")));
+  if (!P) return /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("div", { className: "aia-empty mono dim2", style: { padding: 16 } }, "No model forecast for this name."));
+  return /* @__PURE__ */ React.createElement("div", { className: "wsx-body aip-detail" }, /* @__PURE__ */ React.createElement("div", { className: "aip-pickbar" }, all.slice(0, 10).map((p) => /* @__PURE__ */ React.createElement("button", { key: p.sym, className: `aip-pick ${p.sym === P.sym ? "is-on" : ""}`, onClick: () => onPick(p.sym) }, p.sym))), proj && /* @__PURE__ */ React.createElement("div", { className: "aip-proj" }, /* @__PURE__ */ React.createElement("div", { className: "aip-proj-head" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Targets & projection \xB7 by holding period"), /* @__PURE__ */ React.createElement("div", { className: "aip-modeseg" }, ["swing", "position", "invest"].map((mo) => /* @__PURE__ */ React.createElement("button", { key: mo, className: `aip-modebtn ${mode === mo ? "is-on" : ""}`, onClick: () => setMode(mo) }, window.AIPredict ? null : null, mo === "swing" ? "Swing" : mo === "position" ? "Position" : "Invest", /* @__PURE__ */ React.createElement("span", { className: "aip-modebtn-h mono" }, mo === "swing" ? "5d" : mo === "position" ? "21d" : "126d"))))), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-grid" }, /* @__PURE__ */ React.createElement("div", { className: "aip-proj-cell" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Verdict \xB7 ", proj.horizon), /* @__PURE__ */ React.createElement("div", { className: `aip-proj-v kpi-tone--${proj.verdict === "BUY" ? "gn" : proj.verdict === "AVOID" ? "rd" : "amb"}` }, proj.verdict), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "P(up) ", Math.round(proj.pUp * 100), "%", proj.p_chop != null ? " \xB7 chop " + Math.round(proj.p_chop * 100) + "%" : "", proj.p_dn != null ? " \xB7 dn " + Math.round(proj.p_dn * 100) + "%" : "")), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-cell" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Entry"), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-v mono" }, "$", proj.entry.toFixed(2)), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "spot")), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-cell" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Stop \xB7 q10"), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-v mono dn" }, "$", proj.stop.toFixed(2)), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, proj.mag.q10, "%")), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-cell" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Target T1 \xB7 q75"), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-v mono up" }, "$", proj.t1.toFixed(2)), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "+", proj.mag.q75, "%")), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-cell" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Target T2 \xB7 q90"), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-v mono up" }, "$", proj.t2.toFixed(2)), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "+", proj.mag.q90, "%")), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-cell" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "R:R"), /* @__PURE__ */ React.createElement("div", { className: `aip-proj-v mono ${proj.rr >= 2 ? "up" : "warn"}` }, (_a = proj.rr) != null ? _a : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "T1 vs stop")), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-cell" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Expected value"), /* @__PURE__ */ React.createElement("div", { className: `aip-proj-v mono ${proj.ev >= 0 ? "up" : "dn"}` }, proj.ev >= 0 ? "+" : "", proj.ev, "%"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "P(T1) ", Math.round(proj.hit.p_t1_first * 100), "% \xB7 P(stop) ", Math.round(proj.hit.p_stop_first * 100), "%")), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-cell" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Median proj"), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-v mono" }, "$", proj.projMid.toFixed(2)), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, proj.retMid >= 0 ? "+" : "", proj.retMid, "% \xB7 ", proj.horizon))), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mono dn" }, "$", proj.projLow.toFixed(0)), /* @__PURE__ */ React.createElement("div", { className: "aip-proj-track" }, /* @__PURE__ */ React.createElement("span", { className: "aip-proj-stop", style: { left: 0 } }), /* @__PURE__ */ React.createElement("span", { className: "aip-proj-mid", style: { left: `${Math.max(2, Math.min(98, (proj.projMid - proj.projLow) / (proj.projHigh - proj.projLow) * 100))}%` } }), /* @__PURE__ */ React.createElement("span", { className: "aip-proj-spot", style: { left: `${Math.max(2, Math.min(98, (proj.entry - proj.projLow) / (proj.projHigh - proj.projLow) * 100))}%` }, title: "entry" })), /* @__PURE__ */ React.createElement("span", { className: "mono up" }, "$", proj.projHigh.toFixed(0))), /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 11, marginTop: 4 } }, "All fields recompute from the ", /* @__PURE__ */ React.createElement("b", null, proj.label, " (", proj.horizon, ")"), " model output \u2014 switch the toggle to see how targets, R:R and EV change by holding period. Nothing here is hardcoded; it's derived from the mode's magnitude quantiles + hit-net probabilities.")), proj && window.CandleChart && /* @__PURE__ */ React.createElement("div", { className: "aip-projchart" }, /* @__PURE__ */ React.createElement("div", { className: "aip-proj-head" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "AI price projection \xB7 ", P.sym, " \xB7 ", proj.label, " (", proj.horizon, ") ", /* @__PURE__ */ React.createElement("span", { className: "aip-pc-badge" }, "demo history \xB7 live forecast")), /* @__PURE__ */ React.createElement("span", { className: "mono aip-pc-leg" }, /* @__PURE__ */ React.createElement("i", { className: "aip-pc-sw", style: { background: "var(--cy)" } }), "MA20", /* @__PURE__ */ React.createElement("i", { className: "aip-pc-sw", style: { background: "var(--amb)" } }), "MA50", /* @__PURE__ */ React.createElement("i", { className: "aip-pc-sw", style: { background: "var(--ink-3)" } }), "MA200", /* @__PURE__ */ React.createElement("i", { className: "aip-pc-sw", style: { background: "color-mix(in oklab, var(--gn) 50%, transparent)" } }), "Breakout", /* @__PURE__ */ React.createElement("i", { className: "aip-pc-sw", style: { background: "color-mix(in oklab, var(--violet) 50%, transparent)" } }), "AI zone")), /* @__PURE__ */ React.createElement(AIProjectionChart, { P, proj })), /* @__PURE__ */ React.createElement("div", { className: "aip-hero" }, /* @__PURE__ */ React.createElement("div", { className: `aip-hero-verdict aip-hero-verdict--${vTone(P.verdict)}` }, /* @__PURE__ */ React.createElement("div", { className: "aip-hero-v mono" }, P.verdict), /* @__PURE__ */ React.createElement("div", { className: "aip-hero-score mono" }, P.score, /* @__PURE__ */ React.createElement("span", null, "/100")), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "forward-edge score")), /* @__PURE__ */ React.createElement("div", { className: "aip-hero-stats" }, /* @__PURE__ */ React.createElement("div", { className: "aip-hs" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Name"), /* @__PURE__ */ React.createElement("div", { className: "aip-hs-v", onClick: () => onTicker && onTicker(P.sym), style: { cursor: "pointer" } }, P.sym, " \xB7 ", P.name), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, P.sector, P.px != null ? " \xB7 $" + P.px.toFixed(2) : "")), /* @__PURE__ */ React.createElement("div", { className: "aip-hs" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "P(up \xB7 21d)"), /* @__PURE__ */ React.createElement("div", { className: `aip-hs-v kpi-tone--${P.pUp >= 0.55 ? "gn" : P.pUp <= 0.45 ? "rd" : "amb"}` }, P.pUp != null ? Math.round(P.pUp * 100) + "%" : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "classifier")), /* @__PURE__ */ React.createElement("div", { className: "aip-hs" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Ensemble"), /* @__PURE__ */ React.createElement("div", { className: `aip-hs-v ${P.ens >= 0 ? "up" : "dn"}` }, P.ens >= 0 ? "+" : "", P.ens), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, P.agree, "/3 heads agree")), /* @__PURE__ */ React.createElement("div", { className: "aip-hs" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Target / Stop"), /* @__PURE__ */ React.createElement("div", { className: "aip-hs-v mono" }, /* @__PURE__ */ React.createElement("span", { className: "up" }, "$", P.target), " ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "/"), " ", /* @__PURE__ */ React.createElement("span", { className: "dn" }, "$", P.stop)), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "P75 3M / P10 1M")), /* @__PURE__ */ React.createElement("div", { className: "aip-hs" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "Confidence"), /* @__PURE__ */ React.createElement("div", { className: `aip-hs-v kpi-tone--${cTone(P.conf)}` }, P.conf), /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, P._confluences && P._confluences.length ? P._confluences.slice(0, 2).join(" \xB7 ") : "model confidence")))), /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "PRICE-PATH FORECAST ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 Monte-Carlo \xB7 P10\u2013P90 cone \xB7 3 months")), /* @__PURE__ */ React.createElement(AIPriceCone, { P }), /* @__PURE__ */ React.createElement("div", { className: "aip-horizons" }, P.horizons.map((h) => /* @__PURE__ */ React.createElement("div", { key: h.l, className: "aip-hz" }, /* @__PURE__ */ React.createElement("span", { className: "aip-hz-l mono" }, h.l), /* @__PURE__ */ React.createElement("span", { className: `aip-hz-r mono ${h.ret >= 0 ? "up" : "dn"}` }, aiPct(h.ret)), /* @__PURE__ */ React.createElement("span", { className: "aip-hz-band mono dim2" }, "$", h.lo.toFixed(0), "\u2013$", h.hi.toFixed(0)))))), /* @__PURE__ */ React.createElement("div", { className: "aip-grid2" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "ENSEMBLE \xB7 3 MODEL HEADS"), /* @__PURE__ */ React.createElement("div", { className: "aip-heads" }, P.heads.map((h) => /* @__PURE__ */ React.createElement("div", { key: h.id, className: "aip-head" }, /* @__PURE__ */ React.createElement("div", { className: "aip-head-top" }, /* @__PURE__ */ React.createElement("span", { className: "aip-head-l" }, h.label), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "\xD7", h.w.toFixed(2)), /* @__PURE__ */ React.createElement("span", { className: `aip-head-s mono ${h.score >= 0 ? "up" : "dn"}` }, h.score >= 0 ? "+" : "", h.score)), /* @__PURE__ */ React.createElement("div", { className: "aip-head-track" }, /* @__PURE__ */ React.createElement("span", { className: "aip-head-zero" }), /* @__PURE__ */ React.createElement("div", { className: `aip-head-fill ${h.score >= 0 ? "up" : "dn"}`, style: h.score >= 0 ? { left: "50%", width: `${Math.min(50, h.score * 50)}%` } : { right: "50%", width: `${Math.min(50, -h.score * 50)}%` } })), /* @__PURE__ */ React.createElement("div", { className: "aip-head-note mono dim2" }, h.note))), /* @__PURE__ */ React.createElement("div", { className: "aip-ens-out mono" }, "weighted ensemble ", /* @__PURE__ */ React.createElement("b", { className: P.ens >= 0 ? "up" : "dn" }, P.ens >= 0 ? "+" : "", P.ens), " \u2192 P(up) ", /* @__PURE__ */ React.createElement("b", null, Math.round(P.pUp * 100), "%")))), /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "FEATURE IMPORTANCE ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 what's driving it (SHAP)")), /* @__PURE__ */ React.createElement("div", { className: "aip-feats" }, P.feats.map((f, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "aip-feat" }, /* @__PURE__ */ React.createElement("span", { className: "aip-feat-k" }, f.k), /* @__PURE__ */ React.createElement("div", { className: "aip-feat-track" }, /* @__PURE__ */ React.createElement("span", { className: "aip-feat-zero" }), /* @__PURE__ */ React.createElement("div", { className: `aip-feat-fill ${f.v >= 0 ? "up" : "dn"}`, style: f.v >= 0 ? { left: "50%", width: `${f.v / P.featMax * 48}%` } : { right: "50%", width: `${-f.v / P.featMax * 48}%` } })), /* @__PURE__ */ React.createElement("span", { className: `aip-feat-v mono ${f.v >= 0 ? "up" : "dn"}` }, f.v >= 0 ? "+" : "", f.v.toFixed(2))))))), Array.isArray(P.analogs) && P.analogs.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "HISTORICAL ANALOGS ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 setups that looked like this & how they resolved (21d fwd)")), /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Period"), /* @__PURE__ */ React.createElement("th", null, "Analog"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Similarity"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Fwd 21d"), /* @__PURE__ */ React.createElement("th", null, "Outcome"))), /* @__PURE__ */ React.createElement("tbody", null, P.analogs.map((a, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, a.when), /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, a.sym)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, Math.round(a.sim * 100), "%"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${a.fwd >= 0 ? "up" : "dn"}` }, /* @__PURE__ */ React.createElement("b", null, aiPct(a.fwd))), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `aip-out kpi-tone--${a.fwd >= 0 ? "gn" : "rd"}` }, a.fwd >= 0 ? "RESOLVED UP" : "RESOLVED DOWN"))))))));
 }
 function AIPriceCone({ P }) {
   const [ref, w] = window.useWidth ? window.useWidth(820) : [{ current: null }, 820];
   const h = 220, padL = 8, padR = 56, padT = 12, padB = 22;
   const plotW = w - padL - padR, plotR = padL + plotW, plotH = h - padT - padB;
-  const c = P.cone, n = P.days;
+  const c = P && P.cone, n = P && P.days;
+  if (!c || !Array.isArray(c.p10) || P.px == null) return /* @__PURE__ */ React.createElement("div", { className: "aip-cone mono dim2", style: { padding: 12 } }, "\u2014 price cone unavailable");
   const all = c.p10.concat(c.p90, [P.px]);
   const min = Math.min(...all) * 0.99, max = Math.max(...all) * 1.01;
   const x = (i) => padL + i / n * plotW, y = (v) => padT + plotH - (v - min) / (max - min) * plotH;
@@ -28800,17 +28950,37 @@ function AIProjectionChart({ P, proj }) {
 window.SurfaceAIPredictions = SurfaceAIPredictions;
 window.AIProjectionChart = AIProjectionChart;
 function AICrossMode({ all, onOpen }) {
-  const pBand = (p) => p >= 0.6 ? "gn" : p >= 0.45 ? "amb" : "rd";
-  const rows = useMemoAI(() => all.map((p) => ({
-    sym: p.sym,
-    name: p.name,
-    sw: p.modes.swing.direction.p_up,
-    po: p.modes.position.direction.p_up,
-    iv: p.modes.invest.direction.p_up,
-    cm: p.crossMode
-  })).sort((a, b) => b.sw - a.sw), [all]);
-  const bl = useMemoAI(() => window.AIPredict ? window.AIPredict.buyList("swing") : null, [all]);
-  return /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, bl && bl.defensive && /* @__PURE__ */ React.createElement("div", { className: "aip-defensive" }, /* @__PURE__ */ React.createElement("span", { className: "aip-def-badge mono" }, "\u26A0 DEFENSIVE TAPE"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "Model is suppressed across the universe (max P(up) ", (bl.poolMax * 100).toFixed(1), "%, below the 55% BUY gate). Showing best-of-pool closest-miss watch list instead of forcing BUYs.")), /* @__PURE__ */ React.createElement("div", { className: "aip-board-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "P(up) by horizon \xB7 swing 5d \xB7 position 21d \xB7 invest 126d \u2014 divergence is the signal")), /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl aip-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Symbol"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Swing 5d"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Position 21d"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Invest 126d"), /* @__PURE__ */ React.createElement("th", null, "Horizon view"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Agreement"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r) => /* @__PURE__ */ React.createElement("tr", { key: r.sym, onClick: () => onOpen(r.sym), className: "aip-row" }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, r.sym)), [r.sw, r.po, r.iv].map((p, i) => /* @__PURE__ */ React.createElement("td", { key: i, className: "r" }, /* @__PURE__ */ React.createElement("span", { className: `aip-pchip kpi-tone--${pBand(p)}` }, Math.round(p * 100), "%"))), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: "aip-cm-spark" }, [r.sw, r.po, r.iv].map((p, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: `aip-cm-bar kpi-tone-bg--${pBand(p)}`, style: { height: `${6 + p * 22}px` }, title: ["5d", "21d", "126d"][i] + " " + Math.round(p * 100) + "%" })))), /* @__PURE__ */ React.createElement("td", { className: "r" }, /* @__PURE__ */ React.createElement("span", { className: `aip-cm-verdict aip-cm-verdict--${r.cm.agree === "ALIGNED" ? "gn" : r.cm.agree === "MIXED" ? "amb" : "rd"}` }, r.cm.agree)), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, "\u203A"))))), /* @__PURE__ */ React.createElement("div", { className: "lab-verdict mono dim2" }, /* @__PURE__ */ React.createElement("b", null, "ALIGNED"), " = all three horizons agree on direction (highest-conviction). ", /* @__PURE__ */ React.createElement("b", null, "DIVERGENT"), " = a name that's bullish short-term but bearish long-term (or vice-versa) \u2014 a trade, not an investment. This multi-horizon disagreement is unique to the ML model."));
+  const pBand = (p) => p == null ? "ink" : p >= 0.6 ? "gn" : p >= 0.45 ? "amb" : "rd";
+  const pTxt = (p) => p == null ? "\u2014" : Math.round(p * 100) + "%";
+  const [rows, setRows] = useStateAI(null);
+  React.useEffect(() => {
+    let live = true;
+    const J = (m) => fetch(`/api/ml_edge?mode=${m}&limit=300`, { credentials: "same-origin" }).then((r) => r.ok ? r.json() : null).catch(() => null);
+    Promise.all([J("swing"), J("position"), J("invest")]).then(([sw, po, iv]) => {
+      if (!live) return;
+      const idx = (d) => {
+        const m = {};
+        (d && d.rows || []).forEach((r) => {
+          m[r.ticker] = r;
+        });
+        return m;
+      };
+      const S = idx(sw), Po = idx(po), I = idx(iv);
+      setRows(Object.keys(S).map((s) => {
+        const swp = S[s] && S[s].p_up, pop = Po[s] && Po[s].p_up, ivp = I[s] && I[s].p_up;
+        const present = [swp, pop, ivp].filter((x) => typeof x === "number");
+        const spread = present.length >= 2 ? Math.max(...present) - Math.min(...present) : null;
+        const agree = spread == null ? "\u2014" : spread < 0.12 ? "ALIGNED" : spread < 0.22 ? "MIXED" : "DIVERGENT";
+        return { sym: s, name: S[s] && S[s].name || s, sw: swp, po: pop, iv: ivp, agree };
+      }).filter((r) => typeof r.sw === "number").sort((a, b) => (b.sw || 0) - (a.sw || 0)));
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  const bl = useMemoAI(() => window.AIPredict ? window.AIPredict.buyList("swing") : null, []);
+  if (!rows) return /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("div", { className: "aia-empty mono dim2", style: { padding: 16 } }, "Loading cross-mode forecasts\u2026"));
+  return /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, bl && bl.defensive && /* @__PURE__ */ React.createElement("div", { className: "aip-defensive" }, /* @__PURE__ */ React.createElement("span", { className: "aip-def-badge mono" }, "\u26A0 DEFENSIVE TAPE"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "Model is suppressed across the universe (max P(up) ", (bl.poolMax * 100).toFixed(1), "%, below the 55% BUY gate). Showing best-of-pool closest-miss watch list instead of forcing BUYs.")), /* @__PURE__ */ React.createElement("div", { className: "aip-board-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "P(up) by horizon \xB7 swing 5d \xB7 position 21d \xB7 invest 126d \u2014 divergence is the signal")), /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl aip-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Symbol"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Swing 5d"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Position 21d"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Invest 126d"), /* @__PURE__ */ React.createElement("th", null, "Horizon view"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Agreement"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r) => /* @__PURE__ */ React.createElement("tr", { key: r.sym, onClick: () => onOpen(r.sym), className: "aip-row" }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, r.sym)), [r.sw, r.po, r.iv].map((p, i) => /* @__PURE__ */ React.createElement("td", { key: i, className: "r" }, /* @__PURE__ */ React.createElement("span", { className: `aip-pchip kpi-tone--${pBand(p)}` }, pTxt(p)))), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: "aip-cm-spark" }, [r.sw, r.po, r.iv].map((p, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: `aip-cm-bar kpi-tone-bg--${pBand(p)}`, style: { height: `${6 + (p || 0) * 22}px` }, title: ["5d", "21d", "126d"][i] + " " + pTxt(p) })))), /* @__PURE__ */ React.createElement("td", { className: "r" }, /* @__PURE__ */ React.createElement("span", { className: `aip-cm-verdict aip-cm-verdict--${r.agree === "ALIGNED" ? "gn" : r.agree === "MIXED" ? "amb" : r.agree === "DIVERGENT" ? "rd" : "ink"}` }, r.agree)), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, "\u203A"))))), /* @__PURE__ */ React.createElement("div", { className: "lab-verdict mono dim2" }, /* @__PURE__ */ React.createElement("b", null, "ALIGNED"), " = all three horizons agree on direction (highest-conviction). ", /* @__PURE__ */ React.createElement("b", null, "DIVERGENT"), " = a name that's bullish short-term but bearish long-term (or vice-versa) \u2014 a trade, not an investment. This multi-horizon disagreement is unique to the ML model."));
 }
 function AITrack({ AP, onTicker }) {
   const led = AP.RESOLVED;
@@ -28861,9 +29031,9 @@ function AIAnalystView({ all, onTicker, pick, onPick, single, sym: symProp, tick
     const ctx = [
       `Ticker: ${P2.sym} (${P2.name}), sector ${P2.sector}, price $${P2.px}.`,
       `Quant engine read \u2014 composite score ${P2.score}/100, verdict ${P2.verdict}, P(up) ${Math.round(P2.pUp * 100)}%, confidence ${P2.conf}.`,
-      `3-model ensemble heads: ${heads} (agree ${P2.agree}/3).`,
-      `Monte-Carlo 3M median return ${P2.horizons[2].ret.toFixed(1)}%, target $${P2.target}, modeled stop $${P2.stop}.`,
-      `Top model features: ${feats}. Historical analogs resolved up ${Math.round((P2.analogWin || 0) * 100)}% of the time.`
+      `Model heads \u2014 Direction/Magnitude/Hit-Net: ${heads} (agree ${P2.agree}/3).`,
+      `Model 3M median return ${P2.horizons[2].ret.toFixed(1)}%, target $${P2.target}, modeled stop $${P2.stop}.`,
+      `Top SHAP drivers: ${feats}.`
     ].join("\n");
     return `You are a disciplined swing-trading analyst. Using ONLY the quantitative signals below, write a concise, balanced read for a self-directed trader. Do NOT invent precise price predictions or probabilities beyond what's given; reason qualitatively about what the signals imply.
 

@@ -11,11 +11,21 @@ const cTone = c => c === "HIGH" ? "gn" : c === "MED" ? "amb" : "ink";
 
 function SurfaceAIPredictions({ onTicker }) {
   const AP = window.AIPredict;
-  const [view, setView] = useStateAI("board");   // board · detail · calib
-  const [pick, setPick] = useStateAI("ARGN");
   const all = AP.all();
-  const P = useMemoAI(() => AP.predict(pick), [pick]);
+  const [view, setView] = useStateAI("board");   // board · detail · calib
+  const [pick, setPick] = useStateAI(() => { const r = all.find(x => x.px != null) || all[0]; return (r && r.sym) || ""; });
+  const P = useMemoAI(() => (pick ? AP.predict(pick) : null), [pick]);
   const openDetail = (s) => { setPick(s); setView("detail"); };
+
+  if (!all.length) {
+    return (
+      <div className="surface wsx wsx--violet aip">
+        <div className="wsx-body"><div className="aia-empty mono dim2" style={{ padding: 24 }}>
+          ML predictions unavailable — the model board (<span className="mono">/api/ai_predict</span>) returned no rows. Serve from :7432 with a populated model file.
+        </div></div>
+      </div>
+    );
+  }
 
   return (
     <div className="surface wsx wsx--violet aip">
@@ -23,11 +33,11 @@ function SurfaceAIPredictions({ onTicker }) {
         <div className="wsx-hdr-l">
           <div className="wsx-eyebrow mono">ML PREDICTIONS · MULTI-MODEL FORECAST</div>
           <h1 className="wsx-title mono">ML Predictions</h1>
-          <div className="wsx-sub mono dim2">3-head ensemble · P(up) classifier · Monte-Carlo price cone · feature importances · analogs · forward edge → BUY / HOLD / SELL</div>
+          <div className="wsx-sub mono dim2">Direction · Magnitude · Hit-Net heads · P(up) classifier · quantile price cone · SHAP drivers · forward edge → BUY / HOLD / SELL</div>
         </div>
         <div className="wsx-hdr-r">
-          <span className="aip-bt mono" title="Out-of-sample backtest">AUC {AP.BACKTEST.auc} · hit {Math.round(AP.BACKTEST.hit * 100)}% · n={AP.BACKTEST.n}</span>
-          <FreshnessPill state="live" age="sim" />
+          <span className="aip-bt mono" title="Out-of-sample backtest">{AP.BACKTEST.auc != null ? "AUC " + (+AP.BACKTEST.auc).toFixed(2) : "AUC —"}{AP.BACKTEST.hit != null ? " · hit " + Math.round(AP.BACKTEST.hit * 100) + "%" : ""}{AP.BACKTEST.n != null ? " · n=" + (+AP.BACKTEST.n).toLocaleString() : ""}</span>
+          <FreshnessPill state="live" age="live" />
         </div>
       </div>
 
@@ -35,7 +45,7 @@ function SurfaceAIPredictions({ onTicker }) {
         <div className="wsx-kpi wsx-kpi--violet"><div className="wsx-kpi-l mono">TOP VERDICT</div><div className={`wsx-kpi-v mono kpi-tone--${vTone(all[0].verdict)}`}>{all[0].sym} {all[0].verdict}</div><div className="wsx-kpi-s mono dim2">edge {all[0].score}/100</div></div>
         <div className="wsx-kpi wsx-kpi--gn"><div className="wsx-kpi-l mono">BUY SIGNALS</div><div className="wsx-kpi-v mono kpi-tone--gn">{all.filter(p => p.verdict === "BUY").length}</div><div className="wsx-kpi-s mono dim2">of {all.length} names</div></div>
         <div className="wsx-kpi wsx-kpi--rd"><div className="wsx-kpi-l mono">SELL SIGNALS</div><div className="wsx-kpi-v mono kpi-tone--rd">{all.filter(p => p.verdict === "SELL").length}</div><div className="wsx-kpi-s mono dim2">downside edge</div></div>
-        <div className="wsx-kpi wsx-kpi--cy"><div className="wsx-kpi-l mono">AVG P(up)</div><div className="wsx-kpi-v mono kpi-tone--cy">{Math.round(all.reduce((a, p) => a + p.pUp, 0) / all.length * 100)}%</div><div className="wsx-kpi-s mono dim2">classifier mean</div></div>
+        <div className="wsx-kpi wsx-kpi--cy"><div className="wsx-kpi-l mono">AVG P(up)</div><div className="wsx-kpi-v mono kpi-tone--cy">{(() => { const v = all.filter(p => p.pUp != null); return v.length ? Math.round(v.reduce((a, p) => a + p.pUp, 0) / v.length * 100) + "%" : "—"; })()}</div><div className="wsx-kpi-s mono dim2">classifier mean</div></div>
         <div className="wsx-kpi wsx-kpi--gn"><div className="wsx-kpi-l mono">MODEL AUC</div><div className="wsx-kpi-v mono kpi-tone--gn">{AP.BACKTEST.auc}</div><div className="wsx-kpi-s mono dim2">out-of-sample</div></div>
         <div className="wsx-kpi wsx-kpi--violet"><div className="wsx-kpi-l mono">HIT RATE</div><div className="wsx-kpi-v mono kpi-tone--violet">{Math.round(AP.BACKTEST.hit * 100)}%</div><div className="wsx-kpi-s mono dim2">n={AP.BACKTEST.n} · {AP.BACKTEST.horizon}</div></div>
       </div>
@@ -54,7 +64,7 @@ function SurfaceAIPredictions({ onTicker }) {
       {view === "calib" && <AICalib AP={AP} />}
 
       <div className="pf-note mono dim2">
-        Ensemble of three model heads (gradient-boost on tabular features · sequence model on 60-day OHLCV · regime-conditional HMM) trained on EODHD history, scored on live quotes. Forward edge → verdict. <b>Calibration &amp; backtest are shown so predictions aren't oversold</b> — a "70%" call should win ~70% of the time. Demo outputs; wire to your model server to go live.
+        Three real model heads — <b>Direction</b> (classifier edge) · <b>Magnitude</b> (quantile regression) · <b>Hit-Net</b> (P(T1) vs P(stop)) — from the production model (<span className="mono">/api/ai_predict</span>, ~1,100 names/horizon). Forward edge → verdict. <b>Calibration &amp; out-of-sample backtest are shown so predictions aren't oversold</b> — a top-decile call should beat the base rate. The per-ticker projection chart uses illustrative history with the live forward forecast; price cone, targets, SHAP and calibration are real.
       </div>
     </div>
   );
@@ -75,14 +85,14 @@ function AIBoard({ all, onOpen }) {
         <tbody>{rows.map((p, i) => (
           <tr key={p.sym} onClick={() => onOpen(p.sym)} className="aip-row">
             <td className="mono dim2"><b className={i < 3 ? "vio" : ""}>{i + 1}</b></td>
-            <td className="mono"><b>{p.sym}</b><span className="dim2"> ${p.px.toFixed(0)}</span></td>
+            <td className="mono"><b>{p.sym}</b><span className="dim2"> {p.px != null ? "$" + p.px.toFixed(0) : ""}</span></td>
             <td><span className={`aip-verdict aip-verdict--${vTone(p.verdict)}`}>{p.verdict}</span></td>
-            <td className="r mono tabular"><b className={`kpi-tone--${p.score >= 66 ? "gn" : p.score <= 40 ? "rd" : "amb"}`}>{p.score}</b></td>
-            <td className="r mono tabular">{Math.round(p.pUp * 100)}%</td>
-            <td><span className="aip-votes">{p.heads.map((h, j) => <span key={j} className={`aip-vote ${h.score >= 0 ? "up" : "dn"}`} title={`${h.label}: ${h.score}`} />)}<span className="mono dim2" style={{ marginLeft: 6 }}>{p.agree}/3</span></span></td>
-            <td className={`r mono tabular ${p.horizons[2].ret >= 0 ? "up" : "dn"}`}>{aiPct(p.horizons[2].ret)}</td>
-            <td className="r"><span className={`aip-conf kpi-tone--${cTone(p.conf)}`}>{p.conf}</span></td>
-            <td className="dim2" style={{ fontSize: 11 }}>{p.feats[0].k}</td>
+            <td className="r mono tabular"><b className={`kpi-tone--${p.score >= 66 ? "gn" : p.score <= 40 ? "rd" : "amb"}`}>{p.score != null ? p.score : "—"}</b></td>
+            <td className="r mono tabular">{p.pUp != null ? Math.round(p.pUp * 100) + "%" : "—"}</td>
+            <td><span className="aip-votes">{(p.heads || []).map((h, j) => <span key={j} className={`aip-vote ${h.score >= 0 ? "up" : "dn"}`} title={`${h.label}: ${h.score}`} />)}<span className="mono dim2" style={{ marginLeft: 6 }}>{p.agree != null ? p.agree + "/3" : ""}</span></span></td>
+            <td className={`r mono tabular ${(p.horizons && p.horizons[2] && p.horizons[2].ret) >= 0 ? "up" : "dn"}`}>{p.horizons && p.horizons[2] && p.horizons[2].ret != null ? aiPct(p.horizons[2].ret) : "—"}</td>
+            <td className="r"><span className={`aip-conf kpi-tone--${cTone(p.conf)}`}>{p.conf || "—"}</span></td>
+            <td className="dim2" style={{ fontSize: 11 }}>{(p.feats && p.feats[0]) ? p.feats[0].k : "—"}</td>
             <td className="mono dim">›</td>
           </tr>
         ))}</tbody>
@@ -94,8 +104,9 @@ function AIBoard({ all, onOpen }) {
 // ── per-ticker forecast detail ──────────────────────────────────
 function AIDetail({ P, all, onPick, onTicker }) {
   const [mode, setMode] = useStateAI(() => { const m = (window.__tmode || "SWING").toLowerCase(); return m.startsWith("pos") ? "position" : m.startsWith("inv") ? "invest" : "swing"; });
-  const proj = useMemoAI(() => (window.AIPredict ? window.AIPredict.projection(P.sym, mode) : null), [P.sym, mode]);
+  const proj = useMemoAI(() => (window.AIPredict && P ? window.AIPredict.projection(P.sym, mode) : null), [P && P.sym, mode]);
   const pBand = p => p >= 0.6 ? "gn" : p >= 0.45 ? "amb" : "rd";
+  if (!P) return <div className="wsx-body"><div className="aia-empty mono dim2" style={{ padding: 16 }}>No model forecast for this name.</div></div>;
   return (
     <div className="wsx-body aip-detail">
       <div className="aip-pickbar">
@@ -115,7 +126,7 @@ function AIDetail({ P, all, onPick, onTicker }) {
             </div>
           </div>
           <div className="aip-proj-grid">
-            <div className="aip-proj-cell"><div className="label-cap">Verdict · {proj.horizon}</div><div className={`aip-proj-v kpi-tone--${proj.verdict === "BUY" ? "gn" : proj.verdict === "AVOID" ? "rd" : "amb"}`}>{proj.verdict}</div><div className="mono dim2">P(up) {Math.round(proj.pUp * 100)}% · CI {Math.round(proj.ci[0]*100)}–{Math.round(proj.ci[1]*100)}%</div></div>
+            <div className="aip-proj-cell"><div className="label-cap">Verdict · {proj.horizon}</div><div className={`aip-proj-v kpi-tone--${proj.verdict === "BUY" ? "gn" : proj.verdict === "AVOID" ? "rd" : "amb"}`}>{proj.verdict}</div><div className="mono dim2">P(up) {Math.round(proj.pUp * 100)}%{proj.p_chop != null ? " · chop " + Math.round(proj.p_chop * 100) + "%" : ""}{proj.p_dn != null ? " · dn " + Math.round(proj.p_dn * 100) + "%" : ""}</div></div>
             <div className="aip-proj-cell"><div className="label-cap">Entry</div><div className="aip-proj-v mono">${proj.entry.toFixed(2)}</div><div className="mono dim2">spot</div></div>
             <div className="aip-proj-cell"><div className="label-cap">Stop · q10</div><div className="aip-proj-v mono dn">${proj.stop.toFixed(2)}</div><div className="mono dim2">{proj.mag.q10}%</div></div>
             <div className="aip-proj-cell"><div className="label-cap">Target T1 · q75</div><div className="aip-proj-v mono up">${proj.t1.toFixed(2)}</div><div className="mono dim2">+{proj.mag.q75}%</div></div>
@@ -157,11 +168,11 @@ function AIDetail({ P, all, onPick, onTicker }) {
           <div className="mono dim2">forward-edge score</div>
         </div>
         <div className="aip-hero-stats">
-          <div className="aip-hs"><div className="label-cap">Name</div><div className="aip-hs-v" onClick={() => onTicker && onTicker(P.sym)} style={{ cursor: "pointer" }}>{P.sym} · {P.name}</div><div className="mono dim2">{P.sector} · ${P.px.toFixed(2)}</div></div>
-          <div className="aip-hs"><div className="label-cap">P(up · 21d)</div><div className={`aip-hs-v kpi-tone--${P.pUp >= 0.55 ? "gn" : P.pUp <= 0.45 ? "rd" : "amb"}`}>{Math.round(P.pUp * 100)}%</div><div className="mono dim2">classifier</div></div>
+          <div className="aip-hs"><div className="label-cap">Name</div><div className="aip-hs-v" onClick={() => onTicker && onTicker(P.sym)} style={{ cursor: "pointer" }}>{P.sym} · {P.name}</div><div className="mono dim2">{P.sector}{P.px != null ? " · $" + P.px.toFixed(2) : ""}</div></div>
+          <div className="aip-hs"><div className="label-cap">P(up · 21d)</div><div className={`aip-hs-v kpi-tone--${P.pUp >= 0.55 ? "gn" : P.pUp <= 0.45 ? "rd" : "amb"}`}>{P.pUp != null ? Math.round(P.pUp * 100) + "%" : "—"}</div><div className="mono dim2">classifier</div></div>
           <div className="aip-hs"><div className="label-cap">Ensemble</div><div className={`aip-hs-v ${P.ens >= 0 ? "up" : "dn"}`}>{P.ens >= 0 ? "+" : ""}{P.ens}</div><div className="mono dim2">{P.agree}/3 heads agree</div></div>
           <div className="aip-hs"><div className="label-cap">Target / Stop</div><div className="aip-hs-v mono"><span className="up">${P.target}</span> <span className="dim2">/</span> <span className="dn">${P.stop}</span></div><div className="mono dim2">P75 3M / P10 1M</div></div>
-          <div className="aip-hs"><div className="label-cap">Confidence</div><div className={`aip-hs-v kpi-tone--${cTone(P.conf)}`}>{P.conf}</div><div className="mono dim2">analog WR {Math.round(P.analogWin * 100)}%</div></div>
+          <div className="aip-hs"><div className="label-cap">Confidence</div><div className={`aip-hs-v kpi-tone--${cTone(P.conf)}`}>{P.conf}</div><div className="mono dim2">{P._confluences && P._confluences.length ? P._confluences.slice(0, 2).join(" · ") : "model confidence"}</div></div>
         </div>
       </div>
 
@@ -207,23 +218,24 @@ function AIDetail({ P, all, onPick, onTicker }) {
         </div>
       </div>
 
-      {/* analogs */}
-      <div className="lab-card">
-        <div className="lab-card-h mono">HISTORICAL ANALOGS <span className="dim2">· setups that looked like this & how they resolved (21d fwd)</span></div>
-        <table className="dtable wsx-tbl">
-          <thead><tr><th>Period</th><th>Analog</th><th className="r">Similarity</th><th className="r">Fwd 21d</th><th>Outcome</th></tr></thead>
-          <tbody>{P.analogs.map((a, i) => (
-            <tr key={i}>
-              <td className="mono dim2">{a.when}</td>
-              <td className="mono"><b>{a.sym}</b></td>
-              <td className="r mono tabular">{Math.round(a.sim * 100)}%</td>
-              <td className={`r mono tabular ${a.fwd >= 0 ? "up" : "dn"}`}><b>{aiPct(a.fwd)}</b></td>
-              <td><span className={`aip-out kpi-tone--${a.fwd >= 0 ? "gn" : "rd"}`}>{a.fwd >= 0 ? "RESOLVED UP" : "RESOLVED DOWN"}</span></td>
-            </tr>
-          ))}</tbody>
-        </table>
-        <div className="lab-verdict mono dim2">{Math.round(P.analogWin * 100)}% of the {P.analogs.length} closest historical analogs resolved upward over 21 days — {P.analogWin >= 0.6 ? "supportive of the bullish read" : P.analogWin <= 0.4 ? "a caution flag on the long thesis" : "mixed precedent, size accordingly"}.</div>
-      </div>
+      {/* analogs — only when the backend has computed them (it currently doesn't) */}
+      {Array.isArray(P.analogs) && P.analogs.length > 0 && (
+        <div className="lab-card">
+          <div className="lab-card-h mono">HISTORICAL ANALOGS <span className="dim2">· setups that looked like this & how they resolved (21d fwd)</span></div>
+          <table className="dtable wsx-tbl">
+            <thead><tr><th>Period</th><th>Analog</th><th className="r">Similarity</th><th className="r">Fwd 21d</th><th>Outcome</th></tr></thead>
+            <tbody>{P.analogs.map((a, i) => (
+              <tr key={i}>
+                <td className="mono dim2">{a.when}</td>
+                <td className="mono"><b>{a.sym}</b></td>
+                <td className="r mono tabular">{Math.round(a.sim * 100)}%</td>
+                <td className={`r mono tabular ${a.fwd >= 0 ? "up" : "dn"}`}><b>{aiPct(a.fwd)}</b></td>
+                <td><span className={`aip-out kpi-tone--${a.fwd >= 0 ? "gn" : "rd"}`}>{a.fwd >= 0 ? "RESOLVED UP" : "RESOLVED DOWN"}</span></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -232,7 +244,8 @@ function AIPriceCone({ P }) {
   const [ref, w] = (window.useWidth ? window.useWidth(820) : [{ current: null }, 820]);
   const h = 220, padL = 8, padR = 56, padT = 12, padB = 22;
   const plotW = w - padL - padR, plotR = padL + plotW, plotH = h - padT - padB;
-  const c = P.cone, n = P.days;
+  const c = P && P.cone, n = P && P.days;
+  if (!c || !Array.isArray(c.p10) || P.px == null) return <div className="aip-cone mono dim2" style={{ padding: 12 }}>— price cone unavailable</div>;
   const all = c.p10.concat(c.p90, [P.px]); const min = Math.min(...all) * 0.99, max = Math.max(...all) * 1.01;
   const x = i => padL + (i / n) * plotW, y = v => padT + plotH - ((v - min) / (max - min)) * plotH;
   const pts = arr => arr.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`);
@@ -546,14 +559,28 @@ window.AIProjectionChart = AIProjectionChart;
 
 // ── Cross-Mode — swing/position/invest p_up side-by-side + adaptive picks ──
 function AICrossMode({ all, onOpen }) {
-  const pBand = p => p >= 0.6 ? "gn" : p >= 0.45 ? "amb" : "rd";
-  const rows = useMemoAI(() => all.map(p => ({
-    sym: p.sym, name: p.name,
-    sw: p.modes.swing.direction.p_up, po: p.modes.position.direction.p_up, iv: p.modes.invest.direction.p_up,
-    cm: p.crossMode,
-  })).sort((a, b) => b.sw - a.sw), [all]);
-  // adaptive buy list off the swing pool
-  const bl = useMemoAI(() => (window.AIPredict ? window.AIPredict.buyList("swing") : null), [all]);
+  const pBand = p => p == null ? "ink" : p >= 0.6 ? "gn" : p >= 0.45 ? "amb" : "rd";
+  const pTxt = p => p == null ? "—" : Math.round(p * 100) + "%";
+  const [rows, setRows] = useStateAI(null);
+  React.useEffect(() => {
+    let live = true;
+    const J = m => fetch(`/api/ml_edge?mode=${m}&limit=300`, { credentials: "same-origin" }).then(r => r.ok ? r.json() : null).catch(() => null);
+    Promise.all([J("swing"), J("position"), J("invest")]).then(([sw, po, iv]) => {
+      if (!live) return;
+      const idx = d => { const m = {}; ((d && d.rows) || []).forEach(r => { m[r.ticker] = r; }); return m; };
+      const S = idx(sw), Po = idx(po), I = idx(iv);
+      setRows(Object.keys(S).map(s => {
+        const swp = S[s] && S[s].p_up, pop = Po[s] && Po[s].p_up, ivp = I[s] && I[s].p_up;
+        const present = [swp, pop, ivp].filter(x => typeof x === "number");
+        const spread = present.length >= 2 ? Math.max(...present) - Math.min(...present) : null;
+        const agree = spread == null ? "—" : spread < 0.12 ? "ALIGNED" : spread < 0.22 ? "MIXED" : "DIVERGENT";
+        return { sym: s, name: (S[s] && S[s].name) || s, sw: swp, po: pop, iv: ivp, agree };
+      }).filter(r => typeof r.sw === "number").sort((a, b) => (b.sw || 0) - (a.sw || 0)));
+    });
+    return () => { live = false; };
+  }, []);
+  const bl = useMemoAI(() => (window.AIPredict ? window.AIPredict.buyList("swing") : null), []);
+  if (!rows) return <div className="wsx-body"><div className="aia-empty mono dim2" style={{ padding: 16 }}>Loading cross-mode forecasts…</div></div>;
   return (
     <div className="wsx-body">
       {bl && bl.defensive && (
@@ -569,10 +596,10 @@ function AICrossMode({ all, onOpen }) {
           <tr key={r.sym} onClick={() => onOpen(r.sym)} className="aip-row">
             <td className="mono"><b>{r.sym}</b></td>
             {[r.sw, r.po, r.iv].map((p, i) => (
-              <td key={i} className="r"><span className={`aip-pchip kpi-tone--${pBand(p)}`}>{Math.round(p * 100)}%</span></td>
+              <td key={i} className="r"><span className={`aip-pchip kpi-tone--${pBand(p)}`}>{pTxt(p)}</span></td>
             ))}
-            <td><span className="aip-cm-spark">{[r.sw, r.po, r.iv].map((p, i) => <span key={i} className={`aip-cm-bar kpi-tone-bg--${pBand(p)}`} style={{ height: `${6 + p * 22}px` }} title={["5d", "21d", "126d"][i] + " " + Math.round(p * 100) + "%"} />)}</span></td>
-            <td className="r"><span className={`aip-cm-verdict aip-cm-verdict--${r.cm.agree === "ALIGNED" ? "gn" : r.cm.agree === "MIXED" ? "amb" : "rd"}`}>{r.cm.agree}</span></td>
+            <td><span className="aip-cm-spark">{[r.sw, r.po, r.iv].map((p, i) => <span key={i} className={`aip-cm-bar kpi-tone-bg--${pBand(p)}`} style={{ height: `${6 + (p || 0) * 22}px` }} title={["5d", "21d", "126d"][i] + " " + pTxt(p)} />)}</span></td>
+            <td className="r"><span className={`aip-cm-verdict aip-cm-verdict--${r.agree === "ALIGNED" ? "gn" : r.agree === "MIXED" ? "amb" : r.agree === "DIVERGENT" ? "rd" : "ink"}`}>{r.agree}</span></td>
             <td className="mono dim">›</td>
           </tr>
         ))}</tbody>

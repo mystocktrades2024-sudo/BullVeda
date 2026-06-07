@@ -82,18 +82,21 @@ const HR = (function () {
 function HomeView({ onTicker, onSurface, mode, surface }) {
   const uni = (window.__BV && window.__BV.market && window.__BV.market.funnel && window.__BV.market.funnel.universe) || null;
   const uniStr = uni != null ? uni.toLocaleString() : "612";
-  const liveDown = !HR.has();  // live universe failed to load → sections show sample data
+  const liveDown = !HR.has();  // live universe empty → sections fall back to a placeholder layout
+  // Real "as of" stamp from the last scan bundle (same source the hero uses).
+  const _sm = (window.__BV && window.__BV.scanMeta) || null;
+  const _asOf = _sm && _sm.ts ? String(_sm.ts) + " PT" : "the last scan";
   return (
     <div className="home">
       {liveDown && (
         <div className="home-feed-warn mono" style={{
           margin: "0 0 10px", padding: "10px 14px", borderRadius: 10, fontSize: 12.5, lineHeight: 1.5,
-          background: "color-mix(in oklab, var(--rd) 14%, var(--bg-1))",
-          border: "1px solid color-mix(in oklab, var(--rd) 45%, transparent)", color: "var(--ink-1)",
+          background: "color-mix(in oklab, var(--amb) 12%, var(--bg-1))",
+          border: "1px solid color-mix(in oklab, var(--amb) 42%, transparent)", color: "var(--ink-1)",
         }}>
-          <b className="dn">⚠ LIVE DATA UNAVAILABLE</b> — the market feed isn't reachable, so the
-          tickers, prices and signals below are an <b>illustrative sample layout, not real data</b>.
-          Do not trade on them. Reload once the feed is back.
+          <b className="amb">DATA AS OF {_asOf}</b> — the latest scan returned no live names yet, so the
+          tickers and prices below are a <b>placeholder layout, not real values</b>. They refresh
+          automatically once the next scan lands.
         </div>
       )}
       {/* TIER 1 · MARKET STATE — regime + scan funnel + cross-asset tape */}
@@ -977,6 +980,19 @@ function NewsMarketsBoard({ onTicker, onSurface }) {
   );
 }
 
+// Fear/Greed → tone. Low = fear (red), ~50 = neutral (amber), high = greed (green).
+// Was hardcoded "gn"/"up" everywhere so 50 rendered green regardless of value.
+function fgTone(v) {
+  if (v == null) return "amb";
+  if (v >= 55) return "gn";
+  if (v >= 45) return "amb";
+  return "rd";
+}
+function fgClass(v) {
+  const t = fgTone(v);
+  return t === "gn" ? "up" : t === "rd" ? "dn" : "amb";
+}
+
 function HomeHero({ mode, onSurface }) {
   const go = (id) => () => onSurface && onSurface(id);
   const scan = (f) => () => { window.__scanFilter = f; go("signal-scanner")(); };
@@ -989,7 +1005,7 @@ function HomeHero({ mode, onSurface }) {
   const flagged = buy + watch + avoid || 1;
   const seg = (n) => `${(n / flagged) * 100}%`;
   const mood = [
-    { l: "FEAR/GREED", v: M && M.fearGreed != null ? String(M.fearGreed) : "62", tone: "gn", pct: M && M.fearGreed != null ? M.fearGreed : 62 },
+    { l: "FEAR/GREED", v: M && M.fearGreed != null ? String(M.fearGreed) : "62", tone: fgTone(M && M.fearGreed != null ? M.fearGreed : 62), pct: M && M.fearGreed != null ? M.fearGreed : 62 },
     { l: "BREADTH",    v: M && M.breadthPct != null ? Math.round(M.breadthPct) + "%" : "56%", tone: "gn", pct: M && M.breadthPct != null ? Math.round(M.breadthPct) : 56 },
     { l: "PUT/CALL",   v: M && M.putCall != null ? M.putCall.toFixed(2) : "0.78", tone: "gn", pct: 60 },
     { l: "NEW HIGHS",  v: M && M.newHighs != null ? String(M.newHighs) : "—", tone: "gn", pct: 50 },
@@ -1084,7 +1100,7 @@ function HomeBrief() {
       <span className="hh-brief-txt mono">
         Regime <b className={tone}>{M.regimeLabel} · {M.regimeTrend}</b>
         {M.maxSize != null ? <> (max size <b>{M.maxSize}%</b>)</> : null}
-        {M.fearGreed != null ? <> · Fear/Greed <b className="up">{M.fearGreed}</b></> : null}
+        {M.fearGreed != null ? <> · Fear/Greed <b className={fgClass(M.fearGreed)}>{M.fearGreed}</b></> : null}
         {M.breadthPct != null ? <> · breadth <b>{Math.round(M.breadthPct)}%</b></> : null}
         {vix != null ? <> · VIX <b>{vix.toFixed(1)}</b></> : null}
         {spyChg != null ? <> · SPY <b className={spyChg >= 0 ? "up" : "dn"}>{spyChg >= 0 ? "+" : ""}{spyChg.toFixed(1)}%</b></> : null}
