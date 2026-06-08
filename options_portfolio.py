@@ -232,6 +232,8 @@ def main() -> int:
 
     # submit-path guards FIRST
     if args.exits and not args.dry_run:
+        if (_ROOT / "cache" / "AUTOMATION_HALT").exists():
+            print("REFUSING --submit: cache/AUTOMATION_HALT present (kill-switch active)."); return 0
         if not e["_enabled"]:
             print("REFUSING --submit: options_auto_exit._enabled is false (gated OFF)."); return 0
         if not (cfg.get("alpaca", {}).get("paper", True)):

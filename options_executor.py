@@ -56,6 +56,9 @@ def _opt_cfg(cfg: dict) -> dict:
         # ── liquidity / quote-sanity guards (reject stale/wide/garbage quotes) ──
         "max_spread_ratio":     float(blk.get("max_spread_ratio", 1.6)),   # skip if ask > bid * this
         "max_time_value_pct":   float(blk.get("max_time_value_pct", 0.35)),  # skip if (ask-intrinsic) > spot*this
+        # ── small-mode sizing ──
+        "fixed_contracts":      int(blk.get("fixed_contracts", 0)),        # 0 = %-sized; N = always N contracts/name
+        "max_premium_per_contract": float(blk.get("max_premium_per_contract", 750)),  # absolute $ cap per contract (keeps it small)
     }
 
 
@@ -198,13 +201,20 @@ def build_options_plan(picks: list[dict], equity: float, cfg: dict,
         if not contract:
             plan.append({"ticker": ticker, "action": "skip", "reason": "no liquid call in DTE/strike window (or not optionable)"}); continue
 
-        # Size by premium-at-risk: contracts * premium * 100 <= budget.
         per_contract_cost = contract["ask"] * 100.0
-        n = int(budget_per_name // per_contract_cost)
-        n = min(n, o["max_contracts_per_name"])
-        if n < 1:
-            plan.append({"ticker": ticker, "action": "skip",
-                         "reason": f"1 contract (${per_contract_cost:,.0f}) > {o['premium_risk_pct']}% budget (${budget_per_name:,.0f})"}); continue
+        if o["fixed_contracts"]:
+            # SMALL MODE — always exactly N contracts/name (default 1), bounded by an
+            # absolute $ cap so a single contract can never be large.
+            n = min(o["fixed_contracts"], o["max_contracts_per_name"])
+            if per_contract_cost > o["max_premium_per_contract"]:
+                plan.append({"ticker": ticker, "action": "skip",
+                             "reason": f"1 contract (${per_contract_cost:,.0f}) > max_premium_per_contract (${o['max_premium_per_contract']:,.0f})"}); continue
+        else:
+            # %-sized: contracts * premium * 100 <= premium-at-risk budget.
+            n = min(int(budget_per_name // per_contract_cost), o["max_contracts_per_name"])
+            if n < 1:
+                plan.append({"ticker": ticker, "action": "skip",
+                             "reason": f"1 contract (${per_contract_cost:,.0f}) > {o['premium_risk_pct']}% budget (${budget_per_name:,.0f})"}); continue
 
         limit = round(contract["ask"] * (1.0 + o["limit_slippage_pct"]), 2)
         premium_at_risk = round(n * contract["ask"] * 100.0, 2)
@@ -274,6 +284,8 @@ def main() -> int:
 
     # ── submit-path hard guards (asserted FIRST, before any work) ──
     if not args.dry_run:
+        if (_ROOT / "cache" / "AUTOMATION_HALT").exists():
+            print("REFUSING --submit: cache/AUTOMATION_HALT present (kill-switch active)."); return 0
         if not o["_enabled"]:
             print("REFUSING --submit: config.options_auto_buy._enabled is false (gated OFF).")
             print("Flip it to true to go live-on-paper. Staying inert.")
