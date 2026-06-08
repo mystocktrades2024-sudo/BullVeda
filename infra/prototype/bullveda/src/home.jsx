@@ -208,6 +208,7 @@ function IndexStrip() {
     const BV = window.__BV; if (!BV || !BV.get) return;
     let alive = true, tLast = Date.now();
     const tick = () => BV.get("/api/index-quotes").then(d => { if (alive && d && d.index_quotes && d.index_quotes.length) { setLiveIq(d.index_quotes); tLast = Date.now(); } }).catch(() => {});
+    tick(); // immediate first poll so the tape reflects live truth, not the stale boot snapshot
     const iv = setInterval(tick, 60000);
     const ageIv = setInterval(() => { if (alive) setAge(Math.round((Date.now() - tLast) / 1000)); }, 5000);
     return () => { alive = false; clearInterval(iv); clearInterval(ageIv); };
@@ -250,7 +251,26 @@ function IndexStrip() {
   for (let r = 0; r < reps; r++) idx.forEach((i, k) => half.push(tile(i, r * 1000 + k)));
   // constant scroll speed (~70px/s) regardless of how many tiles are live
   const dur = Math.max(18, Math.round((reps * setW) / 70));
+  // ── staleness / partial-feed detection (informational only — never fakes a tile) ──
+  // A healthy tape carries the Schwab headline indices; when Schwab auth lapses those
+  // (and the commodity ETF proxies) drop, leaving only crypto + FX. Surface it so the
+  // feed degrades loudly instead of silently. Stale = live poll dead for 10m+.
+  const hasCore = idx.some(i => ["S&P 500", "NASDAQ", "VIX"].includes(i.s));
+  const partial = idx.length > 0 && !hasCore;
+  const stale = !partial && age >= 600;
+  const warn = partial
+    ? { kind: "partial", msg: "TAPE PARTIAL — index & commodity quotes unavailable (Schwab auth likely expired); showing crypto + FX only.", fix: "python3 schwab_auth.py oauth" }
+    : stale
+      ? { kind: "stale", msg: `TAPE STALE — live quotes haven't refreshed in ${Math.round(age / 60)}m; the feed may be rate-limited.`, fix: null }
+      : null;
   return (
+    <>
+    {warn && (
+      <div className={`ix-warn ix-warn--${warn.kind} mono`} role="status">
+        <span className="ix-warn-i">⚠</span>
+        <span className="ix-warn-t">{warn.msg}{warn.fix ? <> · fix: <code className="ix-warn-cmd">{warn.fix}</code></> : null}</span>
+      </div>
+    )}
     <div className="ix-strip ix-strip--marquee">
       <div className="ix ix--ink ix-live" title={`Live tape · refreshed ${age < 5 ? "now" : age + "s ago"}`}>
         <span className="ix-s mono" style={{ color: "var(--gn)" }}>● LIVE</span>
@@ -263,6 +283,7 @@ function IndexStrip() {
         </div>
       </div>
     </div>
+    </>
   );
 }
 

@@ -6774,6 +6774,27 @@ body {
 .ix-c { font-size: 10.5px; white-space: nowrap; }
 .ix svg { margin-left: auto; flex-shrink: 0; }
 
+/* Index strip — staleness / partial-feed banner (informational) */
+.ix-warn {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 6px; padding: 7px 12px; border-radius: var(--r-3);
+  font-size: 11.5px; line-height: 1.4;
+  background: color-mix(in oklab, var(--amb) 12%, var(--bg-1));
+  border: 1px solid color-mix(in oklab, var(--amb) 42%, transparent);
+  color: var(--ink-1);
+}
+.ix-warn-i { color: var(--amb); flex-shrink: 0; }
+.ix-warn--stale {
+  background: color-mix(in oklab, var(--ink-3) 12%, var(--bg-1));
+  border-color: color-mix(in oklab, var(--ink-3) 42%, transparent);
+}
+.ix-warn--stale .ix-warn-i { color: var(--ink-2); }
+.ix-warn-cmd {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  background: color-mix(in oklab, var(--amb) 16%, transparent);
+  padding: 1px 6px; border-radius: 4px; color: var(--ink); white-space: nowrap;
+}
+
 /* Index strip — auto-scrolling ticker tape (marquee) */
 .ix-strip--marquee { overflow: hidden; align-items: stretch; }
 .ix-strip--marquee .ix-live { flex: 0 0 auto; position: sticky; left: 0; z-index: 2; }
@@ -27281,6 +27302,7 @@ function IndexStrip() {
       }
     }).catch(() => {
     });
+    tick();
     const iv = setInterval(tick, 6e4);
     const ageIv = setInterval(() => {
       if (alive) setAge(Math.round((Date.now() - tLast) / 1e3));
@@ -27316,7 +27338,11 @@ function IndexStrip() {
   const half = [];
   for (let r = 0; r < reps; r++) idx.forEach((i, k) => half.push(tile(i, r * 1e3 + k)));
   const dur = Math.max(18, Math.round(reps * setW / 70));
-  return /* @__PURE__ */ React.createElement("div", { className: "ix-strip ix-strip--marquee" }, /* @__PURE__ */ React.createElement("div", { className: "ix ix--ink ix-live", title: `Live tape \xB7 refreshed ${age < 5 ? "now" : age + "s ago"}` }, /* @__PURE__ */ React.createElement("span", { className: "ix-s mono", style: { color: "var(--gn)" } }, "\u25CF LIVE"), /* @__PURE__ */ React.createElement("span", { className: "ix-v mono dim2" }, age < 90 ? "tape" : "delayed")), /* @__PURE__ */ React.createElement("div", { className: "ix-viewport" }, /* @__PURE__ */ React.createElement("div", { className: "ix-track", style: { animationDuration: `${dur}s` } }, /* @__PURE__ */ React.createElement("div", { className: "ix-group" }, half), /* @__PURE__ */ React.createElement("div", { className: "ix-group", "aria-hidden": "true" }, half))));
+  const hasCore = idx.some((i) => ["S&P 500", "NASDAQ", "VIX"].includes(i.s));
+  const partial = idx.length > 0 && !hasCore;
+  const stale = !partial && age >= 600;
+  const warn = partial ? { kind: "partial", msg: "TAPE PARTIAL \u2014 index & commodity quotes unavailable (Schwab auth likely expired); showing crypto + FX only.", fix: "python3 schwab_auth.py oauth" } : stale ? { kind: "stale", msg: `TAPE STALE \u2014 live quotes haven't refreshed in ${Math.round(age / 60)}m; the feed may be rate-limited.`, fix: null } : null;
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, warn && /* @__PURE__ */ React.createElement("div", { className: `ix-warn ix-warn--${warn.kind} mono`, role: "status" }, /* @__PURE__ */ React.createElement("span", { className: "ix-warn-i" }, "\u26A0"), /* @__PURE__ */ React.createElement("span", { className: "ix-warn-t" }, warn.msg, warn.fix ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 fix: ", /* @__PURE__ */ React.createElement("code", { className: "ix-warn-cmd" }, warn.fix)) : null)), /* @__PURE__ */ React.createElement("div", { className: "ix-strip ix-strip--marquee" }, /* @__PURE__ */ React.createElement("div", { className: "ix ix--ink ix-live", title: `Live tape \xB7 refreshed ${age < 5 ? "now" : age + "s ago"}` }, /* @__PURE__ */ React.createElement("span", { className: "ix-s mono", style: { color: "var(--gn)" } }, "\u25CF LIVE"), /* @__PURE__ */ React.createElement("span", { className: "ix-v mono dim2" }, age < 90 ? "tape" : "delayed")), /* @__PURE__ */ React.createElement("div", { className: "ix-viewport" }, /* @__PURE__ */ React.createElement("div", { className: "ix-track", style: { animationDuration: `${dur}s` } }, /* @__PURE__ */ React.createElement("div", { className: "ix-group" }, half), /* @__PURE__ */ React.createElement("div", { className: "ix-group", "aria-hidden": "true" }, half)))));
 }
 function MarketBriefing({ onSurface, onTicker }) {
   const go = (id) => onSurface && onSurface(id);
