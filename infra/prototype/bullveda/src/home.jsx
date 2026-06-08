@@ -908,12 +908,19 @@ function NewsMarketsBoard({ onTicker, onSurface }) {
     { head: "Lithium names rebound on supply-cut headlines out of Chile", src: "Reuters", time: "1h", sym: "LAC", tone: "gn", tickers: [["LAC", +5.8]] },
     { head: "Software multiples compress as Street trims FY estimates", src: "Bloomberg", time: "2h", sym: "MDB", tone: "rd", tickers: [["MDB", -4.4]] },
   ]);
-  const Story = ({ s, big }) => (
-    <button className={`nm-story ${big ? "nm-story--big" : ""}`} onClick={() => s.tickers[0] && onTicker(s.tickers[0][0])}>
+  // sentiment label from EODHD story tone (gn/rd/amb). Honest to the feed — note
+  // most "Is X a good buy" headlines score positive, so BULLISH dominates until
+  // genuine negative news flows.
+  const SENT = { gn: "BULLISH", rd: "BEARISH", amb: "NEUTRAL" };
+  const Story = ({ s, big }) => {
+    const tone = s.tone || "amb";
+    return (
+    <button className={`nm-story nm-story--t-${tone} ${big ? "nm-story--big" : ""}`} onClick={() => s.tickers[0] && onTicker(s.tickers[0][0])}>
       {big && <div className="nm-feat-img"><span className="mono">◧ MARKETS</span></div>}
       <div className="nm-head">{s.head}</div>
       <div className="nm-meta mono">
         {s.live && <span className="nm-live">● LIVE</span>}
+        <span className={`nm-sent nm-sent--${tone}`} title="News sentiment (EODHD)">{SENT[tone]}</span>
         <span className="nm-src">{s.src}</span>{s.time ? <span className="dim2"> · {s.time} ago</span> : null}
       </div>
       {big && s.sum && <div className="nm-sum">{s.sum}</div>}
@@ -923,7 +930,8 @@ function NewsMarketsBoard({ onTicker, onSurface }) {
         ))}
       </div>
     </button>
-  );
+    );
+  };
   return (
     <div className="nm-board">
       <div className="nm-col nm-col--feat">
