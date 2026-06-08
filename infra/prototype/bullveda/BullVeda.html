@@ -11231,6 +11231,38 @@ body {
   // ── perform the blocking load (skippable with ?mock=1 for A/B debugging) ──
   // ONE combined round-trip (cuts cold tunnel load ~11s→~3s); fall back to the six
   // individual endpoints/files if the combined endpoint is unavailable.
+  // Derived-state builders — reused by the initial boot AND BV.refreshBoot() so
+  // an in-place refresh produces byte-identical state to a cold load.
+  function buildSetupStatsBy(c) {
+    var sf = c && c.setup_family_stats;
+    if (!sf) return null;
+    var m = {};
+    (Array.isArray(sf) ? sf : Object.keys(sf).map(function (k) { var o = sf[k] || {}; o.setup = o.setup || k; return o; }))
+      .forEach(function (s) { if (s && s.setup) m[s.setup] = s; });
+    return m;
+  }
+  function buildMarket(c) {
+    if (!c) return null;
+    var rg = c.regime || {}, mb = c.market_breadth || {}, mac = c.macro_signals || {};
+    var r4 = rg.regime4 || "risk_on_choppy";
+    var on = !/risk_off|panic/.test(r4);
+    var trend = /trending/.test(r4) ? "TRENDING" : /choppy/.test(r4) ? "CHOPPY" : /panic/.test(r4) ? "PANIC" : "—";
+    var pc = (mac.put_call && num(mac.put_call.equity_pc)) || null;
+    var breadth = num(mb.pct_above_50d, null);
+    var fg = (breadth != null) ? clamp(Math.round(breadth * 0.6 + (pc != null ? (1 - pc) * 40 : 20)), 0, 100) : null;
+    return {
+      regime4: r4, regimeOn: on, regimeTrend: trend,
+      regimeLabel: (on ? "RISK-ON" : "RISK-OFF"),
+      maxSize: num(rg.max_size_pct, null),
+      breadthPct: breadth, breadth100: num(mb.pct_above_100d), breadth200: num(mb.pct_above_200d),
+      newHighs: num(mb.new_highs), newLows: num(mb.new_lows),
+      spy: num(rg.spy_price), qqq: num(rg.qqq_price),
+      putCall: pc, fearGreed: fg, fgLabel: (mac.put_call && mac.put_call.signal) || null,
+      funnel: { universe: num(c.scan_count, 0), bullish: num(c.buy_count, 0), neutral: num(c.watch_count, 0), bearish: num(c.killed_count, 0), short: num(c.short_count, 0) },
+      sectors: c.sector_etf || null, movers: c.market_movers || null,
+    };
+  }
+
   var MOCK = /mock=1/.test(location.search);
   var BOOT = MOCK ? null : syncGet("/api/bullveda-boot");
   if (BOOT) console.info("[BullVeda] combined boot payload (1 request)");
@@ -11328,44 +11360,58 @@ body {
     // (fresh, <120s), else the copy persisted in critical (scan-cadence fallback).
     BV.indexQuotes = (BOOT && BOOT.index_quotes) || (BV.critical && BV.critical.index_quotes) || null;
     // real per-setup track-record stats (Wilson) keyed by setup family
-    BV.setupStatsBy = (function () {
-      var sf = BV.critical && BV.critical.setup_family_stats;
-      if (!sf) return null;
-      var m = {};
-      (Array.isArray(sf) ? sf : Object.keys(sf).map(function (k) { var o = sf[k] || {}; o.setup = o.setup || k; return o; }))
-        .forEach(function (s) { if (s && s.setup) m[s.setup] = s; });
-      return m;
-    })();
+    BV.setupStatsBy = buildSetupStatsBy(BV.critical);
   } else { BV.crypto = BV.earningsBeat = BV.earningsWatch = BV.optionsFlow = BV.marketNews = BV.indexQuotes = BV.critical = BV.setupStatsBy = BV.leaders = null; }
 
   // ── real market context for the Home hero (regime · funnel · breadth · mood) ──
-  BV.market = (function () {
-    var c = BV.critical;
-    if (!c) return null;
-    var rg = c.regime || {}, mb = c.market_breadth || {}, mac = c.macro_signals || {};
-    var r4 = rg.regime4 || "risk_on_choppy";
-    var on = !/risk_off|panic/.test(r4);
-    var trend = /trending/.test(r4) ? "TRENDING" : /choppy/.test(r4) ? "CHOPPY" : /panic/.test(r4) ? "PANIC" : "—";
-    var pc = (mac.put_call && num(mac.put_call.equity_pc)) || null;
-    var breadth = num(mb.pct_above_50d, null);
-    var fg = (breadth != null) ? clamp(Math.round(breadth * 0.6 + (pc != null ? (1 - pc) * 40 : 20)), 0, 100) : null;
-    return {
-      regime4: r4, regimeOn: on, regimeTrend: trend,
-      regimeLabel: (on ? "RISK-ON" : "RISK-OFF"),
-      maxSize: num(rg.max_size_pct, null),
-      breadthPct: breadth, breadth100: num(mb.pct_above_100d), breadth200: num(mb.pct_above_200d),
-      newHighs: num(mb.new_highs), newLows: num(mb.new_lows),
-      spy: num(rg.spy_price), qqq: num(rg.qqq_price),
-      putCall: pc, fearGreed: fg, fgLabel: (mac.put_call && mac.put_call.signal) || null,
-      funnel: { universe: num(c.scan_count, 0), bullish: num(c.buy_count, 0), neutral: num(c.watch_count, 0), bearish: num(c.killed_count, 0), short: num(c.short_count, 0) },
-      sectors: c.sector_etf || null, movers: c.market_movers || null,
-    };
-  })();
+  BV.market = buildMarket(BV.critical);
 
   if (!BV.ready) console.warn("[BullVeda] no live universe — surfaces will show feed-honest empty states.", BV.errors);
   else console.info("[BullVeda] live universe loaded:", BV.universe.length, "rows · NAV", BV.navStr(),
     "· crypto", BV.crypto && BV.crypto.all_scored && BV.crypto.all_scored.length,
     "· earnings", BV.earningsBeat && BV.earningsBeat.length, "· optflow", BV.optionsFlow && BV.optionsFlow.length);
+
+  // ── live in-place refresh ────────────────────────────────────────────────
+  // Re-pulls the PRE-COMPUTED boot snapshot (a disk read of data.critical.json —
+  // the scan rebuilds that file every ~30m on its own launchd cadence, regardless
+  // of how many people view Home). This costs ZERO EODHD calls: no per-ticker
+  // fetch happens here, we just re-read already-scored data. Swaps scan-derived
+  // state in place + notifies subscribers so Home re-renders without a full reload.
+  BV._refreshSubs = [];
+  BV.onRefresh = function (cb) {
+    if (typeof cb === "function") BV._refreshSubs.push(cb);
+    return function () { BV._refreshSubs = BV._refreshSubs.filter(function (f) { return f !== cb; }); };
+  };
+  BV.refreshBoot = function () {
+    if (MOCK || !BV.get) return Promise.resolve({ changed: false });
+    return BV.get("/api/bullveda-boot").then(function (B) {
+      if (!B) return { changed: false };
+      var u = B.universe || null;
+      var newTs = (u && u.run_timestamp) || (B.critical && B.critical.run_timestamp) || null;
+      var oldTs = BV.scanMeta && BV.scanMeta.ts;
+      // portfolio NAV/positions + the live index tape move intraday → always refresh
+      if (B.portfolio) BV.portfolio = B.portfolio;
+      if (B.index_quotes) BV.indexQuotes = B.index_quotes;
+      var changed = !!(newTs && newTs !== oldTs);
+      if (changed) {
+        BV.universe = (u && u.screener) || BV.universe;
+        BV.scanMeta = u ? { ts: u.run_timestamp || null, ageMin: (u.age_min != null ? u.age_min : null), stale: !!u.stale, n: u.n } : BV.scanMeta;
+        BV.critical = B.critical || BV.critical;
+        BV.optionsFlow = (BV.critical && BV.critical.options_flow_top30) || null;
+        BV.marketNews = (BV.critical && BV.critical.market_news) || null;
+        BV.setupStatsBy = buildSetupStatsBy(BV.critical);
+        BV.market = buildMarket(BV.critical);
+        if (B.earnings) {
+          BV.earningsBeat = B.earnings.earnings_beat_predictions || BV.earningsBeat;
+          BV.earningsWatch = B.earnings.earnings_watchlist || BV.earningsWatch;
+        }
+        _rowsCache = null; _bySym = null;   // force scanRows() rebuild from the new universe
+      }
+      var info = { changed: changed, ts: newTs, prevTs: oldTs, ageMin: (u && u.age_min != null) ? u.age_min : (BV.scanMeta && BV.scanMeta.ageMin) };
+      BV._refreshSubs.forEach(function (cb) { try { cb(info); } catch (e) {} });
+      return info;
+    }).catch(function () { return { changed: false }; });
+  };
 
   // ── deferred heavy feeds: load async after first paint, then notify for re-render ──
   if (BV.ready && !MOCK) {
@@ -27204,6 +27250,7 @@ window.TierPicker = TierPicker;
 </script>
 <script>/* src/home.jsx */
 const { useMemo: useMemoH } = React;
+let _homeRefreshN = 0;
 const HR = /* @__PURE__ */ (function() {
   const num = (v, d) => typeof v === "number" && isFinite(v) ? v : d;
   const numStr = (v) => {
@@ -27277,7 +27324,53 @@ function HomeView({ onTicker, onSurface, mode, surface }) {
   const liveDown = !HR.has();
   const _sm = window.__BV && window.__BV.scanMeta || null;
   const _asOf = _sm && _sm.ts ? String(_sm.ts) + " PT" : "the last scan";
-  return /* @__PURE__ */ React.createElement("div", { className: "home" }, liveDown && /* @__PURE__ */ React.createElement("div", { className: "home-feed-warn mono", style: {
+  const [, _bump] = React.useState(0);
+  const [_refreshing, _setRefreshing] = React.useState(false);
+  const _flashRef = React.useRef(0);
+  const _fetchedAtRef = React.useRef(Date.now());
+  const _doRefresh = React.useCallback(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.refreshBoot) return;
+    _setRefreshing(true);
+    BV.refreshBoot().then(() => _setRefreshing(false), () => _setRefreshing(false));
+  }, []);
+  React.useEffect(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.onRefresh) return;
+    const off = BV.onRefresh((info) => {
+      _fetchedAtRef.current = Date.now();
+      if (info && info.changed) {
+        _homeRefreshN++;
+        _flashRef.current = Date.now();
+      }
+      _bump((n) => n + 1);
+    });
+    const poll = () => {
+      if (document.visibilityState === "visible" && BV.refreshBoot) BV.refreshBoot();
+    };
+    const iv = setInterval(poll, 5 * 60 * 1e3);
+    document.addEventListener("visibilitychange", poll);
+    const tick = setInterval(() => _bump((n) => n + 1), 3e4);
+    return () => {
+      if (off) off();
+      clearInterval(iv);
+      clearInterval(tick);
+      document.removeEventListener("visibilitychange", poll);
+    };
+  }, []);
+  const _liveAgeMin = _sm && _sm.ageMin != null ? _sm.ageMin + (Date.now() - _fetchedAtRef.current) / 6e4 : null;
+  const _ageStr = _liveAgeMin == null ? "" : _liveAgeMin < 1 ? "just now" : _liveAgeMin < 60 ? Math.round(_liveAgeMin) + "m ago" : (_liveAgeMin / 60).toFixed(1) + "h ago";
+  const _justUpdated = _flashRef.current && Date.now() - _flashRef.current < 4e3;
+  return /* @__PURE__ */ React.createElement("div", { className: "home" }, /* @__PURE__ */ React.createElement("div", { className: "home-refreshbar mono", style: { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, fontSize: 11, color: "var(--ink-3)", margin: "0 0 6px" } }, _justUpdated ? /* @__PURE__ */ React.createElement("span", { className: "up" }, "\u2713 updated to ", _sm && _sm.ts, " PT") : /* @__PURE__ */ React.createElement("span", { title: "Scan-snapshot freshness \xB7 auto-refreshes every 5 min while this tab is open (no API cost)" }, "scan ", _sm && _sm.ts ? _sm.ts + " PT" : "\u2014", _ageStr ? " \xB7 " + _ageStr : ""), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: _doRefresh,
+      disabled: _refreshing,
+      title: "Re-pull the latest scan snapshot now (reads a pre-computed file \u2014 zero API calls)",
+      style: { background: "none", border: "1px solid var(--glass-line)", borderRadius: 6, color: "var(--ink-2)", cursor: _refreshing ? "default" : "pointer", padding: "2px 8px", fontSize: 11, opacity: _refreshing ? 0.6 : 1 }
+    },
+    _refreshing ? "\u27F3 refreshing\u2026" : "\u27F3 refresh"
+  )), liveDown && /* @__PURE__ */ React.createElement("div", { className: "home-feed-warn mono", style: {
     margin: "0 0 10px",
     padding: "10px 14px",
     borderRadius: 10,
@@ -27674,7 +27767,7 @@ const SCANNER_PICKS = [
   { sym: "NVRH", name: "Novara Health", score: 71, rr: "1.9", wlb: 46, edge: "+0.12", v: "BUY" },
   { sym: "ZOTR", name: "Zotran Industries", score: 69, rr: "1.5", wlb: 44, edge: "+0.09", v: "WATCH" }
 ];
-const bvTok = () => (HR.has() ? 1 : 0) + (HR.ledgerReal() ? 2 : 0) + (window.AIPredict && window.AIPredict.all ? 4 : 0) + (window.__tmode === "position" ? 100 : window.__tmode === "investment" ? 200 : 0);
+const bvTok = () => (HR.has() ? 1 : 0) + (HR.ledgerReal() ? 2 : 0) + (window.AIPredict && window.AIPredict.all ? 4 : 0) + (window.__tmode === "position" ? 100 : window.__tmode === "investment" ? 200 : 0) + _homeRefreshN * 1e3;
 function realFunnel(mode) {
   const rows = HR.rows();
   if (!rows.length) return null;

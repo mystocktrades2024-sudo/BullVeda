@@ -3,6 +3,10 @@
 
 const { useMemo: useMemoH } = React;
 
+// Bumped by HomeView whenever BV.refreshBoot() swaps in a newer scan snapshot —
+// folded into bvTok() so every Home memo (engines, setups, discovery…) recomputes.
+let _homeRefreshN = 0;
+
 // ═══════════════════════════════════════════════════════════════════
 // REAL-DATA LAYER  (audit-log consistency)
 // Every ticker the Home page surfaces is sourced from the live scan universe
@@ -89,8 +93,50 @@ function HomeView({ onTicker, onSurface, mode, surface }) {
   // Real "as of" stamp from the last scan bundle (same source the hero uses).
   const _sm = (window.__BV && window.__BV.scanMeta) || null;
   const _asOf = _sm && _sm.ts ? String(_sm.ts) + " PT" : "the last scan";
+
+  // ── live auto-refresh ──────────────────────────────────────────────────────
+  // Re-pulls the pre-computed scan snapshot (BV.refreshBoot → /api/bullveda-boot,
+  // a disk read of data.critical.json). ZERO EODHD: the scan rebuilds that file on
+  // its own 30-min launchd cadence; we just re-read it. Polls every 5 min while the
+  // tab is visible + on tab-focus, swaps data in place (no page reload), and a 30s
+  // ticker keeps the "Nm ago" label live.
+  const [, _bump] = React.useState(0);
+  const [_refreshing, _setRefreshing] = React.useState(false);
+  const _flashRef = React.useRef(0);
+  const _fetchedAtRef = React.useRef(Date.now());
+  const _doRefresh = React.useCallback(() => {
+    const BV = window.__BV; if (!BV || !BV.refreshBoot) return;
+    _setRefreshing(true);
+    BV.refreshBoot().then(() => _setRefreshing(false), () => _setRefreshing(false));
+  }, []);
+  React.useEffect(() => {
+    const BV = window.__BV; if (!BV || !BV.onRefresh) return;
+    const off = BV.onRefresh((info) => {
+      _fetchedAtRef.current = Date.now();
+      if (info && info.changed) { _homeRefreshN++; _flashRef.current = Date.now(); }
+      _bump((n) => n + 1);
+    });
+    const poll = () => { if (document.visibilityState === "visible" && BV.refreshBoot) BV.refreshBoot(); };
+    const iv = setInterval(poll, 5 * 60 * 1000);
+    document.addEventListener("visibilitychange", poll);
+    const tick = setInterval(() => _bump((n) => n + 1), 30000);
+    return () => { if (off) off(); clearInterval(iv); clearInterval(tick); document.removeEventListener("visibilitychange", poll); };
+  }, []);
+  const _liveAgeMin = (_sm && _sm.ageMin != null) ? (_sm.ageMin + (Date.now() - _fetchedAtRef.current) / 60000) : null;
+  const _ageStr = _liveAgeMin == null ? "" : _liveAgeMin < 1 ? "just now" : _liveAgeMin < 60 ? Math.round(_liveAgeMin) + "m ago" : (_liveAgeMin / 60).toFixed(1) + "h ago";
+  const _justUpdated = _flashRef.current && (Date.now() - _flashRef.current < 4000);
+
   return (
     <div className="home">
+      <div className="home-refreshbar mono" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, fontSize: 11, color: "var(--ink-3)", margin: "0 0 6px" }}>
+        {_justUpdated
+          ? <span className="up">✓ updated to {_sm && _sm.ts} PT</span>
+          : <span title="Scan-snapshot freshness · auto-refreshes every 5 min while this tab is open (no API cost)">scan {_sm && _sm.ts ? _sm.ts + " PT" : "—"}{_ageStr ? " · " + _ageStr : ""}</span>}
+        <button onClick={_doRefresh} disabled={_refreshing} title="Re-pull the latest scan snapshot now (reads a pre-computed file — zero API calls)"
+          style={{ background: "none", border: "1px solid var(--glass-line)", borderRadius: 6, color: "var(--ink-2)", cursor: _refreshing ? "default" : "pointer", padding: "2px 8px", fontSize: 11, opacity: _refreshing ? 0.6 : 1 }}>
+          {_refreshing ? "⟳ refreshing…" : "⟳ refresh"}
+        </button>
+      </div>
       {liveDown && (
         <div className="home-feed-warn mono" style={{
           margin: "0 0 10px", padding: "10px 14px", borderRadius: 10, fontSize: 12.5, lineHeight: 1.5,
@@ -671,7 +717,8 @@ const SCANNER_PICKS = [
 // Token that changes when the live universe / forward-scored ledger become
 // available — used as a memo dependency so Home re-derives real rows post-load.
 const bvTok = () => (HR.has() ? 1 : 0) + (HR.ledgerReal() ? 2 : 0) + (window.AIPredict && window.AIPredict.all ? 4 : 0)
-  + (window.__tmode === "position" ? 100 : window.__tmode === "investment" ? 200 : 0);
+  + (window.__tmode === "position" ? 100 : window.__tmode === "investment" ? 200 : 0)
+  + _homeRefreshN * 1000;
 
 // Scan funnel computed from the SAME per-mode engine verdicts the scanner/TopSetups
 // read (decisions_by_mode), so the hero funnel can't disagree with the rest of Home.

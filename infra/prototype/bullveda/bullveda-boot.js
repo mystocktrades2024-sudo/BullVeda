@@ -420,6 +420,38 @@
   // ── perform the blocking load (skippable with ?mock=1 for A/B debugging) ──
   // ONE combined round-trip (cuts cold tunnel load ~11s→~3s); fall back to the six
   // individual endpoints/files if the combined endpoint is unavailable.
+  // Derived-state builders — reused by the initial boot AND BV.refreshBoot() so
+  // an in-place refresh produces byte-identical state to a cold load.
+  function buildSetupStatsBy(c) {
+    var sf = c && c.setup_family_stats;
+    if (!sf) return null;
+    var m = {};
+    (Array.isArray(sf) ? sf : Object.keys(sf).map(function (k) { var o = sf[k] || {}; o.setup = o.setup || k; return o; }))
+      .forEach(function (s) { if (s && s.setup) m[s.setup] = s; });
+    return m;
+  }
+  function buildMarket(c) {
+    if (!c) return null;
+    var rg = c.regime || {}, mb = c.market_breadth || {}, mac = c.macro_signals || {};
+    var r4 = rg.regime4 || "risk_on_choppy";
+    var on = !/risk_off|panic/.test(r4);
+    var trend = /trending/.test(r4) ? "TRENDING" : /choppy/.test(r4) ? "CHOPPY" : /panic/.test(r4) ? "PANIC" : "—";
+    var pc = (mac.put_call && num(mac.put_call.equity_pc)) || null;
+    var breadth = num(mb.pct_above_50d, null);
+    var fg = (breadth != null) ? clamp(Math.round(breadth * 0.6 + (pc != null ? (1 - pc) * 40 : 20)), 0, 100) : null;
+    return {
+      regime4: r4, regimeOn: on, regimeTrend: trend,
+      regimeLabel: (on ? "RISK-ON" : "RISK-OFF"),
+      maxSize: num(rg.max_size_pct, null),
+      breadthPct: breadth, breadth100: num(mb.pct_above_100d), breadth200: num(mb.pct_above_200d),
+      newHighs: num(mb.new_highs), newLows: num(mb.new_lows),
+      spy: num(rg.spy_price), qqq: num(rg.qqq_price),
+      putCall: pc, fearGreed: fg, fgLabel: (mac.put_call && mac.put_call.signal) || null,
+      funnel: { universe: num(c.scan_count, 0), bullish: num(c.buy_count, 0), neutral: num(c.watch_count, 0), bearish: num(c.killed_count, 0), short: num(c.short_count, 0) },
+      sectors: c.sector_etf || null, movers: c.market_movers || null,
+    };
+  }
+
   var MOCK = /mock=1/.test(location.search);
   var BOOT = MOCK ? null : syncGet("/api/bullveda-boot");
   if (BOOT) console.info("[BullVeda] combined boot payload (1 request)");
@@ -517,44 +549,58 @@
     // (fresh, <120s), else the copy persisted in critical (scan-cadence fallback).
     BV.indexQuotes = (BOOT && BOOT.index_quotes) || (BV.critical && BV.critical.index_quotes) || null;
     // real per-setup track-record stats (Wilson) keyed by setup family
-    BV.setupStatsBy = (function () {
-      var sf = BV.critical && BV.critical.setup_family_stats;
-      if (!sf) return null;
-      var m = {};
-      (Array.isArray(sf) ? sf : Object.keys(sf).map(function (k) { var o = sf[k] || {}; o.setup = o.setup || k; return o; }))
-        .forEach(function (s) { if (s && s.setup) m[s.setup] = s; });
-      return m;
-    })();
+    BV.setupStatsBy = buildSetupStatsBy(BV.critical);
   } else { BV.crypto = BV.earningsBeat = BV.earningsWatch = BV.optionsFlow = BV.marketNews = BV.indexQuotes = BV.critical = BV.setupStatsBy = BV.leaders = null; }
 
   // ── real market context for the Home hero (regime · funnel · breadth · mood) ──
-  BV.market = (function () {
-    var c = BV.critical;
-    if (!c) return null;
-    var rg = c.regime || {}, mb = c.market_breadth || {}, mac = c.macro_signals || {};
-    var r4 = rg.regime4 || "risk_on_choppy";
-    var on = !/risk_off|panic/.test(r4);
-    var trend = /trending/.test(r4) ? "TRENDING" : /choppy/.test(r4) ? "CHOPPY" : /panic/.test(r4) ? "PANIC" : "—";
-    var pc = (mac.put_call && num(mac.put_call.equity_pc)) || null;
-    var breadth = num(mb.pct_above_50d, null);
-    var fg = (breadth != null) ? clamp(Math.round(breadth * 0.6 + (pc != null ? (1 - pc) * 40 : 20)), 0, 100) : null;
-    return {
-      regime4: r4, regimeOn: on, regimeTrend: trend,
-      regimeLabel: (on ? "RISK-ON" : "RISK-OFF"),
-      maxSize: num(rg.max_size_pct, null),
-      breadthPct: breadth, breadth100: num(mb.pct_above_100d), breadth200: num(mb.pct_above_200d),
-      newHighs: num(mb.new_highs), newLows: num(mb.new_lows),
-      spy: num(rg.spy_price), qqq: num(rg.qqq_price),
-      putCall: pc, fearGreed: fg, fgLabel: (mac.put_call && mac.put_call.signal) || null,
-      funnel: { universe: num(c.scan_count, 0), bullish: num(c.buy_count, 0), neutral: num(c.watch_count, 0), bearish: num(c.killed_count, 0), short: num(c.short_count, 0) },
-      sectors: c.sector_etf || null, movers: c.market_movers || null,
-    };
-  })();
+  BV.market = buildMarket(BV.critical);
 
   if (!BV.ready) console.warn("[BullVeda] no live universe — surfaces will show feed-honest empty states.", BV.errors);
   else console.info("[BullVeda] live universe loaded:", BV.universe.length, "rows · NAV", BV.navStr(),
     "· crypto", BV.crypto && BV.crypto.all_scored && BV.crypto.all_scored.length,
     "· earnings", BV.earningsBeat && BV.earningsBeat.length, "· optflow", BV.optionsFlow && BV.optionsFlow.length);
+
+  // ── live in-place refresh ────────────────────────────────────────────────
+  // Re-pulls the PRE-COMPUTED boot snapshot (a disk read of data.critical.json —
+  // the scan rebuilds that file every ~30m on its own launchd cadence, regardless
+  // of how many people view Home). This costs ZERO EODHD calls: no per-ticker
+  // fetch happens here, we just re-read already-scored data. Swaps scan-derived
+  // state in place + notifies subscribers so Home re-renders without a full reload.
+  BV._refreshSubs = [];
+  BV.onRefresh = function (cb) {
+    if (typeof cb === "function") BV._refreshSubs.push(cb);
+    return function () { BV._refreshSubs = BV._refreshSubs.filter(function (f) { return f !== cb; }); };
+  };
+  BV.refreshBoot = function () {
+    if (MOCK || !BV.get) return Promise.resolve({ changed: false });
+    return BV.get("/api/bullveda-boot").then(function (B) {
+      if (!B) return { changed: false };
+      var u = B.universe || null;
+      var newTs = (u && u.run_timestamp) || (B.critical && B.critical.run_timestamp) || null;
+      var oldTs = BV.scanMeta && BV.scanMeta.ts;
+      // portfolio NAV/positions + the live index tape move intraday → always refresh
+      if (B.portfolio) BV.portfolio = B.portfolio;
+      if (B.index_quotes) BV.indexQuotes = B.index_quotes;
+      var changed = !!(newTs && newTs !== oldTs);
+      if (changed) {
+        BV.universe = (u && u.screener) || BV.universe;
+        BV.scanMeta = u ? { ts: u.run_timestamp || null, ageMin: (u.age_min != null ? u.age_min : null), stale: !!u.stale, n: u.n } : BV.scanMeta;
+        BV.critical = B.critical || BV.critical;
+        BV.optionsFlow = (BV.critical && BV.critical.options_flow_top30) || null;
+        BV.marketNews = (BV.critical && BV.critical.market_news) || null;
+        BV.setupStatsBy = buildSetupStatsBy(BV.critical);
+        BV.market = buildMarket(BV.critical);
+        if (B.earnings) {
+          BV.earningsBeat = B.earnings.earnings_beat_predictions || BV.earningsBeat;
+          BV.earningsWatch = B.earnings.earnings_watchlist || BV.earningsWatch;
+        }
+        _rowsCache = null; _bySym = null;   // force scanRows() rebuild from the new universe
+      }
+      var info = { changed: changed, ts: newTs, prevTs: oldTs, ageMin: (u && u.age_min != null) ? u.age_min : (BV.scanMeta && BV.scanMeta.ageMin) };
+      BV._refreshSubs.forEach(function (cb) { try { cb(info); } catch (e) {} });
+      return info;
+    }).catch(function () { return { changed: false }; });
+  };
 
   // ── deferred heavy feeds: load async after first paint, then notify for re-render ──
   if (BV.ready && !MOCK) {
