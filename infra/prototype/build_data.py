@@ -3739,7 +3739,13 @@ def main():
         "short_count":   sum(1 for r in short_term if r["stage"] == "SELL"),
         "killed_count":  len(b.get("killed") or []),
         "killed":        [compact_row(r) for r in (b.get("killed") or [])],
-        "scan_count":    len(b.get("all_scored") or []),
+        # Scanned universe = gate-PASSED (all_scored) + gate-FAILED (killed). On a
+        # market-wide entry-gate day (SPY crash / distribution days) all_scored is
+        # empty and every name lands in killed — len(all_scored) alone then reads 0
+        # and the Home "universe" tile shows 0 even though ~1000 names were scored.
+        # Mirror /api/universe (which merges both) so the fallback funnel agrees with
+        # the live realFunnel universe count.
+        "scan_count":    len(b.get("all_scored") or []) + len(b.get("killed") or []),
         "short_term":    short_term,
         "medium_term":   medium_term,
         "long_term":     long_term,
