@@ -2571,6 +2571,46 @@ async def tv_push_levels(t: str, mode: str = "swing",
         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=200)
 
 
+@app.get("/api/tv/values")
+async def tv_read_values(t: str, auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Prototype (2026-06-08): read the LIVE data-window values of the Pine studies
+    (LuxAlgo / AlgoAlpha / any) loaded on the user's TradingView Desktop chart for
+    a ticker. Backs the "Your TradingView Indicators" chip on the BullVeda
+    TradingView lens. License-clean: the owner holds the LuxAlgo + TV seats and
+    this reads only their own on-screen Data Window — it never recomputes the
+    closed Pine logic, never scales to a universe, and never feeds the scoring
+    path (informational confirmation only, principle 2: no black-box in scoring)."""
+    import subprocess as _subp, json as _json, re as _re
+    sym = (t or "").upper().strip()
+    if not _re.fullmatch(r"[A-Z0-9.\-]{1,12}", sym):
+        return JSONResponse({"ok": False, "error": "bad ticker"}, status_code=400)
+    script = BASE_DIR / "infra" / "prototype" / "tv_bridge" / "read_values.mjs"
+    if not script.exists():
+        return JSONResponse({"ok": False, "error": "reader script not found"}, status_code=404)
+    try:
+        proc = _subp.run(
+            ["node", str(script), sym],
+            capture_output=True, text=True, timeout=45, cwd=str(BASE_DIR),
+        )
+        if proc.returncode == 2:
+            return JSONResponse({"ok": False, "needs_tab": True,
+                                 "message": f"Open {sym} on your TradingView Desktop (and bring it to front) to read your indicators."}, status_code=200)
+        out = (proc.stdout or "").strip()
+        try:
+            payload = _json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": "empty"}
+        except Exception:
+            return JSONResponse({"ok": False, "error": "bridge returned non-JSON",
+                                 "hint": "Is TradingView Desktop running with --remote-debugging-port=9222?",
+                                 "tail": out[-300:]}, status_code=200)
+        return JSONResponse(payload)
+    except FileNotFoundError:
+        return JSONResponse({"ok": False, "error": "node not installed on server host"}, status_code=200)
+    except _subp.TimeoutExpired:
+        return JSONResponse({"ok": False, "error": "read timed out (45s)"}, status_code=200)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=200)
+
+
 @app.get("/api/backtest-report/history")
 async def backtest_report_history(auth: HTTPBasicCredentials = Depends(_check_auth)):
     """List available backtest reports, newest first."""
@@ -3874,6 +3914,113 @@ async def test_mae_mfe_api(days: int = 90):
         "mae_distribution": mae_hist,
         "mfe_distribution": mfe_hist,
     }
+
+
+@app.get("/api/regime/live")
+async def regime_live_api():
+    """Live market-context overlay for the regime tile (DISPLAY-ONLY).
+
+    Discipline boundary (CLAUDE.md principle 18 + regime_hysteresis):
+      - The OFFICIAL regime (regime4) stays anchored to the last completed
+        daily bar + 2-bar hysteresis. It gates sizing and signals. We do NOT
+        recompute or flip it intraday.
+      - This endpoint adds a LIVE Schwab-fed overlay (SPY/QQQ/$VIX) plus a
+        clearly-labelled PROVISIONAL intraday read using ONLY the checks that
+        can legitimately update on a single quote (SPY vs EMA50/SMA200, VIX
+        level). Breadth and distribution-days CANNOT go live (need all
+        constituents / a completed volume bar) so they are passed through from
+        the bundle, flagged stale.
+    Nothing here mutates engine state. Pure read.
+    """
+    import json
+    from datetime import datetime, timezone
+
+    out = {
+        "as_of_utc": datetime.now(timezone.utc).isoformat(),
+        "official": None,      # anchored to last completed daily bar
+        "live": None,          # Schwab intraday quotes
+        "provisional": None,   # price-only intraday read — NOT authoritative
+        "market_open": None,
+        "note": "Live overlay is display-only. Official regime4 gates signals and is anchored to the last completed daily bar.",
+    }
+
+    # ── 1. Official regime from the bundle (authoritative) ──
+    reg = {}
+    try:
+        bp = BASE_DIR / "cache" / "last_bundle.json"
+        b = json.load(open(bp))
+        reg = b.get("regime") or {}
+        out["official"] = {
+            "regime4": reg.get("regime4"),
+            "regime": reg.get("regime"),
+            "max_size_pct": reg.get("max_size_pct"),
+            "spy_close": reg.get("spy_price"),
+            "spy_ema50": reg.get("spy_ema50"),
+            "spy_sma200": reg.get("spy_sma200"),
+            "spy_daily_chg": reg.get("spy_daily_chg"),
+            "breadth_pct_50d": reg.get("breadth_pct_50d"),
+            "distribution_days": reg.get("distribution_days"),
+            "distribution_state": reg.get("distribution_state"),
+            "vix_close": (reg.get("vix") or {}).get("vix_current") if isinstance(reg.get("vix"), dict) else reg.get("vix_current"),
+            "as_of_date": b.get("run_date"),
+            "_stale_fields": ["breadth_pct_50d", "distribution_days", "distribution_state"],
+        }
+    except Exception as e:
+        out["official_error"] = str(e)
+
+    # ── 2. Live Schwab quotes (SPY/QQQ/$VIX) ──
+    live = {}
+    try:
+        import schwab_client as _sc
+        q = _sc.get_quotes_batch(["SPY", "QQQ", "$VIX"])
+        for sym in ("SPY", "QQQ", "$VIX"):
+            qd = (q.get(sym) or {}).get("quote") or {}
+            last = qd.get("lastPrice") or qd.get("mark")
+            live[sym] = {
+                "last": last,
+                "net_change": qd.get("netChange"),
+                "pct_change": qd.get("netPercentChange"),
+            }
+        out["live"] = live
+        try:
+            out["market_open"] = _sc.is_market_open_now()
+        except Exception:
+            out["market_open"] = None
+    except Exception as e:
+        out["live_error"] = str(e)
+
+    # ── 3. Provisional intraday read (PRICE-ONLY — not authoritative) ──
+    try:
+        spy_live = (live.get("SPY") or {}).get("last")
+        vix_live = (live.get("$VIX") or {}).get("last")
+        ema50 = reg.get("spy_ema50")
+        sma200 = reg.get("spy_sma200")
+        if spy_live and ema50 and sma200 and vix_live is not None:
+            above_50 = spy_live > ema50
+            above_200 = spy_live > sma200
+            # mirrors data_fetcher.get_market_regime() price/VIX branch ONLY.
+            # breadth threshold deliberately omitted (cannot go live).
+            if above_50 and above_200 and vix_live < 18:
+                prov = "risk_on_trending_candidate"
+            elif above_50:
+                prov = "risk_on_choppy"
+            elif not above_200 or vix_live >= 28:
+                prov = "risk_off_trending"
+            else:
+                prov = "risk_on_choppy"
+            official4 = (out.get("official") or {}).get("regime4")
+            out["provisional"] = {
+                "read": prov,
+                "spy_vs_ema50": "above" if above_50 else "below",
+                "spy_vs_sma200": "above" if above_200 else "below",
+                "vix_live": vix_live,
+                "diverges_from_official": bool(official4 and prov != official4 and not (prov.startswith("risk_on") and official4.startswith("risk_on"))),
+                "_caveat": "Price+VIX only. Breadth & distribution-days excluded (cannot go live). Provisional — does NOT flip regime4 or affect sizing. Needs a completed daily bar + 2-bar hysteresis to confirm.",
+            }
+    except Exception as e:
+        out["provisional_error"] = str(e)
+
+    return out
 
 
 @app.get("/api/test/regime-conditional")

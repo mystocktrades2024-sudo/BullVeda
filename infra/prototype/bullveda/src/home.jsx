@@ -1237,18 +1237,65 @@ function HomeHero({ mode, onSurface }) {
 }
 
 // Market-state one-liner — REAL regime + breadth + fear/greed + VIX + SPY daily.
+// Live Schwab-fed market-context overlay (DISPLAY-ONLY).
+// Anchored regime (regime4 / sizing) is untouched — see /api/regime/live.
+function useLiveRegime() {
+  const [live, setLive] = React.useState(null);
+  React.useEffect(() => {
+    const BV = window.__BV; if (!BV || !BV.get) return;
+    let alive = true;
+    const tick = () => BV.get("/api/regime/live").then(d => { if (alive && d) setLive(d); }).catch(() => {});
+    tick();
+    const iv = setInterval(tick, 60000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+  return live;
+}
+
+function LiveTapeLine() {
+  const live = useLiveRegime();
+  if (!live || !live.live) return null;
+  const q = live.live;
+  const cell = (label, o) => {
+    if (!o || o.pct_change == null) return null;
+    const p = o.pct_change, up = p >= 0;
+    return <> · {label} <b className={up ? "up" : "dn"}>{up ? "+" : ""}{p.toFixed(2)}%</b></>;
+  };
+  const vix = q["$VIX"] || {};
+  const prov = live.provisional;
+  const diverges = prov && prov.diverges_from_official;
+  const tip = (live.note || "") + " " + ((prov && prov._caveat) || "");
+  return (
+    <div className="hh-brief" style={{ marginTop: 2 }}>
+      <span className="hh-brief-tag mono" style={{ background: "rgba(80,200,140,.10)", color: "var(--up,#3fb96b)" }}>
+        LIVE TAPE{live.market_open === false ? " · CLOSED" : ""}
+      </span>
+      <span className="hh-brief-txt mono" title={tip}>
+        {q.SPY && cell("SPY", q.SPY)}
+        {q.QQQ && cell("QQQ", q.QQQ)}
+        {vix.last != null ? <> · VIX <b className={(vix.pct_change || 0) <= 0 ? "up" : "dn"}>{vix.last.toFixed(1)}{(vix.pct_change || 0) <= 0 ? " ↓" : " ↑"}</b></> : null}
+        {prov ? <> · provisional <b className="dim2">{String(prov.read).replace(/_/g, " ").replace(" candidate", "")}</b></> : null}
+        {diverges ? <span className="amb" style={{ marginLeft: 6 }} title="Live price+VIX read differs from the anchored regime. This is informational only — regime4 needs a completed daily bar + 2-bar hysteresis to flip.">⚠ live diverges (display-only)</span> : null}
+      </span>
+    </div>
+  );
+}
+
 function HomeBrief() {
   const M = (window.__BV && window.__BV.market) || null;
   const c = (window.__BV && window.__BV.critical) || null;
   const rg = (c && c.regime) || {};
   if (!M) {
     return (
+      <>
       <div className="hh-brief">
         <span className="hh-brief-tag mono">MARKET STATE</span>
         <span className="hh-brief-txt mono">
           Regime <b className="amb">RISK-ON · CHOPPY</b> · Fear/Greed <b className="up">62</b> · breadth <b className="up">56%</b> · VIX <b className="up">16.3</b>.
         </span>
       </div>
+      <LiveTapeLine />
+      </>
     );
   }
   const tone = (M.regimeOn ? "up" : "dn");
@@ -1256,8 +1303,9 @@ function HomeBrief() {
   const spyChg = (typeof rg.spy_daily_chg === "number") ? rg.spy_daily_chg : null;
   const dist = rg.distribution_state ? String(rg.distribution_state).replace(/_/g, " ") : null;
   return (
+    <>
     <div className="hh-brief">
-      <span className="hh-brief-tag mono">MARKET STATE · NOW</span>
+      <span className="hh-brief-tag mono" title="Anchored to the last completed daily bar + 2-bar hysteresis. This is the regime that gates sizing & signals — it does NOT move intraday by design.">MARKET STATE · LAST CLOSE</span>
       <span className="hh-brief-txt mono">
         Regime <b className={tone}>{M.regimeLabel} · {M.regimeTrend}</b>
         {M.maxSize != null ? <> (max size <b>{M.maxSize}%</b>)</> : null}
@@ -1268,6 +1316,8 @@ function HomeBrief() {
         {dist ? <> · <b className="dim2">{dist}</b></> : null}.
       </span>
     </div>
+    <LiveTapeLine />
+    </>
   );
 }
 
