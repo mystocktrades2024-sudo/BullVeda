@@ -1184,10 +1184,9 @@ function HomeHero({ mode, onSurface }) {
               </div>
             ))}
           </div>
+          {_liveReg && _liveReg.live ? <MoodLiveStrip reg={_liveReg} /> : null}
         </div>
       </div>
-
-      <HomeBrief />
     </div>
   );
 }
@@ -1208,77 +1207,27 @@ function useLiveRegime() {
   return live;
 }
 
-function LiveTapeLine() {
-  const live = useLiveRegime();
-  if (!live || !live.live) return null;
-  const q = live.live;
-  const cell = (label, o) => {
-    if (!o || o.pct_change == null) return null;
-    const p = o.pct_change, up = p >= 0;
-    return <> · {label} <b className={up ? "up" : "dn"}>{up ? "+" : ""}{p.toFixed(2)}%</b></>;
-  };
+// Compact live Schwab tape rendered INSIDE the hero MARKET MOOD panel (under the
+// mood tiles). The standalone "MARKET STATE · LAST CLOSE" + full-width "LIVE TAPE"
+// lines were removed (2026-06-08) — last-close fields already show in the mood
+// tiles + REGIME·TAPE narrative; this keeps just the live intraday tape, grouped
+// with the mood it belongs to. Display-only; does not touch sizing/regime.
+function MoodLiveStrip({ reg }) {
+  if (!reg || !reg.live) return null;
+  const q = reg.live;
   const vix = q["$VIX"] || {};
-  const prov = live.provisional;
-  const diverges = prov && prov.diverges_from_official;
-  const tip = (live.note || "") + " " + ((prov && prov._caveat) || "");
-  const narr = live.narrative;
+  const narr = reg.narrative;
   const trajTone = narr && narr.trajectory ? ({ recovering: "up", firm: "up", fading: "dn", weak: "dn" }[narr.trajectory.word] || "amb") : "amb";
+  const cell = (label, o) => (!o || o.pct_change == null) ? null
+    : <> · {label} <b className={o.pct_change >= 0 ? "up" : "dn"}>{o.pct_change >= 0 ? "+" : ""}{o.pct_change.toFixed(2)}%</b></>;
   return (
-    <>
-    {/* Narrative now lives inside the hero REGIME · TAPE box (qh-regime-read). */}
-    <div className="hh-brief" style={{ marginTop: 2 }}>
-      <span className="hh-brief-tag mono" style={{ background: "rgba(80,200,140,.10)", color: "var(--up,#3fb96b)" }}>
-        LIVE TAPE{live.market_open === false ? " · CLOSED" : ""}
-      </span>
-      <span className="hh-brief-txt mono" title={tip}>
-        {q.SPY && cell("SPY", q.SPY)}
-        {q.QQQ && cell("QQQ", q.QQQ)}
-        {vix.last != null ? <> · VIX <b className={(vix.pct_change || 0) <= 0 ? "up" : "dn"}>{vix.last.toFixed(1)}{(vix.pct_change || 0) <= 0 ? " ↓" : " ↑"}</b></> : null}
-        {narr && narr.trajectory ? <> · <b className={trajTone}>{narr.trajectory.word}</b></> : (prov ? <> · provisional <b className="dim2">{String(prov.read).replace(/_/g, " ").replace(" candidate", "")}</b></> : null)}
-        {diverges ? <span className="amb" style={{ marginLeft: 6 }} title="Live price+VIX read differs from the anchored regime. This is informational only — regime4 needs a completed daily bar + 2-bar hysteresis to flip.">⚠ live diverges (display-only)</span> : null}
-      </span>
+    <div className="qh-mood-live mono" title="Live Schwab tape — intraday, display-only. The MOOD tiles above are from the last completed daily bar.">
+      <span className="qh-mood-live-tag">LIVE{reg.market_open === false ? " · CLOSED" : ""}</span>
+      {cell("SPY", q.SPY)}
+      {cell("QQQ", q.QQQ)}
+      {vix.last != null ? <> · VIX <b className={(vix.pct_change || 0) <= 0 ? "up" : "dn"}>{vix.last.toFixed(1)}{(vix.pct_change || 0) <= 0 ? " ↓" : " ↑"}</b></> : null}
+      {narr && narr.trajectory ? <> · <b className={trajTone}>{narr.trajectory.word}</b></> : null}
     </div>
-    </>
-  );
-}
-
-function HomeBrief() {
-  const M = (window.__BV && window.__BV.market) || null;
-  const c = (window.__BV && window.__BV.critical) || null;
-  const rg = (c && c.regime) || {};
-  if (!M) {
-    return (
-      <>
-      <div className="hh-brief">
-        <span className="hh-brief-tag mono">MARKET STATE</span>
-        <span className="hh-brief-txt mono">
-          Regime <b className="amb">RISK-ON · CHOPPY</b> · Fear/Greed <b className="up">62</b> · breadth <b className="up">56%</b> · VIX <b className="up">16.3</b>.
-        </span>
-      </div>
-      <LiveTapeLine />
-      </>
-    );
-  }
-  const tone = (M.regimeOn ? "up" : "dn");
-  const vix = (typeof rg.vix_current === "number") ? rg.vix_current : (rg.vix && rg.vix.vix_current);
-  const spyChg = (typeof rg.spy_daily_chg === "number") ? rg.spy_daily_chg : null;
-  const dist = rg.distribution_state ? String(rg.distribution_state).replace(/_/g, " ") : null;
-  return (
-    <>
-    <div className="hh-brief">
-      <span className="hh-brief-tag mono" title="Anchored to the last completed daily bar + 2-bar hysteresis. This is the regime that gates sizing & signals — it does NOT move intraday by design.">MARKET STATE · LAST CLOSE</span>
-      <span className="hh-brief-txt mono">
-        Regime <b className={tone}>{M.regimeLabel} · {M.regimeTrend}</b>
-        {M.maxSize != null ? <> (max size <b>{M.maxSize}%</b>)</> : null}
-        {M.fearGreed != null ? <> · Fear/Greed <b className={fgClass(M.fearGreed)}>{M.fearGreed}</b></> : null}
-        {M.breadthPct != null ? <> · breadth <b>{Math.round(M.breadthPct)}%</b></> : null}
-        {vix != null ? <> · VIX <b>{vix.toFixed(1)}</b></> : null}
-        {spyChg != null ? <> · SPY <b className={spyChg >= 0 ? "up" : "dn"}>{spyChg >= 0 ? "+" : ""}{spyChg.toFixed(1)}%</b></> : null}
-        {dist ? <> · <b className="dim2">{dist}</b></> : null}.
-      </span>
-    </div>
-    <LiveTapeLine />
-    </>
   );
 }
 
