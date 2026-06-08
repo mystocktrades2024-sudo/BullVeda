@@ -1,11 +1,12 @@
 // surface-users.jsx — Admin · User Management.
-// REAL: reads the live auth store (/api/users) + role catalog (/api/roles);
-// add / edit / delete / role-change / suspend / reset-password all hit the
-// admin-gated backend (auth.py) and persist. No fabricated personas. The
-// "Tier Access" tab is an in-session gating PREVIEW (honestly labelled) — it
-// is NOT wired to the live RBAC source of truth (data/roles.json +
-// data/capability_registry.json), which is role-based, not the prototype's
-// T0–T5 tier ladder.
+// REAL on both tabs:
+//  • Users & Roles — reads the live auth store (/api/users) + role catalog
+//    (/api/roles); add / edit / delete / role-change / suspend / reset-password
+//    all hit the admin-gated backend (auth.py) and persist. No fabricated personas.
+//  • Role Access · Live RBAC — a real enable/disable matrix over every gateable
+//    capability in data/capability_registry.json (tabs + sub-tabs/sections +
+//    actions) × every role; each toggle PATCHes /api/roles/{id}, persists to
+//    data/roles.json and is audit-logged. Same source of truth CapStudio edits.
 
 const { useState: useUM, useMemo: useUMm } = React;
 
@@ -138,7 +139,7 @@ function SurfaceUsers() {
         <div className="wsx-hdr-l">
           <div className="wsx-eyebrow mono">ADMIN · USER MANAGEMENT · RBAC</div>
           <h1 className="wsx-title mono">User Management</h1>
-          <div className="wsx-sub mono dim2">live auth store · add &amp; edit users · assign roles · preview tier gating</div>
+          <div className="wsx-sub mono dim2">live auth store · add &amp; edit users · assign roles · gate every capability per role</div>
         </div>
         <div className="wsx-hdr-r">
           {view === "users" && <button className="btn btn--primary btn--sm" onClick={openNew} disabled={loading || dir.err}>＋ Add user</button>}
@@ -148,7 +149,7 @@ function SurfaceUsers() {
 
       <div className="um-viewtabs">
         <button className={`um-vt ${view==="users"?"is-on":""}`} onClick={()=>setView("users")}>Users &amp; Roles</button>
-        <button className={`um-vt ${view==="access"?"is-on":""}`} onClick={()=>setView("access")}>Tier Access · Preview</button>
+        <button className={`um-vt ${view==="access"?"is-on":""}`} onClick={()=>setView("access")}>Role Access · Live RBAC</button>
       </div>
 
       {view === "users" ? (
@@ -220,7 +221,7 @@ function SurfaceUsers() {
         </>
         )
       ) : (
-        <TierAccessConfig tiers={window.TIER_LIST || []} />
+        <RoleAccessConfig />
       )}
 
       {toast && <div className={`um-toast ${toast.bad ? "is-bad" : "is-ok"} mono`} style={{
@@ -328,218 +329,158 @@ function UserEditModal({ user, roleOpts, onSave, onDelete, onReset, onClose }) {
   ), document.body);
 }
 
-// ─── Tier Access configuration ──────────────────────────────────
-const UM_SURFACE_LABELS = {
-  home:"Home", "signal-scanner":"Signal Scanner", "market-map":"Market Map", watchlist:"Watchlist", buy:"Bullish Candidates",
-  playbook:"Playbook", alerts:"Alerts", screener:"Screener", premarket:"Pre-Market", "sector-etf":"ETFs",
-  "etf-screener":"ETF Screener", options:"Options", news:"News · Sentiment",
-  elite:"Elite Picks", strategies:"Strategies", themes:"Themes", momentum:"Momentum", performance:"Performance",
-  "ai-predict":"AI Predictions", insider:"Insider Trading", journal:"Trade Journal", social:"Social Sentiment",
-  "portfolio-srf":"Portfolio",
-};
-const UM_LENS_LABELS = {
-  overview:"Overview", plan:"Plan · Ticket", chart:"Chart", technicals:"Technicals", patterns:"Patterns", smc:"SMC",
-  investment:"Investment", risk:"Risk", earnings:"Earnings", options:"Options", portfolio:"Portfolio", tape:"Tape · Flow",
-  track:"Track Record", mledge:"AI Edge",
-};
+// ─── Role Access · LIVE RBAC ───────────────────────────────────────────────
+// Real, persisted enable/disable matrix over EVERY gateable capability:
+//   rows  = capability_registry.json  (tabs + sub-tabs/sections + actions),
+//           grouped exactly as the registry groups them
+//   cols  = real roles from /api/roles
+//   cell  = is this capability granted to this role? click to toggle
+// Each toggle PATCHes /api/roles/{role_id} with the full permissions object →
+// persists to data/roles.json and is audit-logged (admin-only). This is the
+// SAME source of truth CapStudio edits — no preview, no in-memory mock.
 
-// Min-tier pill selector. `min` greys out tiers below the surface floor
-// (a section can be equal-or-higher than its surface, never lower).
-function TacPills({ tiers, value, onChange, min = 0, size }) {
-  return (
-    <div className={`tac-pills ${size === "sm" ? "tac-pills--sm" : ""}`}>
-      {tiers.map(t => {
-        const dis = t.id < min;
-        return (
-          <button key={t.id} disabled={dis}
-            className={`tac-pill tac-pill--${t.id} ${value === t.id ? "is-on" : ""} ${dis ? "is-dis" : ""}`}
-            onClick={() => !dis && onChange(t.id)}
-            title={dis ? `Below surface floor (T${min})` : `${t.name} · ${t.price}`}>T{t.id}</button>
-        );
-      })}
-    </div>
-  );
+function useRbac() {
+  const [reg, setReg] = useUM(null);     // {tabs, sub_tabs, actions, groups}
+  const [roles, setRoles] = useUM(null); // [{id,name,color,permissions:{tabs,sub_tabs,actions}}]
+  const [err, setErr] = useUM(null);
+  const load = React.useCallback(() => {
+    Promise.all([
+      umApi("GET", "/api/capability-registry"),
+      umApi("GET", "/api/roles"),
+    ]).then(([rg, rl]) => {
+      setReg(rg && rg.tabs ? rg : { tabs: {}, sub_tabs: {}, actions: {}, groups: [] });
+      setRoles((rl && rl.roles) || (Array.isArray(rl) ? rl : []));
+      setErr(null);
+    }).catch(e => { setErr(String(e.message || e)); setReg({ tabs: {}, sub_tabs: {}, actions: {}, groups: [] }); setRoles([]); });
+  }, []);
+  React.useEffect(() => { load(); }, [load]);
+  return { reg, roles, err, setRoles, reload: load };
 }
 
-function TierAccessConfig({ tiers }) {
-  const [, force] = useUM(0);
-  const bump = () => force(x => x + 1);
-  const surf = window.SURFACE_TIER || {};
-  const lens = window.LENS_TIER || {};
-  const ST = window.SECTION_TIER || (window.SECTION_TIER = {});
-  const OFF = window.SECTION_OFF || (window.SECTION_OFF = {});
-  const key = window.sectionKey;
-  const effTier = window.sectionTier;
+function rbacPerm(role, kind) { return (role && role.permissions && role.permissions[kind]) || []; }
+function rbacWild(role, kind) { return rbacPerm(role, kind).indexOf("*") >= 0; }
+function rbacGranted(role, kind, id) { const l = rbacPerm(role, kind); return l.indexOf("*") >= 0 || l.indexOf(id) >= 0; }
 
-  const [open, setOpen] = useUM(() => ({ premarket: true }));
-  const toggleOpen = (k) => setOpen(o => ({ ...o, [k]: !o[k] }));
+function RoleAccessConfig() {
+  const { reg, roles, err, setRoles, reload } = useRbac();
+  const [busy, setBusy] = useUM(null);     // "role:kind:id" mutating
+  const [toast, setToast] = useUM(null);
+  const [open, setOpen] = useUM(() => ({ main_tabs: true }));
+  const [hideEmpty, setHideEmpty] = useUM(false);
+  const flash = (msg, bad) => { setToast({ msg, bad }); window.setTimeout(() => setToast(null), 3200); };
 
-  const setSurf = (k, v) => { window.SURFACE_TIER[k] = v; bump(); };
-  const setLens = (k, v) => { window.LENS_TIER[k] = v; bump(); };
+  if (err) {
+    return <div className="tac"><div className="pm-note mono dim2" style={{ padding: 18 }}>
+      Couldn’t load the capability registry / roles — <b className="warn">{err}</b>.
+      This needs an <b>admin</b> session (the role-write endpoints are admin-gated).
+    </div></div>;
+  }
+  if (!reg || !roles) {
+    return <div className="tac"><div className="smc-empty mono dim2" style={{ padding: 18 }}>Loading live RBAC from <b className="copper">/api/capability-registry</b> + <b className="copper">/api/roles</b>…</div></div>;
+  }
 
-  // section override: store only when raised ABOVE the surface/lens floor
-  const setSec = (surface, panelId, tier) => {
-    const floor = surface.indexOf("lens:") === 0 ? (lens[surface.slice(5)] ?? 0) : (surf[surface] ?? 0);
-    const kk = key(surface, panelId);
-    if (tier <= floor) delete ST[kk]; else ST[kk] = tier;
-    bump();
+  // build grouped rows straight from the registry groups
+  const groups = (reg.groups || []).map(g => {
+    const kind = g.perm_type;                  // tabs | sub_tabs | actions
+    const catalog = reg[kind] || {};
+    const items = Object.keys(catalog)
+      .filter(id => (catalog[id].group || "") === g.id)
+      .map(id => ({ id, kind, label: catalog[id].label || id, meta: catalog[id] }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    return { id: g.id, label: g.label || g.id, kind, desc: g.description || "", items };
+  }).filter(g => g.items.length);
+
+  // any registry entries whose group isn't declared → catch-all bucket
+  ["tabs", "sub_tabs", "actions"].forEach(kind => {
+    const declared = new Set(groups.filter(g => g.kind === kind).flatMap(g => g.items.map(i => i.id)));
+    const orphans = Object.keys(reg[kind] || {}).filter(id => !declared.has(id))
+      .map(id => ({ id, kind, label: (reg[kind][id].label || id), meta: reg[kind][id] }));
+    if (orphans.length) groups.push({ id: "_orphan_" + kind, label: "Other · " + kind, kind, desc: "", items: orphans });
+  });
+
+  const toggle = (role, kind, id) => {
+    if (rbacWild(role, kind)) { flash(`${role.id} has ALL ${kind} (·*·) — edit the wildcard in roles.json to gate individually`, true); return; }
+    const cur = rbacPerm(role, kind).slice();
+    const at = cur.indexOf(id);
+    const nowOn = at < 0;
+    if (at < 0) cur.push(id); else cur.splice(at, 1);
+    const perms = Object.assign({ tabs: [], sub_tabs: [], actions: [] }, role.permissions || {});
+    perms[kind] = cur;
+    const bkey = role.id + ":" + kind + ":" + id;
+    setBusy(bkey);
+    setRoles(rs => rs.map(r => r.id === role.id ? Object.assign({}, r, { permissions: perms }) : r)); // optimistic
+    umApi("PATCH", "/api/roles/" + encodeURIComponent(role.id), { permissions: perms })
+      .then(() => flash(`${nowOn ? "Enabled" : "Disabled"} ${id} · ${role.name || role.id}`))
+      .catch(e => { flash(String(e.message || e), true); reload(); })
+      .finally(() => setBusy(null));
   };
-  const setGroupAll = (surface, panels, tier) => {
-    const floor = surf[surface] ?? 0;
-    panels.forEach(p => {
-      const kk = key(surface, p.id);
-      if (tier <= floor) delete ST[kk]; else ST[kk] = tier;
-    });
-    bump();
-  };
-  const toggleOff = (surface, panelId) => {
-    const kk = key(surface, panelId);
-    if (OFF[kk]) delete OFF[kk]; else OFF[kk] = true;
-    bump();
-  };
 
-  const surfaces = Object.entries(UM_SURFACE_LABELS);
+  const cols = roles;
+  const gridCols = `minmax(220px,1.7fr) repeat(${cols.length}, minmax(56px,1fr))`;
+  const totalCaps = (reg.tabs ? Object.keys(reg.tabs).length : 0) + (reg.sub_tabs ? Object.keys(reg.sub_tabs).length : 0) + (reg.actions ? Object.keys(reg.actions).length : 0);
 
   return (
     <div className="tac">
-      <div className="pm-note mono" style={{ marginBottom: 10, borderColor: "var(--amb)", color: "var(--amb)" }}>
-        ⚠ <b>Session preview only.</b> This matrix gates the surfaces/lenses in <b>your current browser session</b> so you can see how each tier’s view looks. It is <b>not</b> persisted and does <b>not</b> write to the live RBAC source of truth (<code>data/roles.json</code> + <code>data/capability_registry.json</code>), which is <b>role</b>-based, not this T0–T5 tier ladder. Reloading resets it.
+      <div className="pm-note mono" style={{ marginBottom: 10, borderColor: "var(--gn)", color: "var(--gn)" }}>
+        ✓ <b>Live RBAC.</b> Every toggle PATCHes the role’s permissions to <code>data/roles.json</code> and is admin-audit-logged — the same capability map CapStudio edits. {totalCaps} gateable capabilities × {cols.length} roles. Wildcard (<code>*</code>) roles are shown all-on and locked (edit the wildcard in <code>roles.json</code> to gate one-by-one).
       </div>
-      <div className="tac-legend mono dim2">
-        <b>Tier access matrix</b> — columns are tiers, rows are features. Click a cell to set the tier that <b>unlocks</b> a surface; click a surface name to gate its individual sections. Changes apply to this session only.
-        <span className="tac-legendkey">
-          <span><span className="tacx-lk tacx-lk--on">✓</span> included</span>
-          <span><span className="tacx-lk tacx-lk--floor">●</span> unlock tier</span>
-          <span><span className="tacx-lk tacx-lk--off">⊘</span> disabled</span>
-        </span>
+      <div className="lab-tabs" style={{ marginBottom: 8 }}>
+        <span className="mono dim2">Click a cell to grant / revoke. Click a group to collapse.</span>
+        <label className="mono dim2" style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+          <input type="checkbox" checked={hideEmpty} onChange={e => setHideEmpty(e.target.checked)} /> hide rows nobody has
+        </label>
       </div>
 
-      {/* ── Surfaces · tier access matrix ────────────────────────── */}
       <div className="lab-card">
-        <div className="lab-card-h mono tac-acc-h">
-          <span>SURFACE ACCESS MATRIX · {surfaces.length}</span>
-          <span className="tac-acc-hint mono dim2">click a cell to set the unlock tier · click a name to gate sections</span>
-        </div>
-        <div className="tacx" style={{ gridTemplateColumns: `minmax(170px,1.4fr) repeat(${tiers.length}, minmax(44px,1fr))` }}>
-          <div className="tacx-corner mono">Surface</div>
-          {tiers.map(t => {
-            const cnt = surfaces.filter(([sk]) => (surf[sk] ?? 0) <= t.id).length;
+        <div className="tacx" style={{ gridTemplateColumns: gridCols }}>
+          <div className="tacx-corner mono">Capability</div>
+          {cols.map(r => {
+            const gT = rbacWild(r, "tabs") ? "∗" : rbacPerm(r, "tabs").length;
             return (
-              <div key={t.id} className="tacx-th">
-                <div className="tacx-th-name mono">{t.name}</div>
-                <div className="tacx-th-price mono dim2">{t.price}</div>
-                <div className="tacx-th-cnt mono">{cnt}/{surfaces.length}</div>
+              <div key={r.id} className="tacx-th" title={r.description || r.id}>
+                <div className="tacx-th-name mono" style={{ color: `var(--${umRoleTone(r.color)})` }}>{r.name || r.id}</div>
+                <div className="tacx-th-price mono dim2">{r.id}</div>
+                <div className="tacx-th-cnt mono">{gT}<span className="dim2">t</span></div>
               </div>
             );
           })}
-          {surfaces.map(([k, label]) => {
-            const floor = surf[k] ?? 0;
-            const groups = window.surfaceSections(k);
-            const allPanels = groups.flatMap(g => g.panels);
-            const nRaised = allPanels.filter(p => (ST[key(k, p.id)] ?? 0) > floor).length;
-            const isOpen = !!open[k];
+
+          {groups.map(g => {
+            const isOpen = open[g.id] !== false;
             return (
-              <React.Fragment key={k}>
-                <button className={`tacx-name ${isOpen ? "is-open" : ""}`} onClick={() => toggleOpen(k)} title="Gate this surface's sections">
+              <React.Fragment key={g.id}>
+                <button className={`tacx-name is-grouphead ${isOpen ? "is-open" : ""}`} style={{ gridColumn: `1 / -1`, textAlign: "left" }}
+                  onClick={() => setOpen(o => Object.assign({}, o, { [g.id]: o[g.id] === false }))}>
                   <span className={`tac-caret ${isOpen ? "is-open" : ""}`}>▸</span>
-                  <span className="tacx-name-l">{label}</span>
-                  <span className="tacx-name-meta mono dim2">{allPanels.length}{nRaised > 0 ? ` ↑${nRaised}` : ""}</span>
+                  <span className="tacx-name-l"><b>{g.label}</b></span>
+                  <span className="tacx-name-meta mono dim2">{g.items.length} · {g.kind}</span>
                 </button>
-                {tiers.map(t => {
-                  const inc = t.id >= floor, isFloor = t.id === floor;
+                {isOpen && g.items.map(it => {
+                  const anyHas = cols.some(r => rbacGranted(r, it.kind, it.id));
+                  if (hideEmpty && !anyHas) return null;
                   return (
-                    <button key={t.id} className={`tacx-cell ${inc ? "is-on" : ""} ${isFloor ? "is-floor" : ""}`}
-                      onClick={() => setSurf(k, t.id)} title={`${label} · unlocks at ${t.name}`}>
-                      {isFloor ? <span className="tacx-dot" /> : inc ? "✓" : ""}
-                    </button>
+                    <React.Fragment key={g.id + "/" + it.id}>
+                      <div className="tacx-secname" title={it.id}>
+                        <span className="tacx-sec-l">{it.label}</span>
+                        <span className="mono dim2" style={{ fontSize: 10, marginLeft: 6 }}>{it.id}</span>
+                      </div>
+                      {cols.map(r => {
+                        const on = rbacGranted(r, it.kind, it.id);
+                        const wild = rbacWild(r, it.kind);
+                        const bkey = r.id + ":" + it.kind + ":" + it.id;
+                        const isBusy = busy === bkey;
+                        return (
+                          <button key={r.id} disabled={isBusy}
+                            className={`tacx-cell ${on ? "is-on" : ""} ${wild ? "is-floor" : ""} ${isBusy ? "is-busy" : ""}`}
+                            onClick={() => toggle(r, it.kind, it.id)}
+                            title={wild ? `${r.name} = ALL ${it.kind} (wildcard, locked)` : `${on ? "Revoke" : "Grant"} ${it.label} · ${r.name || r.id}`}>
+                            {wild ? "∗" : on ? "✓" : ""}
+                          </button>
+                        );
+                      })}
+                    </React.Fragment>
                   );
                 })}
-                {isOpen && groups.map(g => (
-                  <React.Fragment key={g.id}>
-                    <div className="tacx-grouprow mono">{g.label}</div>
-                    {g.panels.map(p => {
-                      const off = !!OFF[key(k, p.id)];
-                      const eff = effTier(k, p.id);
-                      return (
-                        <React.Fragment key={p.id}>
-                          <div className={`tacx-secname ${off ? "is-off" : ""}`}>
-                            <button className={`tac-onoff ${off ? "" : "is-on"}`} onClick={() => toggleOff(k, p.id)} title={off ? "Disabled — enable" : "Enabled — disable"}><span className="tac-onoff-dot" /></button>
-                            <span className="tacx-sec-l">{p.label}</span>
-                          </div>
-                          {tiers.map(t => {
-                            const below = t.id < floor, inc = !off && t.id >= eff, isEff = !off && t.id === eff;
-                            return (
-                              <button key={t.id} disabled={below} className={`tacx-cell tacx-cell--sm ${inc ? "is-on" : ""} ${isEff ? "is-floor" : ""} ${off ? "is-off" : ""} ${below ? "is-dis" : ""}`}
-                                onClick={() => !below && setSec(k, p.id, t.id)} title={below ? `Below surface floor (${tiers[floor].name})` : `${p.label} · ${t.name}`}>
-                                {off ? "⊘" : isEff ? <span className="tacx-dot" /> : inc ? "✓" : ""}
-                              </button>
-                            );
-                          })}
-                        </React.Fragment>
-                      );
-                    })}
-                  </React.Fragment>
-                ))}
-              </React.Fragment>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ── Per-ticker lenses (flat) ─────────────────────────────── */}
-      <div className="lab-card">
-        <div className="lab-card-h mono tac-acc-h">
-          <span>PER-TICKER LENSES · {Object.keys(UM_LENS_LABELS).length}</span>
-          <span className="tac-acc-hint mono dim2">click a cell to set the unlock tier · click a lens to gate sections</span>
-        </div>
-        <div className="tacx" style={{ gridTemplateColumns: `minmax(170px,1.4fr) repeat(${tiers.length}, minmax(44px,1fr))` }}>
-          <div className="tacx-corner mono">Lens</div>
-          {tiers.map(t => { const cnt = Object.keys(UM_LENS_LABELS).filter(lk => (lens[lk] ?? 0) <= t.id).length; return <div key={t.id} className="tacx-th"><div className="tacx-th-name mono">{t.name}</div><div className="tacx-th-price mono dim2">{t.price}</div><div className="tacx-th-cnt mono">{cnt}/{Object.keys(UM_LENS_LABELS).length}</div></div>; })}
-          {Object.entries(UM_LENS_LABELS).map(([k, label]) => {
-            const floor = lens[k] ?? 0;
-            const lk = "lens:" + k;
-            const groups = window.lensSections(k);
-            const allPanels = groups.flatMap(g => g.panels);
-            const nRaised = allPanels.filter(p => (ST[key(lk, p.id)] ?? 0) > floor).length;
-            const isOpen = !!open[lk];
-            return (
-              <React.Fragment key={k}>
-                <button className={`tacx-name ${isOpen ? "is-open" : ""}`} onClick={() => toggleOpen(lk)} title="Gate this lens's sections">
-                  <span className={`tac-caret ${isOpen ? "is-open" : ""}`}>▸</span>
-                  <span className="tacx-name-l">{label}</span>
-                  <span className="tacx-name-meta mono dim2">{allPanels.length}{nRaised > 0 ? ` ↑${nRaised}` : ""}</span>
-                </button>
-                {tiers.map(t => { const inc = t.id >= floor, isFloor = t.id === floor; return (
-                  <button key={t.id} className={`tacx-cell ${inc ? "is-on" : ""} ${isFloor ? "is-floor" : ""}`} onClick={() => setLens(k, t.id)} title={`${label} · unlocks at ${t.name}`}>
-                    {isFloor ? <span className="tacx-dot" /> : inc ? "✓" : ""}
-                  </button>
-                ); })}
-                {isOpen && groups.map(g => (
-                  <React.Fragment key={g.id}>
-                    <div className="tacx-grouprow mono">{g.label}</div>
-                    {g.panels.map(p => {
-                      const off = !!OFF[key(lk, p.id)];
-                      const eff = effTier(lk, p.id);
-                      return (
-                        <React.Fragment key={p.id}>
-                          <div className={`tacx-secname ${off ? "is-off" : ""}`}>
-                            <button className={`tac-onoff ${off ? "" : "is-on"}`} onClick={() => toggleOff(lk, p.id)} title={off ? "Disabled — enable" : "Enabled — disable"}><span className="tac-onoff-dot" /></button>
-                            <span className="tacx-sec-l">{p.label}</span>
-                          </div>
-                          {tiers.map(t => {
-                            const below = t.id < floor, inc = !off && t.id >= eff, isEff = !off && t.id === eff;
-                            return (
-                              <button key={t.id} disabled={below} className={`tacx-cell tacx-cell--sm ${inc ? "is-on" : ""} ${isEff ? "is-floor" : ""} ${off ? "is-off" : ""} ${below ? "is-dis" : ""}`}
-                                onClick={() => !below && setSec(lk, p.id, t.id)} title={below ? `Below lens floor (${tiers[floor].name})` : `${p.label} · ${t.name}`}>
-                                {off ? "⊘" : isEff ? <span className="tacx-dot" /> : inc ? "✓" : ""}
-                              </button>
-                            );
-                          })}
-                        </React.Fragment>
-                      );
-                    })}
-                  </React.Fragment>
-                ))}
               </React.Fragment>
             );
           })}
@@ -547,14 +488,18 @@ function TierAccessConfig({ tiers }) {
       </div>
 
       <div className="pm-note mono dim2">
-        Preview tool: edits set an in-session access map over the icon-rail, workspace routing, the 14-lens tabs,
-        and every section within a surface. Switch the tier picker (top bar) to preview any tier’s view — sections
-        above the selected tier blur behind an upgrade prompt. To change what users <i>actually</i> get, edit their
-        <b> role</b> on the Users tab (live <code>auth.py</code>); the real per-role capability map lives in CapStudio
-        (<code>data/capability_registry.json</code>).
+        Source of truth: <code>data/roles.json</code> (per-role grants) over <code>data/capability_registry.json</code> (the catalog of {totalCaps} gateable functions). Each user’s <b>role</b> (Users tab) resolves to these grants. Changes are admin-gated, persisted, and recorded in the audit log (<code>capstudio_edit_role</code>). To add a brand-new gateable capability, add it to the registry first (CapStudio / <code>/api/capability-registry</code>).
       </div>
+
+      {toast && <div className={`um-toast ${toast.bad ? "is-bad" : "is-ok"} mono`} style={{
+        position: "fixed", right: 18, bottom: 18, zIndex: 9999, padding: "10px 14px", borderRadius: 8,
+        background: toast.bad ? "var(--rd-bg, #2a1414)" : "var(--gn-bg, #122017)",
+        border: `1px solid var(--${toast.bad ? "rd" : "gn"})`, color: `var(--${toast.bad ? "rd" : "gn"})`, fontSize: 12, maxWidth: 380 }}>
+        {toast.bad ? "✕ " : "✓ "}{toast.msg}
+      </div>}
     </div>
   );
 }
+
 
 window.SurfaceUsers = SurfaceUsers;
