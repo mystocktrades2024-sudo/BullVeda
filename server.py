@@ -3179,6 +3179,104 @@ async def social_api(ticker: str):
         out["insider"] = {"error": str(e)}
     return out
 
+_SOCIAL_BOARD_CACHE = {"mtime": None, "data": None}
+
+@app.get("/api/social-board")
+async def social_board_api():
+    """Aggregate social board from FREE scraped feeds (no new licenses):
+    X/Twitter cashtags (cache/x_signal.json) + WSB trending + StockTwits bull/bear
+    (cache/retail_sentiment.json). File-mtime cached → shared across all viewers.
+    Honest-empty arrays when a feed file is absent."""
+    import json
+    from pathlib import Path
+    xp = BASE_DIR / "cache" / "x_signal.json"
+    rp = BASE_DIR / "cache" / "retail_sentiment.json"
+
+    def _xc(t):
+        for a in (t.get("accounts") or {}).values():
+            if a.get("latest_excerpt"):
+                return a["latest_excerpt"][:180]
+        return None
+    try:
+        mt = (xp.stat().st_mtime if xp.exists() else 0, rp.stat().st_mtime if rp.exists() else 0)
+        global _SOCIAL_BOARD_CACHE
+        if _SOCIAL_BOARD_CACHE["mtime"] != mt:
+            x = json.loads(xp.read_text()) if xp.exists() else {}
+            r = json.loads(rp.read_text()) if rp.exists() else {}
+            xtop = [{
+                "ticker": t.get("ticker"), "mentions_24h": t.get("mentions_24h"),
+                "mentions_7d": t.get("mentions_7d"), "accounts": list((t.get("accounts") or {}).keys())[:5],
+                "excerpt": _xc(t),
+            } for t in (x.get("top_tickers_24h") or x.get("top_tickers_7d") or [])[:30]]
+            wsb = [{"ticker": w.get("ticker"), "mentions": w.get("mentions"), "rank": w.get("rank")}
+                   for w in (r.get("wsb_trending") or [])[:25]]
+            st = sorted([{"ticker": k, **(v or {})} for k, v in (r.get("stocktwits") or {}).items()],
+                        key=lambda z: -(z.get("msgs") or 0))[:25]
+            recent = [{"ts": p.get("ts"), "handle": p.get("handle"), "ticker": p.get("ticker"), "title": p.get("title")}
+                      for p in (x.get("recent_posts") or [])[:30]]
+            _SOCIAL_BOARD_CACHE = {"mtime": mt, "data": {
+                "x_top": xtop, "wsb_trending": wsb, "stocktwits": st, "recent_posts": recent,
+                "sources": r.get("sources") or [], "generated_at": r.get("generated_at"),
+                "x_generated_at": (x.get("_meta") or {}).get("generated_at"),
+            }}
+        return _SOCIAL_BOARD_CACHE["data"]
+    except Exception as e:
+        return {"error": str(e), "x_top": [], "wsb_trending": [], "stocktwits": [], "recent_posts": []}
+
+
+_GEX_CACHE = {}
+
+@app.get("/api/gex")
+async def gex_api(u: str = "SPY"):
+    """Dealer gamma exposure from the Schwab options chain (no new license):
+    per-strike gamma×OI → net GEX, call/put walls, gamma-flip. TTL-cached 10min
+    per underlying → shared across viewers. ok=False (honest) when chain absent."""
+    import time as _t
+    u = (u or "SPY").upper().strip()
+    ce = _GEX_CACHE.get(u)
+    if ce and (_t.time() - ce["ts"]) < 600:
+        return ce["data"]
+    try:
+        import schwab_client as sc
+        chain = sc.get_chains(u, contract_type="ALL", strike_count=40)
+        g = sc.extract_chain_greeks(chain, max_expirations=2) if chain else None
+        if not g or not g.get("expirations"):
+            data = {"underlying": u, "ok": False, "note": "options chain unavailable"}
+            _GEX_CACHE[u] = {"ts": _t.time(), "data": data}; return data
+        spot = g.get("underlying_price") or 0
+        net_by_strike, callg, putg = {}, {}, {}
+        for exp in g["expirations"]:
+            for c in (exp.get("calls") or []):
+                k, gm, oi = c.get("strike"), c.get("gamma"), c.get("oi")
+                if k and gm and oi:
+                    gex = gm * oi * 100 * (spot or 1)
+                    callg[k] = callg.get(k, 0) + gex
+                    net_by_strike[k] = net_by_strike.get(k, 0) + gex
+            for p in (exp.get("puts") or []):
+                k, gm, oi = p.get("strike"), p.get("gamma"), p.get("oi")
+                if k and gm and oi:
+                    gex = gm * oi * 100 * (spot or 1)
+                    putg[k] = putg.get(k, 0) + gex
+                    net_by_strike[k] = net_by_strike.get(k, 0) - gex   # dealers short puts
+        if not net_by_strike:
+            data = {"underlying": u, "ok": False, "note": "no gamma/OI in chain"}
+            _GEX_CACHE[u] = {"ts": _t.time(), "data": data}; return data
+        net = sum(net_by_strike.values())
+        cum, flip = 0, None
+        for k in sorted(net_by_strike):
+            cum += net_by_strike[k]
+            if cum >= 0:
+                flip = k; break
+        data = {
+            "underlying": u, "ok": True, "spot": spot, "net_gex": round(net),
+            "call_wall": (max(callg, key=callg.get) if callg else None),
+            "put_wall": (max(putg, key=putg.get) if putg else None),
+            "gamma_flip": flip, "regime": ("short" if net < 0 else "long"),
+        }
+        _GEX_CACHE[u] = {"ts": _t.time(), "data": data}; return data
+    except Exception as e:
+        return {"underlying": u, "ok": False, "error": str(e)}
+
 @app.get("/api/journal")
 async def journal_api(limit: int = 400):
     """Closed-trade journal from the signal log — REAL per-trade R, MAE/MFE, exit reason."""

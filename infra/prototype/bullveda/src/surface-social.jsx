@@ -1,20 +1,20 @@
 // surface-social.jsx — Social Sentiment surface · REDESIGN v2 (quant-grade, divergence-led)
 // Headline idea: social is a CONTRARIAN input. The hero is a sentiment × price
 // divergence map; the leaderboard is sorted by divergence (the alpha), not raw mentions.
+//
+// SERVED PATH (real): when window.__BV is present we fetch GET /api/social-board
+// and render REAL crowd data — X/Twitter cashtags, r/wallstreetbets trending,
+// StockTwits bull/bear, and recent X posts. Never fabricated. Each section is
+// honest-empty when its array is empty; the whole surface is honest-empty if the
+// fetch fails or returns an error.
+//
+// STANDALONE SHOWCASE (demo): the divergence map / leaderboard below renders ONLY
+// when there is no window.__BV (dev preview). Its demo tickers never reach the
+// served path.
 const { useState: useSocS, useMemo: useSocM } = React;
 
 // ── served-aware ────────────────────────────────────────────────────
-// BULLVEDA: the StockTwits / WSB / Reddit scrapers are NOT currently wired
-// (known roadmap gap — no live social-sentiment feed exists yet). When served
-// we therefore render an HONEST-EMPTY state and never fabricate crowd data.
-// A real feed would land on window.__BV.social (array of {sym, sent, …}); if
-// that ever appears we wire it. The demo universe below is the standalone-
-// showcase fallback ONLY (no window.__BV) and never renders in the served path.
 const SOC_SERVED = (typeof window !== "undefined" && !!window.__BV);
-const socRealFeed = () => {
-  const BV = (typeof window !== "undefined") ? window.__BV : null;
-  return (BV && Array.isArray(BV.social) && BV.social.length) ? BV.social : null;
-};
 
 // ── enriched universe ──────────────────────────────────────────────
 // sent      crowd tone  −1..+1
@@ -254,48 +254,265 @@ function SocHeatmap({ rows, onTicker, hover, setHover }) {
   );
 }
 
+// ── real-feed hook (served) — GET /api/social-board ─────────────────
+// Returns { data, err, loading }. data is the raw board payload (x_top,
+// wsb_trending, stocktwits, recent_posts, sources, generated_at, x_generated_at).
+function useSocialBoard() {
+  const [st, setSt] = useSocS({ data: null, err: false, loading: true });
+  React.useEffect(() => {
+    if (!SOC_SERVED) { setSt({ data: null, err: false, loading: false }); return; }
+    let live = true;
+    window.__BV.get("/api/social-board")
+      .then(d => { if (!live) return; if (d && d.error) setSt({ data: null, err: true, loading: false }); else setSt({ data: d || null, err: !d, loading: false }); })
+      .catch(() => { if (live) setSt({ data: null, err: true, loading: false }); });
+    return () => { live = false; };
+  }, []);
+  return st;
+}
+
+// relative-time formatter for post timestamps (ISO → "Nm/h/d ago")
+function socAgo(iso) {
+  if (!iso) return "";
+  const t = Date.parse(iso); if (isNaN(t)) return "";
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.round(s / 60) + "m ago";
+  if (s < 86400) return (s / 3600).toFixed(s < 36000 ? 1 : 0) + "h ago";
+  return Math.round(s / 86400) + "d ago";
+}
+function socAsof(iso) {
+  if (!iso) return "—";
+  try { const dt = new Date(iso); return dt.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" }) + " PT"; }
+  catch (e) { return String(iso); }
+}
+
+// ── SERVED renderer: real social board ──────────────────────────────
+// Merges X cashtags + WSB trending + StockTwits sentiment into one trending
+// board (keyed by ticker), plus a recent-X-posts feed. 100% real; honest-empty
+// per section. Tickers click → onTicker.
+function SocialBoardReal({ onTicker, tabs, board }) {
+  const xTop     = Array.isArray(board.x_top) ? board.x_top : [];
+  const wsb      = Array.isArray(board.wsb_trending) ? board.wsb_trending : [];
+  const st       = Array.isArray(board.stocktwits) ? board.stocktwits : [];
+  const posts    = Array.isArray(board.recent_posts) ? board.recent_posts : [];
+  const sources  = Array.isArray(board.sources) ? board.sources : [];
+
+  // merge into one row per ticker across the three feeds
+  const merged = useSocM(() => {
+    const m = {};
+    const slot = sym => (m[sym] = m[sym] || { sym, x: null, wsb: null, st: null });
+    xTop.forEach(r => { if (r && r.ticker) slot(r.ticker).x = r; });
+    wsb.forEach(r => { if (r && r.ticker) slot(r.ticker).wsb = r; });
+    st.forEach(r => { if (r && r.ticker) slot(r.ticker).st = r; });
+    const arr = Object.values(m);
+    // rank: cross-platform presence first, then total signal volume
+    const vol = o => (o.x ? (o.x.mentions_24h || 0) : 0) + (o.wsb ? (o.wsb.mentions || 0) : 0) + (o.st ? (o.st.msgs || 0) : 0);
+    const platforms = o => (o.x ? 1 : 0) + (o.wsb ? 1 : 0) + (o.st ? 1 : 0);
+    return arr.sort((a, b) => (platforms(b) - platforms(a)) || (vol(b) - vol(a)));
+  }, [board]);
+
+  const stKnown = st.filter(r => r && r.ticker);
+  const stBull = stKnown.filter(r => (r.label || "").toLowerCase() === "bullish").length;
+
+  return (
+    <div className="surface sx-surface">
+      <div className="sx-hdr">
+        <div>
+          <div className="sx-eyebrow">SOCIAL SENTIMENT · CROWD POSITIONING</div>
+          <h1 className="sx-title">Crowd chatter
+            <span className="sx-title-div"> · </span>
+            <span className="sx-title-sub">X cashtags · r/wallstreetbets · StockTwits — read as a <span className="amb">contrarian</span> input</span>
+          </h1>
+        </div>
+        <div className="sx-hdr-r">
+          <div className="sx-prov">{sources.length ? sources.join(" · ") : "X · Reddit · StockTwits"}</div>
+        </div>
+      </div>
+
+      {tabs}
+
+      {/* KPI strip — real counts */}
+      <div className="sx-kpis">
+        <SxKpi tone="cy"     l="X CASHTAGS 24h" v={xTop.length || "—"} s={xTop.length ? `top: ${xTop[0].ticker}` : "no X activity"} big />
+        <SxKpi tone="violet" l="WSB TRENDING"   v={wsb.length || "—"} s={wsb.length ? `#1 ${wsb[0].ticker} · ${wsb[0].mentions} mentions` : "feed empty"} />
+        <SxKpi tone="gn"     l="STOCKTWITS"     v={stKnown.length || "—"} s={stKnown.length ? `${stBull} bullish` : "no coverage"} />
+        <SxKpi tone="ink"    l="RECENT X POSTS" v={posts.length || "—"} s="latest cashtag flow" />
+      </div>
+
+      <div className="sx-hero">
+        {/* trending board (merged) */}
+        <div className="sx-card sx-scatter">
+          <div className="sx-card-h">TRENDING TICKERS
+            <span className="sx-card-sub">merged across X · WSB · StockTwits — click to open</span>
+          </div>
+          {merged.length === 0 ? (
+            <div className="mono dim2" style={{ padding: 24, textAlign: "center", fontSize: 13 }}>No trending tickers across any feed right now.</div>
+          ) : (
+            <table className="dtable sx-tbl">
+              <thead><tr>
+                <th>Ticker</th>
+                <th className="r">X 24h</th>
+                <th className="r">X 7d</th>
+                <th className="r">WSB rank</th>
+                <th className="r">WSB</th>
+                <th className="r">StockTwits</th>
+              </tr></thead>
+              <tbody>
+                {merged.map(o => {
+                  const stb = o.st ? Math.round((o.st.sentiment != null ? o.st.sentiment : 0) * 100) : null;
+                  const stTone = o.st ? ((o.st.label || "").toLowerCase() === "bullish" ? "gn" : (o.st.label || "").toLowerCase() === "bearish" ? "rd" : "ink") : "ink";
+                  return (
+                    <tr key={o.sym} onClick={() => onTicker(o.sym)} style={{ cursor: "pointer" }}>
+                      <td><b className="mono">{o.sym}</b></td>
+                      <td className="r mono">{o.x ? o.x.mentions_24h : <span className="dim2">—</span>}</td>
+                      <td className="r mono dim">{o.x ? o.x.mentions_7d : "—"}</td>
+                      <td className="r mono">{o.wsb ? <span className="cy">#{o.wsb.rank}</span> : <span className="dim2">—</span>}</td>
+                      <td className="r mono">{o.wsb ? o.wsb.mentions : <span className="dim2">—</span>}</td>
+                      <td className="r">
+                        {o.st
+                          ? <span className={`sx-tag sx-tag--${stTone}`} title={`${o.st.bullish} bullish · ${o.st.bearish} bearish · ${o.st.msgs} msgs`}>{o.st.label} {stb}%</span>
+                          : <span className="dim2 mono">—</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* recent X posts */}
+        <div className="sx-reads">
+          <div className="sx-card-h">RECENT X POSTS</div>
+          {posts.length === 0 ? (
+            <div className="mono dim2" style={{ padding: 18, fontSize: 13 }}>No recent X posts.</div>
+          ) : (
+            posts.slice(0, 12).map((p, i) => (
+              <div key={i} className="sx-read sx-read--ink" onClick={() => p.ticker && onTicker(p.ticker)} style={{ cursor: p.ticker ? "pointer" : "default" }}>
+                <div className="sx-read-top">
+                  <span className="sx-read-sym">{p.ticker || "—"}</span>
+                  <span className="sx-tag sx-tag--ink">@{p.handle || "?"}</span>
+                  <span className="sx-read-div mono dim2">{socAgo(p.ts)}</span>
+                </div>
+                <div className="sx-read-txt">{(p.title || "").replace(/\s+/g, " ").trim().slice(0, 220)}</div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* WSB + StockTwits detail boards */}
+      <div className="sx-hero">
+        <div className="sx-card sx-tblwrap">
+          <div className="sx-card-h">r/WALLSTREETBETS TRENDING
+            <span className="sx-card-sub">mention rank across wallstreetbets · stocks · options</span>
+          </div>
+          {wsb.length === 0 ? (
+            <div className="mono dim2" style={{ padding: 18, fontSize: 13 }}>WSB feed empty.</div>
+          ) : (
+            <table className="dtable sx-tbl">
+              <thead><tr><th className="r">Rank</th><th>Ticker</th><th className="r">Mentions</th></tr></thead>
+              <tbody>
+                {wsb.map(r => (
+                  <tr key={r.ticker} onClick={() => onTicker(r.ticker)} style={{ cursor: "pointer" }}>
+                    <td className="r mono cy">#{r.rank}</td>
+                    <td><b className="mono">{r.ticker}</b></td>
+                    <td className="r mono">{r.mentions}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="sx-card sx-tblwrap">
+          <div className="sx-card-h">STOCKTWITS BULL / BEAR
+            <span className="sx-card-sub">message-level sentiment split</span>
+          </div>
+          {stKnown.length === 0 ? (
+            <div className="mono dim2" style={{ padding: 18, fontSize: 13 }}>No StockTwits coverage.</div>
+          ) : (
+            <table className="dtable sx-tbl">
+              <thead><tr><th>Ticker</th><th className="r">Bull</th><th className="r">Bear</th><th className="r">Msgs</th><th className="r">Tone</th></tr></thead>
+              <tbody>
+                {stKnown.map(r => {
+                  const tone = (r.label || "").toLowerCase() === "bullish" ? "gn" : (r.label || "").toLowerCase() === "bearish" ? "rd" : "ink";
+                  return (
+                    <tr key={r.ticker} onClick={() => onTicker(r.ticker)} style={{ cursor: "pointer" }}>
+                      <td><b className="mono">{r.ticker}</b></td>
+                      <td className="r mono up">{r.bullish}</td>
+                      <td className="r mono dn">{r.bearish}</td>
+                      <td className="r mono dim">{r.msgs}</td>
+                      <td className="r"><span className={`sx-tag sx-tag--${tone}`}>{r.label} {Math.round((r.sentiment != null ? r.sentiment : 0) * 100)}%</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      <div className="sx-foot">
+        <span className="sx-foot-k">Sources</span> {sources.length ? sources.join(" · ") : "X · Reddit · StockTwits"}.
+        {" "}WSB / StockTwits as of <b>{socAsof(board.generated_at)}</b>; X cashtags as of <b>{socAsof(board.x_generated_at)}</b>.
+        {" "}Crowd chatter is a <span className="amb">contrarian</span> input — extreme one-sided activity often marks crowding, not edge.
+      </div>
+    </div>
+  );
+}
+
 function SurfaceSocial({ onTicker, tabs }) {
   const [view, setView] = useSocS("map");                   // map · ranked · heatmap
   const [sort, setSort] = useSocS({ col:"div", dir:-1 });   // default: most-divergent first
   const [hover, setHover] = useSocS(null);
+  const feed = useSocialBoard();
 
-  // Real feed if one is ever wired; standalone showcase uses the demo universe.
-  const realFeed = socRealFeed();
-  // Served + no real feed → honest-empty (scrapers not connected). Never fabricate.
-  if (SOC_SERVED && !realFeed) {
-    return (
-      <div className="surface sx-surface">
-        <div className="sx-hdr">
-          <div>
-            <div className="sx-eyebrow">SOCIAL SENTIMENT · CROWD POSITIONING</div>
-            <h1 className="sx-title">Social-sentiment feed not connected</h1>
+  // ── SERVED: real /api/social-board ──────────────────────────────
+  if (SOC_SERVED) {
+    if (feed.loading) {
+      return (
+        <div className="surface sx-surface">
+          <div className="sx-hdr">
+            <div>
+              <div className="sx-eyebrow">SOCIAL SENTIMENT · CROWD POSITIONING</div>
+              <h1 className="sx-title">Loading crowd chatter…</h1>
+            </div>
           </div>
-          <div className="sx-hdr-r">
-            <div className="sx-prov">Reddit · X · StockTwits · WSB</div>
-          </div>
-        </div>
-        {tabs}
-        <div className="sx-card" style={{ padding: 28, textAlign: "center" }}>
-          <div className="mono dim2" style={{ fontSize: 13, lineHeight: 1.7, maxWidth: 560, margin: "0 auto" }}>
-            Social-sentiment feed not connected yet. The StockTwits / WSB / Reddit
-            scrapers are on the roadmap but not currently wired into this deployment,
-            so there is no live crowd-positioning data to show. This surface stays
-            intentionally empty rather than display fabricated mention counts or tone.
-            <br /><br />
-            When the social aggregator is reconnected it will populate here as a
-            crowd × tape divergence map (contrarian read), ranked by the gap between
-            crowd tone and price.
+          {tabs}
+          <div className="sx-card" style={{ padding: 28, textAlign: "center" }}>
+            <div className="mono dim2" style={{ fontSize: 13 }}>Fetching X · WSB · StockTwits…</div>
           </div>
         </div>
-      </div>
-    );
+      );
+    }
+    // whole-surface honest-empty on fetch error / no payload
+    if (feed.err || !feed.data) {
+      return (
+        <div className="surface sx-surface">
+          <div className="sx-hdr">
+            <div>
+              <div className="sx-eyebrow">SOCIAL SENTIMENT · CROWD POSITIONING</div>
+              <h1 className="sx-title">Social board unavailable</h1>
+            </div>
+            <div className="sx-hdr-r"><div className="sx-prov">X · Reddit · StockTwits</div></div>
+          </div>
+          {tabs}
+          <div className="sx-card" style={{ padding: 28, textAlign: "center" }}>
+            <div className="mono dim2" style={{ fontSize: 13, lineHeight: 1.7, maxWidth: 560, margin: "0 auto" }}>
+              The social board (<code>/api/social-board</code>) could not be reached or returned
+              an error. No crowd data is shown rather than display fabricated mention counts or tone.
+              Retry by reloading the surface.
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return <SocialBoardReal onTicker={onTicker} tabs={tabs} board={feed.data} />;
   }
 
-  // Source universe: real feed (served) or demo (standalone). Real rows are
-  // enriched the same way the demo is, so the view code below is source-agnostic.
-  const SOC_UNIV = realFeed
-    ? realFeed.map(r => ({ ...r, read: r.read || socReadAuto(r), trend: r.trend || socGen(r.sent || 0, (r.sent || 0) - (r.d24 || 0) * 1.6) }))
-    : SOC_UNIV_DEMO;
+  // ── STANDALONE SHOWCASE (no window.__BV): demo divergence engine ──
+  const SOC_UNIV = SOC_UNIV_DEMO;
 
   const net = SOC_UNIV.reduce((a, r) => a + r.sent, 0) / SOC_UNIV.length;
   const breadth = Math.round(SOC_UNIV.filter(r => r.sent >= 0).length / SOC_UNIV.length * 100);

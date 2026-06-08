@@ -27,32 +27,159 @@ const ALERTS_DEMO = [
 ];
 const SEV = { P0: ["rd", "critical"], P1: ["amb", "attention"], P2: ["blue", "info"] };
 
-function SurfaceAlerts({ onTicker }) {
-  const [filt, setFilt] = useDesk("all");
+// ── Map a real /api/alerts/check alert → display row metadata ──
+// type: stop_hit (P0) | stop_approaching (P0) | t1_hit (P1)
+const ALERT_TYPE_META = {
+  stop_hit:         { sev: "P0", label: "STOP HIT",      tone: "rd",  color: "#ef4444" },
+  stop_approaching: { sev: "P0", label: "STOP NEAR",     tone: "amb", color: "#f59e0b" },
+  t1_hit:           { sev: "P1", label: "T1 HIT",        tone: "gn",  color: "#22c55e" },
+};
 
-  // Served + no real alert stream → honest-empty. Never fabricate alerts.
-  if (DESK_SERVED) {
+// ── Served alerts hook: REAL stop/target-proximity on the SHARED AUTOMATED BOOK ──
+// /api/alerts/check computes, per open position in the auto-traded paper book,
+// whether current price has hit/approached the stop or reached T1. These are
+// NOT the viewer's personal positions — they belong to the shared automated
+// book. Empty (count 0) or fetch failure → honest-empty. Never fabricated.
+function useAutoBookAlerts() {
+  const [d, setD] = React.useState(null); // null = loading; {alerts,count,ts} or {error:true}
+  React.useEffect(() => {
+    let live = true;
+    if (!window.__BV || !window.__BV.get) { setD({ error: true }); return; }
+    window.__BV.get("/api/alerts/check")
+      .then(r => { if (live) setD(r && Array.isArray(r.alerts) ? r : { alerts: [], count: 0 }); })
+      .catch(() => { if (live) setD({ error: true }); });
+    return () => { live = false; };
+  }, []);
+  return d;
+}
+
+// ── SERVED Alerts surface: 100% real, sourced from /api/alerts/check ──────
+function SurfaceAlertsLive({ onTicker, filt, setFilt }) {
+  const d = useAutoBookAlerts();
+  const loading = d === null;
+  const failed = !!(d && d.error);
+  const raw = (d && Array.isArray(d.alerts)) ? d.alerts : [];
+
+  // Normalize real payload → display rows. Unknown types fall through to P2/info.
+  const rows = raw.map(a => {
+    const meta = ALERT_TYPE_META[a.type] || { sev: "P2", label: String(a.type || "ALERT").toUpperCase(), tone: "blue", color: a.color };
+    return {
+      sym: String(a.ticker || "").toUpperCase(),
+      type: a.type,
+      label: meta.label,
+      sev: meta.sev,
+      tone: meta.tone,
+      color: a.color || meta.color,
+      message: a.message || "",
+      current: (a.current_price != null) ? Number(a.current_price) : null,
+      threshold: (a.threshold != null) ? Number(a.threshold) : null,
+    };
+  });
+  const shown = rows.filter(r => filt === "all" || r.sev === filt);
+  const c = s => rows.filter(r => r.sev === s).length;
+
+  // Honest-empty: no positions near a threshold, or fetch failed.
+  const empty = !loading && (failed || rows.length === 0);
+
+  const Header = (
+    <div className="wsx-hdr">
+      <div className="wsx-hdr-l">
+        <div className="wsx-eyebrow mono">AUTOMATED-BOOK ALERTS · REAL · /api/alerts/check</div>
+        <h1 className="wsx-title mono">Alerts</h1>
+        <div className="wsx-sub mono dim2">stop / target proximity on the <b>shared automated paper book</b> — not your personal positions · re-evaluated live at current price</div>
+      </div>
+      <div className="wsx-hdr-r">
+        <FreshnessPill state={loading ? "stale" : (failed ? "stale" : "live")} age={loading ? "loading…" : (failed ? "feed error" : `${rows.length} alert${rows.length === 1 ? "" : "s"}`)} />
+        <span className="mono dim2">src · automated paper book · open positions</span>
+      </div>
+    </div>
+  );
+
+  if (loading) {
     return (
       <div className="surface wsx wsx--rd q-alerts">
-        <div className="wsx-hdr">
-          <div className="wsx-hdr-l">
-            <div className="wsx-eyebrow mono">REAL-TIME TRIAGE</div>
-            <h1 className="wsx-title mono">Alerts</h1>
-            <div className="wsx-sub mono dim2">stop breaches · earnings windows · promotions / demotions on your book + scan</div>
-          </div>
-          <div className="wsx-hdr-r"><span className="mono dim2">src · no alert feed wired</span></div>
-        </div>
+        {Header}
         <div className="wsx-body"><div className="lab-verdict mono dim2" style={{ padding: 24, lineHeight: 1.7 }}>
-          No alert feed wired. There is no persistent alert stream in this deployment
-          yet, so this surface stays empty rather than show fabricated triage rows.
-          <br /><br />
-          When connected, alerts will be derived in real time from your open book
-          (stop breaches, T1 hits, earnings ≤ 2d) and scan deltas (new BUYs,
-          promotions / demotions, setup-edge drift). For now, manage open risk from
-          the <b>Portfolio</b> surface and new candidates from the <b>Scanner</b>.
+          Checking the shared automated book for positions near a stop or target…
         </div></div>
       </div>
     );
+  }
+
+  if (empty) {
+    return (
+      <div className="surface wsx wsx--rd q-alerts">
+        {Header}
+        <div className="wsx-body"><div className="lab-verdict mono dim2" style={{ padding: 24, lineHeight: 1.7 }}>
+          {failed
+            ? <>Alert feed unavailable right now (<b className="cop">/api/alerts/check</b> did not respond). Nothing is shown rather than fabricated triage rows — retry by reloading.</>
+            : <>No active alerts — no automated-book position near a stop or target.</>}
+          <br /><br />
+          These alerts cover the <b>shared automated paper book</b> (auto-traded
+          positions), not your personal holdings. When an automated position hits
+          or approaches its stop, or reaches T1, it appears here in real time.
+        </div></div>
+      </div>
+    );
+  }
+
+  const kpis = [
+    ["STOP HIT", rows.filter(r => r.type === "stop_hit").length, "rd", "breached · open risk"],
+    ["STOP NEAR", rows.filter(r => r.type === "stop_approaching").length, "amb", "approaching stop"],
+    ["T1 HIT", rows.filter(r => r.type === "t1_hit").length, "gn", "move stop to BE"],
+  ];
+
+  return (
+    <div className="surface wsx wsx--rd q-alerts">
+      {Header}
+
+      <div className="q-kpis" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+        {kpis.map((k, i) => (
+          <div key={i} className={`q-kpi q-kpi--${k[2]}`}>
+            <div className="q-kpi-l mono">{k[0]}</div>
+            <div className={`q-kpi-v mono kpi-tone--${k[2]}`}>{k[1]}</div>
+            <div className="q-kpi-s mono dim2">{k[3]}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="q-chips">
+        {[["all", "All", rows.length], ["P0", "P0 · critical", c("P0")], ["P1", "P1 · attention", c("P1")], ["P2", "P2 · info", c("P2")]].map(([id, l, n]) => (
+          <button key={id} className={`q-chip-btn ${filt === id ? "is-on" : ""} ${id !== "all" ? `q-chip-btn--${SEV[id][0]}` : ""}`} onClick={() => setFilt(id)}>
+            {l} <span className="q-chip-n mono">{n}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="wsx-body">
+        <table className="dtable wsx-tbl q-alert-tbl">
+          <thead><tr><th>Sev</th><th>Type</th><th>Ticker</th><th>Message</th><th className="r">Price</th><th className="r">Threshold</th></tr></thead>
+          <tbody>{shown.map((r, i) => (
+            <tr key={i} className={`q-alert-row q-alert-row--${r.tone}`} onClick={() => r.sym && onTicker(r.sym)}>
+              <td><span className={`q-sev q-sev--${r.tone}`}>{r.sev}</span></td>
+              <td><span className="q-atype mono" style={{ color: r.color }}>{r.label}</span></td>
+              <td>{r.sym ? <b className="mono">{r.sym}</b> : <span className="dim2">—</span>}<span className="q-held mono">AUTO</span></td>
+              <td className="dim q-alert-detail">{r.message}</td>
+              <td className="r mono">{r.current != null ? `$${r.current.toFixed(2)}` : "—"}</td>
+              <td className="r mono dim2">{r.threshold != null ? `$${r.threshold.toFixed(2)}` : "—"}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      <div className="pf-note mono dim2">
+        Alerts are <b>computed live</b> from the <b>shared automated paper book</b> — each row is an open auto-traded position whose current
+        price has hit or approached its stop, or reached T1. These are not your personal positions. Click a row → 14-lens detail.
+      </div>
+    </div>
+  );
+}
+
+function SurfaceAlerts({ onTicker }) {
+  const [filt, setFilt] = useDesk("all");
+
+  // ── SERVED: real automated-book alerts from /api/alerts/check ──
+  if (DESK_SERVED) {
+    return <SurfaceAlertsLive onTicker={onTicker} filt={filt} setFilt={setFilt} />;
   }
 
   const ALERTS = ALERTS_DEMO;

@@ -68,9 +68,26 @@ const OF_PRINTS = (() => {
   return out.sort((a, b) => b.prem - a.prem);
 })();
 
+// Dealer-gamma (GEX) hook — real Schwab options-chain via /api/gex.
+// Mirrors useMlEdge: async fetch, honest-empty when ok:false / fetch fails / no BV.
+function useGex(underlying) {
+  const [g, setG] = useOF(null);  // null = loading; {ok:false} or {ok:true,...} once resolved
+  React.useEffect(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.get) { setG({ ok: false }); return; }  // standalone/showcase → honest empty
+    let live = true; setG(null);
+    BV.get("/api/gex?u=" + encodeURIComponent(underlying))
+      .then((d) => { if (live) setG(d && d.ok ? d : { ok: false }); })
+      .catch(() => { if (live) setG({ ok: false }); });
+    return () => { live = false; };
+  }, [underlying]);
+  return g;
+}
+
 function SurfaceOptionsFlow({ onTicker }) {
   const [filter, setFilter] = useOF("all");
   const [q, setQ] = useOF("");
+  const gex = useGex("SPY");
 
   const rows = useOFm(() => {
     let r = OF_PRINTS;
@@ -218,13 +235,51 @@ function SurfaceOptionsFlow({ onTicker }) {
           </div>
 
           <div className="lab-card">
-            <div className="lab-card-h mono">⚡ DEALER GAMMA · est. positioning</div>
+            <div className="lab-card-h mono">⚡ DEALER GAMMA · SPY (live chain)</div>
             <div className="of-gamma">
-              <div className="of-gamma-flip mono"><span className="dim2">Gamma flip</span> <b className="dim2">—</b></div>
-              <div className="of-gamma-row"><span className="mono dim2">Net GEX</span><span className="mono dim2">—</span><span className="mono dim2">no dealer-gamma feed wired</span></div>
-              <div className="of-gamma-row"><span className="mono dim2">Call wall</span><span className="mono dim2">—</span><span className="mono dim2">requires full SPX chain GEX</span></div>
-              <div className="of-gamma-row"><span className="mono dim2">Put wall</span><span className="mono dim2">—</span><span className="mono dim2">—</span></div>
-              <div className="lab-verdict mono dim2">Dealer-gamma (GEX) needs a full options-chain feed not currently wired — shown honestly empty rather than estimated.</div>
+              {(() => {
+                // Loading state — keep honest "—" placeholders, no fabricated numbers.
+                if (gex === null) {
+                  return <>
+                    <div className="of-gamma-flip mono"><span className="dim2">Gamma flip</span> <b className="dim2">—</b></div>
+                    <div className="of-gamma-row"><span className="mono dim2">Net GEX</span><span className="mono dim2">—</span><span className="mono dim2">loading dealer-gamma…</span></div>
+                    <div className="of-gamma-row"><span className="mono dim2">Call wall</span><span className="mono dim2">—</span><span className="mono dim2">—</span></div>
+                    <div className="of-gamma-row"><span className="mono dim2">Put wall</span><span className="mono dim2">—</span><span className="mono dim2">—</span></div>
+                    <div className="lab-verdict mono dim2">Fetching SPY dealer-gamma from the live options chain…</div>
+                  </>;
+                }
+                // Unavailable — feed down / chain empty. Honest empty, no old hardcoded values.
+                if (!gex.ok) {
+                  return <>
+                    <div className="of-gamma-flip mono"><span className="dim2">Gamma flip</span> <b className="dim2">—</b></div>
+                    <div className="of-gamma-row"><span className="mono dim2">Net GEX</span><span className="mono dim2">—</span><span className="mono dim2">dealer-gamma feed unavailable</span></div>
+                    <div className="of-gamma-row"><span className="mono dim2">Call wall</span><span className="mono dim2">—</span><span className="mono dim2">—</span></div>
+                    <div className="of-gamma-row"><span className="mono dim2">Put wall</span><span className="mono dim2">—</span><span className="mono dim2">—</span></div>
+                    <div className="lab-verdict mono dim2">Dealer-gamma (GEX) unavailable — SPY options chain not returned by the feed right now. Shown honestly empty rather than estimated.</div>
+                  </>;
+                }
+                // Real GEX payload.
+                const isLong = gex.regime === "long";
+                const netB = (typeof gex.net_gex === "number") ? gex.net_gex / 1e9 : null;
+                const num = (x, d = 0) => (typeof x === "number" && isFinite(x)) ? x.toFixed(d) : "—";
+                return <>
+                  <div className="of-gamma-flip mono">
+                    <span className="dim2">Gamma flip</span> <b className={netB == null ? "dim2" : (isLong ? "up" : "dn")}>{num(gex.gamma_flip) === "—" ? "—" : "$" + num(gex.gamma_flip)}</b>
+                    {typeof gex.spot === "number" && <span className="dim2" style={{ marginLeft: 8 }}>spot ${num(gex.spot, 2)}</span>}
+                  </div>
+                  <div className="of-gamma-row">
+                    <span className="mono dim2">Net GEX</span>
+                    <span className={`mono ${netB == null ? "dim2" : (isLong ? "up" : "dn")}`}>{netB == null ? "—" : (netB >= 0 ? "+" : "−") + "$" + Math.abs(netB).toFixed(2) + "B"}</span>
+                    <span className="mono dim2">notional · {isLong ? "long γ → dampens vol" : "short γ → amplifies vol"}</span>
+                  </div>
+                  <div className="of-gamma-row"><span className="mono dim2">Call wall</span><span className="mono up">{num(gex.call_wall) === "—" ? "—" : "$" + num(gex.call_wall)}</span><span className="mono dim2">upside pin / resistance</span></div>
+                  <div className="of-gamma-row"><span className="mono dim2">Put wall</span><span className="mono dn">{num(gex.put_wall) === "—" ? "—" : "$" + num(gex.put_wall)}</span><span className="mono dim2">downside pin / support</span></div>
+                  <div className="lab-verdict mono dim2">
+                    Dealers are <b>{isLong ? "long gamma" : "short gamma"}</b> ({isLong ? "they sell rallies / buy dips → mean-reversion, vol suppressed" : "they buy rallies / sell dips → trend-amplifying, vol expansion risk"}).
+                    Net GEX shown as raw notional ($B). Computed from the real Schwab SPY chain (per-strike gamma × OI).
+                  </div>
+                </>;
+              })()}
             </div>
           </div>
 
