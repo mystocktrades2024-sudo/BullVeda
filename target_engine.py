@@ -1138,14 +1138,27 @@ def estimate_p_reach(candidate: Candidate, mode: str) -> dict:
 # STOP CALCULATION (simplified Phase 1 · candidate stops + ATR floor)
 # ════════════════════════════════════════════════════════════════════════
 def compute_stop(entry: float, atr: float, direction: str,
-                 swings: list, vp: dict, bull_ob_stops: Optional[list] = None) -> dict:
+                 swings: list, vp: dict, bull_ob_stops: Optional[list] = None,
+                 mode: str = "position") -> dict:
     """Phase 1 stop: structural swing low (long) or swing high (short),
-    fallback to entry − 1.5 × ATR.
+    with a MODE-SCALED minimum distance (fallback to entry − min_atr × ATR).
 
     bull_ob_stops: optional list of bull order-block highs below entry (demand
     zones). The nearest one below entry is added as a structural stop candidate —
     institutional demand is a natural close-below invalidation level.
+
+    mode: stop width must scale with horizon — a 2-5d swing stop (~1 ATR) is
+    nonsensical on a 1-5yr invest hold (normal noise stops you out). Each mode
+    enforces a minimum stop distance and prefers the tightest STRUCTURAL level
+    that already clears that floor (2026-06-08 fix — Overview audit).
     """
+    MODE_MIN_ATR = {"swing": 1.0, "position": 2.0, "invest": 2.5}
+    # Cap the stop distance per mode so a deep multi-year structural low can't blow
+    # out R:R (AAPL invest picked a $193 low = 37% — too extreme; and an over-wide
+    # invest stop pushes its R-band targets past the reach cap, forcing the stub).
+    MODE_MAX_PCT = {"swing": 0.08, "position": 0.12, "invest": 0.14}
+    min_atr = MODE_MIN_ATR.get(mode, 1.0)
+    max_pct = MODE_MAX_PCT.get(mode, 0.12)
     candidates = {}
     if direction == "long":
         # Nearest swing low below entry
@@ -1166,21 +1179,26 @@ def compute_stop(entry: float, atr: float, direction: str,
             below = sorted([p for p in bull_ob_stops if p < entry], reverse=True)
             if below:
                 candidates["bull_ob"] = below[0] - 0.1 * atr
-        candidates["atr_floor"] = entry - 1.5 * atr
+        candidates["atr_floor"] = entry - min_atr * atr
 
         valid = [(k, v) for k, v in candidates.items() if v is not None and v < entry]
         if not valid:
-            return {"price": entry - 1.5 * atr, "basis": "atr_floor_fallback",
-                    "distance_pct": -1.5 * atr / entry * 100, "distance_atr": 1.5,
+            return {"price": round(entry - min_atr * atr, 2), "basis": f"atr_floor_{mode}",
+                    "distance_pct": round(-min_atr * atr / entry * 100, 2), "distance_atr": min_atr,
                     "candidates": candidates}
-        # Tightest valid stop = max
-        chosen_key, chosen_price = max(valid, key=lambda kv: kv[1])
+        # Prefer the TIGHTEST structural stop that already clears the mode floor;
+        # if none is deep enough, widen to the mode's min-ATR floor.
+        deep = [(k, v) for k, v in valid if (entry - v) / atr >= min_atr]
+        if deep:
+            chosen_key, chosen_price = max(deep, key=lambda kv: kv[1])
+        else:
+            chosen_key, chosen_price = f"atr_floor_{mode}", entry - min_atr * atr
+        # Cap: never wider than the mode's max-% (keeps R:R sane on deep structural lows)
+        min_allowed = entry * (1.0 - max_pct)
+        if chosen_price < min_allowed:
+            chosen_price = min_allowed
+            chosen_key = f"{chosen_key}_capped_{int(max_pct*100)}pct"
         distance_atr = (entry - chosen_price) / atr
-        # ATR floor: minimum 0.5 ATR
-        if distance_atr < 0.5:
-            chosen_price = entry - 0.5 * atr
-            chosen_key = "atr_floor_widened"
-            distance_atr = 0.5
         return {
             "price": round(chosen_price, 2),
             "basis": chosen_key,
@@ -1324,7 +1342,7 @@ def analyze_trade(ticker: str, direction: str = "long", mode: str = "position",
 
     # 8. Stop (now demand-zone aware)
     stop_info = compute_stop(entry, atr, direction, swings, vp,
-                             bull_ob_stops=bull_ob_stops)
+                             bull_ob_stops=bull_ob_stops, mode=mode)
     stop_price = stop_info["price"]
 
     # 9. Build base candidate levels (unchanged contract)
@@ -1387,6 +1405,33 @@ def analyze_trade(ticker: str, direction: str = "long", mode: str = "position",
     risk = entry - stop_price
     t1 = cand_to_target(t1_c, entry, risk, stop_price) if t1_c else None
     t2 = cand_to_target(t2_c, entry, risk, stop_price) if t2_c else None
+
+    # Fallback T2 — when no structural level qualifies for T2 but T1 exists,
+    # synthesize an R-multiple T2 so the ladder ALWAYS shows a second target (matches
+    # canonical compute_trade_plan, which always emits target2). Honest source tag.
+    # Capped at the mode reach cap. (2026-06-08 Overview audit — swing T2 was missing
+    # on some tickers.)
+    if t2 is None and t1 is not None and risk > 0:
+        _t2_r = max((cfg.get("min_r_t2") or 2.0), (t1.r_multiple or 1.0) + 1.0)
+        _t2_price = entry + risk * _t2_r
+        _mra, _hrp = cfg.get("max_reach_atr"), cfg.get("hard_reach_pct")
+        if _mra is not None and _hrp is not None:
+            _cap = entry + min(max(atr * _mra, entry * (cfg.get("min_reach_pct") or 0.0)),
+                               entry * _hrp)
+            _t2_price = min(_t2_price, _cap)
+        if _t2_price > t1.price:
+            t2 = Target(
+                price=round(_t2_price, 2),
+                r_multiple=round((_t2_price - entry) / risk, 2),
+                distance_pct=round((_t2_price - entry) / entry * 100, 2),
+                confluence=0.0,
+                sources=[asdict(Source(type="R_MULTIPLE", price=_t2_price, weight=0.0,
+                                       detail={"note": "synthetic_r_multiple_t2"}))],
+                behavior="STRUCTURAL",
+                action="scale_out_partial",
+                p_reach=round(max(0.02, (t1.p_reach or 0.4) * 0.7), 3),
+                p_reach_source={"note": "synthetic_t2_derate_of_t1"},
+            )
 
     # T3 bull-stretch: ARM only when reachability(entry→t3) ≥ 0.45 AND momentum
     # confirms (MACD hist > 0). Otherwise t3 = None (additive, never blocks t1/t2).
