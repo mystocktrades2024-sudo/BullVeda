@@ -139,7 +139,7 @@ function HomeView({ onTicker, onSurface, mode, surface }) {
       </div>
 
       {/* TIER 2.5 · BEST IDEAS PER ENGINE — top 5 from each discovery source */}
-      <div className="home-sec-label"><span className="mono">BEST IDEAS · TOP 5 PER ENGINE</span><span className="mono dim2">each discovery model's highest-conviction names today</span></div>
+      <div className="home-sec-label"><span className="mono">BEST IDEAS · TOP 5 PER ENGINE</span><span className="mono dim2">ranked by each engine's own signal (dim) · grade = unified conviction (composite 0–100), same scale for all</span></div>
       <TopByEngine onTicker={onTicker} onSurface={onSurface} />
 
       {/* TIER 3 · ATTENTION — catalysts, news, what changed */}
@@ -791,6 +791,33 @@ window.TBE_ENGINES = TBE_ENGINES;
 window.SCANNER_PICKS = SCANNER_PICKS;
 window.resolveEngines = resolveEngines;
 window.resolveScannerPicks = resolveScannerPicks;
+
+// ── Unified conviction KPI shared by EVERY engine card ──────────────────────
+// Each engine ranks by its own native signal (RS / beat% / P(up) / R:R / insider
+// net / SMC grade) — those aren't comparable across engines. So every row also
+// shows ONE consistent KPI: the system's composite conviction (0–100, per-mode
+// composite_score) mapped to an A–F grade. Same scale for all six engines, so a
+// "Momentum A" and an "Options A" mean the same conviction. Real per-ticker
+// score from the scan; "—" when the name isn't in today's scored universe.
+function tbeScore(sym) {
+  const row = HR.findRow(sym);
+  if (!row) return null;
+  const d = HR.mdec(row);
+  let sc = d ? HR.num(d.composite_score, null) : null;
+  if (sc == null) sc = HR.num(row.score, null);
+  return (typeof sc === "number" && isFinite(sc)) ? sc : null;
+}
+function tbeGrade(sc) {
+  if (sc == null) return null;
+  if (sc >= 85) return "A+"; if (sc >= 80) return "A"; if (sc >= 75) return "A-";
+  if (sc >= 70) return "B+"; if (sc >= 65) return "B"; if (sc >= 60) return "B-";
+  if (sc >= 55) return "C+"; if (sc >= 50) return "C"; if (sc >= 45) return "C-";
+  return "D";
+}
+function tbeGradeColor(sc) {
+  return sc == null ? "var(--ink-3)" : sc >= 75 ? "var(--gn)" : sc >= 60 ? "var(--amb)" : "var(--rd)";
+}
+
 function TopByEngine({ onTicker, onSurface }) {
   // Each engine's rows pull from the live scan universe (audit-log intersected);
   // ML pulls from the AIPredict ensemble. Re-derives when feeds finish loading.
@@ -801,16 +828,24 @@ function TopByEngine({ onTicker, onSurface }) {
         <div key={e.id} className="tbe-card" style={{ "--eng": e.accent }}>
           <button className="tbe-head" onClick={() => onSurface && onSurface(e.surface)}>
             <span className="tbe-title mono"><span className="tbe-dot" />{e.title}</span>
-            <span className="tbe-metric mono dim2">{e.metric} <span className="tbe-arrow">→</span></span>
+            <span className="tbe-metric mono dim2">{e.metric} · grade <span className="tbe-arrow">→</span></span>
           </button>
           <div className="tbe-list">
-            {e.rows.length ? e.rows.map(([sym, v], i) => (
-              <button key={sym} className={`tbe-row ${i === 0 ? "is-lead" : ""}`} onClick={() => onTicker && onTicker(sym)}>
+            {e.rows.length ? e.rows.map(([sym, v], i) => {
+              const sc = tbeScore(sym);
+              const grade = tbeGrade(sc);
+              return (
+              <button key={sym} className={`tbe-row ${i === 0 ? "is-lead" : ""}`} style={{ gridTemplateColumns: "16px 1fr auto auto" }}
+                onClick={() => onTicker && onTicker(sym)}
+                title={sc != null
+                  ? `Conviction ${Math.round(sc)}/100 (grade ${grade}) · ${String(e.metric).toUpperCase()} ${v}`
+                  : `${String(e.metric).toUpperCase()} ${v} · not in today's scored universe`}>
                 <span className="tbe-rank mono">{i + 1}</span>
                 <span className="tbe-sym mono"><b>{sym}</b></span>
-                <span className="tbe-v mono">{v}</span>
+                <span className="tbe-v mono dim2" style={{ fontSize: 10, opacity: .85 }} title={`${String(e.metric).toUpperCase()} (this engine's signal)`}>{v}</span>
+                <span className="mono" style={{ fontWeight: 700, fontSize: 13, color: tbeGradeColor(sc), textAlign: "right", minWidth: 26, fontVariantNumeric: "tabular-nums" }}>{grade || "—"}</span>
               </button>
-            )) : <div className="tbe-row" style={{ opacity: .5, cursor: "default" }}><span className="tbe-sym mono dim2">no signals today</span></div>}
+            );}) : <div className="tbe-row" style={{ opacity: .5, cursor: "default" }}><span className="tbe-sym mono dim2">no signals today</span></div>}
           </div>
         </div>
       ))}
