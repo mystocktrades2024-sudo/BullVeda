@@ -21105,8 +21105,28 @@ function SmcQuickCard({ m }) {
   )));
 }
 function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
-  const { m, state } = useSmcModel(ticker, mode);
+  const isSwing = (mode || "").toUpperCase() === "SWING";
+  const [smcTf, setSmcTf] = useStateSMC("daily");
+  const on4h = smcTf === "4h" && isSwing;
+  const effMode = on4h ? "SWING_4H" : mode;
+  const { m, state } = useSmcModel(ticker, effMode);
   const ok = _smcUsable(m);
+  const _mtf = ok && Array.isArray(m.mtf) ? m.mtf : [];
+  const _prim = _mtf.find((r) => r.tf === "4H") || _mtf[0] || null;
+  const _higher = _mtf.find((r) => r.tf === "Daily") || _mtf[1] || null;
+  const conf = (() => {
+    if (!on4h || !_prim || !_higher) return null;
+    const norm = (b) => {
+      b = (b || "").toUpperCase();
+      return b === "BULL" ? "bull" : b === "BEAR" ? "bear" : "range";
+    };
+    const p = norm(_prim.bias), h = norm(_higher.bias);
+    const pb = (_prim.bias || "RANGE").toUpperCase(), hb = (_higher.bias || "RANGE").toUpperCase();
+    if (p !== "range" && p === h) return { tone: p === "bull" ? "gn" : "rd", verdict: "ALIGNED", note: `4H ${pb} confirms the Daily ${hb} bias \u2014 high-conviction ${p === "bull" ? "long" : "short"} entry zone. Look for an order block / FVG in this direction.` };
+    if (p !== "range" && h !== "range" && p !== h) return { tone: "rd", verdict: "COUNTER-TREND", note: `4H ${pb} fights the Daily ${hb} bias \u2014 likely a trap / counter-trend bounce. Wait for the 4H to flip with the daily, or skip.` };
+    if (h !== "range") return { tone: "amb", verdict: "WAIT", note: `Daily is ${hb} but the 4H is still ${pb} \u2014 no entry trigger yet. Wait for the 4H structure to confirm the daily before sizing in.` };
+    return { tone: "amb", verdict: "NO HTF TREND", note: `Daily is ${hb} \u2014 no clean higher-timeframe trend to refine into. 4H entries here are lower-conviction.` };
+  })();
   const bias = ok ? m.bias : null;
   const biasTone = bias === "bull" ? "gn" : bias === "bear" ? "rd" : "amb";
   const zone = ok ? m.range.zone : null;
@@ -21132,7 +21152,25 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const s12b = useStateToggle("sm-12");
   const s13b = useStateToggle("sm-13");
   const s14b = useStateToggle("sm-14");
-  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--smc" }, window.LensSummaryBar && /* @__PURE__ */ React.createElement(LensSummaryBar, { ticker, mode, kind: "smc", smc: m }), /* @__PURE__ */ React.createElement(SmcQuickCard, { m }), /* @__PURE__ */ React.createElement("div", { className: "hero smc-hero" }, /* @__PURE__ */ React.createElement("div", { className: "th-left" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap" }, "SMC structure read \xB7 ", mode, ok ? " \xB7 " + m.tf : ""), /* @__PURE__ */ React.createElement("div", { className: "th-score" }, /* @__PURE__ */ React.createElement("div", { className: "th-score-num mono" }, ok ? m.smc_score >= 66 ? "PASS" : m.smc_score >= 50 ? "MIXED" : "WEAK" : "\u2014"), ok && /* @__PURE__ */ React.createElement(Pill, { tone: biasTone, dot: true }, m.headline), ok && /* @__PURE__ */ React.createElement(Pill, { tone: zoneTone, small: true }, zone)), /* @__PURE__ */ React.createElement("div", { className: "th-pill-row" }, ok ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true }, nUnmit, " fresh OB", nUnmit === 1 ? "" : "s", " \xB7 ", bias === "bull" ? "dip-buy zones" : bias === "bear" ? "rip-sell zones" : "watch zones"), nFVGu > 0 ? /* @__PURE__ */ React.createElement(Pill, { tone: "cy", small: true }, nFVGu, " open gap", nFVGu === 1 ? "" : "s", " \xB7 price magnets") : /* @__PURE__ */ React.createElement(Pill, { tone: "ink", small: true }, "no open gaps"), draw && /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "target ", smcMoney(draw.price)), /* @__PURE__ */ React.createElement(Pill, { tone: biasTone, small: true }, "structure ", m.smc_score, "/100")) : /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, state === "loading" ? "loading live bars\u2026" : "no live structure"))), /* @__PURE__ */ React.createElement("div", { className: "th-right" }, /* @__PURE__ */ React.createElement(SMCMicroChart, { m }))), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "lens lens--smc" }, window.LensSummaryBar && /* @__PURE__ */ React.createElement(LensSummaryBar, { ticker, mode, kind: "smc", smc: m }), /* @__PURE__ */ React.createElement(SmcQuickCard, { m }), /* @__PURE__ */ React.createElement("div", { className: "hero smc-hero" }, /* @__PURE__ */ React.createElement("div", { className: "th-left" }, /* @__PURE__ */ React.createElement("div", { className: "label-cap", style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("span", null, "SMC structure read \xB7 ", mode, ok ? " \xB7 " + m.tf : "", on4h ? " \xB7 Schwab intraday" : ""), isSwing && /* @__PURE__ */ React.createElement("span", { className: "seg", style: { display: "inline-flex" } }, [["daily", "Daily"], ["4h", "4H"]].map(([tf, lbl]) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: tf,
+      className: `seg-btn ${smcTf === tf ? "is-on" : ""}`,
+      onClick: () => setSmcTf(tf),
+      style: { fontSize: 10.5, padding: "1px 9px" },
+      title: tf === "daily" ? "Daily \u2014 structure & bias (the swing)" : "4H \u2014 Schwab-intraday entry refinement inside the daily bias"
+    },
+    lbl
+  )))), /* @__PURE__ */ React.createElement("div", { className: "th-score" }, /* @__PURE__ */ React.createElement("div", { className: "th-score-num mono" }, ok ? m.smc_score >= 66 ? "PASS" : m.smc_score >= 50 ? "MIXED" : "WEAK" : "\u2014"), ok && /* @__PURE__ */ React.createElement(Pill, { tone: biasTone, dot: true }, m.headline), ok && /* @__PURE__ */ React.createElement(Pill, { tone: zoneTone, small: true }, zone)), /* @__PURE__ */ React.createElement("div", { className: "th-pill-row" }, ok ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true }, nUnmit, " fresh OB", nUnmit === 1 ? "" : "s", " \xB7 ", bias === "bull" ? "dip-buy zones" : bias === "bear" ? "rip-sell zones" : "watch zones"), nFVGu > 0 ? /* @__PURE__ */ React.createElement(Pill, { tone: "cy", small: true }, nFVGu, " open gap", nFVGu === 1 ? "" : "s", " \xB7 price magnets") : /* @__PURE__ */ React.createElement(Pill, { tone: "ink", small: true }, "no open gaps"), draw && /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, "target ", smcMoney(draw.price)), /* @__PURE__ */ React.createElement(Pill, { tone: biasTone, small: true }, "structure ", m.smc_score, "/100")) : /* @__PURE__ */ React.createElement(Pill, { tone: "amb", small: true }, state === "loading" ? "loading live bars\u2026" : "no live structure"))), /* @__PURE__ */ React.createElement("div", { className: "th-right" }, /* @__PURE__ */ React.createElement(SMCMicroChart, { m }))), conf && /* @__PURE__ */ React.createElement("div", { className: "lens-pad", style: { paddingTop: 0 } }, /* @__PURE__ */ React.createElement("div", { className: "mono", style: {
+    fontSize: 12,
+    lineHeight: 1.5,
+    padding: "9px 12px",
+    borderRadius: 9,
+    border: `1px solid color-mix(in oklab, var(--${conf.tone}) 45%, transparent)`,
+    background: `color-mix(in oklab, var(--${conf.tone}) 11%, transparent)`,
+    color: "var(--ink-1)"
+  } }, /* @__PURE__ */ React.createElement("b", { className: conf.tone === "gn" ? "up" : conf.tone === "rd" ? "dn" : "warn" }, "4H \u2194 Daily confluence \xB7 ", conf.verdict), "  ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\u2014 ", conf.note))), on4h && !ok && /* @__PURE__ */ React.createElement("div", { className: "lens-pad", style: { paddingTop: 0 } }, /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "4H bars come from Schwab intraday \u2014 ", state === "loading" ? "loading\u2026" : "unavailable for this name right now (Schwab returned no intraday). Switch to Daily.")), /* @__PURE__ */ React.createElement("div", { className: "lens-section" }, /* @__PURE__ */ React.createElement(
     SectionHeader,
     {
       title: "SMC Snapshot",

@@ -23,6 +23,10 @@ import pandas as pd
 # mode → (calendar days to fetch, pandas resample rule or None, label, horizon)
 _MODE_CFG = {
     "SWING":      {"days": 300,  "rule": None,    "tf": "Daily",   "horizon": "2–15d"},
+    # SWING_4H — intraday entry-refinement for swing trades. Schwab 30-min bars
+    # resampled to 4H (EODHD has no intraday). Daily stays the structure/bias TF;
+    # this is the lower-timeframe entry view. Schwab-only (no EODHD failover).
+    "SWING_4H":   {"days": 150,  "rule": None,    "tf": "4H",      "horizon": "2–15d", "intraday": "4h"},
     "POSITION":   {"days": 1150, "rule": "W-FRI", "tf": "Weekly",  "horizon": "1–6mo"},
     "INVESTMENT": {"days": 4500, "rule": "ME",    "tf": "Monthly", "horizon": "1–5yr"},
 }
@@ -30,7 +34,39 @@ _MODE_CFG = {
 _MODE_ALIAS = {
     "swing": "SWING", "position": "POSITION", "invest": "INVESTMENT",
     "investment": "INVESTMENT", "INVEST": "INVESTMENT",
+    "4h": "SWING_4H", "4H": "SWING_4H", "swing_4h": "SWING_4H", "swing4h": "SWING_4H",
 }
+
+
+def _fetch_intraday_resampled(ticker: str, days: int = 150, rule: str = "4h"
+                              ) -> Tuple[Optional[pd.DataFrame], str]:
+    """Schwab 30-min bars resampled to ``rule`` (e.g. 4H). Schwab is the ONLY
+    intraday source (EODHD All-In-One has no intraday), so there is no failover —
+    if Schwab fails the caller surfaces an honest 'intraday unavailable' state.
+    Returns (df with lowercase OHLCV cols, tier)."""
+    try:
+        import time
+        import schwab_client as sc
+        now_ms = int(time.time() * 1000)
+        start_ms = now_ms - int(days) * 86400 * 1000
+        r = sc.get_pricehistory(ticker, period_type="day", frequency_type="minute",
+                                frequency=30, start_date=start_ms, end_date=now_ms)
+        candles = r.get("candles") if isinstance(r, dict) else None
+        if not candles:
+            return None, "schwab_empty"
+        df = pd.DataFrame(candles)
+        if "datetime" not in df.columns:
+            return None, "schwab_schema"
+        df["_dt"] = pd.to_datetime(df["datetime"], unit="ms")
+        df = df.set_index("_dt").sort_index()
+        agg = {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+        have = {k: v for k, v in agg.items() if k in df.columns}
+        df4 = df.resample(rule).agg(have).dropna()
+        if df4.empty:
+            return None, "schwab_empty"
+        return df4, "schwab"
+    except Exception as e:  # pragma: no cover
+        return None, f"schwab_err:{e}"
 
 
 def norm_mode(mode: Optional[str]) -> str:
@@ -99,6 +135,17 @@ def get_bars(ticker: str, mode: str = "SWING", enriched: bool = True
     mode = norm_mode(mode)
     cfg = _MODE_CFG[mode]
     meta = mode_meta(mode)
+    # Intraday (4H) path — Schwab-only, already resampled to the target rule.
+    if cfg.get("intraday"):
+        df, tier = _fetch_intraday_resampled(ticker, days=cfg["days"], rule=cfg["intraday"])
+        if df is None or getattr(df, "empty", True):
+            return None, tier or "failed", meta
+        df = _normalize_cols(df)
+        if df is None or len(df) < 24:
+            return None, ("short" if df is not None else "schema"), meta
+        if enriched:
+            df = enrich(df)
+        return df, tier, meta
     try:
         from data_fetcher import fetch_ohlcv_with_failover
         df, tier = fetch_ohlcv_with_failover(ticker, days=cfg["days"])

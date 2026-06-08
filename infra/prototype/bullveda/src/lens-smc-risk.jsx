@@ -212,8 +212,29 @@ function SmcQuickCard({ m }) {
 // SMC — order blocks, FVG, BoS/CHoCH, liquidity sweeps
 // ────────────────────────────────────────────────────────────
 function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
-  const { m, state } = useSmcModel(ticker, mode);
+  // Daily = structure/bias (default). 4H = Schwab-intraday entry refinement, SWING
+  // only — sits INSIDE the daily bias. The engine's mtf gives 4H + Daily bias for
+  // the confluence read. POSITION/INVESTMENT have no 4H (multi-week+ holds).
+  const isSwing = (mode || "").toUpperCase() === "SWING";
+  const [smcTf, setSmcTf] = useStateSMC("daily");
+  const on4h = smcTf === "4h" && isSwing;
+  const effMode = on4h ? "SWING_4H" : mode;
+  const { m, state } = useSmcModel(ticker, effMode);
   const ok = _smcUsable(m);
+  // 4H↔Daily confluence (m.mtf = [{tf,bias},…]); only meaningful on the 4H view
+  const _mtf = (ok && Array.isArray(m.mtf)) ? m.mtf : [];
+  const _prim = _mtf.find(r => r.tf === "4H") || _mtf[0] || null;
+  const _higher = _mtf.find(r => r.tf === "Daily") || _mtf[1] || null;
+  const conf = (() => {
+    if (!on4h || !_prim || !_higher) return null;
+    const norm = b => { b = (b || "").toUpperCase(); return b === "BULL" ? "bull" : b === "BEAR" ? "bear" : "range"; };
+    const p = norm(_prim.bias), h = norm(_higher.bias);
+    const pb = (_prim.bias || "RANGE").toUpperCase(), hb = (_higher.bias || "RANGE").toUpperCase();
+    if (p !== "range" && p === h) return { tone: p === "bull" ? "gn" : "rd", verdict: "ALIGNED", note: `4H ${pb} confirms the Daily ${hb} bias — high-conviction ${p === "bull" ? "long" : "short"} entry zone. Look for an order block / FVG in this direction.` };
+    if (p !== "range" && h !== "range" && p !== h) return { tone: "rd", verdict: "COUNTER-TREND", note: `4H ${pb} fights the Daily ${hb} bias — likely a trap / counter-trend bounce. Wait for the 4H to flip with the daily, or skip.` };
+    if (h !== "range") return { tone: "amb", verdict: "WAIT", note: `Daily is ${hb} but the 4H is still ${pb} — no entry trigger yet. Wait for the 4H structure to confirm the daily before sizing in.` };
+    return { tone: "amb", verdict: "NO HTF TREND", note: `Daily is ${hb} — no clean higher-timeframe trend to refine into. 4H entries here are lower-conviction.` };
+  })();
   const bias = ok ? m.bias : null;
   const biasTone = bias === "bull" ? "gn" : bias === "bear" ? "rd" : "amb";
   const zone = ok ? m.range.zone : null;
@@ -239,7 +260,18 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
       <SmcQuickCard m={m} />
       <div className="hero smc-hero">
         <div className="th-left">
-          <div className="label-cap">SMC structure read · {mode}{ok ? " · " + m.tf : ""}</div>
+          <div className="label-cap" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span>SMC structure read · {mode}{ok ? " · " + m.tf : ""}{on4h ? " · Schwab intraday" : ""}</span>
+            {isSwing && (
+              <span className="seg" style={{ display: "inline-flex" }}>
+                {[["daily", "Daily"], ["4h", "4H"]].map(([tf, lbl]) => (
+                  <button key={tf} className={`seg-btn ${smcTf === tf ? "is-on" : ""}`} onClick={() => setSmcTf(tf)}
+                    style={{ fontSize: 10.5, padding: "1px 9px" }}
+                    title={tf === "daily" ? "Daily — structure & bias (the swing)" : "4H — Schwab-intraday entry refinement inside the daily bias"}>{lbl}</button>
+                ))}
+              </span>
+            )}
+          </div>
           <div className="th-score">
             <div className="th-score-num mono">{ok ? (m.smc_score >= 66 ? "PASS" : m.smc_score >= 50 ? "MIXED" : "WEAK") : "—"}</div>
             {ok && <Pill tone={biasTone} dot>{m.headline}</Pill>}
@@ -258,6 +290,22 @@ function LensSMC({ ticker, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
           <SMCMicroChart m={m} />
         </div>
       </div>
+
+      {conf && (
+        <div className="lens-pad" style={{ paddingTop: 0 }}>
+          <div className="mono" style={{ fontSize: 12, lineHeight: 1.5, padding: "9px 12px", borderRadius: 9,
+            border: `1px solid color-mix(in oklab, var(--${conf.tone}) 45%, transparent)`,
+            background: `color-mix(in oklab, var(--${conf.tone}) 11%, transparent)`, color: "var(--ink-1)" }}>
+            <b className={conf.tone === "gn" ? "up" : conf.tone === "rd" ? "dn" : "warn"}>4H ↔ Daily confluence · {conf.verdict}</b>
+            {"  "}<span className="dim2">— {conf.note}</span>
+          </div>
+        </div>
+      )}
+      {on4h && !ok && (
+        <div className="lens-pad" style={{ paddingTop: 0 }}>
+          <div className="smc-empty mono dim2">4H bars come from Schwab intraday — {state === "loading" ? "loading…" : "unavailable for this name right now (Schwab returned no intraday). Switch to Daily."}</div>
+        </div>
+      )}
 
       <div className="lens-section">
         <SectionHeader title="SMC Snapshot"

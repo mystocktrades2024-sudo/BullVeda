@@ -309,7 +309,7 @@ def _mtf(df: pd.DataFrame, tf: str) -> List[Dict[str, Any]]:
             return "BEAR"
         return "RANGE"
     rows = [{"tf": tf, "bias": _bias(df), "note": "primary timeframe"}]
-    higher = {"Daily": ("W", "Weekly"), "Weekly": ("ME", "Monthly"), "Monthly": ("QE", "Quarterly")}.get(tf)
+    higher = {"4H": ("D", "Daily"), "Daily": ("W", "Weekly"), "Weekly": ("ME", "Monthly"), "Monthly": ("QE", "Quarterly")}.get(tf)
     if higher:
         try:
             hd = df.resample(higher[0]).agg({"Open": "first", "High": "max", "Low": "min",
