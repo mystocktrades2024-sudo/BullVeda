@@ -44,6 +44,12 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
       <PlanActionPanel pm={pm} size={size} mode={mode} sym={ticker.symbol} family={ticker.setupFamily} />
 
       <div className="lens-section">
+        <SectionHeader title="Why / Why Not · the case for &amp; against" style="minimal"
+          sub="real factors pro &amp; con · pre-mortem before you commit" />
+        <div className="lens-pad"><WhyWhyNot pm={pm} size={size} ticker={ticker} mode={mode} /></div>
+      </div>
+
+      <div className="lens-section">
         <SectionHeader n={1} title="Trade Blueprint"
           sub="payoff geometry · stop / entry / T1 / T2 · R-multiples (size-independent)"
           style={headerStyle} right={<StateToggle name="plv2-1" />} />
@@ -296,6 +302,88 @@ function FillRealism({ pm, size }) {
       </div>
       <div className="fr-read mono dim2">
         A stop-buy fills at the <b>next bar's open + spread + slippage</b>, not your signal price — so the entry costs ~<b className="dn">−${Math.abs(slipCost)}</b> ({slipPct.toFixed(2)}%) and the stop can gap <b className="dn">${stopExtra}</b> worse, dropping real R:R to <b className={rrReal >= 2 ? "up" : "warn"}>{rrReal.toFixed(2)}</b>. {real ? <>Friction is computed from this name's <b>live spread, ADV participation &amp; beta</b>.</> : <>Live spread/ADV is missing here, so friction is <b>modeled from beta</b>.</>} Paper P&L &amp; Track Record score actual fills.
+      </div>
+    </div>
+  );
+}
+
+// ─── Why / Why-Not — the case for & against, pre-mortem before commit ─────────
+// Every bullet is derived from real plan data (R:R, ledger edge, sample, pillars,
+// risk %, earnings, liquidity, beta) — never fabricated. Mirrors principles 4
+// (adversarial) + 15 (pre-mortem with falsification) from the operating mindset.
+function WhyWhyNot({ pm, size, ticker, mode }) {
+  const px = ticker.pillars || {};
+  const tech = px.technical != null ? px.technical : null;
+  const ss = pm.setupStats || {};
+  const n = ss.n != null ? ss.n : null;
+  const pf = ss.pf != null ? ss.pf : null;
+  const erD = (pm.earnings && pm.earnings.days != null) ? pm.earnings.days : null;
+  const hold = pm.holdDays || 10;
+  const pros = [], cons = [];
+
+  // R:R geometry
+  if (pm.rr1 >= 3) pros.push({ h: `R:R ${pm.rr1.toFixed(1)}:1 to T1`, d: "well above the 2:1 floor — asymmetric payoff" });
+  else if (pm.rr1 >= 2) pros.push({ h: `R:R ${pm.rr1.toFixed(1)}:1 to T1`, d: "clears the 2:1 minimum" });
+  else cons.push({ h: `R:R only ${pm.rr1.toFixed(1)}:1 to T1`, d: "below the 2:1 floor — thin payoff for the risk taken" });
+
+  // ledger edge / expectancy
+  if (pm.kelly != null && pm.kelly > 0 && pm.evR != null && pm.evR > 0)
+    pros.push({ h: `Positive expectancy +${pm.evR.toFixed(2)}R`, d: `${(pm.wr * 100).toFixed(0)}% WR × ${pm.rr1.toFixed(1)}R · Kelly ${(pm.kelly * 100).toFixed(0)}%` });
+  else if (pm.kelly == null)
+    cons.push({ h: "No ledger edge", d: "this setup has no closed-trade history (n<1) — expectancy unproven" });
+  else if (pm.evR != null && pm.evR <= 0)
+    cons.push({ h: `Negative expectancy ${pm.evR.toFixed(2)}R`, d: "hasn't paid historically at this win-rate × payoff" });
+
+  // sample size / profit factor
+  if (n != null && n >= 10 && pf != null && pf >= 1.2)
+    pros.push({ h: `Track record PF ${pf.toFixed(2)}`, d: `n=${n}${pm.lb != null ? ` · Wilson LB ${(pm.lb * 100).toFixed(0)}%` : ""}` });
+  else if (n != null && n > 0 && n < 10)
+    cons.push({ h: `Thin sample (n=${n})`, d: "below the n≥10 floor — stats are noisy, size half" });
+
+  // technical pillar
+  if (tech != null && tech >= 60) pros.push({ h: `Technicals strong (${Math.round(tech)})`, d: "trend / momentum pillar confirms the entry" });
+  else if (tech != null && tech < 45) cons.push({ h: `Technicals weak (${Math.round(tech)})`, d: "momentum pillar not supporting the long" });
+
+  // risk budget
+  if (size.lossNavPct <= 0.5) pros.push({ h: `Risk contained ${size.lossNavPct.toFixed(2)}% NAV`, d: `max loss $${Math.round(size.maxLoss)} at the stop` });
+  else if (size.lossNavPct > 0.75) cons.push({ h: `Risk hot ${size.lossNavPct.toFixed(2)}% NAV`, d: "over the 0.75% per-trade budget — cut size in §2" });
+
+  // earnings proximity
+  if (erD != null && erD <= hold) cons.push({ h: `Earnings in ${erD}d`, d: "inside the hold window — overnight gap risk through the print" });
+  else if (erD != null && erD > hold) pros.push({ h: "Clear of earnings", d: `next report T+${erD}d, beyond the ~${hold}d hold` });
+
+  // liquidity / spread
+  if (typeof pm.spread === "number" && pm.spread > 0.5)
+    cons.push({ h: `Wide spread ${pm.spread.toFixed(2)}%`, d: "fills will slip — verify the live quote before sizing" });
+
+  // beta
+  if (typeof pm.beta === "number" && pm.beta >= 1.6)
+    cons.push({ h: `High beta ${pm.beta.toFixed(2)}`, d: "amplifies both ways — first to fall in a risk-off tape" });
+
+  const Item = ({ x }) => (
+    <div className="ww-item">
+      <div className="ww-item-h mono">{x.h}</div>
+      <div className="ww-item-d mono dim2">{x.d}</div>
+    </div>
+  );
+  return (
+    <div className="ww">
+      <div className="ww-cols">
+        <div className="ww-col ww-col--pro">
+          <div className="ww-col-h mono"><span className="ww-ic">✓</span> WHY TAKE IT <span className="dim2">· {pros.length}</span></div>
+          {pros.length ? pros.map((x, i) => <Item key={i} x={x} />)
+            : <div className="ww-empty mono dim2">No standout supporting factors in this scan.</div>}
+        </div>
+        <div className="ww-col ww-col--con">
+          <div className="ww-col-h mono"><span className="ww-ic">✕</span> WHY NOT · WATCH-OUTS <span className="dim2">· {cons.length}</span></div>
+          {cons.length ? cons.map((x, i) => <Item key={i} x={x} />)
+            : <div className="ww-empty mono dim2">No material red flags — the risk still lives at the stop below.</div>}
+        </div>
+      </div>
+      <div className="ww-inval mono">
+        <span className="ww-inval-tag">PRE-MORTEM</span>
+        Thesis is wrong if <b>{pm.symbol}</b> closes below <b className="dn">${pm.stop.toFixed(2)}</b> — exit on the close, never average down.
+        {erD != null && erD <= hold ? <> Earnings T+{erD}d is the live binary risk.</> : null}
       </div>
     </div>
   );
