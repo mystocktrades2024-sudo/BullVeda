@@ -452,6 +452,30 @@
   BV.navStr = function () {
     return BV.nav == null ? "—" : "$" + Math.round(BV.nav).toLocaleString();
   };
+  BV.cashStr = function () {
+    return BV.realCash == null ? "—" : "$" + Math.round(BV.realCash).toLocaleString();
+  };
+
+  // ── real signed-in user (basic-auth session) → account chip ──
+  var who = (BOOT && BOOT.user) ? BOOT.user
+    : (MOCK ? null : (function () { var w = syncGet("/api/whoami"); return w ? (w.user || w) : null; })());
+  BV.user = who || null;
+  BV.userName = function () { return (who && (who.display_name || who.username)) || "—"; };
+  BV.userHandle = function () { return who && who.username ? "@" + who.username : ""; };
+  BV.userEmail = function () { return (who && who.email) || ""; };
+  BV.userRole = function () { return (who && who.role) || ""; };
+  BV.userInitials = function () {
+    var base = ((who && (who.display_name || who.username)) || "?").trim();
+    var parts = base.split(/[\s._-]+/).filter(Boolean);
+    return (parts.length > 1 ? parts[0][0] + parts[1][0] : base.slice(0, 2)).toUpperCase();
+  };
+  // last-login as a session marker (browser-local time-of-day)
+  BV.sessionSince = function () {
+    var iso = who && who.last_login; if (!iso) return null;
+    var t = Date.parse(iso); if (!isFinite(t)) return null;
+    try { return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); } catch (e) { return null; }
+  };
+
   // real holdings (Alpaca paper positions) → MyPF seed shape + real price map
   BV.realHoldings = function () {
     if (!pf || !pf.positions || !pf.positions.length) return null;

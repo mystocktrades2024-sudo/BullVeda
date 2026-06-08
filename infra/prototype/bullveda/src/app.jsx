@@ -653,23 +653,35 @@ function UserMenu() {
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
+  const BV = window.__BV || {};
+  const initials = BV.userInitials ? BV.userInitials() : "—";
+  const name = BV.userName ? BV.userName() : "—";
+  const email = BV.userEmail ? BV.userEmail() : "";
+  const role = BV.userRole ? BV.userRole() : "";
+  const handle = BV.userHandle ? BV.userHandle() : "";
+  const navStr = BV.navStr ? BV.navStr() : "—";
+  const cashStr = BV.cashStr ? BV.cashStr() : "—";
+  const since = BV.sessionSince ? BV.sessionSince() : null;
+  const dayPct = (BV.navDayPct != null)
+    ? <span className={BV.navDayPct >= 0 ? "up" : "dn"}>{BV.navDayPct >= 0 ? "+" : ""}{BV.navDayPct}%</span>
+    : null;
   return (
     <div className="user" ref={ref}>
       <button className="user-btn" onClick={() => setOpen(o => !o)} title="Account">
-        <span className="user-avatar mono">JK</span>
+        <span className="user-avatar mono">{initials}</span>
         <span className="user-info">
-          <span className="user-name">J. Kairos</span>
-          <span className="user-acct mono dim">PAPER · {(window.__BV && window.__BV.navStr()) || "$108,420"} {window.__BV && window.__BV.navDayPct != null ? <span className={window.__BV.navDayPct >= 0 ? "up" : "dn"}>{window.__BV.navDayPct >= 0 ? "+" : ""}{window.__BV.navDayPct}%</span> : null}</span>
+          <span className="user-name">{name}</span>
+          <span className="user-acct mono dim">PAPER · {navStr} {dayPct}</span>
         </span>
         <span className="user-caret">▾</span>
       </button>
       {open && ReactDOM.createPortal((
         <div className="user-menu">
           <div className="user-menu-hdr">
-            <div className="user-avatar mono user-avatar--lg">JK</div>
+            <div className="user-avatar mono user-avatar--lg">{initials}</div>
             <div>
-              <div className="user-menu-name">Jules Kairos</div>
-              <div className="user-menu-email mono dim">jules@kairos.fund</div>
+              <div className="user-menu-name">{name}{role ? <span className="mono dim2" style={{ fontSize: 10, marginLeft: 6 }}>{role.toUpperCase()}</span> : null}</div>
+              <div className="user-menu-email mono dim">{email || handle || "—"}</div>
             </div>
           </div>
           <div className="user-menu-acct">
@@ -679,16 +691,16 @@ function UserMenu() {
             </div>
             <div className="um-row">
               <span className="label-cap">NAV</span>
-              <span className="mono"><b>{(window.__BV && window.__BV.navStr()) || "$108,420"}</b> {window.__BV && window.__BV.navDayPct != null ? <span className={window.__BV.navDayPct >= 0 ? "up" : "dn"}>{window.__BV.navDayPct >= 0 ? "+" : ""}{window.__BV.navDayPct}%</span> : <span className="up">+1.20%</span>}</span>
+              <span className="mono"><b>{navStr}</b> {dayPct}</span>
             </div>
             <div className="um-row">
               <span className="label-cap">Cash</span>
-              <span className="mono">$90,628</span>
+              <span className="mono">{cashStr}</span>
             </div>
-            <div className="um-row">
-              <span className="label-cap">Session</span>
-              <span className="mono dim2">since 08:31 ET</span>
-            </div>
+            {since && <div className="um-row">
+              <span className="label-cap">Last login</span>
+              <span className="mono dim2">{since}</span>
+            </div>}
           </div>
           <div className="user-menu-list">
             <button className="um-item">⚙ Settings & preferences</button>
