@@ -4141,6 +4141,24 @@ async def regime_live_api():
     return out
 
 
+@app.get("/api/options/positions")
+async def options_positions_api():
+    """Options paper positions snapshot (OPT-PAPER-4) — written by
+    options_portfolio.py. Reads cache/options_positions.json; returns empty if the
+    tracker hasn't run or there are no contract positions. Cheap (disk read)."""
+    import json
+    from datetime import datetime, timezone
+    p = BASE_DIR / "cache" / "options_positions.json"
+    if not p.exists():
+        return {"as_of": None, "n": 0, "positions": [], "note": "tracker not run yet (options_portfolio.py)"}
+    try:
+        snap = json.load(open(p))
+        snap["_served_at"] = datetime.now(timezone.utc).isoformat()
+        return snap
+    except Exception as e:
+        return {"as_of": None, "n": 0, "positions": [], "error": str(e)}
+
+
 @app.get("/api/test/regime-conditional")
 async def test_regime_conditional_api(days: int = 180):
     """Partition closed trades by regime and compute per-regime stats."""
