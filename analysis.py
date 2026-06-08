@@ -7078,17 +7078,36 @@ def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
             if _te.get("decision") == "trade":
                 _t1d = _te.get("t1") or {}
                 _t2d = _te.get("t2") or {}
+                _t3d = _te.get("t3") or {}   # Phase 1: bull-stretch (may be None/{})
                 _t1p = float(_t1d.get("price") or 0)
                 _t2p = float(_t2d.get("price") or 0)
+                _t3p = float(_t3d.get("price") or 0) if _t3d else 0
                 if _t1p > price and _t2p > price and _t1p < _t2p:
                     _risk = max(abs(price - stop), 1e-6)
                     plan["target1"] = round(_t1p, 2)
                     plan["target2"] = round(_t2p, 2)
+                    # Phase 2: carry T3 (bull-stretch) through. Only set when armed
+                    # AND above T2 (engine guarantees ordering, but guard anyway).
+                    if _t3p > _t2p:
+                        plan["target3"] = round(_t3p, 2)
+                        plan["_struct_t3_sources"] = [s.get("type") for s in _t3d.get("sources", [])]
+                        plan["_struct_t3_behavior"] = _t3d.get("behavior")
+                        plan["_struct_t3_confluence"] = _t3d.get("confluence")
+                        plan["_struct_t3_p_reach"] = _t3d.get("p_reach")
+                    else:
+                        plan["target3"] = None
                     plan["rr_ratio"] = round((_t1p - price) / _risk, 2)
                     plan["_struct_override"] = "applied"
                     plan["_struct_t1_sources"] = [s.get("type") for s in _t1d.get("sources", [])]
                     plan["_struct_t1_behavior"] = _t1d.get("behavior")
                     plan["_struct_t1_confluence"] = _t1d.get("confluence")
+                    # Phase 2: reachability — per-target p_reach + the confidence
+                    # momentum_reachability component (drives Scanner/Plan/Elite chips).
+                    plan["_struct_t1_p_reach"] = _t1d.get("p_reach")
+                    plan["_struct_t2_p_reach"] = _t2d.get("p_reach")
+                    _te_conf = (_te.get("confidence") or {}).get("components") or {}
+                    plan["_struct_momentum_reachability"] = _te_conf.get("momentum_reachability")
+                    plan["_struct_confidence_score"] = (_te.get("confidence") or {}).get("score")
                 else:
                     plan["_struct_override"] = "skip:targets_below_or_inverted"
             else:
@@ -8144,8 +8163,23 @@ def compute_decisions_by_mode(*, price: float, atr: float,
         # falls back to the legacy single-decision rendering.
         return out
 
+    # ════════════════════════════════════════════════════════════════════
+    # STRUCT-TARGETS-M25-CUTOVER (Phase 2, 2026-06-08) — per-mode T1/T2/T3
+    # ────────────────────────────────────────────────────────────────────
+    # Two paths:
+    #   (A) structural ON + applied → base_plan carries engine-capped
+    #       target1/target2/target3 (reachability-gated, never poison). Use
+    #       verbatim; ADD t3.
+    #   (B) structural OFF / engine fell back to ATR → base_plan target1/target2
+    #       are the LEGACY uncapped values (e.g. INTC t1=299/t2=424 on a $111
+    #       stock = 16.9:1 R:R poison). Do NOT inherit them. Instead re-derive
+    #       T1/T2 from the PER-MODE recomputed risk (entry + 3R / entry + 5R)
+    #       so R:R stays sane. T3 is left None on the fallback path (no
+    #       structural stretch level to anchor it).
+    _struct_applied = (base_plan.get("_struct_override") == "applied")
     t1_struct = float(base_plan.get("target1") or base_plan.get("t1") or 0)
     t2_struct = float(base_plan.get("target2") or base_plan.get("t2") or 0)
+    t3_struct = float(base_plan.get("target3") or 0) if base_plan.get("target3") else 0.0
     base_entry_mid = float(base_plan.get("entry_mid") or price)
 
     # Phase 3 (2026-05-19) — feature flag for per-mode pillar reweighting.
@@ -8163,9 +8197,27 @@ def compute_decisions_by_mode(*, price: float, atr: float,
             # INVESTMENT: -15% drawdown from entry
             stop = round(base_entry_mid * (1.0 - rules.get("stop_dd_pct", 0.15)), 2)
 
-        # Recompute R:R against structural T1 (if present)
+        # Per-mode risk from the mode-recomputed stop
         risk = max(0.01, base_entry_mid - stop)
-        rr = round((t1_struct - base_entry_mid) / risk, 2) if t1_struct > 0 else 0.0
+
+        # Per-mode T1/T2/T3 resolution (Phase 2 cutover):
+        if _struct_applied and t1_struct > 0 and t2_struct > 0:
+            # Path A — engine-capped structural levels (shared across modes;
+            # they are S/R + HVN + Fib based, not mode-specific). T3 only when
+            # the engine armed the bull-stretch.
+            mode_t1 = t1_struct
+            mode_t2 = t2_struct
+            mode_t3 = t3_struct if t3_struct > t2_struct else None
+        else:
+            # Path B — legacy fallback. NEVER inherit the uncapped base_plan
+            # targets (INTC poison). Re-derive from per-mode risk so R:R is
+            # bounded by construction: T1 = entry + 3R, T2 = entry + 5R.
+            mode_t1 = round(base_entry_mid + 3.0 * risk, 2)
+            mode_t2 = round(base_entry_mid + 5.0 * risk, 2)
+            mode_t3 = None  # no structural stretch anchor on fallback path
+
+        # Recompute R:R against the resolved mode T1
+        rr = round((mode_t1 - base_entry_mid) / risk, 2) if mode_t1 > 0 else 0.0
 
         # Phase 3 — mode-specific composite if pillar pcts available.
         # Falls back to the legacy single composite (normalized_score)
@@ -8254,9 +8306,11 @@ def compute_decisions_by_mode(*, price: float, atr: float,
             "emoji": verdict_pkg.get("emoji"),
             "bear_type": verdict_pkg.get("bear_type", ""),
             "stop": stop,
-            "t1": t1_struct,
-            "t2": t2_struct,
+            "t1": mode_t1,
+            "t2": mode_t2,
+            "t3": mode_t3,
             "rr_ratio": rr,
+            "target_basis": "structural" if _struct_applied else "atr_capped_3R5R",
             "entry_mid": round(base_entry_mid, 2),
             "size_mult": rules["size_mult"],
             "final_alloc_pct": mode_alloc_pct,

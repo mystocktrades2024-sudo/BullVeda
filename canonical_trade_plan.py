@@ -167,6 +167,7 @@ class CanonicalTradePlan:
     stop: float | None = None
     target1: float | None = None
     target2: float | None = None
+    target3: float | None = None   # bull-stretch (structural engine, Phase 2 cutover)
     hold_period_days: int | None = None
     position_size_pct: float | None = None
     shares: int | None = None
@@ -702,6 +703,7 @@ def from_analysis_result(result: dict, regime_thresholds: dict | None = None,
     plan.stop = tp.get("stop")
     plan.target1 = tp.get("target1")
     plan.target2 = tp.get("target2")
+    plan.target3 = tp.get("target3")   # bull-stretch (structural cutover) — None on ATR fallback
     plan.hold_period_days = tp.get("hold_days") or (tp.get("exit_params") or {}).get("time_stop_days")
 
     # Risk metrics — surfaced first per hedge-fund convention

@@ -78,6 +78,19 @@
   .dh-rung--now{ background:var(--glass-bg-2); border:1px solid color-mix(in oklab,var(--copper) 40%,var(--glass-line)); }
   .dh-rung--now .dh-rung-k{ color:var(--copper); } .dh-rung--now .dh-rung-v{ color:var(--copper); }
   .dh-rung--t .dh-rung-v{ color:var(--gn); } .dh-rung--stop .dh-rung-v{ color:var(--rd); } .dh-rung--trig .dh-rung-v{ color:var(--copper); }
+  /* T3 bull-stretch rung — momentum-confirmed extension above T2 */
+  .dh-rung--stretch{ background:color-mix(in oklab,var(--violet) 9%,transparent); border:1px dashed color-mix(in oklab,var(--violet) 38%,var(--glass-line)); }
+  .dh-rung--stretch .dh-rung-v{ color:var(--violet); }
+  .dh-rung--stretch .dh-rung-k{ color:var(--violet); }
+  /* provenance + reachability metadata under each target rung value */
+  .dh-rung-meta{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; grid-column:2 / 4; font-size:8.5px; letter-spacing:.02em; color:var(--ink-3); margin-top:1px; padding-bottom:1px; }
+  .dh-rung-src{ color:var(--ink-2); }
+  .dh-rung-reach{ padding:0 5px; border-radius:4px; border:1px solid var(--glass-line); background:var(--glass-bg-2); color:var(--ink-2); font-weight:600; }
+  .dh-rung-reach--lo{ color:var(--amb); border-color:color-mix(in oklab,var(--amb) 35%,var(--glass-line)); }
+  .dh-rung-reach--hi{ color:var(--gn); border-color:color-mix(in oklab,var(--gn) 35%,var(--glass-line)); }
+  .dh-rung-badge{ font-size:7.5px; font-weight:700; letter-spacing:.07em; padding:1px 5px; border-radius:4px; color:var(--violet); border:1px solid color-mix(in oklab,var(--violet) 40%,var(--glass-line)); background:color-mix(in oklab,var(--violet) 12%,transparent); }
+  /* let target rungs wrap to two lines (value row + meta row) */
+  .dh-rung--t, .dh-rung--stretch{ row-gap:0; }
   .dh-fit{ display:flex; align-items:center; gap:7px; flex-wrap:wrap; padding-top:6px; margin-top:1px; border-top:1px solid var(--glass-line); font-family:var(--mono); font-size:10px; color:var(--ink-2); }
   .dh-fit-chip{ padding:2px 7px; border-radius:5px; background:var(--glass-bg-2); border:1px solid var(--glass-line); color:var(--ink-1); }
   .dh-actions{ display:flex; gap:8px; flex-wrap:wrap; padding:12px 14px; border-top:1px solid var(--glass-line); }
@@ -114,6 +127,87 @@ window.coherentLevels = function (t) {
   }
   return { price, pivot, stop, t1, t2, valid };
 };
+
+// ─── Shared: structural-target source-type → friendly label ───────────────────
+// Used by every tab (Overview ladder, Plan targets, Scanner/Elite chips) so the
+// provenance of a target reads consistently. Source `type` comes from each
+// trade_engine target's `sources[].type`. Reuse via window.teSourceLabel.
+const TE_SOURCE_LABEL = {
+  OB: "Order Block", EW_INT: "EW Wave (W)", EW_MAJ: "EW Major [W]",
+  FIB_4H: "4H Fib", FIB: "Fib Ext", FIB_D: "Fib Ext", HVN: "Vol Node",
+  VAH: "Value Area", BSL: "Liquidity", SWING: "Swing High",
+  AVWAP_52: "AVWAP 52w", AVWAP_EARN: "AVWAP Earn", ROUND: "Round #",
+};
+window.teSourceLabel = function (type) {
+  return TE_SOURCE_LABEL[type] || (type ? String(type) : "");
+};
+// teSourceChips — given a target object {sources:[{type,weight,...}]}, return the
+// top-N distinct friendly labels (weight-ordered), joined for a compact chip.
+// e.g. "Order Block · 4H Fib". Returns "" when no usable sources.
+window.teSourceChips = function (target, n) {
+  if (!target || !Array.isArray(target.sources) || !target.sources.length) return "";
+  const seen = new Set(); const out = [];
+  const sorted = target.sources.slice().sort((a, b) => (b.weight || 0) - (a.weight || 0));
+  for (const s of sorted) {
+    const lbl = window.teSourceLabel(s.type);
+    if (!lbl || seen.has(lbl)) continue;
+    seen.add(lbl); out.push(lbl);
+    if (out.length >= (n || 2)) break;
+  }
+  return out.join(" · ");
+};
+
+// ─── useTradeEngine — the RICH per-mode trade plan (real, /api/trade_engine) ───
+// The scan-row `decisionsByMode` only varies `stop`; t1/t2 are identical across
+// modes and entry/r_multiple are null. trade_engine returns fully-distinct per-mode
+// t1/t2/stop + a real entry object + r_multiple/confluence/p_reach/warnings. This
+// hook fetches the active mode's payload on (symbol, mode) change, stores it in the
+// window-level BV.tradeEngineCache (keyed SYM|MODE), and forces a re-render when it
+// lands — so toggling SWING/POSITION/INVEST repaints EVERY rung, not just STOP.
+function useTradeEngine(symbol, mode) {
+  const [, force] = React.useState(0);
+  React.useEffect(() => {
+    if (!symbol || !window.__BV || !window.__BV.fetchTradeEngine) return;
+    let live = true;
+    // already cached (incl. null = "no plan") → no fetch, just read synchronously
+    const cached = window.__BV.tradeEngineCached(symbol, mode);
+    if (cached !== undefined) return;
+    window.__BV.fetchTradeEngine(symbol, mode).then(() => { if (live) force(n => n + 1); });
+    return () => { live = false; };
+  }, [symbol, mode]);
+  const p = (window.__BV && window.__BV.tradeEngineCached) ? window.__BV.tradeEngineCached(symbol, mode) : undefined;
+  return (p && typeof p === "object") ? p : null;   // null until loaded / no-plan
+}
+
+// teLevels — build a coherentLevels-shaped {price,pivot,stop,t1,t2,valid} from a
+// rich trade_engine payload. Extracts `.price` from the nested t1/t2/stop objects
+// and uses the real per-mode entry. Returns null if the payload is unusable so the
+// caller can fall back to decisionsByMode → coherentLevels.
+function teLevels(te, livePrice) {
+  if (!te) return null;
+  const pn = (o) => (o && typeof o === "object" && typeof o.price === "number" && isFinite(o.price)) ? o.price : null;
+  const stop = pn(te.stop), t1 = pn(te.t1), t2 = pn(te.t2);
+  // t3 is the momentum-confirmed bull-stretch extension — null/0 when unarmed
+  const t3 = pn(te.t3);
+  const entry = pn(te.entry) != null ? pn(te.entry) : (typeof te.price_at_analysis === "number" ? te.price_at_analysis : null);
+  const price = (typeof livePrice === "number" && livePrice > 0) ? livePrice
+    : (typeof te.price_at_analysis === "number" ? te.price_at_analysis : entry);
+  const pivot = entry != null ? entry : price;
+  // A plan is VALID with t1 + stop alone — T2 is OPTIONAL. When present it must be
+  // ordered (t2>t1); when absent (null/0) the plan is still valid and uses the
+  // engine, never the poisoned coherentLevels fallback. This is the root fix: a
+  // sane engine T1 (e.g. INTC $118) must win even when the engine emits no T2.
+  const hasT2 = t2 > 0;
+  const valid = stop > 0 && pivot > 0 && t1 > 0 && stop < pivot && pivot < t1 && (!hasT2 || t1 < t2);
+  if (!(stop > 0 && t1 > 0)) return null;   // need at least an ordered stop + T1 → else caller falls back
+  return {
+    price, pivot, stop, t1, valid, _entry: entry, _te: te,
+    t2: (hasT2 ? t2 : null),                // T2 optional — null when the engine didn't emit one
+    t3: (t3 > 0 ? t3 : null),
+    // rich target objects carry sources[] + p_reach for provenance/reachability chips
+    _tt1: te.t1, _tt2: (hasT2 ? te.t2 : null), _tt3: te.t3 || null,
+  };
+}
 
 // ─── discoveryFootprint — which screen engines REALLY surfaced this name ───
 // Reads each engine's live signal for this ticker from real data: RS rank, ML
@@ -398,13 +492,15 @@ function SetupChart({ L, sym, view = "full" }) {
       ];
     } else {
       // full trade — frame to encompass stop → T2 AND the real bars
-      r.range = { min: Math.min(L.stop, bLo) * 0.994, max: Math.max(L.t1, bHi) * 1.012 };
+      // T2 is optional — frame to the highest real target present (T2 if any, else T1)
+      const topTgt = (L.t2 && L.t2 > 0) ? L.t2 : L.t1;
+      r.range = { min: Math.min(L.stop, bLo) * 0.994, max: Math.max(topTgt, bHi) * 1.012 };
       r.zones = [
         { top: L.t1, bot: L.pivot, fill: "#34d399", op: 0.06 },                          // reward runway → T1
         { top: L.pivot, bot: Math.max(L.stop, r.range.min), fill: "#f87171", op: 0.09 },  // risk band → stop
       ];
       r.lines = [
-        mk(L.t2, "#34d399", `T2 ${L.t2.toFixed(2)}`, 1, 2),
+        ...(L.t2 && L.t2 > 0 ? [mk(L.t2, "#34d399", `T2 ${L.t2.toFixed(2)}`, 1, 2)] : []),
         mk(L.t1, "#34d399", `T1 ${L.t1.toFixed(2)}`),
         mk(L.pivot, "#d97757", `TRIGGER ${L.pivot.toFixed(2)}`),
         mk(L.stop, "#f87171", `STOP ${L.stop.toFixed(2)}`),
@@ -436,11 +532,20 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
   //    horizon — Position/Invest have different stop/T1/T2/R:R than swing) ──
   const dmKey = mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "investment" : "swing";
   const dec = (ticker.decisionsByMode && ticker.decisionsByMode[dmKey]) || null;
+  // RICH per-mode plan (real, /api/trade_engine) — fully-distinct t1/t2/stop +
+  // real entry + r_multiple per horizon. Re-renders on (symbol, mode) change.
+  const te = useTradeEngine(ticker.symbol, mode);
   const Lbase = window.coherentLevels(ticker);
-  const L = (dec && dec.stop > 0 && dec.t1 > 0 && dec.t2 > 0)
+  // precedence: rich trade_engine → scan-row decisionsByMode → coherentLevels
+  const Lte = teLevels(te, Lbase.price);
+  const L = Lte
+    ? Lte
+    : (dec && dec.stop > 0 && dec.t1 > 0 && dec.t2 > 0)
     ? { price: Lbase.price, pivot: dec.entry_mid || Lbase.pivot, stop: dec.stop, t1: dec.t1, t2: dec.t2, valid: true }
     : Lbase;
-  const modeRR = dec && typeof dec.rr_ratio === "number" ? dec.rr_ratio : (ticker.rMultiple || null);
+  // per-mode R:R — prefer the rich payload's t1 r_multiple, then scan-row, then ticker
+  const teRR = (te && te.t1 && typeof te.t1.r_multiple === "number") ? te.t1.r_multiple : null;
+  const modeRR = teRR != null ? teRR : (dec && typeof dec.rr_ratio === "number" ? dec.rr_ratio : (ticker.rMultiple || null));
   const [chartView, setChartView] = React.useState(() => { try { return localStorage.getItem("dh-chart-view") || "full"; } catch (e) { return "full"; } });
   const pickChartView = v => { setChartView(v); try { localStorage.setItem("dh-chart-view", v); } catch (e) {} };
   // ── live actions (real): watchlist toggle + route to Automated Trade / Alerts ──
@@ -484,13 +589,27 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
 
   // price ladder rungs, high → low, distance measured from live price
   const dist = v => `${v >= L.price ? "+" : ""}${((v - L.price) / L.price * 100).toFixed(1)}%`;
+  // provenance + reachability come from the rich trade_engine target objects (Lte)
+  const srcOf = tt => (window.teSourceChips ? window.teSourceChips(tt, 2) : "");
+  const pReachOf = tt => (tt && typeof tt.p_reach === "number" && isFinite(tt.p_reach)) ? tt.p_reach : null;
   const rungs = [
-    { k: "T2", v: L.t2, cls: "dh-rung--t", d: dist(L.t2), field: "canonical_trade_plan.target2" },
-    { k: "T1", v: L.t1, cls: "dh-rung--t", d: dist(L.t1), field: "canonical_trade_plan.target1" },
+    { k: "T1", v: L.t1, cls: "dh-rung--t", d: dist(L.t1), field: "canonical_trade_plan.target1", src: srcOf(L._tt1), reach: pReachOf(L._tt1) },
     { k: "NOW", v: L.price, cls: "dh-rung--now", d: "live", field: "price" },
     { k: "TRIGGER", v: entry, cls: "dh-rung--trig", d: dist(entry), field: "canonical_trade_plan.entry.low" },
     { k: "STOP", v: L.stop, cls: "dh-rung--stop", d: dist(L.stop), field: "canonical_trade_plan.stop" },
-  ].sort((a, b) => b.v - a.v);
+  ];
+  // T2 rung — ONLY when the engine emitted a real T2 (>0). Never synthesized.
+  if (L.t2 && L.t2 > 0) {
+    rungs.push({ k: "T2", v: L.t2, cls: "dh-rung--t", d: dist(L.t2), field: "canonical_trade_plan.target2", src: srcOf(L._tt2), reach: pReachOf(L._tt2) });
+  }
+  // T3 bull-stretch rung — ONLY when the engine armed it (price>0). Sits above T2.
+  if (L.t3 && L.t3 > 0) {
+    rungs.push({ k: "T3", v: L.t3, cls: "dh-rung--stretch", d: dist(L.t3), field: "canonical_trade_plan.target3", src: srcOf(L._tt3), reach: pReachOf(L._tt3), stretch: true });
+  }
+  rungs.sort((a, b) => b.v - a.v);
+  // overall momentum-reachability (0..1) for the verdict-level pill
+  const momReach = (te && te.confidence && te.confidence.components && typeof te.confidence.components.momentum_reachability === "number")
+    ? te.confidence.components.momentum_reachability : null;
 
   return (
     <div className={`dh dh--${vtone}`}>
@@ -524,6 +643,9 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
               <span className="dh-gated mono" style={{ fontSize: 11, color: "var(--amb)", marginLeft: 6, fontWeight: 600 }} title="The stock itself isn't bearish — new long entries are blocked market-wide today (crash / distribution-day gate). The directional read is neutral; revisit when the market gate clears.">· entry-gated today</span>
             )}
             <span className="dh-conf mono">conf {cv ? cv.conf : "—"}</span>
+            {momReach != null && (
+              <span className="dh-conf mono" title="Overall momentum-reachability — how much trend/MACD/volatility budget supports price running into the target ladder (higher = T2/T3 more attainable).">reach {Math.round(momReach * 100)}%</span>
+            )}
             {cv && (
               <span className="dh-counts">
                 <span className="dh-cnt dh-cnt--gn">{cv.agree} agree</span>
@@ -562,13 +684,25 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
             <span className="dh-state-note mono">{stNote}</span>
           </div>
           <div className="dh-rungs">
-            {rungs.map((r, i) => (
+            {rungs.map((r, i) => {
+              const reachPct = r.reach != null ? Math.round(r.reach * 100) : null;
+              const reachCls = reachPct == null ? "" : reachPct >= 60 ? " dh-rung-reach--hi" : reachPct < 45 ? " dh-rung-reach--lo" : "";
+              const hasMeta = !!r.src || reachPct != null || r.stretch;
+              return (
               <div key={i} className={`dh-rung ${r.cls} mono`}>
                 <span className="dh-rung-k">{r.k}</span>
                 <span className="dh-rung-v" data-field={r.field} data-provenance="comp" title={!L.valid && r.k !== "NOW" ? "estimated from price — no scan trade plan for this off-universe name" : undefined}>{!L.valid && r.k !== "NOW" ? "~" : ""}${r.v.toFixed(2)}</span>
                 <span className="dh-rung-d">{r.d}</span>
+                {hasMeta && (
+                  <span className="dh-rung-meta">
+                    {r.stretch && <span className="dh-rung-badge" title="Momentum-confirmed bull-stretch extension — armed only when trend, MACD and budget support a run beyond T2.">STRETCH · armed</span>}
+                    {r.src && <span className="dh-rung-src" title="Structural confluence behind this target (top sources).">{r.src}</span>}
+                    {reachPct != null && <span className={`dh-rung-reach${reachCls}`} title="Modeled probability price reaches this target within the hold window (analog × Monte-Carlo × Bayes).">{reachPct}% reach</span>}
+                  </span>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
           <div className="dh-rail-stats">
             <div className="dh-rs">
@@ -591,6 +725,8 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
             {L.valid ? <span className="dh-fit-chip">size = ${Math.round(navRisk).toLocaleString()} risk ÷ ${risk.toFixed(2)} stop</span> : null}
             <span className="dh-fit-chip">{held ? `in book · ${Math.abs(held.qty || 0)} sh` : "not held"}</span>
             {ticker.beta != null ? <span className="dh-fit-chip">β {ticker.beta.toFixed(2)} → market</span> : null}
+            {Lte ? <span className="dh-fit-chip" title="Levels sourced from the per-mode structural target engine (distinct T1/T2/stop/entry for this horizon).">structural · {mode.toLowerCase()} plan</span> : null}
+            {te && te.invest_stub ? <span className="dh-fit-chip warn" title={(te.warnings && te.warnings[0]) || "Invest targets are analyst-consensus PT × 1.0/1.3 (interim — structural IV targets pending)."}>⚠ analyst-PT targets</span> : null}
             <span>{NAV ? "½-Kelly · 0.5%-NAV risk" : "½-Kelly reference"}</span>
           </div>
         </div>
@@ -598,7 +734,7 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
 
        <div className="dh-chart">
           <div className="dh-chart-h">
-            <span className="label-cap mono">{chartView === "action" ? "THE SETUP · stop · trigger · EMA 9/21" : "THE SETUP · stop · trigger · T1 / T2 · EMA 9/21"}</span>
+            <span className="label-cap mono">{chartView === "action" ? "THE SETUP · stop · trigger · EMA 9/21" : `THE SETUP · stop · trigger · ${(L.t2 && L.t2 > 0) ? "T1 / T2" : "T1"} · EMA 9/21`}</span>
             <div className="dh-chart-hr">
               <span className="mono dim2 dh-ema-leg"><b style={{ color: "var(--cy)" }}>━</b> EMA9 <b style={{ color: "var(--violet)" }}>━</b> EMA21</span>
               <div className="dh-chart-toggle mono">
@@ -1007,9 +1143,13 @@ function EdgeOdds({ ticker, mode }) {
   const ss = ticker.setupStats || {};
   const dmKey = mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "investment" : "swing";
   const dec = ticker.decisionsByMode && ticker.decisionsByMode[dmKey];
-  const rr = (dec && dec.rr_ratio) || ticker.rMultiple;
+  // RICH per-mode plan → real per-horizon R:R + structural P(reach) for THIS mode
+  const te = useTradeEngine(ticker.symbol, mode);
+  const teRR = (te && te.t1 && typeof te.t1.r_multiple === "number") ? te.t1.r_multiple : null;
+  const tePReach = (te && te.t1 && typeof te.t1.p_reach === "number") ? te.t1.p_reach : null;
+  const rr = teRR != null ? teRR : ((dec && dec.rr_ratio) || ticker.rMultiple);
   const mag = ml.magnitude;
-  if (ml.pT1 == null && !mag && ss.winRate == null) return null;
+  if (ml.pT1 == null && !mag && ss.winRate == null && tePReach == null) return null;
   // hit odds
   const oddsT = (ml.pT1 != null && ml.pStop != null) ? ml.pT1 / (ml.pT1 + ml.pStop) * 100 : null;
   // distribution scale
@@ -1028,6 +1168,13 @@ function EdgeOdds({ ticker, mode }) {
           <span className="eo-k mono">P(T1 vs STOP first)</span>
           <div className="eo-split"><div className="eo-split-g" style={{ width: oddsT + "%" }} /><div className="eo-split-r" style={{ width: (100 - oddsT) + "%" }} /></div>
           <span className="eo-v mono"><b className={ml.pT1 >= ml.pStop ? "up" : "dn"}>{(ml.pT1 * 100).toFixed(0)}%</b> <span className="dim2">/ {(ml.pStop * 100).toFixed(0)}%</span></span>
+        </div>
+      ) : null}
+      {tePReach != null ? (
+        <div className="eo-row">
+          <span className="eo-k mono">P(reach T1) · {mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "invest" : "swing"}</span>
+          <div className="eo-track"><div className="eo-band" style={{ left: "0%", width: _pc(tePReach * 100) + "%", background: "var(--copper)" }} /></div>
+          <span className="eo-v mono copper" title="Structural target-engine probability of tagging T1 for this horizon (analog + Monte-Carlo + Bayes blend).">{(tePReach * 100).toFixed(0)}%</span>
         </div>
       ) : null}
       {lo != null && hi != null ? (

@@ -37,6 +37,12 @@ import pandas as pd
 # Cache configuration
 CACHE_DIR = Path(__file__).parent / "cache" / "target_engine"
 CACHE_TTL_SECONDS = 12 * 60 * 60  # 12 hours
+# Schema version — bump whenever the serialized payload shape changes so all
+# pre-existing on-disk cache files are treated as stale automatically (avoids
+# manually deleting the regenerable cache dir). N=2 added t3 + new sources +
+# reachability (Phase 1 upgrade). A cache file missing _schema or carrying an
+# older _schema is regenerated on next analyze_trade_cached call.
+CACHE_SCHEMA_VERSION = 2
 
 # ════════════════════════════════════════════════════════════════════════
 # CONFIG · per-mode parameters + source weights
@@ -49,7 +55,30 @@ MODES = {
         "fractal_window": 5,
         "atr_period": 14,
         "primary_tf": "daily",
-        "sources_drop": {"AVWAP_52", "FVG", "FIB"},  # too far for short window
+        # FIB un-dropped 2026-06-08 (elevated to bull-stretch weight); AVWAP_52
+        # stays out (anchor too far for a 2-5d hold), FVG stays out (noise).
+        "sources_drop": {"AVWAP_52", "FVG"},
+        # Horizon-conditional NEW anchors that build for this mode. See
+        # _gather_horizon_sources(). swing draws on near-term supply + 4H Fib +
+        # intermediate-degree EW only.
+        "extra_sources": {"OB", "EW_INT", "FIB_4H"},
+        # expected bars over a typical hold — feeds the reachability volatility
+        # budget (ATR × expected_bars vs distance-to-target).
+        "expected_bars": 5,
+        "ew_mode": "SWING",     # pattern_engines.detect degree key
+        # Horizon reach cap (3-tier): a source must sit within
+        #   max(ATR×max_reach_atr, entry×min_reach_pct)   [volatility-aware floor]
+        # but NEVER beyond entry×hard_reach_pct            [absolute ceiling].
+        # The floor lets low-ATR names still reach a structural level; the hard
+        # ceiling stops a high-ATR name (INTC, 8.6%/day) from anchoring a 20%+
+        # swing target. Together they kill the +169%/+281% legacy poisoning.
+        # Volatility-aware floor caps low-ATR names near ~3 ATR; the hard ceiling
+        # (20%) prevents stale far-out swing/52w highs from anchoring a target.
+        # 20% looks high vs a calm name but for a 8.6%-daily-ATR name (INTC) it is
+        # only ~2.3 ATR over a 5-bar hold — reachable. The legacy bug was +169%.
+        "max_reach_atr": 3.0,    # ~3 daily ATR over a 2-5d hold
+        "min_reach_pct": 0.06,   # always allow at least 6%
+        "hard_reach_pct": 0.20,  # absolute ceiling — swing never reaches >20%
     },
     "position": {
         "lookback_days": 120,
@@ -59,6 +88,14 @@ MODES = {
         "atr_period": 14,
         "primary_tf": "daily",
         "sources_drop": set(),
+        # position: multi-TF Fib (4H + daily) + OB + intermediate EW (+ major if
+        # the weekly count yields one) on top of the existing structure stack.
+        "extra_sources": {"OB", "EW_INT", "EW_MAJ", "FIB_4H"},
+        "expected_bars": 20,
+        "ew_mode": "POSITION",
+        "max_reach_atr": 10.0,    # 1-6mo hold has room to run
+        "min_reach_pct": 0.15,
+        "hard_reach_pct": 0.60,   # 60% absolute ceiling for position
     },
     "invest": {
         "lookback_days": 504,
@@ -68,25 +105,41 @@ MODES = {
         "atr_period": 21,
         "primary_tf": "daily",
         "sources_drop": {"FVG"},  # FVG too short-term for 1y+
+        # invest: long-horizon gravity — EW major (Primary degree) + Fib ext on
+        # top of the existing HVN/VAH/AVWAP/BSL/SWING stack. No 4H (irrelevant).
+        "extra_sources": {"EW_INT", "EW_MAJ"},
+        "expected_bars": 120,
+        "ew_mode": "INVESTMENT",
+        # invest reaches farther but a 504-bar lookback can catch an anomalous
+        # old high (NFLX $998 from a pre-split era) → +1000% nonsense. Generous
+        # floor, finite hard ceiling to drop those poisoned levels.
+        "max_reach_atr": 35.0,
+        "min_reach_pct": 0.40,
+        "hard_reach_pct": 1.20,   # 120% absolute ceiling — long-horizon, not absurd
     },
 }
 
 SOURCE_WEIGHTS = {
     "BSL": 3.0,         # equal-highs liquidity pool (touches >= 2)
+    "OB": 2.5,          # bear order block = institutional supply (scaled by Wilson LB)
+    "EW_MAJ": 2.5,      # Elliott primary-degree wave objective (long-horizon gravity)
     "HVN": 2.5,         # High Volume Node center
     "SWING": 2.5,       # prior swing high (BOS anchor)
     "VAH": 2.0,         # Value Area High
     "AVWAP_52": 2.0,    # AVWAP from 52w-high
+    "EW_INT": 2.0,      # Elliott intermediate-degree wave objective
+    "FIB_4H": 1.5,      # 4H Fibonacci extension (intraday-refined upside)
     "AVWAP_EARN": 1.5,  # AVWAP from last earnings
     "FVG": 1.5,         # opposing fair value gap
+    "FIB": 1.5,         # daily Fibonacci extension (1.618 / 2.618) — bull-stretch
+    "FIB_D": 1.0,       # explicit daily Fib (alias-band for multi-TF clustering)
     "ROUND": 1.0,       # round number cluster ($X00, $X50)
-    "FIB": 0.5,         # Fibonacci extension (1.618 / 2.618)
 }
 
 # Behavior classifier rules
-MAGNET_SOURCES = {"HVN"}              # HVN center, POC
-REJECTION_SOURCES = {"VAH", "AVWAP_52", "FVG"}  # mean-revert / overhead supply
-MIXED_SOURCES = {"BSL", "SWING"}      # liquidity sweeps go either way
+MAGNET_SOURCES = {"HVN", "EW_INT", "EW_MAJ"}  # HVN center / POC + EW wave objectives
+REJECTION_SOURCES = {"VAH", "AVWAP_52", "FVG", "OB"}  # mean-revert / overhead supply
+MIXED_SOURCES = {"BSL", "SWING", "FIB", "FIB_4H", "FIB_D"}  # liquidity / fib go either way
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -246,6 +299,7 @@ class TradeAnalysis:
     stop: dict
     t1: Optional[Target]
     t2: Optional[Target]
+    t3: Optional[Target]          # bull-stretch (Fib 1.618/2.618 or EW W5 ext) — armed only on momentum + reachability
     sizing: dict
     context: dict
     confidence: dict
@@ -279,6 +333,141 @@ def compute_atr(df: pd.DataFrame, period: int = 14) -> float:
     for i in range(period, len(tr)):
         atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period
     return float(atr[-1])
+
+
+# ════════════════════════════════════════════════════════════════════════
+# SUB-MODULE 1b · Momentum confirmers (LOCAL) — MACD + Wilder RSI
+# ════════════════════════════════════════════════════════════════════════
+# These are REACHABILITY confirmers, NOT structural anchors. They never define a
+# target PRICE — they only adjust p_reach and a confidence component, per the
+# horizon-conditional design (confirmers gate "can we get there", not "where").
+# Hand-rolled with pandas/numpy only — no new deps (ta is not imported here).
+def _ema(series: "pd.Series", span: int) -> "pd.Series":
+    return series.ewm(span=span, adjust=False).mean()
+
+
+def compute_macd(df: pd.DataFrame, fast: int = 12, slow: int = 26,
+                 signal: int = 9) -> dict:
+    """MACD(12,26,9). Returns {hist, hist_prev, line, signal, rising} on the
+    last bar. `rising` = histogram slope over last bar > 0. Empty/short → zeros.
+    """
+    close = df["Close"]
+    if len(close) < slow + signal:
+        return {"hist": 0.0, "hist_prev": 0.0, "line": 0.0, "signal": 0.0, "rising": False}
+    line = _ema(close, fast) - _ema(close, slow)
+    sig = _ema(line, signal)
+    hist = (line - sig)
+    h0 = float(hist.iloc[-1])
+    h1 = float(hist.iloc[-2]) if len(hist) >= 2 else h0
+    return {"hist": h0, "hist_prev": h1, "line": float(line.iloc[-1]),
+            "signal": float(sig.iloc[-1]), "rising": h0 > h1}
+
+
+def compute_rsi(df: pd.DataFrame, period: int = 14) -> dict:
+    """Wilder RSI(14). Returns {rsi, bearish_divergence} on the last bar.
+    bearish_divergence: price made a higher high over the last `period` bars but
+    RSI made a lower high — a classic far-target-reachability penalty.
+    """
+    close = df["Close"]
+    if len(close) < period + 2:
+        return {"rsi": 50.0, "bearish_divergence": False}
+    delta = close.diff()
+    gain = delta.clip(lower=0.0)
+    loss = (-delta).clip(lower=0.0)
+    # Wilder smoothing via ewm(alpha=1/period)
+    avg_gain = gain.ewm(alpha=1.0 / period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1.0 / period, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    rsi = 100.0 - (100.0 / (1.0 + rs))
+    rsi = rsi.fillna(100.0)
+    cur_rsi = float(rsi.iloc[-1])
+
+    # bearish divergence over the last `period` bars
+    bearish_div = False
+    try:
+        win = min(period, len(close) - 1)
+        px = close.iloc[-win:]
+        rs_win = rsi.iloc[-win:]
+        half = win // 2
+        if half >= 2:
+            px_recent_hi = float(px.iloc[half:].max())
+            px_prior_hi = float(px.iloc[:half].max())
+            rsi_recent_hi = float(rs_win.iloc[half:].max())
+            rsi_prior_hi = float(rs_win.iloc[:half].max())
+            if px_recent_hi > px_prior_hi and rsi_recent_hi < rsi_prior_hi:
+                bearish_div = True
+    except Exception:
+        bearish_div = False
+    return {"rsi": cur_rsi, "bearish_divergence": bearish_div}
+
+
+def compute_reachability(df: pd.DataFrame, entry: float, target_price: float,
+                         atr: float, mode: str) -> dict:
+    """Probability-style multiplier (0..1) that an upside target is reachable
+    within the mode's typical hold, blending three confirmers:
+
+      1. Volatility budget  — ATR × expected_bars(mode) vs distance(entry→target).
+         budget_ratio = budget / distance ; squashed so 1× budget ≈ 0.5, far
+         targets decay toward 0, near targets saturate toward 1.
+      2. MACD(12,26,9)      — positive/rising histogram supports upside;
+         negative/falling penalizes.
+      3. RSI(14)            — mid-range (45-65) ideal for continuation; >75 or a
+         bearish divergence penalizes the reachability of FAR targets.
+
+    Returns {score, budget, budget_ratio, macd_factor, rsi_factor,
+             vol_factor, macd, rsi}. The caller MULTIPLIES p_reach by `score`
+    and feeds it into a `momentum_reachability` confidence component. It NEVER
+    changes a target price (design contract).
+    """
+    cfg = MODES.get(mode, MODES["position"])
+    expected_bars = cfg.get("expected_bars", 20)
+    dist = max(1e-9, abs(target_price - entry))
+    budget = max(1e-9, atr * expected_bars)
+    budget_ratio = budget / dist
+
+    # Volatility factor — logistic on budget_ratio centred at ~1.0 budget.
+    # ratio 1.0 → ~0.5, ratio 2.0 → ~0.78, ratio 0.4 → ~0.21.
+    vol_factor = 1.0 / (1.0 + math.exp(-1.6 * (budget_ratio - 1.0)))
+    vol_factor = max(0.05, min(0.97, vol_factor))
+
+    macd = compute_macd(df)
+    rsi = compute_rsi(df)
+
+    # MACD factor — supportive when hist>0, extra credit when also rising.
+    if macd["hist"] > 0:
+        macd_factor = 1.10 if macd["rising"] else 1.00
+    else:
+        macd_factor = 0.80 if macd["rising"] else 0.65
+
+    # RSI factor — band logic. Far targets get the overbought/divergence penalty;
+    # near targets (already inside budget) are less sensitive.
+    r = rsi["rsi"]
+    far = budget_ratio < 1.0  # target sits beyond the typical volatility budget
+    if 45.0 <= r <= 65.0:
+        rsi_factor = 1.05
+    elif 65.0 < r <= 75.0:
+        rsi_factor = 0.95
+    elif r > 75.0:
+        rsi_factor = 0.70 if far else 0.85
+    elif 35.0 <= r < 45.0:
+        rsi_factor = 0.90
+    else:  # r < 35 — washed out; bounce possible but momentum not confirming up
+        rsi_factor = 0.80
+    if rsi["bearish_divergence"] and far:
+        rsi_factor *= 0.80
+
+    score = vol_factor * macd_factor * rsi_factor
+    score = max(0.03, min(1.0, score))
+    return {
+        "score": round(score, 3),
+        "budget": round(budget, 2),
+        "budget_ratio": round(budget_ratio, 2),
+        "vol_factor": round(vol_factor, 3),
+        "macd_factor": round(macd_factor, 3),
+        "rsi_factor": round(rsi_factor, 3),
+        "macd": {"hist": round(macd["hist"], 4), "rising": macd["rising"]},
+        "rsi": {"rsi": round(rsi["rsi"], 1), "bearish_divergence": rsi["bearish_divergence"]},
+    }
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -610,6 +799,148 @@ def fib_extensions(swings: list, direction: str = "long") -> list:
 
 
 # ════════════════════════════════════════════════════════════════════════
+# SUB-MODULE 8 · Horizon-conditional anchor sources (NEW — 2026-06-08)
+# ════════════════════════════════════════════════════════════════════════
+# Each helper wraps an external sub-engine in try/except and returns a list of
+# Source objects (upside levels > entry for longs). analyze_trade appends these
+# to raw_sources BEFORE clustering, so they flow through the SAME confluence
+# engine as the base structural sources. ALL guarded — a sub-engine failure must
+# never crash analyze_trade; it degrades to base behavior + a warning.
+
+def gather_ob_sources(df_full: "pd.DataFrame", entry: float,
+                      weekly_df: Optional["pd.DataFrame"] = None) -> tuple:
+    """Bear order blocks above entry → upside supply targets (REJECTION).
+
+    Returns (sources, bull_ob_stops, warning):
+      - sources       : list[Source] for bear_ob centers above entry
+      - bull_ob_stops : list[float] of bull_ob highs BELOW entry (demand zones —
+                        fed into compute_stop as extra structural stop candidates)
+      - warning       : str | None
+
+    OB source weight is scaled by the zone-type Wilson lower-bound win-rate when
+    historical stats are available (validated supply weighs more): weight =
+    base × max(0.3, wilson_lb_fraction). If stats unavailable, flat base weight.
+    """
+    sources: list = []
+    bull_stops: list = []
+    try:
+        sys.path.insert(0, str(Path(__file__).parent))
+        import smc_engine as _smc
+        zones = _smc.detect_smc_zones(df_full, weekly_df=weekly_df)
+        obs = zones.get("order_blocks", []) or []
+
+        # Wilson-LB scaling (best-effort — heavy sweep, guarded + size-gated).
+        ob_wlb = None
+        try:
+            if df_full is not None and len(df_full) >= 90:
+                hr = _smc.compute_smc_hit_rates(df_full, "TE")
+                ob_stat = (hr or {}).get("order_blocks", {})
+                if ob_stat.get("total", 0) >= 10:
+                    ob_wlb = float(ob_stat.get("wilson_lb", 0.0)) / 100.0
+        except Exception:
+            ob_wlb = None
+        weight_scale = max(0.3, ob_wlb) if ob_wlb is not None else 1.0
+        base_w = SOURCE_WEIGHTS["OB"] * weight_scale
+
+        for ob in obs:
+            kind = ob.get("kind")
+            lo = ob.get("low")
+            hi = ob.get("high")
+            if lo is None or hi is None:
+                continue
+            center = (float(lo) + float(hi)) / 2.0
+            if kind == "bear_ob" and center > entry:
+                sources.append(Source("OB", base_w, center,
+                                      {"kind": kind, "low": float(lo), "high": float(hi),
+                                       "date": ob.get("date"),
+                                       "wilson_lb": round(ob_wlb, 3) if ob_wlb is not None else None}))
+            elif kind == "bull_ob" and float(hi) < entry:
+                bull_stops.append(float(hi))
+        return sources, bull_stops, None
+    except Exception as e:
+        return [], [], f"ob_source_failed: {type(e).__name__}: {e}"
+
+
+def gather_ew_sources(ticker: str, entry: float, mode_cfg: dict,
+                      extra: set) -> tuple:
+    """Elliott Wave wave-objective targets above entry → MAGNET sources.
+
+    Uses pattern_engines.detect('elliott', ticker, ew_mode). Honesty contract:
+    when state != 'real' (no clean count) we emit NO EW source. Degree drives
+    the source type: intermediate → EW_INT, primary → EW_MAJ. Only the EW types
+    enabled in mode_cfg['extra_sources'] are kept.
+
+    Returns (sources, warning).
+    """
+    sources: list = []
+    try:
+        sys.path.insert(0, str(Path(__file__).parent))
+        import pattern_engines as _pe
+        ew = _pe.detect("elliott", ticker, mode_cfg.get("ew_mode", "SWING")) or {}
+        if ew.get("state") != "real":
+            return [], None  # honest skip — no clean count
+        degree = ew.get("degree", "intermediate")
+        if degree == "primary":
+            stype, sweight = "EW_MAJ", SOURCE_WEIGHTS["EW_MAJ"]
+        else:
+            stype, sweight = "EW_INT", SOURCE_WEIGHTS["EW_INT"]
+        if stype not in extra:
+            return [], None
+        for t in (ew.get("targets") or []):
+            price = t.get("price")
+            # _fib_targets prices are floats for point targets, strings for
+            # zones ("12.3–14.5"). Keep only numeric upside levels.
+            if not isinstance(price, (int, float)):
+                continue
+            if float(price) <= entry:
+                continue
+            sources.append(Source(stype, sweight, float(price),
+                                  {"label": t.get("label"), "basis": t.get("basis"),
+                                   "degree": degree, "ew_conf": t.get("conf")}))
+        return sources, None
+    except Exception as e:
+        return [], f"ew_source_failed: {type(e).__name__}: {e}"
+
+
+def _fib_ext_from_bars(df: "pd.DataFrame", entry: float, fractal_window: int = 5) -> list:
+    """Run the existing swing detector + fib_extensions on an arbitrary-TF frame.
+    Returns numeric extension prices above entry (list[float])."""
+    out: list = []
+    try:
+        if df is None or len(df) < (2 * fractal_window + 2):
+            return out
+        sw = find_swing_pivots(df, fractal_window=fractal_window)
+        for f in fib_extensions(sw, direction="long"):
+            if f > entry:
+                out.append(float(f))
+    except Exception:
+        return out
+    return out
+
+
+def gather_fib_4h_sources(ticker: str, entry: float) -> tuple:
+    """4H Fibonacci extensions above entry → MIXED (bull-stretch) sources.
+
+    Pulls Schwab 4H bars via pattern_data.get_bars(mode='SWING_4H'). Schwab-only,
+    no failover — empty/None degrades gracefully (no source, warning surfaced).
+
+    Returns (sources, warning).
+    """
+    sources: list = []
+    try:
+        sys.path.insert(0, str(Path(__file__).parent))
+        import pattern_data as _pd
+        df4, tier, _meta = _pd.get_bars(ticker, mode="SWING_4H", enriched=False)
+        if df4 is None or getattr(df4, "empty", True):
+            return [], f"fib_4h_unavailable: 4H bars not available ({tier})"
+        for f in _fib_ext_from_bars(df4, entry, fractal_window=5):
+            sources.append(Source("FIB_4H", SOURCE_WEIGHTS["FIB_4H"], f, {"tf": "4h"}))
+        return sources, None
+    except Exception as e:
+        return [], f"fib_4h_failed: {type(e).__name__}: {e}"
+
+
+# ════════════════════════════════════════════════════════════════════════
 # CONFLUENCE + SELECTION
 # ════════════════════════════════════════════════════════════════════════
 def build_candidate_levels(
@@ -706,22 +1037,35 @@ def cluster_levels_and_score(raw_sources: list, atr: float, cluster_atr: float =
 
 
 def select_targets(candidates: list, entry: float, stop: float, mode: str) -> tuple:
-    """Select T1 (highest confluence in ≥min_r_t1 band) and T2 (≥min_r_t2 band, > T1)."""
+    """Select T1 / T2 / T3 from clustered candidates.
+
+    Returns (t1, t2, t3) Candidate objects (any may be None).
+      - T1 : highest confluence in the ≥min_r_t1 R-band
+      - T2 : beyond T1, highest confluence in the ≥min_r_t2 R-band
+      - T3 : beyond T2, the bull-stretch — the candidate whose source stack
+             includes a stretch anchor (Fib ext or EW W5/extension); if no such
+             stretch candidate exists, the highest-priced candidate beyond T2.
+             T3 is only ARMED later (analyze_trade) on momentum + reachability.
+
+    INVEST mode is now R-band-driven too: stops ARE defined (compute_stop runs
+    for all long modes), so a fixed mild R floor produces real structural targets
+    from the EW-major / Fib stack. The analyst-PT stub is the final fallback in
+    analyze_trade only when this yields nothing.
+    """
     cfg = MODES[mode]
     risk = entry - stop
     if risk <= 0:
-        return None, None
+        return None, None, None
 
-    # For invest mode, fall back to IV triangulation (Phase 2 — for now return None)
-    if mode == "invest":
-        return None, None  # Phase 2 implements IV-based selection
-
-    min_r_t1 = cfg["min_r_t1"]
-    min_r_t2 = cfg["min_r_t2"]
+    # INVEST has no R floor in config (was IV-based stub). Use mild structural
+    # floors so long-horizon EW/Fib targets qualify without forcing the 2-3R
+    # swing/position discipline onto a 1-5yr horizon.
+    min_r_t1 = cfg["min_r_t1"] if cfg["min_r_t1"] is not None else 1.0
+    min_r_t2 = cfg["min_r_t2"] if cfg["min_r_t2"] is not None else 2.0
 
     t1_pool = [c for c in candidates if (c.price - entry) / risk >= min_r_t1]
     if not t1_pool:
-        return None, None
+        return None, None, None
 
     # T1: highest confluence within first R-band
     t1 = max(t1_pool, key=lambda c: (c.confluence, -c.price))
@@ -730,7 +1074,23 @@ def select_targets(candidates: list, entry: float, stop: float, mode: str) -> tu
     t2_pool = [c for c in candidates if c.price > t1.price and (c.price - entry) / risk >= min_r_t2]
     t2 = max(t2_pool, key=lambda c: (c.confluence, -c.price)) if t2_pool else None
 
-    return t1, t2
+    # T3: bull-stretch beyond T2 (or beyond T1 if T2 absent). Prefer candidates
+    # whose source stack carries a stretch anchor (Fib extension or EW objective).
+    anchor = t2.price if t2 else t1.price
+    t3_pool = [c for c in candidates if c.price > anchor]
+    t3 = None
+    if t3_pool:
+        STRETCH_TYPES = {"FIB", "FIB_4H", "FIB_D", "EW_INT", "EW_MAJ"}
+        stretch_cands = [c for c in t3_pool
+                         if any(s.type in STRETCH_TYPES for s in c.sources)]
+        if stretch_cands:
+            # nearest stretch candidate beyond the anchor (don't over-reach)
+            t3 = min(stretch_cands, key=lambda c: c.price)
+        else:
+            # no dedicated stretch source — take the highest-confluence far level
+            t3 = max(t3_pool, key=lambda c: (c.confluence, -c.price))
+
+    return t1, t2, t3
 
 
 def classify_behavior(candidate: Candidate) -> tuple:
@@ -778,9 +1138,13 @@ def estimate_p_reach(candidate: Candidate, mode: str) -> dict:
 # STOP CALCULATION (simplified Phase 1 · candidate stops + ATR floor)
 # ════════════════════════════════════════════════════════════════════════
 def compute_stop(entry: float, atr: float, direction: str,
-                 swings: list, vp: dict) -> dict:
+                 swings: list, vp: dict, bull_ob_stops: Optional[list] = None) -> dict:
     """Phase 1 stop: structural swing low (long) or swing high (short),
     fallback to entry − 1.5 × ATR.
+
+    bull_ob_stops: optional list of bull order-block highs below entry (demand
+    zones). The nearest one below entry is added as a structural stop candidate —
+    institutional demand is a natural close-below invalidation level.
     """
     candidates = {}
     if direction == "long":
@@ -797,6 +1161,11 @@ def compute_stop(entry: float, atr: float, direction: str,
                       key=lambda z: z["high"], reverse=True)
         if lvns:
             candidates["lvn"] = lvns[0]["low"] - 0.1 * atr
+        # Bull order block (demand) nearest below entry
+        if bull_ob_stops:
+            below = sorted([p for p in bull_ob_stops if p < entry], reverse=True)
+            if below:
+                candidates["bull_ob"] = below[0] - 0.1 * atr
         candidates["atr_floor"] = entry - 1.5 * atr
 
         valid = [(k, v) for k, v in candidates.items() if v is not None and v < entry]
@@ -920,29 +1289,89 @@ def analyze_trade(ticker: str, direction: str = "long", mode: str = "position",
     # 7. Anchored VWAP
     anchors = find_anchor_dates(df_full)
 
-    # 8. Stop
-    stop_info = compute_stop(entry, atr, direction, swings, vp)
+    # 8b. Horizon-conditional NEW anchor sources (2026-06-08). Gathered BEFORE
+    # the stop so bull-OB demand zones can feed compute_stop. Every gatherer is
+    # try/except-wrapped and returns a warning string on failure — analyze_trade
+    # degrades to base behavior, never crashes. Which sources build per horizon
+    # is gated by cfg["extra_sources"].
+    extra = cfg.get("extra_sources", set())
+    horizon_sources: list = []
+    horizon_warnings: list = []
+    bull_ob_stops: list = []
+
+    # Order blocks (swing + position): bear OB above entry = supply target;
+    # bull OB below entry = demand stop candidate.
+    if "OB" in extra:
+        ob_src, bull_ob_stops, ob_warn = gather_ob_sources(df_full, entry,
+                                                            weekly_df=None)
+        horizon_sources.extend(ob_src)
+        if ob_warn:
+            horizon_warnings.append(ob_warn)
+
+    # Elliott Wave objectives (intermediate and/or major depending on horizon).
+    if "EW_INT" in extra or "EW_MAJ" in extra:
+        ew_src, ew_warn = gather_ew_sources(ticker, entry, cfg, extra)
+        horizon_sources.extend(ew_src)
+        if ew_warn:
+            horizon_warnings.append(ew_warn)
+
+    # 4H Fibonacci extensions (swing + position) — Schwab-only, degrades quietly.
+    if "FIB_4H" in extra:
+        fib4_src, fib4_warn = gather_fib_4h_sources(ticker, entry)
+        horizon_sources.extend(fib4_src)
+        if fib4_warn:
+            horizon_warnings.append(fib4_warn)
+
+    # 8. Stop (now demand-zone aware)
+    stop_info = compute_stop(entry, atr, direction, swings, vp,
+                             bull_ob_stops=bull_ob_stops)
     stop_price = stop_info["price"]
 
-    # 9. Build candidate levels
+    # 9. Build base candidate levels (unchanged contract)
     raw_sources = build_candidate_levels(
         entry, atr, direction,
         eq_highs, eq_lows,
         vp, anchors, swings,
         df_full, cfg,
     )
+    # 9b. Append the horizon sources so they flow through the SAME confluence
+    # engine (cluster + weight) as the base structural sources.
+    raw_sources.extend(horizon_sources)
+
+    # 9c. Horizon reach cap (3-tier) — drop sources beyond the mode's plausible
+    # distance. cap = min( max(ATR×max_reach_atr, entry×min_reach_pct),
+    #                      entry×hard_reach_pct ).
+    # The inner max() is a volatility-aware floor (low-ATR names still reach a
+    # level); the outer min() is an ABSOLUTE ceiling so a high-ATR name (INTC,
+    # 8.6%/day) can't anchor a 20%+ swing target. Kills the +169%/+1115% bug.
+    max_reach_atr = cfg.get("max_reach_atr")
+    min_reach_pct = cfg.get("min_reach_pct")
+    hard_reach_pct = cfg.get("hard_reach_pct")
+    warnings_capped = 0
+    if max_reach_atr is not None and hard_reach_pct is not None:
+        vol_floor = max(atr * max_reach_atr, entry * (min_reach_pct or 0.0))
+        reach_cap = entry + min(vol_floor, entry * hard_reach_pct)
+        n_before = len(raw_sources)
+        raw_sources = [s for s in raw_sources if s.price <= reach_cap]
+        warnings_capped = n_before - len(raw_sources)
 
     # 10. Cluster into candidates
     candidates = cluster_levels_and_score(raw_sources, atr)
     candidates.sort(key=lambda c: c.price)
 
-    # 11. Select T1 / T2
-    t1_c, t2_c = select_targets(candidates, entry, stop_price, mode)
+    # 11. Select T1 / T2 / T3
+    t1_c, t2_c, t3_c = select_targets(candidates, entry, stop_price, mode)
 
-    # 12. Classify behavior + estimate p_reach
+    # 12. Classify behavior + estimate p_reach (× momentum reachability)
     def cand_to_target(c: Candidate, entry: float, risk: float, stop: float) -> Target:
         beh, action = classify_behavior(c)
         p = estimate_p_reach(c, mode)
+        # Reachability confirmer (volatility budget + MACD + RSI) MULTIPLIES the
+        # structural p_reach. It NEVER changes the price (design contract).
+        reach = compute_reachability(df, entry, c.price, atr, mode)
+        p_final = round(max(0.02, min(0.95, p["median"] * reach["score"])), 3)
+        p_src = dict(p)
+        p_src["reachability"] = reach
         return Target(
             price=round(c.price, 2),
             r_multiple=round((c.price - entry) / risk, 2),
@@ -951,17 +1380,33 @@ def analyze_trade(ticker: str, direction: str = "long", mode: str = "position",
             sources=[asdict(s) for s in c.sources],
             behavior=beh,
             action=action,
-            p_reach=p["median"],
-            p_reach_source=p,
+            p_reach=p_final,
+            p_reach_source=p_src,
         )
 
     risk = entry - stop_price
     t1 = cand_to_target(t1_c, entry, risk, stop_price) if t1_c else None
     t2 = cand_to_target(t2_c, entry, risk, stop_price) if t2_c else None
 
+    # T3 bull-stretch: ARM only when reachability(entry→t3) ≥ 0.45 AND momentum
+    # confirms (MACD hist > 0). Otherwise t3 = None (additive, never blocks t1/t2).
+    t3 = None
+    if t3_c is not None:
+        t3_reach = compute_reachability(df, entry, t3_c.price, atr, mode)
+        macd_confirms = t3_reach["macd"]["hist"] > 0
+        if t3_reach["score"] >= 0.45 and macd_confirms:
+            t3 = cand_to_target(t3_c, entry, risk, stop_price)
+            t3.action = "stretch_runner_trail_only"
+
     # 13. Decision logic
     decision = "trade" if t1 else ("reject" if mode != "invest" else "wait")
     warnings = list(pre_warnings)  # carry ETF/etc. warnings forward
+    warnings.extend(horizon_warnings)  # surface sub-engine degradation
+    if warnings_capped:
+        warnings.append(f"reach_cap_applied — dropped {warnings_capped} far-out "
+                        f"source(s) beyond the {mode} horizon distance cap")
+    if t3 is None and t3_c is not None:
+        warnings.append("t3_stretch_unarmed — reachability/momentum did not confirm bull-stretch")
     if t1 is None and mode != "invest":
         warnings.append("no_target_meets_minimum_r")
     if stop_info["distance_atr"] > 3.0:
@@ -1027,15 +1472,22 @@ def analyze_trade(ticker: str, direction: str = "long", mode: str = "position",
     caps = {"swing": 0.10, "position": 0.12, "invest": 0.20}
     sizing = compute_sizing(entry, stop_price, equity, risk_pcts[mode], caps[mode])
 
-    # 15. Confidence (0-1 score · 4 components)
+    # 15. Confidence (0-1 score · 5 components, incl. momentum reachability)
+    # momentum_reachability = the reachability score of the PRIMARY target (T1),
+    # i.e. does volatility budget + MACD + RSI support getting there? Falls back
+    # to 0.5 (neutral) when T1 is absent.
+    t1_reach = None
+    if t1 and isinstance(t1.p_reach_source, dict):
+        t1_reach = (t1.p_reach_source.get("reachability") or {}).get("score")
     conf_components = {
         "trend_alignment": 0.9 if structure_info["trend"] == "uptrend" else 0.4 if structure_info["trend"] == "range" else 0.2,
         "confluence_quality": min(1.0, (t1.confluence / 8.0) if t1 else 0),
         "volume_confirmation": 0.7,  # Phase 2: real RVOL/volume_trend
         "rr_quality": min(1.0, (t1.r_multiple / 3.0) if t1 else 0),
+        "momentum_reachability": round(float(t1_reach), 3) if t1_reach is not None else 0.5,
     }
     confidence = {
-        "score": round(sum(conf_components.values()) / 4, 2),
+        "score": round(sum(conf_components.values()) / len(conf_components), 2),
         "components": conf_components,
     }
 
@@ -1056,6 +1508,7 @@ def analyze_trade(ticker: str, direction: str = "long", mode: str = "position",
         stop=stop_info,
         t1=t1,
         t2=t2,
+        t3=t3,
         sizing=sizing,
         context={
             "trend": structure_info["trend"],
@@ -1087,7 +1540,7 @@ def _reject(ticker: str, mode: str, direction: str, reason: str) -> TradeAnalysi
     return TradeAnalysis(
         ticker=ticker.upper(), mode=mode, timestamp=datetime.utcnow().isoformat() + "Z",
         price_at_analysis=0, direction=direction, decision="reject",
-        entry={}, stop={}, t1=None, t2=None, sizing={},
+        entry={}, stop={}, t1=None, t2=None, t3=None, sizing={},
         context={"rejection_reason": reason},
         confidence={"score": 0, "components": {}},
         warnings=[reason],
@@ -1113,11 +1566,25 @@ def _cache_path(ticker: str, mode: str) -> Path:
 
 
 def _cache_is_fresh(path: Path, ttl: int = CACHE_TTL_SECONDS) -> bool:
-    """File exists AND age < ttl seconds."""
+    """File exists AND age < ttl seconds AND schema matches current version.
+
+    A pre-Phase-1 cache file (no `_schema` key, or an older version) is reported
+    stale so analyze_trade_cached regenerates it with t3 + new sources +
+    reachability. This makes the whole cache dir self-invalidate on a schema bump
+    without a manual delete.
+    """
     if not path.exists():
         return False
     age = time.time() - path.stat().st_mtime
-    return age < ttl
+    if age >= ttl:
+        return False
+    # Schema-version gate
+    cached = _cache_read(path)
+    if cached is None:
+        return False
+    if cached.get("_schema") != CACHE_SCHEMA_VERSION:
+        return False
+    return True
 
 
 def _cache_read(path: Path) -> Optional[dict]:
@@ -1130,8 +1597,9 @@ def _cache_read(path: Path) -> Optional[dict]:
 
 
 def _cache_write(path: Path, payload: dict) -> None:
-    """Atomic write via temp file + rename."""
+    """Atomic write via temp file + rename. Stamps current schema version."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {**payload, "_schema": CACHE_SCHEMA_VERSION}
     tmp = path.with_suffix(".tmp")
     with open(tmp, "w") as f:
         json.dump(payload, f, indent=2, default=str)

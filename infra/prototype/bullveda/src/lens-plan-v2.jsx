@@ -187,6 +187,7 @@ function modeAdjustP2(ticker, mode) {
       stop: nz(md.stop, ticker.stop),
       t1: nz(md.t1, ticker.t1),
       t2: nz(md.t2, ticker.t2),
+      t3: nz(md.t3, null),                 // bull-stretch (null when unarmed)
       pivot: nz(md.entry_mid, ticker.pivot),
       holdDays: holdPlot,
       holdLabel: ((md.rulebook || "").split("·")[1] || "").trim() || null,
@@ -220,7 +221,18 @@ function planMath(t) {
   const kelly = (wr != null && rr1 > 0) ? Math.max(0, (wr * rr1 - (1 - wr)) / rr1) : null; // raw Kelly f*
   const atr = +(risk / 1.25).toFixed(2);                 // ATR est: system stop = 1.25×ATR ⇒ ATR ≈ risk/1.25
   const levelsValid = (L.valid !== false) && L.stop > 0 && entry > L.stop && L.t1 > entry && L.t2 > L.t1;
+  // ── T3 bull-stretch — price from the mode-adjusted ticker (decisionsByMode), with
+  //    richer sources/p_reach pulled from the cached trade_engine payload when present.
+  const t3px = (typeof t.t3 === "number" && isFinite(t.t3) && t.t3 > L.t2) ? t.t3 : null;
+  let t3src = "", t3reach = null;
+  if (t3px) {
+    const teP = (window.__BV && window.__BV.tradeEngineCached)
+      ? window.__BV.tradeEngineCached(t.symbol, (t.holdDays >= 120 ? "INVESTMENT" : t.holdDays >= 45 ? "POSITION" : "SWING")) : undefined;
+    const tt3 = (teP && typeof teP === "object") ? teP.t3 : null;
+    if (tt3) { t3src = window.teSourceChips ? window.teSourceChips(tt3, 2) : ""; if (typeof tt3.p_reach === "number") t3reach = tt3.p_reach; }
+  }
   return { symbol: t.symbol, price: L.price, entry, stop: L.stop, t1: L.t1, t2: L.t2,
+           t3: t3px, t3src, t3reach,
            risk, rr1, rr2, NAV: PLAN_NAV, navDemo, riskBudget, baseShares, wr, lb, evR, kelly, atr, levelsValid,
            spread: t.spread, dvol: t.dvol, beta: t.beta, sector: t.sector,
            holdDays: t.holdDays, earnings: t.earnings || { days: null, date: "" }, setupStats: ss };
@@ -552,6 +564,12 @@ function TradeBlueprint({ pm, size }) {
           tip="Reward-to-risk to the second (runner) target." />
         <TbMetric label="% to T2" value={`+${(reward2/entry*100).toFixed(2)}%`} sub={`$${t2.toFixed(2)}`} tone="gn" secondary
           tip="How far price must move from entry to reach the second target." />
+        {pm.t3 && (
+          <TbMetric label="T3 · stretch" value={`$${pm.t3.toFixed(2)}`}
+            sub={`+${((pm.t3-entry)/entry*100).toFixed(1)}%${pm.t3reach!=null?` · ${Math.round(pm.t3reach*100)}% reach`:""}${pm.t3src?` · ${pm.t3src}`:""}`}
+            tone="violet" secondary
+            tip="Bull-stretch extension — armed only on momentum-confirmed names. Runner-only target beyond T2; lower reach probability by design (let it run, trail only)." />
+        )}
         <TbMetric label="ATR · est" value={`$${atr.toFixed(2)}`} sub={`${(atr/entry*100).toFixed(1)}% · stop÷1.25`} tone="ink" secondary
           tip="Average True Range — typical daily move. Estimated as stop ÷ 1.25 (the stop is set at 1.25× ATR)." />
         <TbMetric label="Wilson WR" value={pm.lb != null ? `${(pm.lb*100).toFixed(1)}%` : "—"} sub={`LB · n=${pm.setupStats.n ?? "—"}`} tone="copper" secondary
