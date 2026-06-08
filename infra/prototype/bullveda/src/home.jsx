@@ -148,8 +148,8 @@ function HomeView({ onTicker, onSurface, mode, surface }) {
         <HomeCard title="Earnings today" sub="reporting · implied move · your exposure" cta="Calendar →" onCta={() => onSurface && onSurface("premarket")}>
           <EarningsToday onTicker={onTicker} />
         </HomeCard>
-        <HomeCard title="Stock catalysts" sub="named-ticker headlines · not shown above · sentiment-scored" cta="News →" onCta={() => onSurface && onSurface("news")}>
-          <TopStories onTicker={onTicker} />
+        <HomeCard title="Market movers" sub="trending · most active · in-scan universe" cta="Scanner →" onCta={() => onSurface && onSurface("signal-scanner")}>
+          <MarketMovers onTicker={onTicker} onSurface={onSurface} />
         </HomeCard>
         <HomeCard title="Overnight signals" sub="bias shifts · alerts · insider · ML" cta="View all →" onCta={() => onSurface && onSurface("alerts")}>
           <SignalFeed onTicker={onTicker} />
@@ -481,64 +481,6 @@ function realStories(limit) {
     if (out.length >= (limit || 99)) break;
   }
   return out.length ? out : null;
-}
-
-// ─── Top Stories / news ──────────────────────────────────────────
-function TopStories({ onTicker }) {
-  // De-dupe against MARKETS·NEWS: that board shows the top NEWS_BOARD_TAKE
-  // headlines, so this card starts after them and prefers stock-specific
-  // (named-ticker) catalysts — the right cut for the ATTENTION · CATALYSTS row.
-  const real = useMemoH(() => {
-    const all = realStories(99);
-    if (!all) return null;
-    const seen = new Set(all.slice(0, NEWS_BOARD_TAKE).map(s => s.head));
-    const rest = all.filter(s => !seen.has(s.head));
-    const named = rest.filter(s => s.sym);
-    const pick = (named.length >= 3 ? named : rest).slice(0, 5);
-    return pick.length ? pick : null;
-  }, [bvTok()]);
-  const stories = real || (window.__BV ? [] : [
-    { t: "12:48", sym: "NVDA", sent: +0.8, tone: "gn", src: "Reuters", head: "Chipmakers rally as data-center capex guidance lifts sector",
-      sum: "Three hyperscalers lifted FY capex guides on the same morning — direct read-through to GPU and networking suppliers. Group +2.8% on 1.6× volume.",
-      impact: "Sector tailwind", affects: ["NVDA", "AVGO", "ARM"] },
-    { t: "11:30", sym: null, sent: +0.3, tone: "gn", src: "Bloomberg", head: "Fed minutes preview: market prices 88% hold, dot-plot in focus",
-      sum: "Minutes land 14:00 ET. A hold is fully priced; the swing factors are the dot-plot path and any balance-sheet language — both move duration and risk appetite.",
-      impact: "Macro · rates", affects: ["SPY", "TLT"] },
-    { t: "10:14", sym: "ARCM", sent: +0.7, tone: "gn", src: "Barron's", head: "Specialty-materials names see insider buying cluster",
-      sum: "Form 4s show CFO + COO open-market buys across the group over five sessions. Historically a positive 3-month signal in this sleeve (Wilson LB 61%).",
-      impact: "Stock-specific", affects: ["ARCM"] },
-    { t: "09:02", sym: "XOM", sent: -0.4, tone: "rd", src: "WSJ", head: "Crude slips on demand worries; energy complex under pressure",
-      sum: "Brent −2.1% on soft China PMI; majors and oil-services lower pre-bell. XLE testing its 50-DMA — a break opens rotation out of energy.",
-      impact: "Sector risk", affects: ["XOM", "CVX", "XLE"] },
-    { t: "08:20", sym: "GENO", sent: +0.5, tone: "gn", src: "FierceBio", head: "Genoa Bio Phase-2 readout expected ahead of next-week print",
-      sum: "Topline due before earnings; options imply a ±18% event move. Binary catalyst — size for the gap, not the drift.",
-      impact: "Binary catalyst", affects: ["GENO"] },
-  ]);
-  const impactTone = { "Sector tailwind": "gn", "Stock-specific": "gn", "Macro · rates": "amb", "Binary catalyst": "amb", "Sector risk": "rd", "Bullish": "gn", "Bearish": "rd", "Neutral": "amb" };
-  if (!stories.length) return <div className="ts"><span className="mono dim2">No additional stock-specific catalysts beyond the board above.</span></div>;
-  return (
-    <div className="ts">
-      {stories.map((s, i) => (
-        <div key={i} className={`ts-row ts-${s.tone}`} onClick={() => s.sym && onTicker(s.sym)}>
-          <div className="ts-top">
-            <span className="ts-time mono dim2">{s.t}{s.t ? " ago" : ""}</span>
-            <span className="ts-src mono dim2">{s.src}</span>
-            {s.sym && <span className="ts-sym mono">{s.sym}</span>}
-            {s.sent != null && <span className={`ts-sent mono ${s.sent >= 0 ? "up" : "dn"}`}>{s.sent >= 0 ? "+" : ""}{s.sent.toFixed(1)}</span>}
-          </div>
-          <div className="ts-head">{s.head}</div>
-          <div className="ts-sum">{s.sum}</div>
-          <div className="ts-foot">
-            <span className={`ts-impact mono kpi-tone--${impactTone[s.impact] || "amb"}`}>{s.impact}</span>
-            <span className="ts-affects mono dim2">affects</span>
-            {s.affects.map(tk => (
-              <button key={tk} className="ts-tk mono" onClick={(e) => { e.stopPropagation(); onTicker(tk); }}>{tk}</button>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
 }
 
 // ─── Earnings Today ──────────────────────────────────────────────
@@ -916,34 +858,29 @@ function TopSetups({ onTicker }) {
 // tickers), trending/gainers rails from the live scan universe. Mock fallback
 // per-slot when no live feed is present (standalone showcase).
 function resolveNewsBoard() {
-  const stories = realStories(NEWS_BOARD_TAKE);
-  const rows = HR.pool();
+  const stories = realStories(99);
   const toStory = (s, live) => ({
-    head: s.head, src: s.src, time: s.t, url: s.url, live: !!live, sum: s.sum,
+    head: s.head, src: s.src, time: s.t, url: s.url, live: !!live, sum: s.sum, sym: s.sym, tone: s.tone,
     tickers: (s.tickers && s.tickers.length) ? s.tickers : (s.sym ? [[s.sym, 0]] : []),
   });
-  let featured = null, leftStack = null, latest = null, trending = null, gainers = null;
+  let featured = null, leftStack = null, latest = null, catalysts = null;
   if (stories && stories.length) {
     featured = toStory(stories[0], true);
     leftStack = stories.slice(1, 5).map(s => toStory(s));
     latest = stories.slice(5, NEWS_BOARD_TAKE).map(s => toStory(s));
+    // Col 3 — stock-specific catalysts BELOW the headline cut (named tickers
+    // preferred), so the board never repeats a headline already shown in cols 1-2.
+    const seen = new Set(stories.slice(0, NEWS_BOARD_TAKE).map(s => s.head));
+    const rest = stories.filter(s => !seen.has(s.head));
+    const named = rest.filter(s => s.sym);
+    const pick = (named.length >= 3 ? named : rest).slice(0, 6);
+    catalysts = pick.map(s => toStory(s));
   }
-  if (rows.length) {
-    const px = (p) => p >= 1000 ? Math.round(p).toLocaleString() : p.toFixed(2);
-    const audited = rows.filter(r => HR.inAudit(r.sym) && HR.num(r.chg, null) != null && HR.num(r.price, null) != null);
-    trending = [...audited].sort((a, b) => Math.abs(b.chg) - Math.abs(a.chg)).slice(0, 5)
-      .map(r => ({ sym: r.sym, name: r.name, px: px(r.price), chg: r.chg, up: r.chg >= 0 }));
-    // "Most active" by dollar-volume — a distinct metric from the Top-movers card
-    // (which is by %), so the two no longer show the same names.
-    gainers = [...audited].filter(r => HR.num(r.dvol, null) != null).sort((a, b) => b.dvol - a.dvol).slice(0, 4)
-      .map(r => ({ sym: r.sym, name: r.name, px: px(r.price), chg: r.chg, dvol: r.dvol }));
-  }
-  return { featured, leftStack, latest, trending, gainers };
+  return { featured, leftStack, latest, catalysts };
 }
 
 function NewsMarketsBoard({ onTicker, onSurface }) {
   const real = useMemoH(() => resolveNewsBoard(), [bvTok()]);
-  const [trendSparks, setTrendSparks] = React.useState({});
   const featured = real.featured || {
     head: "Chipmakers extend rally as hyperscaler capex guides lift the group",
     src: "Reuters", time: "12m", live: true, tickers: [["NVDA", +6.26], ["AVGO", +3.1], ["ARM", +2.4]],
@@ -963,27 +900,14 @@ function NewsMarketsBoard({ onTicker, onSurface }) {
     { head: "Software multiples compress as Street trims FY estimates", src: "Bloomberg", time: "2h", tickers: [["MDB", +20.4], ["TWLO", +19.4]] },
     { head: "Retail sales beat lifts consumer-discretionary breadth", src: "Reuters", time: "3h", tickers: [["XLY", +1.2]] },
   ];
-  const trending = real.trending || [
-    { sym: "NVDA", name: "NVIDIA Corp", px: "884.20", chg: +7.04, up: true },
-    { sym: "BTC", name: "Bitcoin USD", px: "69,969", chg: -3.76, up: false },
-    { sym: "ARGN", name: "Argentum Robotics", px: "213.40", chg: +3.10, up: true },
-    { sym: "LAC", name: "Lithium Americas", px: "5.51", chg: +5.76, up: true },
-    { sym: "ABVX", name: "ABIVAX SA", px: "129.69", chg: -2.22, up: false },
-  ];
-  const gainers = real.gainers || [
-    { sym: "FLNC", name: "Fluence Energy", px: "27.15", chg: +43.8 },
-    { sym: "MDB", name: "MongoDB Inc", px: "403.88", chg: +20.4 },
-    { sym: "TWLO", name: "Twilio Inc", px: "227.54", chg: +19.4 },
-    { sym: "GENO", name: "Genoa Bio", px: "29.40", chg: +12.1 },
-  ];
-  // real daily-close sparklines for the trending tickers (Schwab history, server-cached)
-  const trendKey = trending.map(r => r.sym).join(",");
-  React.useEffect(() => {
-    const BV = window.__BV; if (!BV || !BV.get || !trendKey) return;
-    let alive = true;
-    BV.get("/api/spark?syms=" + encodeURIComponent(trendKey)).then(d => { if (alive && d && d.sparks) setTrendSparks(s => ({ ...s, ...d.sparks })); }).catch(() => {});
-    return () => { alive = false; };
-  }, [trendKey]);
+  // Col 3 — stock-specific catalyst headlines (real, from the news feed). Served →
+  // honest [] when none remain beyond the headline cut; mock only in standalone preview.
+  const catalysts = real.catalysts || (window.__BV ? [] : [
+    { head: "Specialty-materials names see insider buying cluster", src: "Barron's", time: "2h", sym: "ARGN", tone: "gn", tickers: [["ARGN", +2.1]] },
+    { head: "Genoa Bio Phase-2 readout expected ahead of next-week print", src: "FierceBio", time: "16m", sym: "GENO", tone: "gn", tickers: [["GENO", +0.5]] },
+    { head: "Lithium names rebound on supply-cut headlines out of Chile", src: "Reuters", time: "1h", sym: "LAC", tone: "gn", tickers: [["LAC", +5.8]] },
+    { head: "Software multiples compress as Street trims FY estimates", src: "Bloomberg", time: "2h", sym: "MDB", tone: "rd", tickers: [["MDB", -4.4]] },
+  ]);
   const Story = ({ s, big }) => (
     <button className={`nm-story ${big ? "nm-story--big" : ""}`} onClick={() => s.tickers[0] && onTicker(s.tickers[0][0])}>
       {big && <div className="nm-feat-img"><span className="mono">◧ MARKETS</span></div>}
@@ -1011,35 +935,70 @@ function NewsMarketsBoard({ onTicker, onSurface }) {
         <div className="nm-col-h mono">LATEST</div>
         <div className="nm-feed">{latest.map((s, i) => <Story key={i} s={s} />)}</div>
       </div>
-      <div className="nm-col nm-col--rail">
-        <div className="nm-lookup" onClick={() => onSurface && onSurface("signal-scanner")}><span className="mono dim2">⌕ Quote lookup</span></div>
-        <div className="nm-rail-card">
-          <div className="nm-rail-h mono"><span>TRENDING TICKERS</span><span className="nm-rail-go" onClick={() => onSurface && onSurface("signal-scanner")}>Scanner →</span></div>
-          {trending.map((r, i) => {
-            const series = trendSparks[r.sym];
-            return (
-            <button key={i} className="nm-row" onClick={() => onTicker(r.sym)}>
-              <span className="nm-row-l"><b className="nm-row-sym mono">{r.sym}</b><span className="nm-row-name dim2">{r.name}</span></span>
-              {series && series.length >= 3
-                ? <Sparkline data={series} color={`var(--${r.chg >= 0 ? "gn" : "rd"})`} w={52} h={20} />
-                : <span style={{ width: 52, height: 20, display: "inline-block" }} />}
-              <span className="nm-row-r"><span className="nm-row-px mono">{r.px}</span><span className={`nm-row-chg mono ${r.chg >= 0 ? "up" : "dn"}`}>{r.chg >= 0 ? "+" : ""}{r.chg.toFixed(2)}%</span></span>
-            </button>
-            );
-          })}
+      <div className="nm-col nm-col--cat">
+        <div className="nm-col-h mono">STOCK CATALYSTS</div>
+        <div className="nm-feed">
+          {catalysts.length
+            ? catalysts.map((s, i) => <Story key={i} s={s} />)
+            : <div className="nm-cat-empty mono dim2">No stock-specific catalysts beyond the headlines.</div>}
         </div>
-        <div className="nm-rail-card">
-          <div className="nm-rail-h mono"><span>MOST ACTIVE</span><span className="nm-rail-go" onClick={() => onSurface && onSurface("momentum")}>Movers →</span></div>
-          {gainers.map((r, i) => {
-            const dv = r.dvol != null ? (r.dvol >= 1e9 ? "$" + (r.dvol / 1e9).toFixed(1) + "B" : "$" + Math.round(r.dvol / 1e6) + "M") : null;
-            return (
-            <button key={i} className="nm-row nm-row--g" onClick={() => onTicker(r.sym)}>
-              <span className="nm-row-l"><b className="nm-row-sym mono">{r.sym}</b><span className="nm-row-name dim2">{dv || r.name}</span></span>
-              <span className="nm-row-r"><span className="nm-row-px mono">{r.px}</span><span className={`nm-row-chg mono ${r.chg >= 0 ? "up" : "dn"}`}>{r.chg >= 0 ? "+" : ""}{r.chg.toFixed(1)}%</span></span>
-            </button>
-            );
-          })}
-        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Market movers — trending + most-active rails (moved out of the news board) ──
+function MarketMovers({ onTicker, onSurface }) {
+  const { trending, gainers } = useMemoH(() => {
+    const rows = HR.pool();
+    if (!rows.length) return { trending: [], gainers: [] };
+    const px = (p) => p >= 1000 ? Math.round(p).toLocaleString() : p.toFixed(2);
+    const audited = rows.filter(r => HR.inAudit(r.sym) && HR.num(r.chg, null) != null && HR.num(r.price, null) != null);
+    const trending = [...audited].sort((a, b) => Math.abs(b.chg) - Math.abs(a.chg)).slice(0, 5)
+      .map(r => ({ sym: r.sym, name: r.name, px: px(r.price), chg: r.chg }));
+    // "Most active" by dollar-volume — a distinct metric from the Top-movers card (by %).
+    const gainers = [...audited].filter(r => HR.num(r.dvol, null) != null).sort((a, b) => b.dvol - a.dvol).slice(0, 5)
+      .map(r => ({ sym: r.sym, name: r.name, px: px(r.price), chg: r.chg, dvol: r.dvol }));
+    return { trending, gainers };
+  }, [bvTok()]);
+  const [trendSparks, setTrendSparks] = React.useState({});
+  const trendKey = trending.map(r => r.sym).join(",");
+  React.useEffect(() => {
+    const BV = window.__BV; if (!BV || !BV.get || !trendKey) return;
+    let alive = true;
+    BV.get("/api/spark?syms=" + encodeURIComponent(trendKey)).then(d => { if (alive && d && d.sparks) setTrendSparks(s => ({ ...s, ...d.sparks })); }).catch(() => {});
+    return () => { alive = false; };
+  }, [trendKey]);
+  if (!trending.length && !gainers.length)
+    return <div className="nm-cat-empty mono dim2">No movers in the live scan yet.</div>;
+  return (
+    <div className="mv-wrap">
+      <div className="nm-rail-card">
+        <div className="nm-rail-h mono"><span>TRENDING TICKERS</span><span className="nm-rail-go" onClick={() => onSurface && onSurface("signal-scanner")}>Scanner →</span></div>
+        {trending.map((r, i) => {
+          const series = trendSparks[r.sym];
+          return (
+          <button key={i} className="nm-row" onClick={() => onTicker(r.sym)}>
+            <span className="nm-row-l"><b className="nm-row-sym mono">{r.sym}</b><span className="nm-row-name dim2">{r.name}</span></span>
+            {series && series.length >= 3
+              ? <Sparkline data={series} color={`var(--${r.chg >= 0 ? "gn" : "rd"})`} w={52} h={20} />
+              : <span style={{ width: 52, height: 20, display: "inline-block" }} />}
+            <span className="nm-row-r"><span className="nm-row-px mono">{r.px}</span><span className={`nm-row-chg mono ${r.chg >= 0 ? "up" : "dn"}`}>{r.chg >= 0 ? "+" : ""}{r.chg.toFixed(2)}%</span></span>
+          </button>
+          );
+        })}
+      </div>
+      <div className="nm-rail-card">
+        <div className="nm-rail-h mono"><span>MOST ACTIVE</span><span className="nm-rail-go" onClick={() => onSurface && onSurface("momentum")}>Movers →</span></div>
+        {gainers.map((r, i) => {
+          const dv = r.dvol != null ? (r.dvol >= 1e9 ? "$" + (r.dvol / 1e9).toFixed(1) + "B" : "$" + Math.round(r.dvol / 1e6) + "M") : null;
+          return (
+          <button key={i} className="nm-row nm-row--g" onClick={() => onTicker(r.sym)}>
+            <span className="nm-row-l"><b className="nm-row-sym mono">{r.sym}</b><span className="nm-row-name dim2">{dv || r.name}</span></span>
+            <span className="nm-row-r"><span className="nm-row-px mono">{r.px}</span><span className={`nm-row-chg mono ${r.chg >= 0 ? "up" : "dn"}`}>{r.chg >= 0 ? "+" : ""}{r.chg.toFixed(1)}%</span></span>
+          </button>
+          );
+        })}
       </div>
     </div>
   );
