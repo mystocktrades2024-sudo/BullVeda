@@ -102,9 +102,9 @@ function HomeView({ onTicker, onSurface, mode, surface }) {
           automatically once the next scan lands.
         </div>
       )}
-      {/* TIER 1 · MARKET STATE — regime + scan funnel + cross-asset tape */}
-      <HomeHero mode={mode} onSurface={onSurface} />
+      {/* TIER 1 · MARKET STATE — cross-asset tape (above the hero), then regime + scan funnel */}
       <IndexStrip />
+      <HomeHero mode={mode} onSurface={onSurface} />
 
       {/* TIER 1.6 · AUTOMATED BOOK — the system's auto-traded paper account, shared
           across all viewers (NOT the individual user's book). Per-user position
@@ -148,7 +148,7 @@ function HomeView({ onTicker, onSurface, mode, surface }) {
         <HomeCard title="Earnings today" sub="reporting · implied move · your exposure" cta="Calendar →" onCta={() => onSurface && onSurface("premarket")}>
           <EarningsToday onTicker={onTicker} />
         </HomeCard>
-        <HomeCard title="Top stories" sub="market-moving · last 6h · sentiment-scored" cta="News →" onCta={() => onSurface && onSurface("news")}>
+        <HomeCard title="Stock catalysts" sub="named-ticker headlines · not shown above · sentiment-scored" cta="News →" onCta={() => onSurface && onSurface("news")}>
           <TopStories onTicker={onTicker} />
         </HomeCard>
         <HomeCard title="Overnight signals" sub="bias shifts · alerts · insider · ML" cta="View all →" onCta={() => onSurface && onSurface("alerts")}>
@@ -219,32 +219,49 @@ function IndexStrip() {
     BV.get("/api/spark?syms=" + encodeURIComponent(sparkKey)).then(d => { if (alive && d && d.sparks) setSparks(s => ({ ...s, ...d.sparks })); }).catch(() => {});
     return () => { alive = false; };
   }, [sparkKey]);
+  // One tile (rendered twice — once per marquee half — for a seamless loop).
+  const tile = (i, k) => {
+    const series = i.spark ? sparks[i.spark] : null;
+    const up = i.c == null ? true : i.c >= 0;
+    const isCommodity = ["WTI", "GOLD", "COPPER", "SILVER"].includes(i.s);
+    const tip = i.spark ? (isCommodity
+      ? `value = front-month future · sparkline tracks the ${i.spark} ETF (closest free proxy path)`
+      : `sparkline: ${i.spark} · 22 daily closes`) : undefined;
+    return (
+      <div key={k} className={`ix ix--${i.c == null ? "ink" : up ? "gn" : "rd"}`} title={tip}>
+        <span className="ix-s mono">{i.s}</span>
+        <span className="ix-v mono">{i.v}</span>
+        {i.c != null
+          ? <span className={`ix-c mono ${up ? "up" : "dn"}`}>{i.c >= 0 ? "+" : ""}{i.c.toFixed(2)}%</span>
+          : <span className="ix-c mono dim2">—</span>}
+        {series && series.length >= 3
+          ? <Sparkline data={series} color={`var(--${up ? "gn" : "rd"})`} w={48} h={20} />
+          : <span style={{ width: 48, height: 20, display: "inline-block" }} />}
+      </div>
+    );
+  };
+  // Seamless marquee: each of the two halves must be at least as wide as the
+  // widest plausible viewport, else a short tape (few live tiles) leaves a blank
+  // gap on the right. Repeat the tile set enough times to fill ~3000px per half.
+  const TILE_W = 179; // 178px tile + 1px gap
+  const setW = Math.max(1, idx.length * TILE_W);
+  const reps = idx.length ? Math.max(1, Math.ceil(3000 / setW)) : 1;
+  const half = []; // reps copies of the tile set, keys unique within the half
+  for (let r = 0; r < reps; r++) idx.forEach((i, k) => half.push(tile(i, r * 1000 + k)));
+  // constant scroll speed (~70px/s) regardless of how many tiles are live
+  const dur = Math.max(18, Math.round((reps * setW) / 70));
   return (
-    <div className="ix-strip">
-      <div className="ix ix--ink" title={`Live tape · refreshed ${age < 5 ? "now" : age + "s ago"}`}>
+    <div className="ix-strip ix-strip--marquee">
+      <div className="ix ix--ink ix-live" title={`Live tape · refreshed ${age < 5 ? "now" : age + "s ago"}`}>
         <span className="ix-s mono" style={{ color: "var(--gn)" }}>● LIVE</span>
         <span className="ix-v mono dim2">{age < 90 ? "tape" : "delayed"}</span>
       </div>
-      {idx.map((i, k) => {
-        const series = i.spark ? sparks[i.spark] : null;
-        const up = i.c == null ? true : i.c >= 0;
-        const isCommodity = ["WTI", "GOLD", "COPPER", "SILVER"].includes(i.s);
-        const tip = i.spark ? (isCommodity
-          ? `value = front-month future · sparkline tracks the ${i.spark} ETF (closest free proxy path)`
-          : `sparkline: ${i.spark} · 22 daily closes`) : undefined;
-        return (
-          <div key={k} className={`ix ix--${i.c == null ? "ink" : up ? "gn" : "rd"}`} title={tip}>
-            <span className="ix-s mono">{i.s}</span>
-            <span className="ix-v mono">{i.v}</span>
-            {i.c != null
-              ? <span className={`ix-c mono ${up ? "up" : "dn"}`}>{i.c >= 0 ? "+" : ""}{i.c.toFixed(2)}%</span>
-              : <span className="ix-c mono dim2">—</span>}
-            {series && series.length >= 3
-              ? <Sparkline data={series} color={`var(--${up ? "gn" : "rd"})`} w={48} h={20} />
-              : <span style={{ width: 48, height: 20, display: "inline-block" }} />}
-          </div>
-        );
-      })}
+      <div className="ix-viewport">
+        <div className="ix-track" style={{ animationDuration: `${dur}s` }}>
+          <div className="ix-group">{half}</div>
+          <div className="ix-group" aria-hidden="true">{half}</div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -415,6 +432,10 @@ function fmtAgo(dateStr) {
   if (hr < 24) return (hr < 10 ? hr.toFixed(0) : Math.round(hr)) + "h";
   return Math.round(hr / 24) + "d";
 }
+// How many of the top headlines the MARKETS·NEWS board consumes (featured + left
+// stack + latest). The TIER-3 "Top stories" card starts AFTER this so the two
+// surfaces never show the same headline twice.
+const NEWS_BOARD_TAKE = 11;
 // Build real story objects (audit-log-only tickers). null when no live feed.
 function realStories(limit) {
   const mn = (window.__BV && window.__BV.marketNews) || [];
@@ -443,7 +464,18 @@ function realStories(limit) {
 
 // ─── Top Stories / news ──────────────────────────────────────────
 function TopStories({ onTicker }) {
-  const real = useMemoH(() => realStories(5), [bvTok()]);
+  // De-dupe against MARKETS·NEWS: that board shows the top NEWS_BOARD_TAKE
+  // headlines, so this card starts after them and prefers stock-specific
+  // (named-ticker) catalysts — the right cut for the ATTENTION · CATALYSTS row.
+  const real = useMemoH(() => {
+    const all = realStories(99);
+    if (!all) return null;
+    const seen = new Set(all.slice(0, NEWS_BOARD_TAKE).map(s => s.head));
+    const rest = all.filter(s => !seen.has(s.head));
+    const named = rest.filter(s => s.sym);
+    const pick = (named.length >= 3 ? named : rest).slice(0, 5);
+    return pick.length ? pick : null;
+  }, [bvTok()]);
   const stories = real || (window.__BV ? [] : [
     { t: "12:48", sym: "NVDA", sent: +0.8, tone: "gn", src: "Reuters", head: "Chipmakers rally as data-center capex guidance lifts sector",
       sum: "Three hyperscalers lifted FY capex guides on the same morning — direct read-through to GPU and networking suppliers. Group +2.8% on 1.6× volume.",
@@ -462,7 +494,7 @@ function TopStories({ onTicker }) {
       impact: "Binary catalyst", affects: ["GENO"] },
   ]);
   const impactTone = { "Sector tailwind": "gn", "Stock-specific": "gn", "Macro · rates": "amb", "Binary catalyst": "amb", "Sector risk": "rd", "Bullish": "gn", "Bearish": "rd", "Neutral": "amb" };
-  if (!stories.length) return <div className="ts"><span className="mono dim2">No market headlines in the feed right now.</span></div>;
+  if (!stories.length) return <div className="ts"><span className="mono dim2">No additional stock-specific catalysts beyond the board above.</span></div>;
   return (
     <div className="ts">
       {stories.map((s, i) => (
@@ -863,7 +895,7 @@ function TopSetups({ onTicker }) {
 // tickers), trending/gainers rails from the live scan universe. Mock fallback
 // per-slot when no live feed is present (standalone showcase).
 function resolveNewsBoard() {
-  const stories = realStories(11);
+  const stories = realStories(NEWS_BOARD_TAKE);
   const rows = HR.pool();
   const toStory = (s, live) => ({
     head: s.head, src: s.src, time: s.t, url: s.url, live: !!live, sum: s.sum,
@@ -873,7 +905,7 @@ function resolveNewsBoard() {
   if (stories && stories.length) {
     featured = toStory(stories[0], true);
     leftStack = stories.slice(1, 5).map(s => toStory(s));
-    latest = stories.slice(5, 11).map(s => toStory(s));
+    latest = stories.slice(5, NEWS_BOARD_TAKE).map(s => toStory(s));
   }
   if (rows.length) {
     const px = (p) => p >= 1000 ? Math.round(p).toLocaleString() : p.toFixed(2);
