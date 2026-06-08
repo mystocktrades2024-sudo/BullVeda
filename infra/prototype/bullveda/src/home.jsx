@@ -128,15 +128,9 @@ function HomeView({ onTicker, onSurface, mode, surface }) {
 
   return (
     <div className="home">
-      <div className="home-refreshbar mono" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, fontSize: 11, color: "var(--ink-3)", margin: "0 0 6px" }}>
-        {_justUpdated
-          ? <span className="up">✓ updated to {_sm && _sm.ts} PT</span>
-          : <span title="Scan-snapshot freshness · auto-refreshes every 5 min while this tab is open (no API cost)">scan {_sm && _sm.ts ? _sm.ts + " PT" : "—"}{_ageStr ? " · " + _ageStr : ""}</span>}
-        <button onClick={_doRefresh} disabled={_refreshing} title="Re-pull the latest scan snapshot now (reads a pre-computed file — zero API calls)"
-          style={{ background: "none", border: "1px solid var(--glass-line)", borderRadius: 6, color: "var(--ink-2)", cursor: _refreshing ? "default" : "pointer", padding: "2px 8px", fontSize: 11, opacity: _refreshing ? 0.6 : 1 }}>
-          {_refreshing ? "⟳ refreshing…" : "⟳ refresh"}
-        </button>
-      </div>
+      {/* Refresh button removed (2026-06-08) — the data auto-refreshes every 5 min
+          while the tab is visible + on tab-focus (see the useEffect above), and the
+          freshness stamp lives in the hero eyebrow. The manual button was redundant. */}
       {liveDown && (
         <div className="home-feed-warn mono" style={{
           margin: "0 0 10px", padding: "10px 14px", borderRadius: 10, fontSize: 12.5, lineHeight: 1.5,
@@ -166,9 +160,9 @@ function HomeView({ onTicker, onSurface, mode, surface }) {
       <div className="home-sec-label"><span className="mono">MARKET CONTEXT · BEFORE YOU TRADE</span><span className="mono dim2">top-down read · regime gates your size · click any card to go deeper</span></div>
       <MarketBriefing onSurface={onSurface} onTicker={onTicker} />
 
-      {/* TIER 1.7 · MARKETS · NEWS — news-forward board (featured · latest · trending/gainers rail) */}
-      <div className="home-sec-label"><span className="mono">MARKETS · NEWS</span><span className="mono dim2">the tape in words · trending names · today's movers</span></div>
-      <NewsMarketsBoard onTicker={onTicker} onSurface={onSurface} />
+      {/* TIER 1.6 · BEST IDEAS PER ENGINE — top 5 from each discovery source (moved directly under Market Context 2026-06-08) */}
+      <div className="home-sec-label"><span className="mono">BEST IDEAS · TOP 5 PER ENGINE</span><span className="mono dim2">ranked by each engine's own signal (dim) · grade = unified conviction (composite 0–100), same scale for all</span></div>
+      <TopByEngine onTicker={onTicker} onSurface={onSurface} />
 
       {/* TIER 2 · WHAT THE SYSTEM FOUND TODAY — opportunity surfaces */}
       <div className="home-sec-label"><span className="mono">OPPORTUNITY · TODAY'S SCAN</span><span className="mono dim2">{uniStr} ranked · regime-fit · edge-validated</span></div>
@@ -184,10 +178,6 @@ function HomeView({ onTicker, onSurface, mode, surface }) {
         </HomeCard>
       </div>
 
-      {/* TIER 2.5 · BEST IDEAS PER ENGINE — top 5 from each discovery source */}
-      <div className="home-sec-label"><span className="mono">BEST IDEAS · TOP 5 PER ENGINE</span><span className="mono dim2">ranked by each engine's own signal (dim) · grade = unified conviction (composite 0–100), same scale for all</span></div>
-      <TopByEngine onTicker={onTicker} onSurface={onSurface} />
-
       {/* TIER 3 · ATTENTION — catalysts, news, what changed */}
       <div className="home-sec-label"><span className="mono">ATTENTION · CATALYSTS & FLOW</span><span className="mono dim2">next 24h · sentiment-scored</span></div>
       <div className="home-grid-3">
@@ -201,6 +191,10 @@ function HomeView({ onTicker, onSurface, mode, surface }) {
           <SignalFeed onTicker={onTicker} />
         </HomeCard>
       </div>
+
+      {/* TIER 4 · MARKETS · NEWS — news-forward board, moved to the end (2026-06-08) */}
+      <div className="home-sec-label"><span className="mono">MARKETS · NEWS</span><span className="mono dim2">the tape in words · trending names · today's movers</span></div>
+      <NewsMarketsBoard onTicker={onTicker} onSurface={onSurface} />
     </div>
   );
 }
@@ -337,23 +331,8 @@ function IndexStrip() {
 function MarketBriefing({ onSurface, onTicker }) {
   const go = (id) => onSurface && onSurface(id);
   const M = (window.__BV && window.__BV.market) || null;
-  // breadth / regime internals — real from BV.market when available
-  const breadth = M ? [
-    { k: ">50-DMA", v: M.breadthPct != null ? Math.round(M.breadthPct) + "%" : "—", tone: "gn" },
-    { k: ">200-DMA", v: M.breadth200 != null ? Math.round(M.breadth200) + "%" : "—", tone: "gn" },
-    { k: "New highs", v: M.newHighs != null ? "+" + M.newHighs : "—", tone: "gn" },
-    { k: "New lows", v: M.newLows != null ? String(M.newLows) : "—", tone: M.newLows > (M.newHighs || 0) ? "rd" : "gn" },
-    { k: "F&G proxy", v: M.fearGreed != null ? String(M.fearGreed) : "—", tone: "gn" },
-    { k: "Put/Call", v: M.putCall != null ? M.putCall.toFixed(2) : "—", tone: "amb" },
-  ] : (window.__BV ? [
-    { k: ">50-DMA", v: "—", tone: "ink" }, { k: ">200-DMA", v: "—", tone: "ink" },
-    { k: "New highs", v: "—", tone: "ink" }, { k: "New lows", v: "—", tone: "ink" },
-    { k: "F&G proxy", v: "—", tone: "ink" }, { k: "Put/Call", v: "—", tone: "ink" },
-  ] : [
-    { k: ">50-DMA", v: "62%", tone: "gn" }, { k: ">200-DMA", v: "58%", tone: "gn" },
-    { k: "A/D line", v: "+1,240", tone: "gn" }, { k: "New H–L", v: "+86", tone: "gn" },
-    { k: "VIX", v: "16.3", tone: "gn" }, { k: "Put/Call", v: "0.82", tone: "amb" },
-  ]);
+  // Regime internals (breadth tiles) moved entirely into the hero MARKET MOOD strip
+  // — they were duplicated here. This section now leads with PRE-MARKET + calendar.
   // gappers — biggest movers from the live universe (audit-log intersected)
   const gappers = useMemoH(() => {
     const rows = HR.pool();
@@ -404,34 +383,7 @@ function MarketBriefing({ onSurface, onTicker }) {
     ];
   }, [bvTok()]);
   return (
-    <div className="home-grid-3 mbf">
-      {/* REGIME */}
-      <div className="mbf-card" onClick={() => go("internals")}>
-        <div className="mbf-hd">
-          <span className="mbf-tag mono">REGIME</span>
-          <span className="mbf-go mono">Internals →</span>
-        </div>
-        <div className="mbf-regime">
-          <span className="mbf-regime-v mono"><b className={M && !M.regimeOn ? "dn" : "up"}>{M ? M.regimeLabel : "RISK-ON"}</b> · <b className="warn">{M ? M.regimeTrend : "CHOPPY"}</b></span>
-          <span className="mbf-regime-cap mono dim2">{M && M.maxSize != null ? `~${M.maxSize}% max size` : "~70% size"}</span>
-        </div>
-        <div className="mbf-breadth">
-          {breadth.map((b, i) => (
-            <div key={i} className="mbf-br">
-              <span className="mbf-br-k mono dim2">{b.k}</span>
-              <span className={`mbf-br-v mono ${b.tone === "gn" ? "up" : b.tone === "rd" ? "dn" : "warn"}`}>{b.v}</span>
-            </div>
-          ))}
-        </div>
-        <div className="mbf-foot mono dim2">{(() => {
-          if (!M) return "Breadth healthy but tape choppy — size into prints carefully.";
-          const rgc = (window.__BV && window.__BV.critical && window.__BV.critical.regime) || {};
-          const dist = rgc.distribution_state ? String(rgc.distribution_state).replace(/_/g, " ") : null;
-          const b = M.breadthPct != null ? Math.round(M.breadthPct) : null;
-          return `${M.regimeLabel} · ${M.regimeTrend}${b != null ? ` · breadth ${b}%` : ""}${dist ? ` · ${dist}` : ""} — max size ${M.maxSize != null ? M.maxSize : 70}%.`;
-        })()}</div>
-      </div>
-
+    <div className="home-grid-2 mbf">
       {/* PRE-MARKET */}
       <div className="mbf-card" onClick={() => go("premarket")}>
         <div className="mbf-hd">
@@ -1029,7 +981,8 @@ function NewsMarketsBoard({ onTicker, onSurface }) {
     const vt = storyTone(s);
     return (
     <button className={`nm-story nm-story--t-${vt} ${big ? "nm-story--big" : ""}`} onClick={() => s.tickers[0] && onTicker(s.tickers[0][0])}>
-      {big && <div className="nm-feat-img"><span className="mono">◧ MARKETS</span></div>}
+      {/* Removed the decorative nm-feat-img hero banner — our news feed has no
+          article images, so it was 132px of empty gradient (2026-06-08). */}
       <div className="nm-head">{s.head}</div>
       <div className="nm-meta mono">
         {s.live && <span className="nm-live">● LIVE</span>}
@@ -1154,7 +1107,7 @@ function HomeHero({ mode, onSurface }) {
     { l: "FEAR/GREED", v: M && M.fearGreed != null ? String(M.fearGreed) : (SV ? "—" : "62"), tone: fgTone(M && M.fearGreed != null ? M.fearGreed : 62), pct: M && M.fearGreed != null ? M.fearGreed : (SV ? 0 : 62) },
     { l: "BREADTH",    v: M && M.breadthPct != null ? Math.round(M.breadthPct) + "%" : (SV ? "—" : "56%"), tone: "gn", pct: M && M.breadthPct != null ? Math.round(M.breadthPct) : (SV ? 0 : 56) },
     { l: "PUT/CALL",   v: M && M.putCall != null ? M.putCall.toFixed(2) : (SV ? "—" : "0.78"), tone: "gn", pct: SV && !(M && M.putCall != null) ? 0 : 60 },
-    { l: "NEW HIGHS",  v: M && M.newHighs != null ? String(M.newHighs) : "—", tone: "gn", pct: 50 },
+    { l: "NEW H/L",    v: (M && (M.newHighs != null || M.newLows != null)) ? `${M.newHighs != null ? M.newHighs : "—"}/${M.newLows != null ? M.newLows : "—"}` : "—", tone: (M && M.newLows != null && M.newHighs != null && M.newLows > M.newHighs) ? "rd" : "gn", pct: 50 },
     { l: ">200-DMA",   v: M && M.breadth200 != null ? Math.round(M.breadth200) + "%" : "—", tone: "gn", pct: M && M.breadth200 != null ? Math.round(M.breadth200) : 55 },
     { l: "MAX SIZE",   v: M && M.maxSize != null ? M.maxSize + "%" : (SV ? "—" : "70%"), tone: "amb", pct: M && M.maxSize != null ? M.maxSize : (SV ? 0 : 70) },
   ];
@@ -1221,7 +1174,7 @@ function HomeHero({ mode, onSurface }) {
           <div className="qh-cap mono">MARKET MOOD</div>
           <div className="qh-mood-row">
             {mood.map((m, i) => (
-              <div key={i} className={`qh-m qh-m--${m.tone}`} title={m.l === "FEAR/GREED" ? "Computed proxy from breadth + put/call (not the CNN Fear & Greed index)" : undefined}>
+              <div key={i} className={`qh-m qh-m--${m.tone}`} title={m.l === "FEAR/GREED" ? "Computed proxy from breadth + put/call (not the CNN Fear & Greed index)" : m.l === "NEW H/L" ? "52-week new highs / new lows in the universe (more lows than highs turns this red)" : undefined}>
                 <span className="qh-m-l mono">{m.l === "FEAR/GREED" ? "F&G PROXY" : m.l}</span>
                 <span className="qh-m-v mono">{m.v}</span>
                 <span className="qh-m-bar"><i style={{ width: `${m.pct}%` }} /></span>
