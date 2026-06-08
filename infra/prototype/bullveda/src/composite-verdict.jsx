@@ -63,6 +63,13 @@ const _cvImpl = function (ticker, mode) {
   const verdict = _engVerdict || (net >= 66 ? "BUY" : net >= 50 ? "WATCH" : net >= 40 ? "AVOID" : "PASS");
   const verdictSource = _engVerdict ? "engine" : "derived";
   const vtone = _engVerdict ? _vt(_engVerdict) : (net >= 66 ? "gn" : net >= 50 ? "amb" : "rd");
+  // ── market-gate awareness (fix b/c) ── a market-wide entry block isn't a
+  // bearish stock: relabel the directional chip to Neutral/amber so the word
+  // and the tone agree, and surface the engine reason for downstream notes.
+  const _engReason = (_engRaw && typeof _engRaw === "object") ? (_engRaw.reason || null) : null;
+  const _gated = window.isMarketGateBlock ? window.isMarketGateBlock(verdict, _engReason, net) : false;
+  const biasLabel = _gated ? "Neutral" : (window.secBias ? window.secBias(verdict) : verdict);
+  const vtoneFinal = _gated ? "amb" : vtone;
   const agree   = lenses.filter(l => l.tone === "gn").length;
   const caution = lenses.filter(l => l.tone === "amb").length;
   const fail    = lenses.filter(l => l.tone === "rd").length;
@@ -76,7 +83,7 @@ const _cvImpl = function (ticker, mode) {
   const sd = Math.sqrt(lenses.reduce((a, l) => a + (l.v - mean) ** 2, 0) / lenses.length);
   const conf = sd < 12 ? "HIGH" : sd < 20 ? "MED" : "LOW";
   const disagree = sd < 12 ? "low" : sd < 20 ? "moderate" : "high";
-  return { net, lensNet, verdict, verdictSource, vtone, conf, disagree, lenses, agree, caution, fail, dissenters, mode };
+  return { net, lensNet, verdict, verdictSource, vtone: vtoneFinal, biasLabel, gated: _gated, reason: _engReason, conf, disagree, lenses, agree, caution, fail, dissenters, mode };
 };
 function compositeVerdict(ticker, mode) {
   const key = (ticker && ticker.symbol || "") + "|" + mode + "|" + (ticker && ticker.score) + "|" + (ticker && ticker.ml && ticker.ml.direction) + "|" + (ticker && ticker._fund ? 1 : 0);
@@ -92,7 +99,7 @@ window.compositeVerdict = compositeVerdict;
 function CompositeVerdict({ ticker, mode, onLens }) {
   const cv = useMemoCV(() => compositeVerdict(ticker, mode), [ticker, mode, ticker && ticker.symbol]);
   const maxW = Math.max(...cv.lenses.map(l => l.w));
-  const biasWord = window.secBias ? window.secBias(cv.verdict) : cv.verdict;
+  const biasWord = cv.biasLabel || (window.secBias ? window.secBias(cv.verdict) : cv.verdict);
   const cvPrompt = () => `In plain English, explain to a beginner why ${ticker.symbol} has an overall ${biasWord} read (score ${cv.net} out of 100, ${mode} timeframe). 3-4 short sentences. Name the 2-3 strongest supporting areas and anything that disagrees, in everyday words.
 Overall: ${biasWord}, ${cv.net}/100, confidence ${cv.conf}.
 Strongest areas: ${cv.lenses.slice().sort((a, b) => b.v - a.v).slice(0, 3).map(l => `${l.k} ${l.v}/100 (${l.why})`).join("; ")}.
@@ -102,8 +109,11 @@ Weakest or disagreeing: ${cv.dissenters.length ? cv.dissenters.slice(0, 3).map(d
       <div className="cv-left">
         <div className="cv-eyebrow mono">COMPOSITE BIAS · {cv.lenses.length} LENSES · <b className="copper">{mode}</b></div>
         <div className="cv-headline">
-          <span className={`cv-verdict cv-verdict--${cv.vtone}`}>{window.secBias ? window.secBias(cv.verdict) : cv.verdict}</span>
-          <span className="cv-net mono">{cv.net}<span className="cv-net-of">/100</span></span>
+          <span className={`cv-verdict cv-verdict--${cv.vtone}`}>{cv.biasLabel || (window.secBias ? window.secBias(cv.verdict) : cv.verdict)}</span>
+          <span className="cv-net mono" title="This stock graded for your active horizon (per-mode composite — reweights catalyst &amp; entry-quality for the timeframe). This is the number that drives the verdict.">{cv.net}<span className="cv-net-of">/100</span></span>
+          {typeof ticker.score === "number" && Math.round(ticker.score) !== cv.net && (
+            <span className="cv-net-alt mono dim2" style={{ fontSize: 12, alignSelf: "flex-end", marginBottom: 5 }} title="Generic, horizon-agnostic 5-pillar score (the number shown on the Scanner). It does NOT reweight catalyst / entry-quality for your timeframe, so it usually reads higher than the per-mode number.">· overall {Math.round(ticker.score)}</span>
+          )}
           <span className="cv-conf mono dim2">conf {cv.conf} · disagreement <b className={cv.disagree === "low" ? "gn-c" : cv.disagree === "high" ? "rd-c" : "amb-c"}>{cv.disagree}</b></span>
         </div>
         <div className="cv-counts mono">

@@ -160,7 +160,7 @@ function HorizonStrip({ ticker, mode, onMode }) {
       <span className="hz-tag mono">HORIZONS</span>
       {modes.map(([m, label, hold]) => {
         const v = cv(ticker, m);
-        const bias = window.secBias ? window.secBias(v.verdict) : v.verdict;
+        const bias = v.biasLabel || (window.secBias ? window.secBias(v.verdict) : v.verdict);
         return (
           <button key={m} className={`hz-cell hz-${v.vtone} ${m === mode ? "is-active" : ""}`} onClick={() => onMode && onMode(m)} title={`Score ${v.net}/100 · ${v.conf} confidence`}>
             <span className="hz-mode mono">{label}<span className="hz-hold dim2"> · {hold}</span></span>
@@ -430,7 +430,7 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
   const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
   const net = cv ? cv.net : (ticker.score || 60);
   const vtone = cv ? cv.vtone : (net >= 66 ? "gn" : net >= 50 ? "amb" : "rd");
-  const bias = window.secBias ? window.secBias(cv ? cv.verdict : ticker.verdict) : (cv ? cv.verdict : ticker.verdict);
+  const bias = cv ? cv.biasLabel : (window.secBias ? window.secBias(ticker.verdict) : ticker.verdict);
   const pillars = ticker.pillars;
   // ── per-mode levels (decisions_by_mode is the authoritative plan for the active
   //    horizon — Position/Invest have different stop/T1/T2/R:R than swing) ──
@@ -516,7 +516,13 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
 
           <div className="dh-verdict">
             <span className={`dh-bias dh-bias--${vtone}`}>{bias}</span>
-            <span className="dh-net mono">{net}<span className="dh-net-of">/100</span></span>
+            <span className="dh-net mono" title="Graded for your active horizon (shown above) — the per-mode composite that drives the verdict.">{net}<span className="dh-net-of">/100</span></span>
+            {typeof ticker.score === "number" && Math.round(ticker.score) !== net && (
+              <span className="dh-net-alt mono" style={{ fontSize: 14, color: "var(--ink-3)", fontWeight: 600 }} title="Generic, horizon-agnostic 5-pillar score (the number shown on the Scanner). It does NOT reweight catalyst / entry-quality for your timeframe, so it usually reads higher than the per-mode number.">· overall {Math.round(ticker.score)}</span>
+            )}
+            {cv && cv.gated && (
+              <span className="dh-gated mono" style={{ fontSize: 11, color: "var(--amb)", marginLeft: 6, fontWeight: 600 }} title="The stock itself isn't bearish — new long entries are blocked market-wide today (crash / distribution-day gate). The directional read is neutral; revisit when the market gate clears.">· entry-gated today</span>
+            )}
             <span className="dh-conf mono">conf {cv ? cv.conf : "—"}</span>
             {cv && (
               <span className="dh-counts">
@@ -655,8 +661,12 @@ function ThesisCard({ ticker, mode }) {
   const [tAi, setTAi] = React.useState(null);   // null | "loading" | text
   const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
   const net = cv ? cv.net : (ticker.score || 60);
-  const bias = window.secBias ? window.secBias(cv ? cv.verdict : ticker.verdict) : (cv ? cv.verdict : ticker.verdict);
+  const bias = cv ? cv.biasLabel : (window.secBias ? window.secBias(ticker.verdict) : ticker.verdict);
   const tone = net >= 66 ? "up" : net >= 50 ? "warn" : "dn";
+  // verdict-derived tone for the BIAS WORD (so word + color agree even when the
+  // numeric score is high but the verdict is gated to Neutral); `tone` above stays
+  // for the numeric score (magnitude color).
+  const vtoneCls = cv ? (cv.vtone === "gn" ? "up" : cv.vtone === "rd" ? "dn" : "warn") : tone;
   const sTone = v => v >= 62 ? "gn" : v >= 46 ? "amb" : "rd";
   const entry = (ticker.pivot || ticker.price || 0) * 1.002;
   const ss = ticker.setupStats || {};
@@ -686,7 +696,7 @@ Levels: entry $${entry.toFixed(2)}, stop $${(ticker.stop || 0).toFixed(2)}, targ
       <div className="thx-head">
         <div className="thx-head-l">
           <span className="thx-tag mono">THESIS</span>
-          <span className={`thx-bias mono kpi-tone--${sTone(net)}`}>{bias} · {net}/100</span>
+          <span className={`thx-bias mono kpi-tone--${cv ? cv.vtone : sTone(net)}`}>{bias} · {net}/100</span>
           <span className="thx-head-sub mono dim2">{mode.toLowerCase()} · synthesized across 14 lenses</span>
         </div>
         <button className="thx-ai-btn aix-btn mono" onClick={writeThesis} disabled={tAi === "loading"}>
@@ -694,7 +704,7 @@ Levels: entry $${entry.toFixed(2)}, stop $${(ticker.stop || 0).toFixed(2)}, targ
         </button>
       </div>
 
-      <div className="thx-line">{ticker.symbol} reads <b className={tone}>{bias}</b> for a {mode.toLowerCase()} hold — a <b>{ticker.setupFamily || "continuation"}</b> setup on a <b className={tone}>{net}/100</b> cross-lens score, into {erTxt}.</div>
+      <div className="thx-line">{ticker.symbol} reads <b className={vtoneCls}>{bias}</b> for a {mode.toLowerCase()} hold — a <b>{ticker.setupFamily || "continuation"}</b> setup on a <b className={tone}>{net}/100</b> cross-lens score, into {erTxt}.</div>
 
       <div className="thx-cols">
         <div className="thx-col thx-col--bull">
@@ -844,7 +854,7 @@ function BuyChecklist({ ticker, mode }) {
   const erDays = ticker.earnings ? ticker.earnings.days : null;
   const hold = ticker.holdDays || 9;
   const checks = [
-    { k: "Bias is Bullish", v: `${bias} ${net}`, need: "≥66", pass: net >= 66 },
+    { k: "Composite ≥ 66", v: `${net}/100`, need: "≥66", pass: net >= 66 },
     { k: "Lens confluence", v: cv ? `${cv.agree}/${cv.lenses.length}` : "—", need: "majority", pass: cv ? cv.agree >= Math.ceil(cv.lenses.length * 0.5) : false },
     { k: "Technicals aligned", v: lensV("Technicals") != null ? `${lensV("Technicals")}` : "—", need: "≥60", pass: (lensV("Technicals") || 0) >= 60 },
     { k: "Pattern / SMC", v: lensV("Patterns") != null ? `${lensV("Patterns")}` : "—", need: "≥60", pass: (lensV("Patterns") || 0) >= 60 },
@@ -980,7 +990,7 @@ function ConvictionMeter({ cv }) {
     <div className="cm">
       <div className="cm-net">
         <span className={`cm-num kpi-tone--${tone}`}>{cv.net}</span><span className="cm-of mono dim2">/100</span>
-        <span className={`cm-bias mono kpi-tone--${tone}`} style={{ marginLeft: 10 }}>{window.secBias ? window.secBias(cv.verdict) : cv.verdict}</span>
+        <span className={`cm-bias mono kpi-tone--${cv.vtone}`} style={{ marginLeft: 10 }}>{cv.biasLabel || (window.secBias ? window.secBias(cv.verdict) : cv.verdict)}</span>
         <span className="mono dim2" style={{ marginLeft: 10, fontSize: 11 }}>conf {cv.conf}</span>
       </div>
       <div className="cm-bar">

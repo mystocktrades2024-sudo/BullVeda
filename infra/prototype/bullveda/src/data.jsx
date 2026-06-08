@@ -753,6 +753,17 @@ const SEC_BIAS = {
 };
 function secBias(v) { return (SEC_BIAS[v] && SEC_BIAS[v].label) || v; }
 function secBiasTone(v) { return (SEC_BIAS[v] && SEC_BIAS[v].tone) || "amb"; }
+// A market-WIDE entry block (crash / distribution day, breadth collapse, regime
+// flat / risk-off, panic) stops NEW longs without making the underlying stock
+// bearish. Detect it so a timing block renders as a neutral "hold" instead of a
+// directional "Bearish" — and so the word and the tone can never disagree.
+const _MKT_GATE_RE = /crash[ -]?day|distribution[ -]?day|entry[ -]?day gate|no new longs|breadth|spy down|market[- ]?wide|regime (flat|risk[- ]?off)|risk[- ]?off|panic/i;
+function isMarketGateBlock(verdict, reason, score) {
+  if (!reason || !/AVOID|PASS|WAIT/i.test(String(verdict || ""))) return false;
+  if (!_MKT_GATE_RE.test(String(reason))) return false;
+  return (typeof score === "number" ? score : 60) >= 55; // only re-label non-weak names
+}
+window.isMarketGateBlock = isMarketGateBlock;
 const SEC_DISCLAIMER = "Informational and educational analytics only — not investment advice or a recommendation to buy or sell any security. Signals describe a quantitative directional bias, not a solicitation. Paper mode · no live orders. Past performance does not guarantee future results.";
 const SEC_DISCLAIMER_SHORT = "Informational only · not investment advice · paper mode";
 
