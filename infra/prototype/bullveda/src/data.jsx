@@ -186,6 +186,7 @@ const LENSES = [
   { id: "portfolio",   label: "Portfolio · Book",   kbd: "P", q: "Does this fit my book?",         accent: "copper", verdict: "gn"  },
   { id: "mledge",      label: "AI Edge",            kbd: "M", q: "3-headed model forecast",        accent: "violet", verdict: "gn"  },
   { id: "time",        label: "Time Anatomy",       kbd: "8", q: "When does this resolve? (T1/T2)", accent: "copper", verdict: "gn"  },
+  { id: "tv",          label: "TradingView",        kbd: "9", q: "Live chart + push levels to desktop", accent: "blue",  verdict: "gn"  },
 ];
 
 // Watchlist rows (mock)
