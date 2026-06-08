@@ -254,14 +254,34 @@ def submit_call(trade_client, order: dict) -> tuple[bool, str]:
         )
         resp = trade_client.submit_order(req)
         oid = str(getattr(resp, "id", "submitted"))
-        _eq._slack_notify(
-            f"📈 OPTIONS (paper) BUY {order['contracts']}x {order['occ_symbol']} "
-            f"@ ${order['limit_price']:.2f} · {order['ticker']} ${order['strike']:.0f}C "
-            f"{order['dte']}DTE · risk ${order['premium_at_risk']:,.0f} ({order['premium_risk_pct']}%)"
-        )
+        # Per-order Slack omitted — a single consolidated morning summary is posted
+        # by _post_buy_summary() at the end of the run (see main()).
         return True, oid
     except Exception as e:
         return False, str(e)
+
+
+def _post_buy_summary(filled: list[dict], attempted: list[dict], skips: list[dict]) -> None:
+    """One consolidated Slack post per morning options auto-buy run."""
+    try:
+        if filled:
+            total = sum(p.get("premium_at_risk", 0) for p in filled)
+            lines = "\n".join(
+                f"• {p['ticker']} 1x ${p['strike']:.0f}C {p['expiry']} ({p['dte']}DTE) "
+                f"@ ${p['limit_price']:.2f} · risk ${p['premium_at_risk']:,.0f}"
+                for p in filled
+            )
+            msg = (f"📈 *Options auto-buy (paper)* — {len(filled)}/{len(attempted)} filled · "
+                   f"${total:,.0f} total premium-at-risk\n{lines}")
+        elif attempted:
+            failed = ", ".join(f"{p['ticker']} ({p.get('error','?')})" for p in attempted)
+            msg = f"📈 *Options auto-buy (paper)* — 0 filled · {len(attempted)} attempted, all failed: {failed}"
+        else:
+            msg = (f"📈 *Options auto-buy (paper)* — no fills today "
+                   f"({len(skips)} candidate(s) skipped: too pricey / illiquid / no BUYs)")
+        _eq._slack_notify(msg)
+    except Exception:
+        pass
 
 
 def _log(entry: dict) -> None:
@@ -310,7 +330,10 @@ def main() -> int:
         picks = [r for r in bundle["all_scored"]
                  if (r.get("decision") or {}).get("verdict", "") in verdicts]
     if not picks:
-        print("No BUY picks in bundle. Nothing to do."); return 0
+        print("No BUY picks in bundle. Nothing to do.")
+        if not args.dry_run:
+            _post_buy_summary([], [], [])  # confirm the job ran on a quiet day
+        return 0
 
     mode = "DRY-RUN" if args.dry_run else "SUBMIT"
     print(f"=== Options Executor ({mode}) — {len(picks)} BUY picks · structure={o['structure']} ===")
@@ -357,6 +380,7 @@ def main() -> int:
         print(("  ✅ " if ok else "  ❌ ") + f"{p['ticker']} {p['occ_symbol']} → {info}")
         submitted += int(ok)
     print(f"\nSubmitted {submitted}/{len(orders)} option orders (paper).")
+    _post_buy_summary([p for p in orders if p.get("submitted")], orders, skips)
     return 0
 
 
