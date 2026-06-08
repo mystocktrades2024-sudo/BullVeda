@@ -1095,6 +1095,8 @@ function HomeHero({ mode, onSurface }) {
   const go = (id) => () => onSurface && onSurface(id);
   const scan = (f) => () => { window.__scanFilter = f; go("signal-scanner")(); };
   const M = (window.__BV && window.__BV.market) || null;
+  const _liveReg = useLiveRegime();
+  const _narr = _liveReg && _liveReg.narrative;
   // funnel from the live per-mode verdicts (consistent with TopSetups/Discovery);
   // falls back to the critical funnel only when no live universe is loaded.
   const F = realFunnel(mode) || (M ? M.funnel : null);
@@ -1134,10 +1136,11 @@ function HomeHero({ mode, onSurface }) {
       </div>
 
       <div className="qh-band">
-        <button className="qh-regime" onClick={go("signal-scanner")} title="Multi-factor regime → open Scanner">
+        <button className="qh-regime" onClick={go("signal-scanner")} title={(_narr && _narr._source) || "Multi-factor regime → open Scanner"}>
           <span className="qh-cap mono">REGIME · TAPE</span>
           <span className="qh-regime-v mono"><b className={regOn === "—" ? "dim2" : regOn === "RISK-ON" ? "up" : "dn"}>{regOn}</b>{regTrend ? <><span className="qh-sep">·</span><b className="amb">{regTrend}</b></> : null}</span>
           <span className="qh-regime-wr mono dim2">multi-factor{M && M.maxSize != null ? ` · max size ${M.maxSize}%` : ""}</span>
+          {_narr && _narr.text ? <span className="qh-regime-read">{_narr.text}</span> : null}
         </button>
 
         <div className="qh-funnel">
@@ -1222,12 +1225,7 @@ function LiveTapeLine() {
   const trajTone = narr && narr.trajectory ? ({ recovering: "up", firm: "up", fading: "dn", weak: "dn" }[narr.trajectory.word] || "amb") : "amb";
   return (
     <>
-    {narr && narr.text ? (
-      <div className="hh-regime-read" style={{ margin: "1px 0 0", fontSize: 12, lineHeight: 1.45, color: "var(--ink-2)" }}
-           title={(narr._source || "") + "  ·  Day-dynamic strategist read composed from our own signals; the regime label itself is a stable quant classification."}>
-        {narr.text}
-      </div>
-    ) : null}
+    {/* Narrative now lives inside the hero REGIME · TAPE box (qh-regime-read). */}
     <div className="hh-brief" style={{ marginTop: 2 }}>
       <span className="hh-brief-tag mono" style={{ background: "rgba(80,200,140,.10)", color: "var(--up,#3fb96b)" }}>
         LIVE TAPE{live.market_open === false ? " · CLOSED" : ""}
