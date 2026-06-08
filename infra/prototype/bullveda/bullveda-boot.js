@@ -446,6 +446,7 @@
       breadthPct: breadth, breadth100: num(mb.pct_above_100d), breadth200: num(mb.pct_above_200d),
       newHighs: num(mb.new_highs), newLows: num(mb.new_lows),
       spy: num(rg.spy_price), qqq: num(rg.qqq_price),
+      spyDailyChg: num(rg.spy_daily_chg, null), distributionDays: num(rg.distribution_days, null),
       putCall: pc, fearGreed: fg, fgLabel: (mac.put_call && mac.put_call.signal) || null,
       funnel: { universe: num(c.scan_count, 0), bullish: num(c.buy_count, 0), neutral: num(c.watch_count, 0), bearish: num(c.killed_count, 0), short: num(c.short_count, 0) },
       sectors: c.sector_etf || null, movers: c.market_movers || null,

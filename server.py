@@ -2521,6 +2521,56 @@ async def backtest_report_regen(auth: HTTPBasicCredentials = Depends(_check_auth
         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=500)
 
 
+@app.post("/api/tv/push")
+async def tv_push_levels(t: str, mode: str = "swing",
+                         auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Prototype (2026-06-07): push the structural levels (entry/stop/T1/T2) for
+    a ticker onto the user's logged-in TradingView Desktop app via the CDP bridge.
+
+    Backs the "▲ Push levels to desktop" button on the BullVeda TradingView lens.
+    Shells out to infra/prototype/tv_bridge/find_and_push.mjs, which draws on a
+    desktop chart already showing that symbol (it never changes a chart's symbol
+    or creates tabs). Requires TradingView Desktop running with --remote-debugging
+    -port=9222. Honest-fail: if the bridge or a matching tab is absent, returns a
+    message the lens shows as a CLI fallback. TV is a visual layer only — this
+    never feeds the scoring path (EODHD stays single-source)."""
+    import subprocess as _subp, re as _re
+    sym = (t or "").upper().strip()
+    if not _re.fullmatch(r"[A-Z0-9.\-]{1,12}", sym):
+        return JSONResponse({"ok": False, "error": "bad ticker"}, status_code=400)
+    if mode not in ("swing", "position", "invest"):
+        mode = "swing"
+    script = BASE_DIR / "infra" / "prototype" / "tv_bridge" / "find_and_push.mjs"
+    if not script.exists():
+        return JSONResponse({"ok": False, "error": "bridge script not found"}, status_code=404)
+    cache = BASE_DIR / "cache" / "target_engine" / f"{sym}_{mode}.json"
+    if not cache.exists():
+        return JSONResponse({"ok": False, "needs_plan": True,
+                             "message": f"No structural plan cached for {sym} ({mode})."}, status_code=200)
+    try:
+        proc = _subp.run(
+            ["node", str(script), sym, mode],
+            capture_output=True, text=True, timeout=90, cwd=str(BASE_DIR),
+        )
+        out = (proc.stdout or "") + (proc.stderr or "")
+        if proc.returncode == 2 or "No chart showing" in out:
+            return JSONResponse({"ok": False, "needs_tab": True,
+                                 "message": f"Open a TradingView Desktop tab on {sym} first, then push."}, status_code=200)
+        if proc.returncode != 0:
+            return JSONResponse({"ok": False, "error": "bridge failed",
+                                 "hint": "Is TradingView Desktop running with --remote-debugging-port=9222?",
+                                 "stderr_tail": out[-400:]}, status_code=200)
+        return JSONResponse({"ok": True,
+                             "message": f"Pushed {sym} {mode} levels (entry/stop/T1/T2) to your desktop chart.",
+                             "stdout_tail": out[-400:]})
+    except FileNotFoundError:
+        return JSONResponse({"ok": False, "error": "node not installed on server host"}, status_code=200)
+    except _subp.TimeoutExpired:
+        return JSONResponse({"ok": False, "error": "bridge timed out (90s) — is the desktop app responsive?"}, status_code=200)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=200)
+
+
 @app.get("/api/backtest-report/history")
 async def backtest_report_history(auth: HTTPBasicCredentials = Depends(_check_auth)):
     """List available backtest reports, newest first."""

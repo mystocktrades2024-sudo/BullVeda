@@ -729,15 +729,30 @@ function realFunnel(mode) {
   if (!rows.length) return null;
   const m = String(mode || window.__tmode || "swing").toLowerCase();
   const key = m.indexOf("pos") === 0 ? "position" : m.indexOf("inv") === 0 ? "investment" : "swing";
-  let bull = 0, neu = 0, bear = 0;
+  let bull = 0, neu = 0, bear = 0, gateBlocked = 0;
   rows.forEach(r => {
-    const dbm = (r._raw && r._raw.decisions_by_mode) || null;
-    const v = String((dbm && dbm[key] && dbm[key].verdict) || r.verdict || "").toUpperCase();
+    const raw = r._raw || {};
+    const dbm = raw.decisions_by_mode || null;
+    let v = String((dbm && dbm[key] && dbm[key].verdict) || r.verdict || "").toUpperCase();
+    // Un-collapse entry/timing-gate AVOIDs. A market-wide gate (SPY crash-day,
+    // distribution days, macro blackout, sector blocklist, earnings blackout)
+    // stamps decisions_by_mode=AVOID on EVERY blocked name even when the name's
+    // own directional read is WAIT/WATCH — which would otherwise paint the whole
+    // universe "bearish" on a single red SPY day (e.g. SPY −2.6% on 2026-06-08 →
+    // 0 bull / 0 neutral / 1000 avoid). When the per-mode verdict is AVOID but the
+    // composite (score-based) verdict is NOT bearish, classify by the composite
+    // read and tally it as an entry-gate block instead of a bearish name.
+    const comp = String(raw.stage || r.verdict || "").toUpperCase(); // = decision.verdict
+    if (v === "AVOID" && comp && comp !== "AVOID" && comp !== "SELL" && comp !== "SHORT") {
+      gateBlocked++;
+      v = comp;
+    }
+    if (v === "WAIT") v = "WATCH";
     if (v === "BUY") bull++;
     else if (v === "SHORT" || v === "AVOID" || v === "SELL") bear++;
     else neu++;
   });
-  return { universe: rows.length, bullish: bull, neutral: neu, bearish: bear };
+  return { universe: rows.length, bullish: bull, neutral: neu, bearish: bear, gateBlocked: gateBlocked };
 }
 
 // Build each engine's top-5 from the REAL scan universe (audit-log intersected).
@@ -1185,6 +1200,21 @@ function HomeHero({ mode, onSurface }) {
             <button className="qh-fstat qh-fstat--amb"    onClick={scan("WATCH")} title="Scanner · Neutral"><b>{watch}</b><span>neutral</span></button>
             <button className="qh-fstat qh-fstat--rd"     onClick={scan("SHORT")} title="Scanner · Avoid — excluded from longs (not necessarily shortable)"><b>{avoid}</b><span>avoid</span></button>
           </div>
+          {F && F.gateBlocked > 0 ? (() => {
+            // Market-wide entry gate active — explain the 0 (or few) longs so a single
+            // red SPY day doesn't read as "the whole universe is bearish".
+            const dd = M && M.distributionDays, sc = M && M.spyDailyChg;
+            const bits = [];
+            if (sc != null && sc <= -1.5) bits.push(`SPY ${sc.toFixed(1)}%`);
+            if (dd != null && dd >= 7) bits.push(`${dd} distribution days`);
+            const why = bits.length ? bits.join(" · ") : "market-wide entry gate";
+            return (
+              <div className="qh-funnel-gate mono"
+                   title="A market-wide risk gate is blocking NEW long entries today. The entry-gated names are not bearish — they're shown by their own directional read above and excluded from longs only until the gate clears.">
+                ⚠ No new longs today · {why} — {F.gateBlocked} entry-gated (shown by directional read, not bearish)
+              </div>
+            );
+          })() : null}
         </div>
 
         <div className="qh-mood">
