@@ -908,19 +908,35 @@ function NewsMarketsBoard({ onTicker, onSurface }) {
     { head: "Lithium names rebound on supply-cut headlines out of Chile", src: "Reuters", time: "1h", sym: "LAC", tone: "gn", tickers: [["LAC", +5.8]] },
     { head: "Software multiples compress as Street trims FY estimates", src: "Bloomberg", time: "2h", sym: "MDB", tone: "rd", tickers: [["MDB", -4.4]] },
   ]);
-  // sentiment label from EODHD story tone (gn/rd/amb). Honest to the feed — note
-  // most "Is X a good buy" headlines score positive, so BULLISH dominates until
-  // genuine negative news flows.
-  const SENT = { gn: "BULLISH", rd: "BEARISH", amb: "NEUTRAL" };
+  // sentiment label, cross-checked vs today's tape. EODHD news sentiment alone is
+  // noisy (most "Is X a good buy" headlines score positive), so we confirm it
+  // against the primary ticker's daily move: bullish news on a stock that's
+  // actually FALLING ≥1% reads MIXED, not BULLISH (and vice-versa). Grounds the
+  // label in real price action instead of the text model alone.
+  const SENT = { gn: "BULLISH", rd: "BEARISH", amb: "NEUTRAL", mx: "MIXED" };
+  const SENT_TIP = {
+    gn: "Bullish news · confirmed by today's price",
+    rd: "Bearish news · confirmed by today's price",
+    amb: "Neutral news sentiment",
+    mx: "Sentiment vs tape diverge — news & price disagree today",
+  };
+  const storyTone = (s) => {
+    const t = s.tone || "amb";
+    const chg = (s.tickers && s.tickers[0] && typeof s.tickers[0][1] === "number") ? s.tickers[0][1] : null;
+    if (chg == null) return t;
+    if (t === "gn" && chg <= -1) return "mx";   // bullish headline, stock down ≥1%
+    if (t === "rd" && chg >= 1) return "mx";    // bearish headline, stock up ≥1%
+    return t;
+  };
   const Story = ({ s, big }) => {
-    const tone = s.tone || "amb";
+    const vt = storyTone(s);
     return (
-    <button className={`nm-story nm-story--t-${tone} ${big ? "nm-story--big" : ""}`} onClick={() => s.tickers[0] && onTicker(s.tickers[0][0])}>
+    <button className={`nm-story nm-story--t-${vt} ${big ? "nm-story--big" : ""}`} onClick={() => s.tickers[0] && onTicker(s.tickers[0][0])}>
       {big && <div className="nm-feat-img"><span className="mono">◧ MARKETS</span></div>}
       <div className="nm-head">{s.head}</div>
       <div className="nm-meta mono">
         {s.live && <span className="nm-live">● LIVE</span>}
-        <span className={`nm-sent nm-sent--${tone}`} title="News sentiment (EODHD)">{SENT[tone]}</span>
+        <span className={`nm-sent nm-sent--${vt}`} title={SENT_TIP[vt]}>{SENT[vt]}</span>
         <span className="nm-src">{s.src}</span>{s.time ? <span className="dim2"> · {s.time} ago</span> : null}
       </div>
       {big && s.sum && <div className="nm-sum">{s.sum}</div>}

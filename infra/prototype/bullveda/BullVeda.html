@@ -6726,9 +6726,11 @@ body {
 .nm-sent--gn { color: var(--gn); background: color-mix(in oklab, var(--gn) 15%, transparent); }
 .nm-sent--rd { color: var(--rd); background: color-mix(in oklab, var(--rd) 15%, transparent); }
 .nm-sent--amb { color: var(--ink-3); background: color-mix(in oklab, var(--ink-3) 14%, transparent); }
+.nm-sent--mx { color: var(--amb); background: color-mix(in oklab, var(--amb) 16%, transparent); }
 .nm-story { padding-left: 10px; border-left: 2px solid transparent; }
 .nm-story--t-gn { border-left-color: color-mix(in oklab, var(--gn) 55%, transparent); }
 .nm-story--t-rd { border-left-color: color-mix(in oklab, var(--rd) 55%, transparent); }
+.nm-story--t-mx { border-left-color: color-mix(in oklab, var(--amb) 55%, transparent); }
 .nm-sum { font-size: 11px; color: var(--ink-2); line-height: 1.5; margin-top: 7px; text-wrap: pretty; }
 .nm-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
 .nm-chip { font-size: 9.5px; color: var(--ink-1); background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-2); padding: 1px 6px; }
@@ -27841,10 +27843,24 @@ function NewsMarketsBoard({ onTicker, onSurface }) {
     { head: "Lithium names rebound on supply-cut headlines out of Chile", src: "Reuters", time: "1h", sym: "LAC", tone: "gn", tickers: [["LAC", 5.8]] },
     { head: "Software multiples compress as Street trims FY estimates", src: "Bloomberg", time: "2h", sym: "MDB", tone: "rd", tickers: [["MDB", -4.4]] }
   ]);
-  const SENT = { gn: "BULLISH", rd: "BEARISH", amb: "NEUTRAL" };
+  const SENT = { gn: "BULLISH", rd: "BEARISH", amb: "NEUTRAL", mx: "MIXED" };
+  const SENT_TIP = {
+    gn: "Bullish news \xB7 confirmed by today's price",
+    rd: "Bearish news \xB7 confirmed by today's price",
+    amb: "Neutral news sentiment",
+    mx: "Sentiment vs tape diverge \u2014 news & price disagree today"
+  };
+  const storyTone = (s) => {
+    const t = s.tone || "amb";
+    const chg = s.tickers && s.tickers[0] && typeof s.tickers[0][1] === "number" ? s.tickers[0][1] : null;
+    if (chg == null) return t;
+    if (t === "gn" && chg <= -1) return "mx";
+    if (t === "rd" && chg >= 1) return "mx";
+    return t;
+  };
   const Story = ({ s, big }) => {
-    const tone = s.tone || "amb";
-    return /* @__PURE__ */ React.createElement("button", { className: `nm-story nm-story--t-${tone} ${big ? "nm-story--big" : ""}`, onClick: () => s.tickers[0] && onTicker(s.tickers[0][0]) }, big && /* @__PURE__ */ React.createElement("div", { className: "nm-feat-img" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "\u25E7 MARKETS")), /* @__PURE__ */ React.createElement("div", { className: "nm-head" }, s.head), /* @__PURE__ */ React.createElement("div", { className: "nm-meta mono" }, s.live && /* @__PURE__ */ React.createElement("span", { className: "nm-live" }, "\u25CF LIVE"), /* @__PURE__ */ React.createElement("span", { className: `nm-sent nm-sent--${tone}`, title: "News sentiment (EODHD)" }, SENT[tone]), /* @__PURE__ */ React.createElement("span", { className: "nm-src" }, s.src), s.time ? /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " \xB7 ", s.time, " ago") : null), big && s.sum && /* @__PURE__ */ React.createElement("div", { className: "nm-sum" }, s.sum), /* @__PURE__ */ React.createElement("div", { className: "nm-chips" }, s.tickers.map(([t, c], i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "nm-chip mono", onClick: (e) => {
+    const vt = storyTone(s);
+    return /* @__PURE__ */ React.createElement("button", { className: `nm-story nm-story--t-${vt} ${big ? "nm-story--big" : ""}`, onClick: () => s.tickers[0] && onTicker(s.tickers[0][0]) }, big && /* @__PURE__ */ React.createElement("div", { className: "nm-feat-img" }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, "\u25E7 MARKETS")), /* @__PURE__ */ React.createElement("div", { className: "nm-head" }, s.head), /* @__PURE__ */ React.createElement("div", { className: "nm-meta mono" }, s.live && /* @__PURE__ */ React.createElement("span", { className: "nm-live" }, "\u25CF LIVE"), /* @__PURE__ */ React.createElement("span", { className: `nm-sent nm-sent--${vt}`, title: SENT_TIP[vt] }, SENT[vt]), /* @__PURE__ */ React.createElement("span", { className: "nm-src" }, s.src), s.time ? /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " \xB7 ", s.time, " ago") : null), big && s.sum && /* @__PURE__ */ React.createElement("div", { className: "nm-sum" }, s.sum), /* @__PURE__ */ React.createElement("div", { className: "nm-chips" }, s.tickers.map(([t, c], i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "nm-chip mono", onClick: (e) => {
       e.stopPropagation();
       onTicker(t);
     } }, t, c ? /* @__PURE__ */ React.createElement("b", { className: c >= 0 ? "up" : "dn" }, " ", c >= 0 ? "+" : "", c.toFixed(2), "%") : null))));
@@ -28261,106 +28277,203 @@ window.buildConsensus = buildConsensus;
 })();
 </script>
 <script>/* src/surface-smc-patterns.jsx */
-const { useState: useSP, useMemo: useSPm } = React;
-function spHash(s) {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
+const { useState: useSP, useMemo: useSPm, useEffect: useSPe } = React;
+const SP_CAP = 12;
+const SP_HR = typeof HR !== "undefined" && HR || /* @__PURE__ */ (function() {
+  const num = (v, d) => typeof v === "number" && isFinite(v) ? v : d;
+  const sym0 = (s) => String(s || "").split(".")[0].toUpperCase();
+  function rows() {
+    const BV = window.__BV;
+    return BV && BV.ready && BV.scanRows ? BV.scanRows() : [];
   }
-  return h >>> 0;
+  function ledgerSet() {
+    const SL = window.SigLedger;
+    if (!SL || !SL.SIGNALS || !SL.SIGNALS.length) return null;
+    return new Set(SL.SIGNALS.map((s) => s.sym));
+  }
+  function ledgerReal() {
+    return !!(window.SigLedger && window.SigLedger.real);
+  }
+  function inAudit(sym) {
+    const set = ledgerSet();
+    if (!set || !ledgerReal()) return true;
+    return set.has(sym0(sym));
+  }
+  return { num, sym0, rows, inAudit, has: () => rows().length > 0 };
+})();
+const spMoney = (v) => typeof v === "number" && isFinite(v) ? "$" + v.toFixed(2) : "\u2014";
+function spCandidates() {
+  const rows = SP_HR.rows();
+  if (!rows.length) return [];
+  const pool = rows.filter((r) => SP_HR.inAudit(r.sym));
+  const src = pool.length >= SP_CAP ? pool : rows;
+  return src.filter((r) => r.sym).map((r) => ({
+    sym: SP_HR.sym0(r.sym),
+    name: r.name || r.sym,
+    sector: r.sector || "\u2014",
+    px: SP_HR.num(r.price, null),
+    score: SP_HR.num(r.score, -1),
+    verdict: String(r.verdict || "").toUpperCase()
+  })).sort((a, b) => b.score - a.score).slice(0, SP_CAP);
 }
-function spRng(a) {
-  return function() {
-    a |= 0;
-    a = a + 1831565813 | 0;
-    let t = Math.imul(a ^ a >>> 15, 1 | a);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+function spDecision(m) {
+  if (!m || !m.ok) return null;
+  const cur = m.cur_close, r = m.range || {}, draw = m.draw_on_liquidity;
+  const bull = m.bias === "bull", bear = m.bias === "bear";
+  const obs = m.order_blocks || [];
+  let ob = null;
+  if (bull) ob = obs.filter((o) => o.type === "demand" && o.hi <= cur * 1.005).sort((a, b) => b.hi - a.hi)[0] || null;
+  else if (bear) ob = obs.filter((o) => o.type === "supply" && o.lo >= cur * 0.995).sort((a, b) => a.lo - b.lo)[0] || null;
+  const obMid = ob ? (ob.lo + ob.hi) / 2 : null;
+  const obFar = obMid != null && Math.abs(obMid - cur) / cur > 0.12;
+  const nearEntry = !!(ob && !obFar);
+  let entry = null, stop = null;
+  if (nearEntry) {
+    entry = +((ob.lo + ob.hi) / 2).toFixed(2);
+    stop = bull ? +(ob.lo * 0.99).toFixed(2) : +(ob.hi * 1.01).toFixed(2);
+  }
+  let target = null;
+  if (bull) target = draw && draw.price > cur ? draw.price : r.hi > cur ? r.hi : null;
+  else if (bear) target = draw && draw.price < cur ? draw.price : r.lo < cur ? r.lo : null;
+  if (entry != null && target != null) {
+    if (bull && target <= entry) target = Math.max(r.hi, +(entry * 1.02).toFixed(2));
+    else if (bear && target >= entry) target = Math.min(r.lo, +(entry * 0.98).toFixed(2));
+  }
+  let rr = null;
+  if (entry != null && stop != null && target != null) {
+    const risk = Math.abs(entry - stop), rew = Math.abs(target - entry);
+    const valid = bull ? target > entry && entry > stop : target < entry && entry < stop;
+    rr = valid && risk > 0 ? +(rew / risk).toFixed(1) : null;
+  }
+  let verdict, bias;
+  if (!bull && !bear) {
+    verdict = "NO EDGE";
+    bias = "FLAT";
+  } else if (bull) {
+    bias = "LONG";
+    if (!nearEntry) verdict = "EXTENDED";
+    else if (r.zone === "discount" || r.ote_active) verdict = "BUY";
+    else verdict = "WAIT";
+  } else {
+    bias = "SHORT";
+    verdict = nearEntry && r.zone === "premium" ? "SHORT" : "AVOID";
+  }
+  return {
+    verdict,
+    bias,
+    target,
+    stop,
+    rr,
+    entry: nearEntry ? entry : null,
+    score: SP_HR.num(m.smc_score, null),
+    headline: m.headline || (m.bias ? m.bias.toUpperCase() : "\u2014"),
+    zone: r.zone || null,
+    pct: SP_HR.num(r.pct, null),
+    tf: m.tf || "",
+    bull,
+    bear
   };
 }
-const SP_NAMES = {
-  ARGN: ["Argentum Robotics", 213.4, "Tech"],
-  ARCM: ["Arclight Materials", 67.42, "Materials"],
-  NVRH: ["Novara Health", 142.1, "Healthcare"],
-  FLNX: ["Flux Nexus", 88.3, "Tech"],
-  GENO: ["Genoa Biosystems", 29.4, "Healthcare"],
-  DRSH: ["Druseh Energy", 56.1, "Energy"],
-  NEXO: ["Nexora Health", 53.9, "Healthcare"],
-  BORA: ["Borealis Aero", 45.3, "Industrials"],
-  KARO: ["Karo Systems", 124.6, "Tech"],
-  INPR: ["Inproova", 34.1, "Tech"],
-  VLCT: ["Velocity Capital", 198.2, "Finance"],
-  BIVO: ["Bivota Pharma", 72.55, "Healthcare"],
-  ZOTR: ["Zotran Industries", 41.8, "Industrials"],
-  MERC: ["Mercia Semiconductor", 17.2, "Tech"],
-  LIGN: ["Lignite Power", 112.4, "Energy"],
-  AXLE: ["Axle Logistics", 45.3, "Industrials"]
-};
-const SP_METHODS = ["Wyckoff", "Elliott", "Fibonacci", "Volume Profile", "SMC", "Classical", "Harmonic"];
-const SP_SMC = ["Bull BOS", "CHoCH\u2191", "OB retest", "FVG fill", "Liq sweep", "Premium", "Discount", "OTE zone"];
-const SP_PATTERNS = ["VCP base", "Asc. triangle", "Bull flag", "Cup & handle", "Falling wedge", "Inv. H&S", "Double bottom", "Gartley", "Wolfe 5", "Elliott W3"];
-function spBuild(sym) {
-  const meta = SP_NAMES[sym] || [sym, 100, "Tech"];
-  const r = spRng(spHash(sym) ^ 1457);
-  const wyck = ["Accum C", "Accum D", "Markup", "Re-accum", "Distribution"][Math.floor(r() * 5)];
-  const ew = ["Wave 1", "Wave 3", "Wave 5", "Wave 2", "Wave 4"][Math.floor(r() * 5)];
-  const smc = SP_SMC[Math.floor(r() * SP_SMC.length)];
-  const patt = SP_PATTERNS[Math.floor(r() * SP_PATTERNS.length)];
-  const bias = r() < 0.72 ? "LONG" : "SHORT";
-  const align = Math.floor(r() * 4) + 4;
-  const composite = Math.round(40 + align * 7 + r() * 14);
-  const conf = composite >= 80 ? "HIGH" : composite >= 64 ? "MED" : "LOW";
-  const verdict = composite >= 72 ? bias === "LONG" ? "GO" : "SHORT" : composite >= 55 ? "WATCH" : "PASS";
-  const px = meta[1];
-  const target = +(px * (bias === "LONG" ? 1.08 + r() * 0.08 : 0.94 - r() * 0.05)).toFixed(2);
-  const stop = +(px * (bias === "LONG" ? 0.95 - r() * 0.02 : 1.05 + r() * 0.02)).toFixed(2);
-  const rr = +(Math.abs(target - px) / Math.abs(px - stop)).toFixed(1);
-  return { sym, name: meta[0], sector: meta[2], px, wyck, ew, smc, patt, bias, align, composite, conf, verdict, target, stop, rr };
-}
-const SP_ALL = Object.keys(SP_NAMES).map(spBuild).sort((a, b) => b.composite - a.composite);
-const spVTone = (v) => v === "GO" ? "gn" : v === "SHORT" ? "rd" : v === "WATCH" ? "amb" : "ink";
-function SurfaceSMCPatterns({ onTicker }) {
-  const [tab, setTab] = useSP("board");
-  const all = SP_ALL;
-  const go = all.filter((p) => p.verdict === "GO").length;
-  const stacked = all.filter((p) => p.align >= 6).length;
-  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--violet spx" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "SMC / PATTERNS \xB7 MARKET-WIDE STRUCTURE SCANNER"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "SMC / Patterns"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "every name with active smart-money structure + multi-method pattern confluence \xB7 ranked by composite edge \u2192 open the Patterns lens")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement(FreshnessPill, { state: "live", age: "9s" }), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "7-method confluence \xB7 Schwab + EODHD"))), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpis" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--gn" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "GO SIGNALS"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--gn" }, go), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "composite \u2265 72")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--violet" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "STACKED"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--violet" }, stacked), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "6+ of 7 methods agree")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--cy" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "TOP NAME"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--cy" }, all[0].sym), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, all[0].composite, " \xB7 ", all[0].patt)), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--copper" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "AVG R:R"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--copper" }, (all.reduce((a, p) => a + p.rr, 0) / all.length).toFixed(1)), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "go-rated setups")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--gn" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "SCANNED"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--gn" }, all.length), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "universe coverage")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--amb" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "METHOD HIT \xB7 1Y"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--amb" }, "63%"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "confluence \u2265 6"))), /* @__PURE__ */ React.createElement("div", { className: "lab-tabs spx-tabs" }, [["board", "Structure Board"], ["track", "Track Record"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `lab-tab ${tab === id ? "is-on" : ""}`, onClick: () => setTab(id) }, l))), tab === "board" ? /* @__PURE__ */ React.createElement(SPBoard, { all, onTicker }) : /* @__PURE__ */ React.createElement(SPTrack, { onTicker }), /* @__PURE__ */ React.createElement("div", { className: "of-playbook mono" }, /* @__PURE__ */ React.createElement("span", { className: "of-pb-tag", style: { color: "var(--violet)" } }, "COMPOSITE CONFLUENCE"), /* @__PURE__ */ React.createElement("span", { className: "of-pb-txt" }, "Each name is scored 0\u2013100 by how many of ", /* @__PURE__ */ React.createElement("b", null, "7 methods"), " (Wyckoff \xB7 Elliott \xB7 Fibonacci \xB7 Volume Profile \xB7 SMC \xB7 Classical \xB7 Harmonic) align on the same directional thesis. ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "\u226572"), " = GO, ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "55\u201371"), " = WATCH, ", /* @__PURE__ */ React.createElement("b", null, "<55"), " = PASS. Click a row \u2192 the full Patterns lens with all theory sub-tabs.")), /* @__PURE__ */ React.createElement("div", { className: "pm-note mono dim2" }, "Structure detected on Schwab OHLCV + EODHD history. The composite is the same engine as the Patterns lens ", /* @__PURE__ */ React.createElement("b", null, "Confluence"), " tab, run across the universe. ", /* @__PURE__ */ React.createElement("b", null, "Not advice"), " \u2014 a confluence signal to investigate."));
-}
-function SPBoard({ all, onTicker }) {
-  const [sort, setSort] = useSP("composite");
-  const rows = useSPm(() => [...all].sort((a, b) => sort === "composite" ? b.composite - a.composite : sort === "rr" ? b.rr - a.rr : b.align - a.align), [sort, all]);
-  return /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("div", { className: "aip-board-bar", style: { display: "flex", justifyContent: "space-between", marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, all.length, " names with active structure \xB7 ranked by confluence"), /* @__PURE__ */ React.createElement("div", { className: "seg" }, [["composite", "Composite"], ["align", "Methods agree"], ["rr", "R:R"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `seg-btn ${sort === id ? "is-on" : ""}`, onClick: () => setSort(id) }, l)))), /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl spx-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "#"), /* @__PURE__ */ React.createElement("th", null, "Symbol"), /* @__PURE__ */ React.createElement("th", null, "Verdict"), /* @__PURE__ */ React.createElement("th", null, "Bias"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Composite"), /* @__PURE__ */ React.createElement("th", null, "Methods (7)"), /* @__PURE__ */ React.createElement("th", null, "Wyckoff"), /* @__PURE__ */ React.createElement("th", null, "Elliott"), /* @__PURE__ */ React.createElement("th", null, "SMC"), /* @__PURE__ */ React.createElement("th", null, "Pattern"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "R:R"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((p, i) => /* @__PURE__ */ React.createElement("tr", { key: p.sym, onClick: () => onTicker(p.sym, "patterns"), style: { cursor: "pointer" } }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, /* @__PURE__ */ React.createElement("b", { className: i < 3 ? "vio" : "" }, i + 1)), /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, p.sym), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " $", p.px.toFixed(0))), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `aip-verdict aip-verdict--${spVTone(p.verdict)}` }, p.verdict)), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: p.bias === "LONG" ? "up" : "dn" }, p.bias)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, /* @__PURE__ */ React.createElement("b", { className: `kpi-tone--${p.composite >= 72 ? "gn" : p.composite >= 55 ? "amb" : "ink"}` }, p.composite)), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: "spx-meth" }, Array.from({ length: 7 }).map((_, j) => /* @__PURE__ */ React.createElement("span", { key: j, className: `spx-meth-dot ${j < p.align ? "on" : ""}` })), /* @__PURE__ */ React.createElement("span", { className: "mono dim2", style: { marginLeft: 6 } }, p.align, "/7"))), /* @__PURE__ */ React.createElement("td", { className: "mono dim2", style: { fontSize: 11 } }, p.wyck), /* @__PURE__ */ React.createElement("td", { className: "mono dim2", style: { fontSize: 11 } }, p.ew), /* @__PURE__ */ React.createElement("td", { className: "mono", style: { fontSize: 11 } }, /* @__PURE__ */ React.createElement("span", { className: "spx-tag" }, p.smc)), /* @__PURE__ */ React.createElement("td", { className: "mono", style: { fontSize: 11 } }, /* @__PURE__ */ React.createElement("span", { className: "spx-tag spx-tag--v" }, p.patt)), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${p.rr >= 2 ? "up" : "warn"}` }, p.rr), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, "\u203A"))))));
-}
-function SPTrack({ onTicker }) {
-  const led = useSPm(() => {
-    let s = 367853;
-    const rng = () => {
-      s = s * 1103515245 + 12345 & 2147483647;
-      return s / 2147483647;
-    };
-    const syms = Object.keys(SP_NAMES);
-    const out = [];
-    for (let i = 0; i < 30; i++) {
-      const sym = syms[Math.floor(rng() * syms.length)];
-      const align = Math.floor(rng() * 4) + 4;
-      const wk = Math.floor(rng() * 50) + 1;
-      const bull = rng() < 0.74;
-      const fwd = +((rng() - (align >= 6 ? 0.32 : 0.5)) * 20 * (bull ? 1 : -1)).toFixed(1);
-      out.push({ sym, align, wk, fwd, bull, patt: SP_PATTERNS[Math.floor(rng() * SP_PATTERNS.length)], hit: bull ? fwd > 0 : fwd < 0 });
+const spVTone = (v) => v === "BUY" || v === "GO" ? "gn" : v === "SHORT" || v === "AVOID" ? "rd" : v === "WAIT" || v === "EXTENDED" ? "amb" : "ink";
+function useSPBoard() {
+  const served = !!window.__BV;
+  const cands = useSPm(() => served ? spCandidates() : [], [served]);
+  const candKey = cands.map((c) => c.sym).join(",");
+  const [map, setMap] = useSP({});
+  const [pending, setPending] = useSP(served && cands.length > 0);
+  useSPe(() => {
+    if (!served || !cands.length || !(window.__BV && window.__BV.fetchPattern)) {
+      setPending(false);
+      return;
     }
-    return out.sort((a, b) => a.wk - b.wk);
-  }, []);
-  const [f, setF] = useSP("all");
-  const resolved = led.length, hits = led.filter((l) => l.hit).length, hr = resolved ? hits / resolved * 100 : 0;
-  const stacked = led.filter((l) => l.align >= 6);
-  const stHr = stacked.length ? stacked.filter((l) => l.hit).length / stacked.length * 100 : 0;
-  const avg = resolved ? led.reduce((a, l) => a + (l.bull ? l.fwd : -l.fwd), 0) / resolved : 0;
-  const rows = led.filter((l) => f === "all" || (f === "hit" ? l.hit : !l.hit));
-  return /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("div", { className: "mpf-jr-kpis", style: { display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 8, marginBottom: 12 } }, /* @__PURE__ */ React.createElement(SPTk, { l: "Resolved \xB7 1Y", v: resolved, s: "setups scored", tone: "violet" }), /* @__PURE__ */ React.createElement(SPTk, { l: "Hit rate", v: `${hr.toFixed(0)}%`, s: `${hits} of ${resolved}`, tone: hr >= 55 ? "gn" : "amb" }), /* @__PURE__ */ React.createElement(SPTk, { l: "Stacked (6+) hit", v: `${stHr.toFixed(0)}%`, s: `${stacked.length} high-confluence`, tone: stHr >= 60 ? "gn" : "amb" }), /* @__PURE__ */ React.createElement(SPTk, { l: "Avg fwd 21d", v: `${avg >= 0 ? "+" : ""}${avg.toFixed(1)}%`, s: "thesis-aligned", tone: avg >= 0 ? "gn" : "rd" }), /* @__PURE__ */ React.createElement(SPTk, { l: "Edge", v: hr >= 55 ? "REAL" : "THIN", s: "vs 50% coin", tone: hr >= 55 ? "gn" : "amb" })), /* @__PURE__ */ React.createElement("div", { className: "aip-board-bar", style: { display: "flex", justifyContent: "space-between", marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, resolved, " pattern/SMC setups scored at +21 trading days \xB7 confluence \u22656 cohort highlighted"), /* @__PURE__ */ React.createElement("div", { className: "seg" }, [["all", "All"], ["hit", "Hits"], ["fail", "Misses"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `seg-btn ${f === id ? "is-on" : ""}`, onClick: () => setF(id) }, l)))), /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl spx-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "When"), /* @__PURE__ */ React.createElement("th", null, "Sym"), /* @__PURE__ */ React.createElement("th", null, "Pattern"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Methods"), /* @__PURE__ */ React.createElement("th", null, "Bias"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Fwd 21d"), /* @__PURE__ */ React.createElement("th", null, "Outcome"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((l, i) => /* @__PURE__ */ React.createElement("tr", { key: i, onClick: () => onTicker(l.sym, "patterns"), style: { cursor: "pointer" } }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, l.wk, "w ago"), /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, l.sym)), /* @__PURE__ */ React.createElement("td", { className: "mono", style: { fontSize: 11 } }, /* @__PURE__ */ React.createElement("span", { className: "spx-tag spx-tag--v" }, l.patt)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim2" }, l.align, "/7"), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: l.bull ? "up" : "dn" }, l.bull ? "LONG" : "SHORT")), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${l.fwd >= 0 ? "up" : "dn"}` }, /* @__PURE__ */ React.createElement("b", null, l.fwd >= 0 ? "+" : "", l.fwd, "%")), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `aip-out kpi-tone--${l.hit ? "gn" : "rd"}` }, l.hit ? "\u2713 HIT" : "\u2715 MISS")))))), /* @__PURE__ */ React.createElement("div", { className: "of-playbook mono" }, /* @__PURE__ */ React.createElement("span", { className: "of-pb-tag", style: { color: "var(--violet)" } }, "CONFLUENCE EDGE"), /* @__PURE__ */ React.createElement("span", { className: "of-pb-txt" }, "High-confluence setups (6+ of 7 methods aligned) resolve in-thesis ", /* @__PURE__ */ React.createElement("b", { className: "up" }, stHr.toFixed(0), "%"), " of the time over 21 days \u2014 meaningfully above the ", hr.toFixed(0), "% base rate. Confluence is the edge.")));
+    let alive = true;
+    setPending(true);
+    const seed = {};
+    cands.forEach((c) => {
+      try {
+        const cached = window.__BV.patternCached && window.__BV.patternCached("smc", c.sym, "SWING");
+        if (cached) seed[c.sym] = cached;
+      } catch (e) {
+      }
+    });
+    if (Object.keys(seed).length) setMap((m) => ({ ...m, ...seed }));
+    Promise.all(cands.map(
+      (c) => window.__BV.fetchPattern("smc", c.sym, "SWING").then((d) => ({ sym: c.sym, d: d || null })).catch(() => ({ sym: c.sym, d: null }))
+    )).then((results) => {
+      if (!alive) return;
+      const next = {};
+      results.forEach((r) => {
+        next[r.sym] = r.d;
+      });
+      setMap((m) => ({ ...m, ...next }));
+      setPending(false);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [candKey, served]);
+  const rows = useSPm(() => {
+    if (!served) return null;
+    return cands.map((c) => {
+      const m = map[c.sym];
+      const d = m && m.ok ? spDecision(m) : null;
+      if (!d) return null;
+      return {
+        sym: c.sym,
+        name: c.name,
+        sector: c.sector,
+        px: SP_HR.num(c.px, m ? SP_HR.num(m.cur_close, null) : null),
+        verdict: d.verdict,
+        bias: d.bias,
+        score: d.score,
+        headline: d.headline,
+        zone: d.zone,
+        pct: d.pct,
+        tf: d.tf,
+        entry: d.entry,
+        stop: d.stop,
+        target: d.target,
+        rr: d.rr
+      };
+    }).filter(Boolean).sort((a, b) => SP_HR.num(b.score, -1) - SP_HR.num(a.score, -1));
+  }, [candKey, map, served]);
+  return { rows, loading: pending, served, scanned: cands.length };
 }
-function SPTk({ l, v, s, tone }) {
-  return /* @__PURE__ */ React.createElement("div", { className: `pf-tile pf-tile--${tone}` }, /* @__PURE__ */ React.createElement("div", { className: "pf-tile-l mono dim2" }, l), /* @__PURE__ */ React.createElement("div", { className: `pf-tile-v mono kpi-tone--${tone}` }, v), /* @__PURE__ */ React.createElement("div", { className: "pf-tile-s mono dim2" }, s));
+function SurfaceSMCPatterns({ onTicker }) {
+  const { rows, loading, served, scanned } = useSPBoard();
+  if (!served) return /* @__PURE__ */ React.createElement(SPDemo, { onTicker });
+  const have = Array.isArray(rows) ? rows : [];
+  const go = have.filter((p) => p.verdict === "BUY" || p.verdict === "SHORT").length;
+  const longs = have.filter((p) => p.bias === "LONG").length;
+  const top = have[0] || null;
+  const rrRows = have.filter((p) => p.rr != null);
+  const avgRR = rrRows.length ? (rrRows.reduce((a, p) => a + p.rr, 0) / rrRows.length).toFixed(1) : "\u2014";
+  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--violet spx" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "SMC \xB7 MARKET-WIDE SMART-MONEY STRUCTURE SCANNER"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "SMC / Patterns"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "top scan names with REAL smart-money structure (order blocks \xB7 FVG \xB7 BoS/CHoCH \xB7 draw on liquidity) computed per-ticker \xB7 ranked by structure score \u2192 open the per-ticker SMC / Patterns lens")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement(FreshnessPill, { state: loading ? "loading" : "live" }), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "engines/smc.py \xB7 daily bars \xB7 \u2264", SP_CAP, " names"))), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpis" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--gn" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "ACTIONABLE"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--gn" }, have.length ? go : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "BUY / SHORT setups")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--violet" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "LONG BIAS"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--violet" }, have.length ? longs : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "of ", have.length, " with structure")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--cy" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "TOP NAME"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--cy" }, top ? top.sym : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, top ? `${top.score != null ? top.score + " \xB7 " : ""}${top.headline}` : "\u2014")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--copper" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "AVG R:R"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--copper" }, avgRR), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "near-entry setups")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--gn" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "STRUCTURE"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--gn" }, have.length), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "of ", scanned, " scanned"))), /* @__PURE__ */ React.createElement(SPBoard, { rows: have, loading, scanned, onTicker }), /* @__PURE__ */ React.createElement("div", { className: "of-playbook mono" }, /* @__PURE__ */ React.createElement("span", { className: "of-pb-tag", style: { color: "var(--violet)" } }, "SMART-MONEY STRUCTURE"), /* @__PURE__ */ React.createElement("span", { className: "of-pb-txt" }, "Each name is scored 0\u2013100 by the same SMC engine as the per-ticker lens (", /* @__PURE__ */ React.createElement("b", null, "order blocks \xB7 fair-value gaps \xB7 break-of-structure \xB7 premium/discount \xB7 draw on liquidity"), "), run on live daily bars. Verdict mirrors the lens: ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "BUY"), " = bullish + near a demand OB in discount/OTE, ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "WAIT/EXTENDED"), " = bullish but no low-risk entry yet, ", /* @__PURE__ */ React.createElement("b", null, "SHORT/AVOID"), " = bearish. Click a row \u2192 the full SMC / Patterns lens with every theory sub-tab.")), /* @__PURE__ */ React.createElement("div", { className: "pm-note mono dim2" }, "Structure computed per-ticker by ", /* @__PURE__ */ React.createElement("b", null, "engines/smc.py"), " over live daily bars (server-cached). This surface fetches the top ", /* @__PURE__ */ React.createElement("b", null, SP_CAP), " scan names (audit-log intersected) \u2014 it is not a full-universe sweep. Open any individual ticker's SMC lens for the complete annotated map, MTF screener, and confluence grade. ", /* @__PURE__ */ React.createElement("b", null, "Not advice"), " \u2014 a structure read to investigate."));
+}
+function SPBoard({ rows, loading, scanned, onTicker }) {
+  const [sort, setSort] = useSP("score");
+  const sorted = useSPm(() => [...rows].sort(
+    (a, b) => sort === "score" ? SP_HR.num(b.score, -1) - SP_HR.num(a.score, -1) : sort === "rr" ? (b.rr || -1) - (a.rr || -1) : a.sym.localeCompare(b.sym)
+  ), [sort, rows]);
+  if (!rows.length) {
+    return /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2", style: { padding: "28px 12px", textAlign: "center" } }, loading ? `\u2014 computing SMC structure on live bars for ${scanned} scan name${scanned === 1 ? "" : "s"}\u2026` : scanned === 0 ? "\u2014 no live scan universe yet. SMC structure is computed from the daily scan; run a scan or open a ticker's SMC lens directly." : "\u2014 no usable SMC structure on the current scan names' daily bars. Open a specific ticker's SMC / Patterns lens for its full structure read."));
+  }
+  return /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("div", { className: "aip-board-bar", style: { display: "flex", justifyContent: "space-between", marginBottom: 10 } }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, rows.length, " name", rows.length === 1 ? "" : "s", " with real SMC structure", loading ? " \xB7 still loading\u2026" : "", " \xB7 ranked by structure score"), /* @__PURE__ */ React.createElement("div", { className: "seg" }, [["score", "Structure"], ["rr", "R:R"], ["sym", "Symbol"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `seg-btn ${sort === id ? "is-on" : ""}`, onClick: () => setSort(id) }, l)))), /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl spx-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "#"), /* @__PURE__ */ React.createElement("th", null, "Symbol"), /* @__PURE__ */ React.createElement("th", null, "Verdict"), /* @__PURE__ */ React.createElement("th", null, "Bias"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Structure"), /* @__PURE__ */ React.createElement("th", null, "Headline"), /* @__PURE__ */ React.createElement("th", null, "Zone"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Entry"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Stop"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Target"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "R:R"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, sorted.map((p, i) => /* @__PURE__ */ React.createElement("tr", { key: p.sym, onClick: () => onTicker(p.sym, "patterns"), style: { cursor: "pointer" } }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, /* @__PURE__ */ React.createElement("b", { className: i < 3 ? "vio" : "" }, i + 1)), /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, p.sym), p.px != null && /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " $", p.px.toFixed(0))), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `aip-verdict aip-verdict--${spVTone(p.verdict)}` }, p.verdict)), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: p.bias === "LONG" ? "up" : p.bias === "SHORT" ? "dn" : "warn" }, p.bias)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, /* @__PURE__ */ React.createElement("b", { className: `kpi-tone--${p.score == null ? "ink" : p.score >= 66 ? "gn" : p.score >= 50 ? "amb" : "rd"}` }, p.score == null ? "\u2014" : p.score)), /* @__PURE__ */ React.createElement("td", { className: "mono dim2", style: { fontSize: 11 } }, p.headline), /* @__PURE__ */ React.createElement("td", { className: "mono", style: { fontSize: 11 } }, p.zone ? /* @__PURE__ */ React.createElement("span", { className: `spx-tag ${p.zone === "discount" ? "" : "spx-tag--v"}` }, p.zone, p.pct != null ? ` ${p.pct}%` : "") : /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\u2014")), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular copper", style: { fontSize: 11 } }, spMoney(p.entry)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dn", style: { fontSize: 11 } }, spMoney(p.stop)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular up", style: { fontSize: 11 } }, spMoney(p.target)), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${p.rr == null ? "dim2" : p.rr >= 2 ? "up" : "warn"}` }, p.rr == null ? "\u2014" : p.rr), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, "\u203A"))))));
+}
+const SP_DEMO = [
+  { sym: "WMB", px: 58, verdict: "BUY", bias: "LONG", score: 78, headline: "BULL BoS", zone: "discount", pct: 38, entry: 56.4, stop: 54.9, target: 62.1, rr: 3.5 },
+  { sym: "COST", px: 912, verdict: "WAIT", bias: "LONG", score: 71, headline: "BULL", zone: "premium", pct: 72, entry: null, stop: null, target: 948, rr: null },
+  { sym: "ROST", px: 148, verdict: "BUY", bias: "LONG", score: 69, headline: "CHoCH UP", zone: "discount", pct: 41, entry: 145.2, stop: 141.8, target: 158, rr: 3.1 },
+  { sym: "KMI", px: 27, verdict: "EXTENDED", bias: "LONG", score: 62, headline: "BULL", zone: "premium", pct: 81, entry: null, stop: null, target: 29.4, rr: null },
+  { sym: "MO", px: 54, verdict: "AVOID", bias: "SHORT", score: 44, headline: "BEAR BoS", zone: "premium", pct: 66, entry: null, stop: null, target: 50.2, rr: null }
+];
+function SPDemo({ onTicker }) {
+  const go = SP_DEMO.filter((p) => p.verdict === "BUY" || p.verdict === "SHORT").length;
+  const longs = SP_DEMO.filter((p) => p.bias === "LONG").length;
+  const top = SP_DEMO[0];
+  const rrRows = SP_DEMO.filter((p) => p.rr != null);
+  const avgRR = (rrRows.reduce((a, p) => a + p.rr, 0) / rrRows.length).toFixed(1);
+  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--violet spx" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "SMC \xB7 MARKET-WIDE SMART-MONEY STRUCTURE SCANNER"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "SMC / Patterns"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "sample board \u2014 connect to :7432 for live per-ticker SMC structure across the scan universe")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement(FreshnessPill, { state: "scaffold" }), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "showcase \xB7 not live"))), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpis" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--gn" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "ACTIONABLE"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--gn" }, go), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "BUY / SHORT setups")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--violet" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "LONG BIAS"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--violet" }, longs), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "of ", SP_DEMO.length)), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--cy" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "TOP NAME"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--cy" }, top.sym), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, top.score, " \xB7 ", top.headline)), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--copper" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "AVG R:R"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--copper" }, avgRR), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "near-entry setups")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--gn" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "STRUCTURE"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--gn" }, SP_DEMO.length), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "sample names"))), /* @__PURE__ */ React.createElement(SPBoard, { rows: SP_DEMO, loading: false, scanned: SP_DEMO.length, onTicker }), /* @__PURE__ */ React.createElement("div", { className: "pm-note mono dim2" }, "Sample board \u2014 illustrative SMC reads on real S&P symbols. ", /* @__PURE__ */ React.createElement("b", null, "Connect to the server"), " for live per-ticker structure computed by engines/smc.py across the scan universe (top ", SP_CAP, " names, audit-log intersected)."));
 }
 window.SurfaceSMCPatterns = SurfaceSMCPatterns;
 </script>
@@ -30147,11 +30260,84 @@ window.SurfaceLab = SurfaceLab;
 </script>
 <script>/* src/surface-momentum.jsx */
 const { useState: useMo, useMemo: useMom } = React;
-const MO_ROWS = (() => {
+const MO_SERVED = !!window.__BV;
+const MO_num = (v) => typeof v === "number" && isFinite(v) ? v : null;
+const MO_clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+function moBuildRows() {
+  if (MO_SERVED) {
+    const BV = window.__BV;
+    const scan = BV && BV.ready && BV.scanRows ? BV.scanRows() : [];
+    if (!scan || !scan.length) return [];
+    return scan.map((s) => {
+      const raw = s._raw || {};
+      const rs = MO_num(parseFloat(s.rs));
+      const rsRank = rs != null ? rs : MO_num(raw.rs_rank);
+      const r1m = MO_num(raw.perf_month);
+      const r3m = MO_num(raw.perf_3m);
+      const r6m = MO_num(raw.perf_6m);
+      const r1w = MO_num(raw.perf_week);
+      const chg = MO_num(s.chg);
+      const rvol = MO_num(parseFloat(s.rvol));
+      const adx = MO_num(s.adx);
+      const sharpe = MO_num(s.sharpe);
+      const off52 = MO_num(s.off52);
+      const pos52w = off52 != null ? MO_clamp(Math.round(100 + off52), 0, 100) : null;
+      const accel = r1m != null && r3m != null ? +(r1m - r3m / 3).toFixed(2) : chg != null ? chg : null;
+      const ema = (() => {
+        const e = (raw.ema_signal || raw.ema_stack || "").toString().toLowerCase();
+        if (e.indexOf("stack") >= 0 || e.indexOf("above") >= 0) return "stacked+";
+        if (e.indexOf("below") >= 0 || e.indexOf("down") >= 0) return "below";
+        return e ? "mixed" : "\u2014";
+      })();
+      const histPts = [r6m, r3m, r1m, r1w, chg].filter((v) => v != null);
+      const hist = histPts.length >= 2 ? histPts : null;
+      return {
+        sym: s.sym,
+        sector: s.sector || raw.sector || "\u2014",
+        name: s.name || s.sym,
+        mcap: MO_num(s.mcap),
+        price: MO_num(s.price),
+        chg,
+        score: MO_num(s.score),
+        verdict: s.verdict || "\u2014",
+        rs: rsRank,
+        rs1w: r1w,
+        rs1m: r1m,
+        rs3m: r3m,
+        rs6m: r6m,
+        rvol,
+        adx,
+        sharpe126: sharpe,
+        pos52w,
+        accel,
+        persist: MO_num(raw.rs_weeks_top_decile),
+        // real or null
+        zUniv: MO_num(raw.mom_z),
+        // momentum z vs universe (real or null)
+        ema,
+        stage: raw.stage || raw.weinstein_stage || "\u2014",
+        rsSec: MO_num(raw.sector_pct_rank),
+        shortInt: MO_num(s.si),
+        cat: s.cat || "\u2014",
+        breakout: !!(raw.fresh_breakout || raw.at_52w_breakout),
+        hist,
+        _scan: s
+      };
+    }).sort((a, b) => {
+      const sa = a.sharpe126, sb = b.sharpe126;
+      if (sa != null && sb != null && sa !== sb) return sb - sa;
+      if (sa != null && sb == null) return -1;
+      if (sa == null && sb != null) return 1;
+      const ra = a.rs == null ? -1 : a.rs, rb = b.rs == null ? -1 : b.rs;
+      if (ra !== rb) return rb - ra;
+      return (b.score || 0) - (a.score || 0);
+    });
+  }
+  if (typeof HEATMAP === "undefined" || !Array.isArray(HEATMAP)) return [];
   return HEATMAP.map(([sym, sector, mcap, chg]) => {
     const code = sym.charCodeAt(0) + sym.charCodeAt(1);
-    const w = WATCHLIST.find((x) => x.sym === sym);
-    const rs = Math.max(8, Math.min(99, 50 + Math.round(chg * 7) + code % 20));
+    const w = (typeof WATCHLIST !== "undefined" ? WATCHLIST : []).find((x) => x.sym === sym);
+    const rs = MO_clamp(50 + Math.round(chg * 7) + code % 20, 8, 99);
     return {
       sym,
       sector,
@@ -30159,104 +30345,41 @@ const MO_ROWS = (() => {
       chg,
       name: (w == null ? void 0 : w.name) || `${sector} Corp`,
       price: (w == null ? void 0 : w.price) || 20 + code % 200,
-      score: (w == null ? void 0 : w.score) || Math.max(28, Math.min(94, 50 + Math.round(chg * 5))),
+      score: (w == null ? void 0 : w.score) || MO_clamp(50 + Math.round(chg * 5), 28, 94),
+      verdict: (w == null ? void 0 : w.verdict) || "\u2014",
       rs,
-      rs1w: Math.max(5, Math.min(99, rs + (code % 11 - 5))),
+      rs1w: MO_clamp(rs + (code % 11 - 5), 5, 99),
       rs1m: rs,
-      rs3m: Math.max(5, Math.min(99, rs - (code % 9 - 4))),
-      rs6m: Math.max(5, Math.min(99, rs - (code % 13 - 6))),
+      rs3m: MO_clamp(rs - (code % 9 - 4), 5, 99),
+      rs6m: MO_clamp(rs - (code % 13 - 6), 5, 99),
       rvol: 0.7 + code % 14 / 10,
       persist: Math.max(1, code % 9),
-      // weeks in top decile
       accel: chg + (code % 7 - 3) * 0.4,
-      // RS acceleration
-      atr: (code % 6 + 1) * 0.2,
-      // ── spec fields (kairos _QMOM14_ALL_COLS) ──
       sharpe126: 0.4 + code % 26 / 10,
-      // t.sharpe_126d · PRIMARY rank
       zUniv: (code % 40 - 18) / 10,
-      // momentum z-score vs universe
-      pos52w: Math.max(20, Math.min(100, 55 + Math.round(chg * 6) + code % 30)),
-      // 52W range pos
+      pos52w: MO_clamp(55 + Math.round(chg * 6) + code % 30, 20, 100),
       adx: 14 + code % 32,
-      // t.adx
       ema: code % 3 === 0 ? "stacked+" : code % 3 === 1 ? "mixed" : "below",
-      // t.ema_signal
       stage: code % 4 === 0 ? "2 \xB7 markup" : code % 4 === 1 ? "1 \xB7 accum" : code % 4 === 2 ? "3 \xB7 distrib" : "2 \xB7 markup",
-      asness: (code % 60 - 12) / 100,
-      // Asness 12-1 factor
-      ddPeak: -(code % 18 / 10),
-      // drawdown from peak %
-      rsSec: Math.max(10, Math.min(99, rs + (code % 17 - 8))),
-      // RS vs own sector
+      rsSec: MO_clamp(rs + (code % 17 - 8), 10, 99),
       shortInt: 2 + code % 22,
-      // short % of float
-      obv: code % 3 === 0 ? "accum" : code % 3 === 1 ? "flat" : "distrib",
       cat: code % 3 === 0 ? "T1" : code % 3 === 1 ? "T2" : "\u2014",
       breakout: code % 3 === 0,
-      // fresh breakout flag
       hist: (() => {
         const a = [];
         let v = rs - 18;
         for (let i = 0; i < 60; i++) {
           v += (Math.sin(i * 0.3 + code) + 0.4) * 0.7 + (Math.random() - 0.45);
-          a.push(Math.max(5, Math.min(99, v)));
+          a.push(MO_clamp(v, 5, 99));
         }
         a[a.length - 1] = rs;
         return a;
       })()
     };
   }).sort((a, b) => b.sharpe126 - a.sharpe126);
-})();
+}
+const MO_ROWS = moBuildRows();
 const MO_TABS = [["leaders", "RS Leaders"], ["accel", "Accelerating"], ["fade", "Fading"], ["persist", "Persistent"], ["history", "Signal History"]];
-const MO_HISTORY = (() => {
-  const setups = ["RS breakout", "Accel cross", "Persist add", "Pullback re-add", "Fade exit"];
-  const out = [];
-  const syms = HEATMAP.slice(0, 22);
-  for (let i = 0; i < 28; i++) {
-    const [sym, sector] = syms[i % syms.length];
-    const code = sym.charCodeAt(0) + i * 7;
-    const open = i < 4;
-    const rMult = open ? (code % 30 - 8) / 10 : (code % 50 - 18) / 10;
-    const win = !open && rMult > 0;
-    const daysAgo = open ? code % 6 : 8 + code % 80;
-    return;
-  }
-  for (let i = 0; i < 32; i++) {
-    const [sym, sector] = syms[i % syms.length];
-    const code = sym.charCodeAt(0) + sym.charCodeAt(1) + i * 13;
-    const open = i < 4;
-    const rMult = open ? (code % 22 - 6) / 10 : (code % 56 - 20) / 10;
-    const status = open ? "OPEN" : rMult > 0.05 ? "WIN" : rMult < -0.05 ? "LOSS" : "FLAT";
-    return out;
-  }
-  return out;
-})();
-const MO_HIST = (() => {
-  const syms = HEATMAP.slice(0, 24);
-  const setups = ["RS breakout", "Accel cross", "Persistent add", "Pullback re-add", "Sector-leader BO"];
-  return syms.map((h, i) => {
-    const sym = h[0], sector = h[1];
-    const code = sym.charCodeAt(0) + sym.charCodeAt(1) + i * 11;
-    const open = i < 4;
-    const r = open ? (code % 20 - 5) / 10 : (code % 58 - 22) / 10;
-    const status = open ? "OPEN" : r >= 0.1 ? "WIN" : r <= -0.1 ? "LOSS" : "FLAT";
-    return {
-      sym,
-      sector,
-      date: `2026-0${1 + i % 5}-${String(2 + code % 26).padStart(2, "0")}`,
-      setup: setups[code % setups.length],
-      entryRS: 60 + code % 35,
-      exitRS: open ? null : 40 + code % 50,
-      r,
-      status,
-      held: open ? code % 7 : 4 + code % 18,
-      mae: -(code % 12 / 10),
-      // max adverse excursion in R
-      pnl: Math.round(r * 420)
-    };
-  });
-})();
 function MomentumHistory() {
   const [st, setSt] = React.useState({ loading: true, summary: null, signals: null, err: null });
   React.useEffect(() => {
@@ -30296,12 +30419,15 @@ function MomentumHistory() {
     eq.push(cum);
   });
   const w = 620, h = 150, pad = 18;
+  const haveEq = eq.length >= 1;
   const min = Math.min(0, ...eq) - 1, max = Math.max(1, ...eq) + 1;
-  const x = (i) => pad + i / Math.max(1, eq.length - 1) * (w - pad * 2);
-  const y = (v) => h - pad - (v - min) / (max - min) * (h - pad * 2);
+  const span = max - min || 1;
+  const denomX = Math.max(1, eq.length - 1);
+  const x = (i) => pad + i / denomX * (w - pad * 2);
+  const y = (v) => h - pad - (v - min) / span * (h - pad * 2);
   const eqTone = (eq[eq.length - 1] || 0) >= 0 ? "gn" : "rd";
   const tableRows = sigs.slice(0, 150);
-  return /* @__PURE__ */ React.createElement("div", { className: "moh" }, /* @__PURE__ */ React.createElement("div", { className: "moh-kpis" }, /* @__PURE__ */ React.createElement(MohK, { k: "SIGNALS", v: sm.n_total, tone: "copper", s: `${sm.n_closed} closed \xB7 ${sm.n_open} open` }), /* @__PURE__ */ React.createElement(MohK, { k: "WIN RATE", v: `${Math.round(wr)}%`, tone: wr >= 50 ? "gn" : "rd", s: `${wins}W \xB7 ${losses}L \xB7 n=${nReal}` }), /* @__PURE__ */ React.createElement(MohK, { k: "WILSON LB", v: `${Math.round(wilsonLB)}%`, tone: wilsonLB >= 45 ? "gn" : "amb", s: "95% lower bound" }), /* @__PURE__ */ React.createElement(MohK, { k: "AVG P&L", v: `${sm.avg_pnl_pct >= 0 ? "+" : ""}${sm.avg_pnl_pct}%`, tone: sm.avg_pnl_pct >= 0 ? "gn" : "rd", s: "per signal" }), /* @__PURE__ */ React.createElement(MohK, { k: "AVG ALPHA", v: `${sm.avg_alpha_pp >= 0 ? "+" : ""}${sm.avg_alpha_pp}pp`, tone: sm.avg_alpha_pp >= 0 ? "gn" : "rd", s: "vs SPY" }), /* @__PURE__ */ React.createElement(MohK, { k: "BEAT SPY", v: `${sm.beat_spy_pct}%`, tone: sm.beat_spy_pct >= 50 ? "gn" : "amb", s: `${sm.n_days}d \xB7 ${sm.first_date}\u2192${sm.last_date}` })), /* @__PURE__ */ React.createElement("div", { className: "moh-grid" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "EQUITY CURVE \xB7 CUMULATIVE REALIZED P&L (%)"), /* @__PURE__ */ React.createElement("svg", { viewBox: `0 0 ${w} ${h}`, className: "lab-svg", preserveAspectRatio: "xMidYMid meet" }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("linearGradient", { id: "moh-eq", x1: "0", y1: "0", x2: "0", y2: "1" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: `var(--${eqTone})`, stopOpacity: "0.3" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: `var(--${eqTone})`, stopOpacity: "0" }))), /* @__PURE__ */ React.createElement("line", { x1: pad, y1: y(0), x2: w - pad, y2: y(0), stroke: "var(--glass-line)", strokeDasharray: "2 3" }), /* @__PURE__ */ React.createElement("path", { d: `M ${pad} ${y(0)} L ${eq.map((v, i) => `${x(i)},${y(v)}`).join(" L ")} L ${w - pad} ${y(0)} Z`, fill: "url(#moh-eq)" }), /* @__PURE__ */ React.createElement("polyline", { points: eq.map((v, i) => `${x(i)},${y(v)}`).join(" "), stroke: `var(--${eqTone})`, strokeWidth: "1.8", fill: "none" }), /* @__PURE__ */ React.createElement("circle", { cx: x(eq.length - 1), cy: y(eq[eq.length - 1] || 0), r: "3.5", fill: `var(--${eqTone})` })), /* @__PURE__ */ React.createElement("div", { className: "moh-eqfoot mono dim2" }, "Cumulative realized P&L across ", closed.length, " closed momentum signals \xB7 ", sm.first_date, " \u2192 ", sm.last_date)), /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "OUTCOME DISTRIBUTION"), /* @__PURE__ */ React.createElement("div", { className: "moh-dist" }, [["WIN", wins, "gn"], ["LOSS", losses, "rd"], ["OPEN", sm.n_open, "ink"]].map(([l, n, t], i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "moh-distrow" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, l), /* @__PURE__ */ React.createElement("div", { className: "moh-distbar" }, /* @__PURE__ */ React.createElement("div", { style: { width: `${n / (sm.n_total || 1) * 100}%`, background: `var(--${t})` } })), /* @__PURE__ */ React.createElement("span", { className: "mono" }, n)))), /* @__PURE__ */ React.createElement("div", { className: "moh-bysetup mono dim2", style: { marginTop: 8 } }, "Realized win rate ", Math.round(wr), "% (Wilson LB ", Math.round(wilsonLB), "%) \xB7 ", sm.beat_spy_pct, "% beat SPY over ", sm.n_days, " days."))), /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl moh-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Date"), /* @__PURE__ */ React.createElement("th", null, "Sym"), /* @__PURE__ */ React.createElement("th", null, "Setup"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Score"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "RS"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Stars"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "P&L %"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Alpha"), /* @__PURE__ */ React.createElement("th", null, "Outcome"))), /* @__PURE__ */ React.createElement("tbody", null, tableRows.map((s, i) => {
+  return /* @__PURE__ */ React.createElement("div", { className: "moh" }, /* @__PURE__ */ React.createElement("div", { className: "moh-kpis" }, /* @__PURE__ */ React.createElement(MohK, { k: "SIGNALS", v: sm.n_total, tone: "copper", s: `${sm.n_closed} closed \xB7 ${sm.n_open} open` }), /* @__PURE__ */ React.createElement(MohK, { k: "WIN RATE", v: `${Math.round(wr)}%`, tone: wr >= 50 ? "gn" : "rd", s: `${wins}W \xB7 ${losses}L \xB7 n=${nReal}` }), /* @__PURE__ */ React.createElement(MohK, { k: "WILSON LB", v: `${Math.round(wilsonLB)}%`, tone: wilsonLB >= 45 ? "gn" : "amb", s: "95% lower bound" }), /* @__PURE__ */ React.createElement(MohK, { k: "AVG P&L", v: `${sm.avg_pnl_pct >= 0 ? "+" : ""}${sm.avg_pnl_pct}%`, tone: sm.avg_pnl_pct >= 0 ? "gn" : "rd", s: "per signal" }), /* @__PURE__ */ React.createElement(MohK, { k: "AVG ALPHA", v: `${sm.avg_alpha_pp >= 0 ? "+" : ""}${sm.avg_alpha_pp}pp`, tone: sm.avg_alpha_pp >= 0 ? "gn" : "rd", s: "vs SPY" }), /* @__PURE__ */ React.createElement(MohK, { k: "BEAT SPY", v: `${sm.beat_spy_pct}%`, tone: sm.beat_spy_pct >= 50 ? "gn" : "amb", s: `${sm.n_days}d \xB7 ${sm.first_date}\u2192${sm.last_date}` })), /* @__PURE__ */ React.createElement("div", { className: "moh-grid" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "EQUITY CURVE \xB7 CUMULATIVE REALIZED P&L (%)"), haveEq ? /* @__PURE__ */ React.createElement("svg", { viewBox: `0 0 ${w} ${h}`, className: "lab-svg", preserveAspectRatio: "xMidYMid meet" }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("linearGradient", { id: "moh-eq", x1: "0", y1: "0", x2: "0", y2: "1" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: `var(--${eqTone})`, stopOpacity: "0.3" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: `var(--${eqTone})`, stopOpacity: "0" }))), /* @__PURE__ */ React.createElement("line", { x1: pad, y1: y(0), x2: w - pad, y2: y(0), stroke: "var(--glass-line)", strokeDasharray: "2 3" }), /* @__PURE__ */ React.createElement("path", { d: `M ${pad} ${y(0)} L ${eq.map((v, i) => `${x(i)},${y(v)}`).join(" L ")} L ${w - pad} ${y(0)} Z`, fill: "url(#moh-eq)" }), /* @__PURE__ */ React.createElement("polyline", { points: eq.map((v, i) => `${x(i)},${y(v)}`).join(" "), stroke: `var(--${eqTone})`, strokeWidth: "1.8", fill: "none" }), /* @__PURE__ */ React.createElement("circle", { cx: x(eq.length - 1), cy: y(eq[eq.length - 1] || 0), r: "3.5", fill: `var(--${eqTone})` })) : /* @__PURE__ */ React.createElement("div", { className: "ss-empty", style: { padding: 28 } }, "No closed momentum signals yet \u2014 equity curve appears once trades realize."), /* @__PURE__ */ React.createElement("div", { className: "moh-eqfoot mono dim2" }, "Cumulative realized P&L across ", closed.length, " closed momentum signals \xB7 ", sm.first_date, " \u2192 ", sm.last_date)), /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "OUTCOME DISTRIBUTION"), /* @__PURE__ */ React.createElement("div", { className: "moh-dist" }, [["WIN", wins, "gn"], ["LOSS", losses, "rd"], ["OPEN", sm.n_open, "ink"]].map(([l, n, t], i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "moh-distrow" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, l), /* @__PURE__ */ React.createElement("div", { className: "moh-distbar" }, /* @__PURE__ */ React.createElement("div", { style: { width: `${(n || 0) / (sm.n_total || 1) * 100}%`, background: `var(--${t})` } })), /* @__PURE__ */ React.createElement("span", { className: "mono" }, n)))), /* @__PURE__ */ React.createElement("div", { className: "moh-bysetup mono dim2", style: { marginTop: 8 } }, "Realized win rate ", Math.round(wr), "% (Wilson LB ", Math.round(wilsonLB), "%) \xB7 ", sm.beat_spy_pct, "% beat SPY over ", sm.n_days, " days."))), /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl moh-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Date"), /* @__PURE__ */ React.createElement("th", null, "Sym"), /* @__PURE__ */ React.createElement("th", null, "Setup"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Score"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "RS"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Stars"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "P&L %"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Alpha"), /* @__PURE__ */ React.createElement("th", null, "Outcome"))), /* @__PURE__ */ React.createElement("tbody", null, tableRows.map((s, i) => {
     const status = s.pnl_pct == null ? "OPEN" : s.pnl_pct > 0 ? "WIN" : "LOSS";
     return /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, s.date), /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, s.ticker)), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, s.strategy || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, s.score != null ? Math.round(s.score) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, s.rs_rank != null ? Math.round(s.rs_rank) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, s.stars != null ? "\u2605" + Math.round(s.stars) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${s.pnl_pct == null ? "dim" : s.pnl_pct >= 0 ? "up" : "dn"}` }, s.pnl_pct == null ? "\u2014" : (s.pnl_pct >= 0 ? "+" : "") + s.pnl_pct.toFixed(2) + "%"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${s.alpha == null ? "dim" : s.alpha >= 0 ? "up" : "dn"}` }, s.alpha == null ? "\u2014" : (s.alpha >= 0 ? "+" : "") + Number(s.alpha).toFixed(1) + "pp"), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: status === "WIN" ? "gn" : status === "LOSS" ? "rd" : "cy", small: true }, status)));
   })))), /* @__PURE__ */ React.createElement("div", { className: "moh-note mono dim2" }, "Every momentum signal the engine fired (RS New High, Trend Continuation, EMA pullback, Pocket Pivot, VCP, 10-Week Pullback, Breakout/Impulse) logged with its realized P&L and alpha vs SPY \u2014 the honest audit trail. Win-rate shown with its Wilson 95% lower bound so a small sample can't masquerade as edge. Source: /api/momentum-signals \xB7 signal_log.json (showing latest ", tableRows.length, " of ", sm.n_total, ")."));
@@ -30309,38 +30435,90 @@ function MomentumHistory() {
 function MohK({ k, v, tone, s }) {
   return /* @__PURE__ */ React.createElement("div", { className: `wsx-kpi wsx-kpi--${tone}` }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, k), /* @__PURE__ */ React.createElement("div", { className: `wsx-kpi-v mono kpi-tone--${tone}` }, v), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, s));
 }
+const moFix = (v, d = 0, suffix = "") => v == null ? "\u2014" : v.toFixed(d) + suffix;
+const moInt = (v, suffix = "") => v == null ? "\u2014" : Math.round(v) + suffix;
+const moSigned = (v, d = 1) => v == null ? "\u2014" : (v >= 0 ? "+" : "") + v.toFixed(d);
 function SurfaceMomentum({ onTicker }) {
   const [tab, setTab] = useMo("leaders");
-  const [sel, setSel] = useMo(MO_ROWS[0].sym);
+  const [sel, setSel] = useMo(MO_ROWS.length ? MO_ROWS[0].sym : null);
   const [sort, setSort] = useMo({ col: "rs", dir: -1 });
+  const empty = MO_ROWS.length === 0;
   const rows = useMom(() => {
+    if (empty) return [];
     let r = MO_ROWS;
-    if (tab === "accel") r = r.filter((x) => x.accel > 1.5);
-    if (tab === "fade") r = [...MO_ROWS].filter((x) => x.rs1w < x.rs3m).sort((a, b) => a.rs1w - a.rs3m - (b.rs1w - b.rs3m));
-    if (tab === "persist") r = [...MO_ROWS].sort((a, b) => b.persist - a.persist);
+    if (tab === "accel") r = r.filter((x) => x.accel != null && x.accel > 1.5);
+    if (tab === "fade") r = [...MO_ROWS].filter((x) => x.rs1w != null && x.rs3m != null && x.rs1w < x.rs3m).sort((a, b) => a.rs1w - a.rs3m - (b.rs1w - b.rs3m));
+    if (tab === "persist") r = [...MO_ROWS].sort((a, b) => (b.persist || 0) - (a.persist || 0));
     return [...r].sort((a, b) => {
       const av = a[sort.col], bv = b[sort.col];
       const an = +av, bn = +bv;
-      if (!isNaN(an) && !isNaN(bn)) return (an - bn) * sort.dir;
+      if (av != null && bv != null && !isNaN(an) && !isNaN(bn)) return (an - bn) * sort.dir;
+      if (av != null && bv == null) return -sort.dir;
+      if (av == null && bv != null) return sort.dir;
       return String(av).localeCompare(String(bv)) * sort.dir;
     }).slice(0, 30);
-  }, [tab, sort]);
+  }, [tab, sort, empty]);
   const TH = (col, label, r) => /* @__PURE__ */ React.createElement("th", { className: `${r ? "r" : ""} wsx-th ${sort.col === col ? "is-active" : ""}`, onClick: () => setSort((s) => s.col === col ? { col, dir: -s.dir } : { col, dir: -1 }) }, label, sort.col === col && /* @__PURE__ */ React.createElement("span", { className: "wsx-arr mono" }, sort.dir > 0 ? "\u25B2" : "\u25BC"));
-  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--copper mo" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "RELATIVE STRENGTH \xB7 MULTI-TIMEFRAME"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "Momentum"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "Ranked leaderboard of the strongest names \xB7 RS rank vs SPY \xB7 1W/1M/3M/6M history \xB7 persistence + acceleration \xB7 winners keep winning")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement(FreshnessPill, { state: "live", age: "18s" }), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "src \xB7 EODHD /eod \xB7 RS computed 63d"))), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpis" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--copper" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "RS LEADERS"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--copper" }, MO_ROWS.filter((r) => r.rs >= 80).length), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "RS \u2265 80")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--gn" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "ACCELERATING"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--gn" }, MO_ROWS.filter((r) => r.accel > 1.5).length), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "RS slope \u2191")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--rd" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "FADING"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--rd" }, MO_ROWS.filter((r) => r.rs1w < r.rs3m).length), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "1W < 3M RS")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--copper" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "SHARPE \u22651.5"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--copper" }, MO_ROWS.filter((r) => r.sharpe126 >= 1.5).length), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "clean trend gate")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--gn" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "ADX \u226525"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--gn" }, MO_ROWS.filter((r) => r.adx >= 25).length), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "tradeable trend")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--amb" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "FRESH BREAKOUT"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--amb" }, MO_ROWS.filter((r) => r.breakout).length), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "prime entry")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--violet" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "STAGE-2 MARKUP"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--violet" }, MO_ROWS.filter((r) => r.stage.startsWith("2")).length), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "buyable phase"))), /* @__PURE__ */ React.createElement("div", { className: "lab-tabs" }, MO_TABS.map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `lab-tab ${tab === id ? "is-on" : ""}`, onClick: () => setTab(id) }, l))), /* @__PURE__ */ React.createElement("div", { className: "mo-split", style: tab === "history" ? { display: "block" } : null }, tab === "history" ? /* @__PURE__ */ React.createElement(MomentumHistory, null) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "wsx-body mo-tbl-wrap" }, /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl mo-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { className: "r wsx-th" }, "#"), TH("sym", "Sym"), /* @__PURE__ */ React.createElement("th", null, "Name"), TH("sharpe126", "Sharpe126", true), TH("zUniv", "Z", true), TH("rs", "RS", true), TH("rsSec", "RS\xB7Sec", true), TH("pos52w", "52W", true), TH("adx", "ADX", true), TH("rvol", "Vol", true), /* @__PURE__ */ React.createElement("th", null, "EMA"), /* @__PURE__ */ React.createElement("th", null, "Stage"), TH("asness", "Asness", true), TH("ddPeak", "DD-Pk", true), TH("shortInt", "Short", true), /* @__PURE__ */ React.createElement("th", null, "OBV"), /* @__PURE__ */ React.createElement("th", null, "Cat"), /* @__PURE__ */ React.createElement("th", null, "BO"), /* @__PURE__ */ React.createElement("th", null, "7d"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((t, i) => /* @__PURE__ */ React.createElement("tr", { key: t.sym + i, className: sel === t.sym ? "is-sel" : "", onClick: () => setSel(t.sym) }, /* @__PURE__ */ React.createElement("td", { className: "r mono dim2" }, /* @__PURE__ */ React.createElement("b", { className: i < 3 ? "copper" : "" }, i + 1)), /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, t.sym)), /* @__PURE__ */ React.createElement("td", { className: "dim" }, t.name), /* @__PURE__ */ React.createElement("td", { className: "r", "data-field": "t.sharpe_126d", "data-provenance": "comp" }, /* @__PURE__ */ React.createElement("span", { className: `mo-rsbadge mo-rs--${t.sharpe126 >= 1.5 ? "hot" : t.sharpe126 >= 1 ? "warm" : "cool"}` }, t.sharpe126.toFixed(2))), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.zUniv >= 1 ? "up" : t.zUniv <= -1 ? "dn" : "dim"}` }, t.zUniv >= 0 ? "+" : "", t.zUniv.toFixed(1)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular", "data-field": "t.rs_rank", "data-provenance": "comp" }, t.rs), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular", "data-field": "t.sector_pct_rank" }, t.rsSec), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.pos52w >= 90 ? "up" : "dim"}` }, t.pos52w, "%"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.adx >= 25 ? "up" : "warn"}`, "data-field": "t.adx" }, t.adx), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.rvol >= 1.5 ? "up" : "dim"}`, "data-field": "t.rvol" }, t.rvol.toFixed(2), "\xD7"), /* @__PURE__ */ React.createElement("td", { className: `mono ${t.ema === "stacked+" ? "up" : t.ema === "below" ? "dn" : "dim"}`, "data-field": "t.ema_signal" }, t.ema), /* @__PURE__ */ React.createElement("td", { className: `mono ${t.stage.startsWith("2") ? "up" : t.stage.startsWith("3") ? "dn" : "dim"}`, "data-field": "t.stage" }, t.stage), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.asness >= 0 ? "up" : "dn"}` }, t.asness >= 0 ? "+" : "", t.asness.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dn", "data-field": "t.max_dd_3y" }, t.ddPeak.toFixed(1), "%"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.shortInt >= 15 ? "amb" : "dim"}`, "data-field": "t.short_float_pct" }, t.shortInt, "%"), /* @__PURE__ */ React.createElement("td", { className: `mono ${t.obv === "accum" ? "up" : t.obv === "distrib" ? "dn" : "dim"}` }, t.obv), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, t.cat), /* @__PURE__ */ React.createElement("td", null, t.breakout ? /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true }, "BO") : /* @__PURE__ */ React.createElement("span", { className: "dim2 mono" }, "\u2014")), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Sparkline, { data: t.hist, color: `var(--${t.rs1w >= t.rs3m ? "gn" : "rd"})`, w: 64, h: 18 }))))))), /* @__PURE__ */ React.createElement(MoDetail, { sym: sel, onTicker }))));
+  const cnt = (fn) => MO_ROWS.filter(fn).length;
+  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--copper mo" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "RELATIVE STRENGTH \xB7 MULTI-TIMEFRAME"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "Momentum"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "Ranked leaderboard of the strongest names \xB7 RS rank vs SPY \xB7 1W/1M/3M/6M context \xB7 persistence + acceleration \xB7 winners keep winning")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement(FreshnessPill, { state: "live", age: "18s" }), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "src \xB7 EODHD /eod \xB7 RS computed 63d"))), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpis" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--copper" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "RS LEADERS"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--copper" }, cnt((r) => r.rs != null && r.rs >= 80)), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "RS \u2265 80")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--gn" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "ACCELERATING"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--gn" }, cnt((r) => r.accel != null && r.accel > 1.5)), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "RS slope \u2191")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--rd" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "FADING"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--rd" }, cnt((r) => r.rs1w != null && r.rs3m != null && r.rs1w < r.rs3m)), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "1W < 3M RS")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--copper" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "SHARPE \u22651.5"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--copper" }, cnt((r) => r.sharpe126 != null && r.sharpe126 >= 1.5)), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "clean trend gate")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--gn" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "ADX \u226525"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--gn" }, cnt((r) => r.adx != null && r.adx >= 25)), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "tradeable trend")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--amb" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "FRESH BREAKOUT"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--amb" }, cnt((r) => r.breakout)), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "prime entry")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--violet" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "STAGE-2 MARKUP"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--violet" }, cnt((r) => String(r.stage).startsWith("2"))), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "buyable phase"))), /* @__PURE__ */ React.createElement("div", { className: "lab-tabs" }, MO_TABS.map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `lab-tab ${tab === id ? "is-on" : ""}`, onClick: () => setTab(id) }, l))), /* @__PURE__ */ React.createElement("div", { className: "mo-split", style: tab === "history" ? { display: "block" } : null }, tab === "history" ? /* @__PURE__ */ React.createElement(MomentumHistory, null) : empty ? /* @__PURE__ */ React.createElement("div", { className: "ss-empty", style: { padding: 48, textAlign: "center" } }, "No momentum leaders in today's scan.") : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "wsx-body mo-tbl-wrap" }, /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl mo-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { className: "r wsx-th" }, "#"), TH("sym", "Sym"), /* @__PURE__ */ React.createElement("th", null, "Name"), TH("sharpe126", "Sharpe126", true), TH("zUniv", "Z", true), TH("rs", "RS", true), TH("rsSec", "RS\xB7Sec", true), TH("pos52w", "52W", true), TH("adx", "ADX", true), TH("rvol", "Vol", true), /* @__PURE__ */ React.createElement("th", null, "EMA"), /* @__PURE__ */ React.createElement("th", null, "Stage"), TH("shortInt", "Short", true), /* @__PURE__ */ React.createElement("th", null, "Cat"), /* @__PURE__ */ React.createElement("th", null, "BO"), /* @__PURE__ */ React.createElement("th", null, "7d"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((t, i) => /* @__PURE__ */ React.createElement("tr", { key: t.sym + i, className: sel === t.sym ? "is-sel" : "", onClick: () => setSel(t.sym) }, /* @__PURE__ */ React.createElement("td", { className: "r mono dim2" }, /* @__PURE__ */ React.createElement("b", { className: i < 3 ? "copper" : "" }, i + 1)), /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, t.sym)), /* @__PURE__ */ React.createElement("td", { className: "dim" }, t.name), /* @__PURE__ */ React.createElement("td", { className: "r", "data-field": "t.sharpe_126d", "data-provenance": "comp" }, /* @__PURE__ */ React.createElement("span", { className: `mo-rsbadge mo-rs--${t.sharpe126 != null && t.sharpe126 >= 1.5 ? "hot" : t.sharpe126 != null && t.sharpe126 >= 1 ? "warm" : "cool"}` }, moFix(t.sharpe126, 2))), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.zUniv != null && t.zUniv >= 1 ? "up" : t.zUniv != null && t.zUniv <= -1 ? "dn" : "dim"}` }, moSigned(t.zUniv, 1)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular", "data-field": "t.rs_rank", "data-provenance": "comp" }, moInt(t.rs)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular", "data-field": "t.sector_pct_rank" }, moInt(t.rsSec)), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.pos52w != null && t.pos52w >= 90 ? "up" : "dim"}` }, moInt(t.pos52w, "%")), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.adx != null && t.adx >= 25 ? "up" : "warn"}`, "data-field": "t.adx" }, moInt(t.adx)), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.rvol != null && t.rvol >= 1.5 ? "up" : "dim"}`, "data-field": "t.rvol" }, moFix(t.rvol, 2, "\xD7")), /* @__PURE__ */ React.createElement("td", { className: `mono ${t.ema === "stacked+" ? "up" : t.ema === "below" ? "dn" : "dim"}`, "data-field": "t.ema_signal" }, t.ema), /* @__PURE__ */ React.createElement("td", { className: `mono ${String(t.stage).startsWith("2") ? "up" : String(t.stage).startsWith("3") ? "dn" : "dim"}`, "data-field": "t.stage" }, t.stage), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.shortInt != null && t.shortInt >= 15 ? "amb" : "dim"}`, "data-field": "t.short_float_pct" }, moInt(t.shortInt, "%")), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, t.cat), /* @__PURE__ */ React.createElement("td", null, t.breakout ? /* @__PURE__ */ React.createElement(Pill, { tone: "gn", small: true }, "BO") : /* @__PURE__ */ React.createElement("span", { className: "dim2 mono" }, "\u2014")), /* @__PURE__ */ React.createElement("td", null, t.hist && t.hist.length >= 2 ? /* @__PURE__ */ React.createElement(Sparkline, { data: t.hist, color: `var(--${t.rs1w != null && t.rs3m != null && t.rs1w >= t.rs3m ? "gn" : "rd"})`, w: 64, h: 18 }) : /* @__PURE__ */ React.createElement("span", { className: "dim2 mono" }, "\u2014"))))))), /* @__PURE__ */ React.createElement(MoDetail, { sym: sel, onTicker }))));
 }
 function MoDetail({ sym, onTicker }) {
   const t = MO_ROWS.find((r) => r.sym === sym) || MO_ROWS[0];
+  if (!t) return /* @__PURE__ */ React.createElement("div", { className: "sdp mo-detail" }, /* @__PURE__ */ React.createElement("div", { className: "ss-empty", style: { padding: 28 } }, "No name selected."));
+  const hist = Array.isArray(t.hist) ? t.hist.filter((v) => typeof v === "number" && isFinite(v)) : [];
+  const haveHist = hist.length >= 2;
   const w = 300, h = 120, pad = 14;
-  const min = Math.min(...t.hist) - 4, max = Math.max(...t.hist) + 4;
-  const x = (i) => pad + i / 59 * (w - pad * 2);
-  const y = (v) => h - pad - (v - min) / (max - min) * (h - pad * 2);
-  return /* @__PURE__ */ React.createElement("div", { className: "sdp mo-detail" }, /* @__PURE__ */ React.createElement("div", { className: "sdp-hdr" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sdp-sym mono" }, /* @__PURE__ */ React.createElement("b", null, t.sym), " ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, t.sector)), /* @__PURE__ */ React.createElement("div", { className: "sdp-px mono" }, "RS ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, t.rs), " \xB7 $", t.price.toFixed(2), " ", /* @__PURE__ */ React.createElement("span", { className: t.chg >= 0 ? "up" : "dn" }, t.chg >= 0 ? "+" : "", t.chg.toFixed(2), "%"))), /* @__PURE__ */ React.createElement("span", { className: `mo-rsbadge mo-rs--${t.rs >= 80 ? "hot" : t.rs >= 60 ? "warm" : "cool"}` }, t.rs)), /* @__PURE__ */ React.createElement("button", { className: "sdp-open mono", onClick: () => onTicker(t.sym) }, "OPEN 14-LENS DETAIL \u2192"), /* @__PURE__ */ React.createElement("div", { className: "sdp-body" }, /* @__PURE__ */ React.createElement("div", { className: "sdp-sec" }, /* @__PURE__ */ React.createElement("div", { className: "sdp-sec-h" }, /* @__PURE__ */ React.createElement("span", { className: "sdp-sec-n mono" }, "RS"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "60-DAY HISTORY")), /* @__PURE__ */ React.createElement("div", { className: "sdp-sec-b" }, /* @__PURE__ */ React.createElement("svg", { viewBox: `0 0 ${w} ${h}`, style: { width: "100%", overflow: "visible" } }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("linearGradient", { id: "mo-rsg", x1: "0", y1: "0", x2: "0", y2: "1" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: "var(--copper)", stopOpacity: "0.3" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: "var(--copper)", stopOpacity: "0" }))), /* @__PURE__ */ React.createElement("line", { x1: pad, y1: y(80), x2: w - pad, y2: y(80), stroke: "var(--gn)", strokeDasharray: "2 3", opacity: "0.4" }), /* @__PURE__ */ React.createElement("text", { x: w - pad, y: y(80) - 3, fontSize: "8", className: "mono", textAnchor: "end", fill: "var(--gn)" }, "80 leader"), /* @__PURE__ */ React.createElement("line", { x1: pad, y1: y(50), x2: w - pad, y2: y(50), stroke: "var(--ink-3)", strokeDasharray: "2 3", opacity: "0.4" }), /* @__PURE__ */ React.createElement("path", { d: `M ${pad} ${y(min)} L ${t.hist.map((v, i) => `${x(i)},${y(v)}`).join(" L ")} L ${w - pad} ${y(min)} Z`, fill: "url(#mo-rsg)" }), /* @__PURE__ */ React.createElement("polyline", { points: t.hist.map((v, i) => `${x(i)},${y(v)}`).join(" "), stroke: "var(--copper)", strokeWidth: "1.6", fill: "none", style: { filter: "drop-shadow(0 0 4px var(--copper))" } }), /* @__PURE__ */ React.createElement("circle", { cx: x(59), cy: y(t.rs), r: "3.5", fill: "var(--copper)", style: { filter: "drop-shadow(0 0 6px var(--copper))" } })))), /* @__PURE__ */ React.createElement("div", { className: "sdp-sec" }, /* @__PURE__ */ React.createElement("div", { className: "sdp-sec-h" }, /* @__PURE__ */ React.createElement("span", { className: "sdp-sec-n mono" }, "TF"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "RS ACROSS TIMEFRAMES")), /* @__PURE__ */ React.createElement("div", { className: "sdp-sec-b" }, [["1W", t.rs1w], ["1M", t.rs1m], ["3M", t.rs3m], ["6M", t.rs6m]].map(([l, v], i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "sdp-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, l), /* @__PURE__ */ React.createElement("div", { className: "sdp-bar-t" }, /* @__PURE__ */ React.createElement("div", { className: "sdp-bar-f", style: { width: `${v}%`, background: v >= 80 ? "var(--gn)" : v >= 50 ? "var(--amb)" : "var(--rd)" } })), /* @__PURE__ */ React.createElement("span", { className: "mono" }, v))))), /* @__PURE__ */ React.createElement("div", { className: "sdp-sec" }, /* @__PURE__ */ React.createElement("div", { className: "sdp-sec-h" }, /* @__PURE__ */ React.createElement("span", { className: "sdp-sec-n mono" }, "\u2197"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "PERSISTENCE \xB7 ACCEL")), /* @__PURE__ */ React.createElement("div", { className: "sdp-sec-b" }, /* @__PURE__ */ React.createElement("div", { className: "sdp-kv" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "weeks in top decile"), /* @__PURE__ */ React.createElement("span", { className: "mono copper" }, t.persist, "w")), /* @__PURE__ */ React.createElement("div", { className: "sdp-kv" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "RS acceleration"), /* @__PURE__ */ React.createElement("span", { className: `mono ${t.accel >= 0 ? "up" : "dn"}` }, t.accel >= 0 ? "+" : "", t.accel.toFixed(1))), /* @__PURE__ */ React.createElement("div", { className: "sdp-kv" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "1W vs 3M"), /* @__PURE__ */ React.createElement("span", { className: `mono ${t.rs1w >= t.rs3m ? "up" : "dn"}` }, t.rs1w >= t.rs3m ? "strengthening" : "fading")), /* @__PURE__ */ React.createElement("div", { className: "sdp-kv" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "RVOL"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, t.rvol.toFixed(2), "\xD7")))), /* @__PURE__ */ React.createElement("div", { className: "sdp-sec" }, /* @__PURE__ */ React.createElement("div", { className: "sdp-sec-h" }, /* @__PURE__ */ React.createElement("span", { className: "sdp-sec-n mono" }, "\u2605"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "EDGE READ")), /* @__PURE__ */ React.createElement("div", { className: "sdp-sec-b" }, /* @__PURE__ */ React.createElement("div", { className: "sdp-mech mono" }, t.rs >= 80 && t.rs1w >= t.rs3m ? "Persistent leader, still strengthening \u2014 highest-quality momentum (winners keep winning)." : t.rs1w < t.rs3m ? "RS fading vs 3M \u2014 momentum decaying, avoid fresh entries." : "Mid-pack RS \u2014 needs a catalyst to lead.")))));
+  const min = haveHist ? Math.min(...hist) - 4 : 0;
+  const max = haveHist ? Math.max(...hist) + 4 : 1;
+  const span = max - min || 1;
+  const denomX = Math.max(1, hist.length - 1);
+  const x = (i) => pad + i / denomX * (w - pad * 2);
+  const y = (v) => h - pad - (v - min) / span * (h - pad * 2);
+  const last = haveHist ? hist[hist.length - 1] : null;
+  const rs = t.rs;
+  const tf = [["1W", t.rs1w], ["1M", t.rs1m], ["3M", t.rs3m], ["6M", t.rs6m]];
+  return /* @__PURE__ */ React.createElement("div", { className: "sdp mo-detail" }, /* @__PURE__ */ React.createElement("div", { className: "sdp-hdr" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sdp-sym mono" }, /* @__PURE__ */ React.createElement("b", null, t.sym), " ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, t.sector)), /* @__PURE__ */ React.createElement("div", { className: "sdp-px mono" }, "RS ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, moInt(rs)), " \xB7 ", t.price != null ? "$" + t.price.toFixed(2) : "\u2014", " ", t.chg != null && /* @__PURE__ */ React.createElement("span", { className: t.chg >= 0 ? "up" : "dn" }, t.chg >= 0 ? "+" : "", t.chg.toFixed(2), "%"))), /* @__PURE__ */ React.createElement("span", { className: `mo-rsbadge mo-rs--${rs != null && rs >= 80 ? "hot" : rs != null && rs >= 60 ? "warm" : "cool"}` }, moInt(rs))), /* @__PURE__ */ React.createElement("button", { className: "sdp-open mono", onClick: () => onTicker(t.sym) }, "OPEN 14-LENS DETAIL \u2192"), /* @__PURE__ */ React.createElement("div", { className: "sdp-body" }, /* @__PURE__ */ React.createElement("div", { className: "sdp-sec" }, /* @__PURE__ */ React.createElement("div", { className: "sdp-sec-h" }, /* @__PURE__ */ React.createElement("span", { className: "sdp-sec-n mono" }, "RS"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "MOMENTUM TRAJECTORY")), /* @__PURE__ */ React.createElement("div", { className: "sdp-sec-b" }, haveHist ? /* @__PURE__ */ React.createElement("svg", { viewBox: `0 0 ${w} ${h}`, style: { width: "100%", overflow: "visible" } }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("linearGradient", { id: "mo-rsg", x1: "0", y1: "0", x2: "0", y2: "1" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: "var(--copper)", stopOpacity: "0.3" }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: "var(--copper)", stopOpacity: "0" }))), /* @__PURE__ */ React.createElement("path", { d: `M ${pad} ${y(min)} L ${hist.map((v, i) => `${x(i)},${y(v)}`).join(" L ")} L ${w - pad} ${y(min)} Z`, fill: "url(#mo-rsg)" }), /* @__PURE__ */ React.createElement("polyline", { points: hist.map((v, i) => `${x(i)},${y(v)}`).join(" "), stroke: "var(--copper)", strokeWidth: "1.6", fill: "none", style: { filter: "drop-shadow(0 0 4px var(--copper))" } }), /* @__PURE__ */ React.createElement("circle", { cx: x(hist.length - 1), cy: y(last), r: "3.5", fill: "var(--copper)", style: { filter: "drop-shadow(0 0 6px var(--copper))" } })) : /* @__PURE__ */ React.createElement("div", { className: "ss-empty mono dim2", style: { padding: 18 } }, "No RS history series for ", t.sym, " in the current feed."))), /* @__PURE__ */ React.createElement("div", { className: "sdp-sec" }, /* @__PURE__ */ React.createElement("div", { className: "sdp-sec-h" }, /* @__PURE__ */ React.createElement("span", { className: "sdp-sec-n mono" }, "TF"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "RELATIVE STRENGTH BY TIMEFRAME")), /* @__PURE__ */ React.createElement("div", { className: "sdp-sec-b" }, tf.map(([l, v], i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "sdp-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, l), /* @__PURE__ */ React.createElement("div", { className: "sdp-bar-t" }, /* @__PURE__ */ React.createElement("div", { className: "sdp-bar-f", style: { width: `${v != null ? MO_clamp(v, 0, 100) : 0}%`, background: v == null ? "var(--ink-3)" : v >= 80 ? "var(--gn)" : v >= 50 ? "var(--amb)" : "var(--rd)" } })), /* @__PURE__ */ React.createElement("span", { className: "mono" }, v == null ? "\u2014" : Math.round(v)))))), /* @__PURE__ */ React.createElement("div", { className: "sdp-sec" }, /* @__PURE__ */ React.createElement("div", { className: "sdp-sec-h" }, /* @__PURE__ */ React.createElement("span", { className: "sdp-sec-n mono" }, "\u2197"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "PERSISTENCE \xB7 ACCEL")), /* @__PURE__ */ React.createElement("div", { className: "sdp-sec-b" }, /* @__PURE__ */ React.createElement("div", { className: "sdp-kv" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "weeks in top decile"), /* @__PURE__ */ React.createElement("span", { className: "mono copper" }, t.persist != null ? t.persist + "w" : "\u2014")), /* @__PURE__ */ React.createElement("div", { className: "sdp-kv" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "RS acceleration"), /* @__PURE__ */ React.createElement("span", { className: `mono ${t.accel != null && t.accel >= 0 ? "up" : t.accel != null ? "dn" : "dim2"}` }, moSigned(t.accel, 1))), /* @__PURE__ */ React.createElement("div", { className: "sdp-kv" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "1W vs 3M"), /* @__PURE__ */ React.createElement("span", { className: `mono ${t.rs1w != null && t.rs3m != null ? t.rs1w >= t.rs3m ? "up" : "dn" : "dim2"}` }, t.rs1w != null && t.rs3m != null ? t.rs1w >= t.rs3m ? "strengthening" : "fading" : "\u2014")), /* @__PURE__ */ React.createElement("div", { className: "sdp-kv" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "RVOL"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, moFix(t.rvol, 2, "\xD7"))))), /* @__PURE__ */ React.createElement("div", { className: "sdp-sec" }, /* @__PURE__ */ React.createElement("div", { className: "sdp-sec-h" }, /* @__PURE__ */ React.createElement("span", { className: "sdp-sec-n mono" }, "\u2605"), /* @__PURE__ */ React.createElement("span", { className: "mono" }, "EDGE READ")), /* @__PURE__ */ React.createElement("div", { className: "sdp-sec-b" }, /* @__PURE__ */ React.createElement("div", { className: "sdp-mech mono" }, rs != null && rs >= 80 && t.rs1w != null && t.rs3m != null && t.rs1w >= t.rs3m ? "Persistent leader, still strengthening \u2014 highest-quality momentum (winners keep winning)." : t.rs1w != null && t.rs3m != null && t.rs1w < t.rs3m ? "RS fading vs 3M \u2014 momentum decaying, avoid fresh entries." : rs != null ? "Mid-pack RS \u2014 needs a catalyst to lead." : "RS history not available for this name in the current feed.")))));
 }
 window.SurfaceMomentum = SurfaceMomentum;
 </script>
 <script>/* src/surface-premarket.jsx */
 const { useState: usePM, useMemo: usePMm } = React;
-const PM_ROWS = (() => {
+const PM_SERVED = typeof window !== "undefined" && !!window.__BV;
+const PM_CRIT = () => PM_SERVED && window.__BV.critical || null;
+const pmNum = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+function pmMapGapper(g, catalystsBySym) {
+  const sym = String(g.ticker || g.sym || g.symbol || "").toUpperCase();
+  const gap = pmNum(g.gap_pct != null ? g.gap_pct : g.gap);
+  const last = pmNum(g.last != null ? g.last : g.pre_price);
+  const prev = pmNum(g.prev_close != null ? g.prev_close : g.prevClose);
+  const pmVol = pmNum(g.pm_volume_m != null ? g.pm_volume_m : g.pmVol);
+  const adv = pmNum(g.adv_m != null ? g.adv_m : g.adv);
+  const rvol = pmVol != null && adv ? pmVol / adv : pmNum(g.rvol);
+  const cat = catalystsBySym && catalystsBySym[sym] || g.catalyst || null;
+  const taxon = gap == null || Math.abs(gap) < 1.5 ? "\u2014" : gap > 0 && (rvol || 0) >= 2 ? "GAP & GO" : gap > 0 && (rvol || 99) < 1.2 ? "GAP FILL" : gap < 0 && (rvol || 0) >= 2 ? "BREAKDOWN" : Math.abs(gap) > 5 && (rvol || 99) < 1.5 ? "EXHAUSTION" : "WATCH";
+  return {
+    sym,
+    sector: g.sector || "\u2014",
+    gap,
+    prevClose: prev,
+    last,
+    pmVol,
+    adv,
+    rvol,
+    cat: cat || "\u2014",
+    catType: cat ? "news" : "tech",
+    catTone: cat ? "amb" : "ink",
+    pmHigh: pmNum(g.pm_high),
+    pmLow: pmNum(g.pm_low),
+    fillProb: pmNum(g.fill_prob),
+    taxon,
+    halt: !!g.halted
+  };
+}
+const PM_ROWS_DEMO = (() => {
   const cats = [
     ["Earnings beat", "earnings", "gn"],
     ["Guidance cut", "earnings", "rd"],
@@ -30379,7 +30557,7 @@ const PM_ROWS = (() => {
     };
   }).sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap));
 })();
-const PM_FUT = [
+const PM_FUT_DEMO = [
   ["ES", "S&P fut", "+0.31%", "gn"],
   ["NQ", "Nasdaq fut", "+0.58%", "gn"],
   ["RTY", "Russell fut", "\u22120.12%", "rd"],
@@ -30387,8 +30565,32 @@ const PM_FUT = [
   ["DXY", "dollar", "+0.08%", "ink"],
   ["CL", "crude", "\u22120.9%", "rd"]
 ];
+function pmRealTape(crit) {
+  const rg = crit && crit.regime || null;
+  if (!rg) return null;
+  const out = [];
+  const spy = pmNum(rg.spy_daily_chg);
+  if (spy != null) out.push(["SPY", "S&P (cash)", `${spy >= 0 ? "+" : ""}${spy.toFixed(2)}%`, spy >= 0 ? "gn" : "rd"]);
+  const vix = rg.vix && pmNum(rg.vix.vix_current);
+  if (vix != null) out.push(["VIX", "volatility", vix.toFixed(1), vix < 18 ? "gn" : vix < 25 ? "amb" : "rd"]);
+  const breadth = pmNum(rg.breadth_pct_50d);
+  if (breadth != null) out.push(["BREADTH", "% > 50-DMA", `${breadth.toFixed(0)}%`, breadth >= 55 ? "gn" : breadth >= 40 ? "amb" : "rd"]);
+  return out.length ? out : null;
+}
 function SurfacePreMarket({ onTicker }) {
   const [filter, setFilter] = usePM("all");
+  const crit = PM_CRIT();
+  const pm = crit && crit.premarket || null;
+  const sessionActive = !!(pm && pm._meta && pm._meta.session_active);
+  const PM_ROWS = usePMm(() => {
+    if (!PM_SERVED) return PM_ROWS_DEMO;
+    if (!pm) return [];
+    const catsBySym = {};
+    Object.entries(pm.catalysts || {}).forEach(([k, v]) => {
+      catsBySym[String(k).toUpperCase()] = typeof v === "string" ? v : v && (v.headline || v.title) || null;
+    });
+    return [...pm.gappers_up || [], ...pm.gappers_dn || []].map((g) => pmMapGapper(g, catsBySym)).filter((r) => r.sym && r.gap != null).sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap));
+  }, [pm]);
   const gu = PM_ROWS.filter((r) => r.gap > 1.5).length;
   const gd = PM_ROWS.filter((r) => r.gap < -1.5).length;
   const news = PM_ROWS.filter((r) => r.catType !== "tech").length;
@@ -30398,8 +30600,15 @@ function SurfacePreMarket({ onTicker }) {
     if (filter === "news") return PM_ROWS.filter((r) => r.catType !== "tech");
     if (filter === "go") return PM_ROWS.filter((r) => r.taxon === "GAP & GO");
     return PM_ROWS;
-  }, [filter]);
-  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--violet pm2" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "PRE-MARKET COCKPIT \xB7 04:00\u201309:29 ET"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "Pre-Market"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "gap board \xB7 catalyst-tagged \xB7 gap taxonomy \xB7 PM levels \xB7 futures tape")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement("div", { className: "pm-clock mono" }, /* @__PURE__ */ React.createElement("span", { className: "pm-clock-dot" }), "OPENS IN ", /* @__PURE__ */ React.createElement("b", null, "00:42:18")), /* @__PURE__ */ React.createElement(FreshnessPill, { state: "live", age: "5s" }))), /* @__PURE__ */ React.createElement("div", { className: "pm-read" }, /* @__PURE__ */ React.createElement("div", { className: "pm-read-l" }, /* @__PURE__ */ React.createElement("span", { className: "pm-read-tag mono" }, "PRE-MARKET READ"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-stance mono" }, "STAND ASIDE \xB7 WAIT FOR 09:45")), /* @__PURE__ */ React.createElement("div", { className: "pm-read-body mono" }, "Futures firm, ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "risk-on tilt"), " (Tech +1.4% / Energy +2.1%) \u2014 but ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "CPI prints 08:30"), " and can override every single-name thesis, so keep risk light into the number. No clean pre-market ", /* @__PURE__ */ React.createElement("b", null, "buy"), ": the big movers (CRWV +9%, GENO \u22126%) are ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "earnings-gap blackout"), " \u2014 no fresh swing entries. Your held ", /* @__PURE__ */ React.createElement("b", { className: "cop" }, "BORA"), " reports BMO and gaps +1.8% \u2014 that's today's first risk to manage. ", /* @__PURE__ */ React.createElement("b", { className: "cop" }, "Action:"), " watch, don't chase; let CPI + the 09:45 range print, then revisit Signal Scanner."), /* @__PURE__ */ React.createElement("div", { className: "pm-read-chips" }, /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip pm-read-chip--gn" }, "REGIME \xB7 RISK-ON"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip pm-read-chip--rd" }, "MACRO \xB7 CPI 08:30"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip pm-read-chip--amb" }, "2 EARNINGS BLACKOUT"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip pm-read-chip--cy" }, "1 BOOK REPORTER \xB7 BORA"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip" }, "0 FRESH BUYS"))), /* @__PURE__ */ React.createElement("div", { className: "pm-tape" }, PM_FUT.map(([s, l, v, t], i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `pm-fut pm-fut--${t}` }, /* @__PURE__ */ React.createElement("span", { className: "pm-fut-s mono" }, s), /* @__PURE__ */ React.createElement("span", { className: `pm-fut-v mono kpi-tone--${t}` }, v), /* @__PURE__ */ React.createElement("span", { className: "pm-fut-l mono dim2" }, l)))), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpis" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--violet" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "GAPPERS"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--violet" }, gu + gd), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "> 1.5% gap")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--gn" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "GAP UP"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--gn" }, gu), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, PM_ROWS.filter((r) => r.taxon === "GAP & GO").length, " gap-and-go")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--rd" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "GAP DOWN"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--rd" }, gd), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, PM_ROWS.filter((r) => r.taxon === "BREAKDOWN").length, " breakdown")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--amb" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "NEWS-DRIVEN"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--amb" }, news), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "vs ", PM_ROWS.length - news, " technical"))), /* @__PURE__ */ React.createElement("div", { className: "lab-tabs" }, [["all", "All gaps"], ["up", "Gap up"], ["down", "Gap down"], ["news", "News-driven"], ["go", "Gap & Go"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `lab-tab ${filter === id ? "is-on" : ""}`, onClick: () => setFilter(id) }, l))), /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl pm-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Sym"), /* @__PURE__ */ React.createElement("th", null, "Sector"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Prev"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "PM Last"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Gap %"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "PM Vol"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "vs ADV"), /* @__PURE__ */ React.createElement("th", null, "Catalyst"), /* @__PURE__ */ React.createElement("th", null, "Taxonomy"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Fill Prob"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "PM Range"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((t, i) => /* @__PURE__ */ React.createElement("tr", { key: t.sym + i, onClick: () => onTicker(t.sym) }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, t.sym), t.halt && /* @__PURE__ */ React.createElement("span", { className: "pm-halt mono" }, "HALT")), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, t.sector), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, "$", t.prevClose.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, "$", t.last.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.gap >= 0 ? "up" : "dn"}`, "data-field": "schwab.quote.pre.gap_pct" }, /* @__PURE__ */ React.createElement("b", null, t.gap >= 0 ? "+" : "", t.gap.toFixed(1), "%")), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular", "data-field": "schwab.quote.pre.volume" }, t.pmVol.toFixed(1), "M"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.pmVol / t.adv >= 2 ? "up" : "dim"}` }, (t.pmVol / t.adv).toFixed(1), "\xD7"), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: t.catTone, small: true }, t.cat)), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `pm-taxon pm-tax--${t.taxon === "GAP & GO" ? "gn" : t.taxon === "BREAKDOWN" ? "rd" : t.taxon === "EXHAUSTION" ? "amb" : "ink"}` }, t.taxon)), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.fillProb >= 60 ? "amb" : "dim"}` }, t.fillProb, "%"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, "$", t.pmLow.toFixed(0), "\u2013$", t.pmHigh.toFixed(0)), /* @__PURE__ */ React.createElement("td", { className: "r mono dim" }, "\u203A")))))), /* @__PURE__ */ React.createElement("div", { className: "pm-panels" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "\u26A0 MACRO CALENDAR \xB7 pre-open prints"), /* @__PURE__ */ React.createElement("div", { className: "pm-macro" }, [
+  }, [filter, PM_ROWS]);
+  const futTape = PM_SERVED ? pmRealTape(crit) || [] : PM_FUT_DEMO;
+  const book = PM_SERVED && window.__BV.portfolio && Array.isArray(window.__BV.portfolio.positions) ? window.__BV.portfolio.positions : null;
+  const macroEv = PM_SERVED && crit && Array.isArray(crit.economic_events) ? crit.economic_events : null;
+  const wire = PM_SERVED && window.__BV.marketNews && window.__BV.marketNews.length ? window.__BV.marketNews : null;
+  if (PM_SERVED && PM_ROWS.length === 0) {
+    return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--violet pm2" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "PRE-MARKET COCKPIT \xB7 04:00\u201309:29 ET"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "Pre-Market"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "gap board \xB7 catalyst-tagged \xB7 gap taxonomy \xB7 PM levels")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "src \xB7 critical.premarket"))), futTape.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "pm-tape" }, futTape.map(([s, l, v, t], i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `pm-fut pm-fut--${t}` }, /* @__PURE__ */ React.createElement("span", { className: "pm-fut-s mono" }, s), /* @__PURE__ */ React.createElement("span", { className: `pm-fut-v mono kpi-tone--${t}` }, v), /* @__PURE__ */ React.createElement("span", { className: "pm-fut-l mono dim2" }, l)))), /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("div", { className: "lab-verdict mono dim2", style: { padding: 24, lineHeight: 1.7 } }, sessionActive ? "Pre-market session is live but no names are gapping > 1.5% right now \u2014 nothing to show. This board only renders real gappers from the scan; it stays empty rather than fabricate movers." : /* @__PURE__ */ React.createElement(React.Fragment, null, "No pre-market session active (", pm && pm._meta && pm._meta.session_status || "outside 04:00\u201309:29 ET", "). The gap board populates with real movers during the pre-market window. No fabricated gappers are shown."), macroEv && macroEv.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("br", null), "Today/upcoming macro prints are still live below."))), macroEv && macroEv.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "pm-panels" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "\u26A0 MACRO CALENDAR \xB7 upcoming US prints"), /* @__PURE__ */ React.createElement("div", { className: "pm-macro" }, macroEv.slice(0, 6).map((m, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `pm-macro-row pm-macro--${m._impact === "HIGH" ? "rd" : m._impact === "MED" ? "amb" : "ink"}` }, /* @__PURE__ */ React.createElement("span", { className: "mono pm-macro-t" }, String(m.date || "").slice(5, 16)), /* @__PURE__ */ React.createElement("span", { className: "mono pm-macro-e" }, m.type, m.comparison ? " (" + m.comparison + ")" : ""), /* @__PURE__ */ React.createElement(Pill, { tone: m._impact === "HIGH" ? "rd" : m._impact === "MED" ? "amb" : "ink", small: true }, m._impact || "LOW"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2 pm-macro-f" }, m.estimate != null ? "fcst " + m.estimate : "", m.previous != null ? " \xB7 prior " + m.previous : "")))))), /* @__PURE__ */ React.createElement("div", { className: "pm-note mono dim2" }, "Gap board sourced from ", /* @__PURE__ */ React.createElement("b", null, "critical.premarket"), " (Schwab pre-session quotes when the window is open). Macro from ", /* @__PURE__ */ React.createElement("b", null, "EODHD /calendar"), " (critical.economic_events). Empty by design outside the pre-market window \u2014 no fabricated movers."));
+  }
+  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--violet pm2" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "PRE-MARKET COCKPIT \xB7 04:00\u201309:29 ET"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "Pre-Market"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "gap board \xB7 catalyst-tagged \xB7 gap taxonomy \xB7 PM levels \xB7 futures tape")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement("div", { className: "pm-clock mono" }, /* @__PURE__ */ React.createElement("span", { className: "pm-clock-dot" }), "OPENS IN ", /* @__PURE__ */ React.createElement("b", null, "00:42:18")), /* @__PURE__ */ React.createElement(FreshnessPill, { state: "live", age: "5s" }))), !PM_SERVED && /* @__PURE__ */ React.createElement("div", { className: "pm-read" }, /* @__PURE__ */ React.createElement("div", { className: "pm-read-l" }, /* @__PURE__ */ React.createElement("span", { className: "pm-read-tag mono" }, "PRE-MARKET READ"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-stance mono" }, "STAND ASIDE \xB7 WAIT FOR 09:45")), /* @__PURE__ */ React.createElement("div", { className: "pm-read-body mono" }, "Futures firm, ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "risk-on tilt"), " (Tech +1.4% / Energy +2.1%) \u2014 but ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "CPI prints 08:30"), " and can override every single-name thesis, so keep risk light into the number. No clean pre-market ", /* @__PURE__ */ React.createElement("b", null, "buy"), ": the big movers are ", /* @__PURE__ */ React.createElement("b", { className: "warn" }, "earnings-gap blackout"), " \u2014 no fresh swing entries. ", /* @__PURE__ */ React.createElement("b", { className: "cop" }, "Action:"), " watch, don't chase; let CPI + the 09:45 range print, then revisit Signal Scanner."), /* @__PURE__ */ React.createElement("div", { className: "pm-read-chips" }, /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip pm-read-chip--gn" }, "REGIME \xB7 RISK-ON"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip pm-read-chip--rd" }, "MACRO \xB7 CPI 08:30"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip" }, "DEMO SHOWCASE"))), PM_SERVED && /* @__PURE__ */ React.createElement("div", { className: "pm-read" }, /* @__PURE__ */ React.createElement("div", { className: "pm-read-l" }, /* @__PURE__ */ React.createElement("span", { className: "pm-read-tag mono" }, "PRE-MARKET READ"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-stance mono" }, gu + gd, " GAPPER", gu + gd === 1 ? "" : "S", " \xB7 > 1.5%")), /* @__PURE__ */ React.createElement("div", { className: "pm-read-body mono" }, gu + gd, " name", gu + gd === 1 ? "" : "s", " gapping > 1.5% from the scan \u2014 ", gu, " up, ", gd, " down, ", news, " news-driven.", book && book.length > 0 ? /* @__PURE__ */ React.createElement(React.Fragment, null, " Your book holds ", book.length, " position", book.length === 1 ? "" : "s", "; check the exposure panel for overnight moves.") : /* @__PURE__ */ React.createElement(React.Fragment, null, " No open positions in the book."), " ", "Don't chase gaps in the first 5 minutes \u2014 let the 09:45 range set first."), /* @__PURE__ */ React.createElement("div", { className: "pm-read-chips" }, /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip pm-read-chip--gn" }, gu, " GAP UP"), /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip pm-read-chip--rd" }, gd, " GAP DOWN"), book && /* @__PURE__ */ React.createElement("span", { className: "pm-read-chip pm-read-chip--cy" }, book.length, " HELD"))), futTape.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "pm-tape" }, futTape.map(([s, l, v, t], i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `pm-fut pm-fut--${t}` }, /* @__PURE__ */ React.createElement("span", { className: "pm-fut-s mono" }, s), /* @__PURE__ */ React.createElement("span", { className: `pm-fut-v mono kpi-tone--${t}` }, v), /* @__PURE__ */ React.createElement("span", { className: "pm-fut-l mono dim2" }, l)))), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpis" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--violet" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "GAPPERS"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--violet" }, gu + gd), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "> 1.5% gap")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--gn" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "GAP UP"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--gn" }, gu), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, PM_ROWS.filter((r) => r.taxon === "GAP & GO").length, " gap-and-go")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--rd" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "GAP DOWN"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--rd" }, gd), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, PM_ROWS.filter((r) => r.taxon === "BREAKDOWN").length, " breakdown")), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi wsx-kpi--amb" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, "NEWS-DRIVEN"), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-v mono kpi-tone--amb" }, news), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, "vs ", PM_ROWS.length - news, " technical"))), /* @__PURE__ */ React.createElement("div", { className: "lab-tabs" }, [["all", "All gaps"], ["up", "Gap up"], ["down", "Gap down"], ["news", "News-driven"], ["go", "Gap & Go"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `lab-tab ${filter === id ? "is-on" : ""}`, onClick: () => setFilter(id) }, l))), /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl pm-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Sym"), /* @__PURE__ */ React.createElement("th", null, "Sector"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Prev"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "PM Last"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Gap %"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "PM Vol"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "vs ADV"), /* @__PURE__ */ React.createElement("th", null, "Catalyst"), /* @__PURE__ */ React.createElement("th", null, "Taxonomy"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Fill Prob"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "PM Range"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((t, i) => /* @__PURE__ */ React.createElement("tr", { key: t.sym + i, onClick: () => onTicker(t.sym) }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, t.sym), t.halt && /* @__PURE__ */ React.createElement("span", { className: "pm-halt mono" }, "HALT")), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, t.sector), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, t.prevClose != null ? "$" + t.prevClose.toFixed(2) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, t.last != null ? "$" + t.last.toFixed(2) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.gap >= 0 ? "up" : "dn"}`, "data-field": "schwab.quote.pre.gap_pct" }, /* @__PURE__ */ React.createElement("b", null, t.gap >= 0 ? "+" : "", t.gap.toFixed(1), "%")), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular", "data-field": "schwab.quote.pre.volume" }, t.pmVol != null ? t.pmVol.toFixed(1) + "M" : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${(t.rvol || 0) >= 2 ? "up" : "dim"}` }, t.rvol != null ? t.rvol.toFixed(1) + "\xD7" : "\u2014"), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: t.catTone, small: true }, t.cat)), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `pm-taxon pm-tax--${t.taxon === "GAP & GO" ? "gn" : t.taxon === "BREAKDOWN" ? "rd" : t.taxon === "EXHAUSTION" ? "amb" : "ink"}` }, t.taxon)), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${(t.fillProb || 0) >= 60 ? "amb" : "dim"}` }, t.fillProb != null ? t.fillProb + "%" : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, t.pmLow != null && t.pmHigh != null ? `$${t.pmLow.toFixed(0)}\u2013$${t.pmHigh.toFixed(0)}` : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r mono dim" }, "\u203A")))))), /* @__PURE__ */ React.createElement("div", { className: "pm-panels" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card" }, /* @__PURE__ */ React.createElement("div", { className: "lab-card-h mono" }, "\u26A0 MACRO CALENDAR \xB7 pre-open prints"), /* @__PURE__ */ React.createElement("div", { className: "pm-macro" }, [
     ["08:30", "CPI Core MoM", "HIGH", "+0.3%", "+0.3%", "amb"],
     ["08:30", "Jobless Claims", "MED", "218k", "221k", "ink"],
     ["10:00", "FOMC Speak \xB7 Powell", "HIGH", "\u2014", "\u2014", "amb"],
@@ -30708,7 +30917,48 @@ window.SurfaceOptionsFlow = SurfaceOptionsFlow;
 </script>
 <script>/* src/surface-options-ideas.jsx */
 const { useState: useOI, useMemo: useOIm } = React;
-const OI_IDEAS = [
+const OI_SERVED = typeof window !== "undefined" && !!window.__BV;
+function oiRealIdeas() {
+  const BV = typeof window !== "undefined" ? window.__BV : null;
+  const flow = BV && Array.isArray(BV.optionsFlow) ? BV.optionsFlow : null;
+  if (!flow || !flow.length) return null;
+  return flow.map((o) => {
+    const pcr = typeof o.put_call_ratio === "number" ? o.put_call_ratio : 1;
+    const dir = pcr < 0.85 ? "bull" : pcr > 1.2 ? "bear" : "bull";
+    const spot = +(o.price || o.spot || 0) || 0;
+    const ivr = typeof o.iv_percentile === "number" ? Math.round(o.iv_percentile) : o.atm_iv ? Math.round(o.atm_iv * 100) : null;
+    const dte = o.atm_dte || null;
+    const strike = o.atm_strike || (spot ? Math.round(spot) : null);
+    const premM = (o.premium_total_$ || 0) / 1e6;
+    const strat = ivr == null ? "Directional (UOA)" : ivr < 45 ? dir === "bear" ? "Long Put" : "Long Call" : ivr < 70 ? dir === "bear" ? "Put Debit Spread" : "Bull Call Spread" : "Calendar / sell premium";
+    return {
+      sym: String(o.ticker || "").toUpperCase(),
+      spot,
+      dir,
+      strat,
+      structure: strike != null && dte != null ? `~${strike}${dir === "bear" ? "P" : "C"} \xB7 ${dte}d` : "chain not priced",
+      debit: null,
+      maxLoss: null,
+      maxGain: null,
+      be: null,
+      pop: null,
+      rr: null,
+      ivr,
+      dte,
+      delta: null,
+      theta: null,
+      catalyst: o.uoa_detail || "\u2014",
+      conv: null,
+      kelly: null,
+      why: `UOA tape: net ${dir === "bear" ? "put" : "call"} premium ${premM >= 0.01 ? "$" + premM.toFixed(1) + "M" : "flow"} (P/C ${pcr.toFixed(2)})${ivr != null ? " \xB7 IV-rank " + ivr : ""}. Structure is IV-rank guidance \u2014 price the leg on the Options lens before sizing.`,
+      premM,
+      pcr,
+      risk: "size off the Options lens",
+      riskTone: "amb"
+    };
+  }).filter((x) => x.sym).sort((a, b) => (b.premM || 0) - (a.premM || 0));
+}
+const OI_IDEAS_DEMO = [
   { sym: "ARGN", spot: 213.4, dir: "bull", strat: "Long Call", structure: "Jul18 220C", debit: 8.4, maxLoss: 840, maxGain: "open", be: 228.4, pop: 46, rr: "3.1", ivr: 34, dte: 35, delta: 0.52, theta: -12, catalyst: "Order backlog \xB7 upgrade", conv: 5, kelly: 0.16, why: "Low IV-rank (34) + strong momentum \u2192 buy premium, not spread. Cheap optionality into automation cycle.", risk: "none material", riskTone: "gn" },
   { sym: "ARCM", spot: 67.42, dir: "bull", strat: "Bull Call Spread", structure: "Jul18 68/78C", debit: 3.1, maxLoss: 310, maxGain: 690, be: 71.1, pop: 41, rr: "2.2", ivr: 48, dte: 35, delta: 0.34, theta: -6, catalyst: "Breakout base #2 \xB7 ER 11d", conv: 4, kelly: 0.11, why: "Mid IV-rank \u2192 defined-risk spread caps cost. Short leg above T1 funds the long.", risk: "earnings in 11d (pre-T1)", riskTone: "amb" },
   { sym: "GENO", spot: 29.4, dir: "bull", strat: "Call Debit (ER)", structure: "Jun13 30C", debit: 1.85, maxLoss: 185, maxGain: "open", be: 31.85, pop: 38, rr: "2.8", ivr: 82, dte: 14, delta: 0.44, theta: -9, catalyst: "Phase-2 readout", conv: 3, kelly: 0.04, why: "Binary catalyst trade \u2014 only justified as a small lottery into the readout.", risk: "IV-crush 82 IVR \xB7 binary", riskTone: "rd" },
@@ -30757,8 +31007,14 @@ function SurfaceOptionsIdeas({ onTicker }) {
     } catch (e) {
     }
   };
+  const realIdeas = oiRealIdeas();
+  const REAL = !!realIdeas;
+  const IDEAS = realIdeas || OI_IDEAS_DEMO;
+  if (OI_SERVED && !realIdeas) {
+    return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--gn oidea" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "TOP OPTIONS TO BUY \xB7 RANKED IDEAS"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "No options ideas right now"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "ideas are derived from the live unusual-options-activity tape")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "src \xB7 options_flow_top30 (UOA)"))), /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("div", { className: "lab-verdict mono dim2", style: { padding: 24, lineHeight: 1.7 } }, "No unusual-options-activity names on the tape from the latest scan, so there are no option ideas to surface. This board is built only from real UOA aggregates (", /* @__PURE__ */ React.createElement("b", { className: "cop" }, "critical.options_flow_top30"), ") \u2014 it stays empty rather than show fabricated tickets. Per-leg pricing (debit / POP / Greeks / Kelly) lives on each name's ", /* @__PURE__ */ React.createElement("b", null, "Options lens"), " (Schwab chain).")));
+  }
   const sizeFor = (x) => {
-    if (!x.kelly || x.kelly <= 0) return { contracts: 0, dollars: 0, pctRisk: 0, note: "skip" };
+    if (!x.kelly || x.kelly <= 0 || !x.maxLoss) return { contracts: 0, dollars: 0, pctRisk: 0, note: REAL ? "price on lens" : "skip" };
     const kCap = Math.min(x.kelly * kFrac, 0.05);
     const riskBudget = acct * kCap;
     const contracts = Math.max(0, Math.floor(riskBudget / x.maxLoss));
@@ -30766,27 +31022,29 @@ function SurfaceOptionsIdeas({ onTicker }) {
     return { contracts, dollars, pctRisk: acct ? dollars / acct * 100 : 0, note: contracts === 0 ? "below 1 lot" : "" };
   };
   const rows = useOIm(() => {
-    let r = OI_IDEAS;
+    let r = IDEAS;
     if (filter === "bull") r = r.filter((x) => x.dir === "bull");
     if (filter === "bear") r = r.filter((x) => x.dir === "bear");
-    if (filter === "cheap") r = r.filter((x) => x.ivr < 45);
+    if (filter === "cheap") r = r.filter((x) => x.ivr != null && x.ivr < 45);
     if (filter === "spread") r = r.filter((x) => x.strat.includes("Spread") || x.strat.includes("Calendar"));
     if (filter === "long") r = r.filter((x) => x.strat.includes("Long") || x.strat.includes("Debit"));
-    if (filter === "actionable") r = r.filter((x) => x.conv >= 4 && parseFloat(x.rr) >= 2);
-    r = [...r].sort((a, b) => sort === "conv" ? b.conv - a.conv : sort === "rr" ? parseFloat(b.rr) - parseFloat(a.rr) : sort === "size" ? sizeFor(b).contracts - sizeFor(a).contracts : b.pop - a.pop);
+    if (filter === "actionable") r = r.filter((x) => (x.conv || 0) >= 4 && parseFloat(x.rr) >= 2);
+    const sf = (x) => sort === "conv" ? x.conv || 0 : sort === "rr" ? parseFloat(x.rr) || 0 : sort === "size" ? sizeFor(x).contracts : x.pop || x.premM || 0;
+    r = [...r].sort((a, b) => sf(b) - sf(a));
     return r;
-  }, [filter, sort, acct, kFrac]);
-  const best = OI_IDEAS.slice().sort((a, b) => b.conv - a.conv)[0];
-  const nActionable = OI_IDEAS.filter((x) => x.conv >= 4 && parseFloat(x.rr) >= 2).length;
-  const sized = OI_IDEAS.map(sizeFor).filter((s) => s.contracts > 0);
-  const nSizeable = OI_IDEAS.filter((x) => x.kelly > 0).length;
+  }, [filter, sort, acct, kFrac, REAL]);
+  const best = IDEAS.slice().sort((a, b) => REAL ? (b.premM || 0) - (a.premM || 0) : (b.conv || 0) - (a.conv || 0))[0];
+  const nActionable = IDEAS.filter((x) => (x.conv || 0) >= 4 && parseFloat(x.rr) >= 2).length;
+  const sized = IDEAS.map(sizeFor).filter((s) => s.contracts > 0);
+  const nSizeable = IDEAS.filter((x) => x.kelly > 0).length;
   const deployed = sized.reduce((a, s) => a + s.dollars, 0);
   const totRiskPct = acct ? deployed / acct * 100 : 0;
   const nSized = sized.length;
-  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--gn oidea" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "TOP OPTIONS TO BUY \xB7 RANKED IDEAS"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "Options Ideas"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "concrete option tickets \xB7 ranked by edge \xB7 IV-aware structure \xB7 Schwab chains")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement(FreshnessPill, { state: "live", age: "6s" }), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, OI_IDEAS.length, " ideas \xB7 ", nActionable, " actionable \xB7 Schwab chains"))), /* @__PURE__ */ React.createElement("div", { className: "oi-sizebar" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Position sizing"), /* @__PURE__ */ React.createElement("label", { className: "oi-size-fld mono" }, "Account", /* @__PURE__ */ React.createElement("span", { className: "oi-size-input" }, "$", /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", step: "1000", value: acct || "", placeholder: "50000", onChange: (e) => setAcctP(e.target.value === "" ? 0 : Math.max(0, +e.target.value)) }))), /* @__PURE__ */ React.createElement("label", { className: "oi-size-fld mono" }, "Kelly fraction", /* @__PURE__ */ React.createElement("select", { value: kFrac, onChange: (e) => setKFracP(+e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: 0.25 }, "\xBC Kelly (conservative)"), /* @__PURE__ */ React.createElement("option", { value: 0.5 }, "\xBD Kelly (recommended)"), /* @__PURE__ */ React.createElement("option", { value: 1 }, "Full Kelly (aggressive)"))), /* @__PURE__ */ React.createElement("span", { className: "oi-size-live mono" }, /* @__PURE__ */ React.createElement("span", { className: "oi-size-live-cell" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "Deployed"), " ", /* @__PURE__ */ React.createElement("b", { className: "cop" }, "$", (deployed / 1e3).toFixed(1), "k")), /* @__PURE__ */ React.createElement("span", { className: "oi-size-live-cell" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "Total risk"), " ", /* @__PURE__ */ React.createElement("b", { className: totRiskPct > 25 ? "dn" : "up" }, totRiskPct.toFixed(1), "%")), /* @__PURE__ */ React.createElement("span", { className: "oi-size-live-cell" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "Sized"), " ", /* @__PURE__ */ React.createElement("b", null, nSized, "/", nSizeable))), /* @__PURE__ */ React.createElement("span", { className: "oi-size-note mono dim2" }, "auto-sized from each idea's Kelly edge \xD7 your fraction, capped 5%/idea \xB7 updates live")), /* @__PURE__ */ React.createElement("div", { className: "oi-best" }, /* @__PURE__ */ React.createElement("div", { className: "oi-best-l" }, /* @__PURE__ */ React.createElement("div", { className: "oi-best-eyebrow mono" }, "\u2B50 HIGHEST-CONVICTION IDEA"), /* @__PURE__ */ React.createElement("div", { className: "oi-best-row" }, /* @__PURE__ */ React.createElement("span", { className: "oi-best-sym mono" }, best.sym), /* @__PURE__ */ React.createElement("span", { className: `oi-best-dir oi-best-dir--${best.dir}` }, best.dir === "bull" ? "\u25B2 BULLISH" : "\u25BC BEARISH"), /* @__PURE__ */ React.createElement("span", { className: "oi-best-strat mono" }, best.strat)), /* @__PURE__ */ React.createElement("div", { className: "oi-best-struct mono" }, best.structure, " ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 debit ", /* @__PURE__ */ React.createElement("b", { className: "cop" }, "$", best.debit.toFixed(2)), " (", "$", best.maxLoss, " max loss) \xB7 BE $", best.be)), /* @__PURE__ */ React.createElement("div", { className: "oi-best-why mono dim2" }, best.why)), /* @__PURE__ */ React.createElement("div", { className: "oi-best-r" }, /* @__PURE__ */ React.createElement("div", { className: "oi-best-kpi" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "R:R"), /* @__PURE__ */ React.createElement("div", { className: "mono kpi-tone--gn oi-best-kpi-v" }, best.rr)), /* @__PURE__ */ React.createElement("div", { className: "oi-best-kpi" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "POP"), /* @__PURE__ */ React.createElement("div", { className: "mono oi-best-kpi-v" }, best.pop, "%")), /* @__PURE__ */ React.createElement("div", { className: "oi-best-kpi" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "IV RANK"), /* @__PURE__ */ React.createElement("div", { className: `mono oi-best-kpi-v ${best.ivr < 45 ? "up" : "warn"}` }, best.ivr, "%")), /* @__PURE__ */ React.createElement("div", { className: "oi-best-kpi" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "CONV"), /* @__PURE__ */ React.createElement("div", { className: "mono kpi-tone--gn oi-best-kpi-v" }, best.conv, "/5")))), /* @__PURE__ */ React.createElement("div", { className: "lab-tabs" }, [["all", "All ideas"], ["actionable", "\u2713 Actionable"], ["bull", "Bullish"], ["bear", "Bearish"], ["cheap", "Cheap IV"], ["long", "Long premium"], ["spread", "Spreads"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `lab-tab ${filter === id ? "is-on" : ""}`, onClick: () => setFilter(id) }, l)), /* @__PURE__ */ React.createElement("div", { className: "seg", style: { marginLeft: "auto" } }, [["conv", "Conviction"], ["rr", "R:R"], ["pop", "POP"], ["size", "Size"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `seg-btn ${sort === id ? "is-on" : ""}`, onClick: () => setSort(id) }, l)))), /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl oi-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Sym"), /* @__PURE__ */ React.createElement("th", null, "Bias"), /* @__PURE__ */ React.createElement("th", null, "Strategy"), /* @__PURE__ */ React.createElement("th", null, "Structure"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Debit"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Max Loss"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "R:R"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "POP"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "IV Rank"), /* @__PURE__ */ React.createElement("th", null, "Catalyst"), /* @__PURE__ */ React.createElement("th", null, "Why not"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Conv"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Size"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((x, i) => {
+  const num = (v, fn) => v == null || typeof v === "number" && !Number.isFinite(v) ? "\u2014" : fn ? fn(v) : v;
+  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--gn oidea" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "TOP OPTIONS TO BUY \xB7 RANKED IDEAS"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "Options Ideas"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, REAL ? "live unusual-options-activity tape \xB7 bias from P/C \xB7 structure by IV-rank \xB7 price the leg on each Options lens" : "concrete option tickets \xB7 ranked by edge \xB7 IV-aware structure \xB7 Schwab chains")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, !REAL && /* @__PURE__ */ React.createElement(FreshnessPill, { state: "live", age: "6s" }), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, IDEAS.length, " ", REAL ? "UOA names \xB7 price legs on Options lens" : `ideas \xB7 ${nActionable} actionable \xB7 Schwab chains`))), !REAL && /* @__PURE__ */ React.createElement("div", { className: "oi-sizebar" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "Position sizing"), /* @__PURE__ */ React.createElement("label", { className: "oi-size-fld mono" }, "Account", /* @__PURE__ */ React.createElement("span", { className: "oi-size-input" }, "$", /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", step: "1000", value: acct || "", placeholder: "50000", onChange: (e) => setAcctP(e.target.value === "" ? 0 : Math.max(0, +e.target.value)) }))), /* @__PURE__ */ React.createElement("label", { className: "oi-size-fld mono" }, "Kelly fraction", /* @__PURE__ */ React.createElement("select", { value: kFrac, onChange: (e) => setKFracP(+e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: 0.25 }, "\xBC Kelly (conservative)"), /* @__PURE__ */ React.createElement("option", { value: 0.5 }, "\xBD Kelly (recommended)"), /* @__PURE__ */ React.createElement("option", { value: 1 }, "Full Kelly (aggressive)"))), /* @__PURE__ */ React.createElement("span", { className: "oi-size-live mono" }, /* @__PURE__ */ React.createElement("span", { className: "oi-size-live-cell" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "Deployed"), " ", /* @__PURE__ */ React.createElement("b", { className: "cop" }, "$", (deployed / 1e3).toFixed(1), "k")), /* @__PURE__ */ React.createElement("span", { className: "oi-size-live-cell" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "Total risk"), " ", /* @__PURE__ */ React.createElement("b", { className: totRiskPct > 25 ? "dn" : "up" }, totRiskPct.toFixed(1), "%")), /* @__PURE__ */ React.createElement("span", { className: "oi-size-live-cell" }, /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "Sized"), " ", /* @__PURE__ */ React.createElement("b", null, nSized, "/", nSizeable))), /* @__PURE__ */ React.createElement("span", { className: "oi-size-note mono dim2" }, "auto-sized from each idea's Kelly edge \xD7 your fraction, capped 5%/idea \xB7 updates live")), best && /* @__PURE__ */ React.createElement("div", { className: "oi-best" }, /* @__PURE__ */ React.createElement("div", { className: "oi-best-l" }, /* @__PURE__ */ React.createElement("div", { className: "oi-best-eyebrow mono" }, REAL ? "\u{1F50A} LOUDEST UOA NAME" : "\u2B50 HIGHEST-CONVICTION IDEA"), /* @__PURE__ */ React.createElement("div", { className: "oi-best-row" }, /* @__PURE__ */ React.createElement("span", { className: "oi-best-sym mono" }, best.sym), /* @__PURE__ */ React.createElement("span", { className: `oi-best-dir oi-best-dir--${best.dir}` }, best.dir === "bull" ? "\u25B2 BULLISH" : "\u25BC BEARISH"), /* @__PURE__ */ React.createElement("span", { className: "oi-best-strat mono" }, best.strat)), /* @__PURE__ */ React.createElement("div", { className: "oi-best-struct mono" }, best.structure, " ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, REAL ? `\xB7 net premium ${best.premM >= 0.01 ? "$" + best.premM.toFixed(1) + "M" : "\u2014"} \xB7 price the leg on the Options lens` : `\xB7 debit ${best.debit != null ? "$" + best.debit.toFixed(2) : "\u2014"} ($${best.maxLoss} max loss) \xB7 BE $${best.be}`)), /* @__PURE__ */ React.createElement("div", { className: "oi-best-why mono dim2" }, best.why)), /* @__PURE__ */ React.createElement("div", { className: "oi-best-r" }, /* @__PURE__ */ React.createElement("div", { className: "oi-best-kpi" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "R:R"), /* @__PURE__ */ React.createElement("div", { className: "mono kpi-tone--gn oi-best-kpi-v" }, num(best.rr))), /* @__PURE__ */ React.createElement("div", { className: "oi-best-kpi" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "POP"), /* @__PURE__ */ React.createElement("div", { className: "mono oi-best-kpi-v" }, num(best.pop, (v) => v + "%"))), /* @__PURE__ */ React.createElement("div", { className: "oi-best-kpi" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, "IV RANK"), /* @__PURE__ */ React.createElement("div", { className: `mono oi-best-kpi-v ${best.ivr != null && best.ivr < 45 ? "up" : "warn"}` }, num(best.ivr, (v) => v + "%"))), /* @__PURE__ */ React.createElement("div", { className: "oi-best-kpi" }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2" }, REAL ? "PREM" : "CONV"), /* @__PURE__ */ React.createElement("div", { className: "mono kpi-tone--gn oi-best-kpi-v" }, REAL ? best.premM >= 0.01 ? "$" + best.premM.toFixed(1) + "M" : "\u2014" : num(best.conv, (v) => v + "/5"))))), /* @__PURE__ */ React.createElement("div", { className: "lab-tabs" }, [["all", "All ideas"], ["actionable", "\u2713 Actionable"], ["bull", "Bullish"], ["bear", "Bearish"], ["cheap", "Cheap IV"], ["long", "Long premium"], ["spread", "Spreads"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `lab-tab ${filter === id ? "is-on" : ""}`, onClick: () => setFilter(id) }, l)), /* @__PURE__ */ React.createElement("div", { className: "seg", style: { marginLeft: "auto" } }, (REAL ? [["pop", "Premium"], ["rr", "Bias"]] : [["conv", "Conviction"], ["rr", "R:R"], ["pop", "POP"], ["size", "Size"]]).map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `seg-btn ${sort === id ? "is-on" : ""}`, onClick: () => setSort(id) }, l)))), /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl oi-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Sym"), /* @__PURE__ */ React.createElement("th", null, "Bias"), /* @__PURE__ */ React.createElement("th", null, "Strategy"), /* @__PURE__ */ React.createElement("th", null, "Structure"), /* @__PURE__ */ React.createElement("th", { className: "r" }, REAL ? "Net prem" : "Debit"), /* @__PURE__ */ React.createElement("th", { className: "r" }, REAL ? "P/C" : "Max Loss"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "R:R"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "POP"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "IV Rank"), /* @__PURE__ */ React.createElement("th", null, REAL ? "UOA detail" : "Catalyst"), /* @__PURE__ */ React.createElement("th", null, REAL ? "Note" : "Why not"), /* @__PURE__ */ React.createElement("th", { className: "r" }, REAL ? "Prem" : "Conv"), /* @__PURE__ */ React.createElement("th", { className: "r" }, "Size"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((x, i) => {
     const sz = sizeFor(x);
-    return /* @__PURE__ */ React.createElement("tr", { key: i, onClick: () => onTicker(x.sym) }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, x.sym), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " $", x.spot.toFixed(0))), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `of-bias of-bias--${x.dir}` }, x.dir === "bull" ? "\u25B2" : "\u25BC")), /* @__PURE__ */ React.createElement("td", { className: "mono" }, x.strat), /* @__PURE__ */ React.createElement("td", { className: "mono oi-struct" }, x.structure), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular cop" }, "$", x.debit.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dn" }, "$", x.maxLoss), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${parseFloat(x.rr) >= 2 ? "up" : "warn"}` }, /* @__PURE__ */ React.createElement("b", null, x.rr)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, x.pop, "%"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${x.ivr < 45 ? "up" : x.ivr < 70 ? "warn" : "dn"}` }, x.ivr, "%"), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, x.catalyst), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `oi-risk oi-risk--${x.riskTone}` }, x.risk)), /* @__PURE__ */ React.createElement("td", { className: "r" }, /* @__PURE__ */ React.createElement("span", { className: "oi-conv mono", "data-c": x.conv }, "\u25CF".repeat(x.conv), /* @__PURE__ */ React.createElement("span", { className: "oi-conv-off" }, "\u25CF".repeat(5 - x.conv)))), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, sz.contracts > 0 ? /* @__PURE__ */ React.createElement("span", { className: "oi-size-cell" }, /* @__PURE__ */ React.createElement("b", { className: "up" }, sz.contracts, "\xD7"), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " $", (sz.dollars / 1e3).toFixed(1), "k \xB7 ", sz.pctRisk.toFixed(1), "%")) : /* @__PURE__ */ React.createElement("span", { className: "dim2" }, sz.note)), /* @__PURE__ */ React.createElement("td", { className: "r mono dim" }, "\u203A"));
-  })))), /* @__PURE__ */ React.createElement("div", { className: "of-playbook mono" }, /* @__PURE__ */ React.createElement("span", { className: "of-pb-tag", style: { color: "var(--gn)" } }, "STRUCTURE RULES"), /* @__PURE__ */ React.createElement("span", { className: "of-pb-txt" }, "IV-rank picks the structure: ", /* @__PURE__ */ React.createElement("b", null, "<45"), " = buy premium (long call/put \u2014 cheap optionality); ", /* @__PURE__ */ React.createElement("b", null, "45\u201370"), " = debit spread (cap the vol you overpay); ", /* @__PURE__ */ React.createElement("b", null, ">70"), " = sell premium or calendar (IV rich, time-decay works for you). R:R \u2265 2.0 floor. Earnings inside the hold window \u2192 size \u221225% or skip the binary. Every idea is a starting structure \u2014 set your own size off the Risk lens.")), /* @__PURE__ */ React.createElement("div", { className: "pm-note mono dim2" }, "Ideas ranked from scan verdicts \xD7 ", /* @__PURE__ */ React.createElement("b", null, "Schwab /markets/options/chains"), " (real bid/ask/IV/Greeks, 6s poll) \xB7 structure auto-selected by IV-rank \xB7 debit/max-loss/BE/POP Black-Scholes priced \xB7 catalyst from EODHD /calendar + /news. Click any row \u2192 14-lens detail + full Options lens."));
+    return /* @__PURE__ */ React.createElement("tr", { key: i, onClick: () => onTicker(x.sym) }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, x.sym), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " ", x.spot ? "$" + x.spot.toFixed(0) : "")), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `of-bias of-bias--${x.dir}` }, x.dir === "bull" ? "\u25B2" : "\u25BC")), /* @__PURE__ */ React.createElement("td", { className: "mono" }, x.strat), /* @__PURE__ */ React.createElement("td", { className: "mono oi-struct" }, x.structure), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular cop" }, REAL ? x.premM >= 0.01 ? "$" + x.premM.toFixed(1) + "M" : "\u2014" : "$" + x.debit.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dn" }, REAL ? num(x.pcr, (v) => v.toFixed(2)) : "$" + x.maxLoss), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${parseFloat(x.rr) >= 2 ? "up" : "warn"}` }, /* @__PURE__ */ React.createElement("b", null, num(x.rr))), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, num(x.pop, (v) => v + "%")), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${x.ivr != null && x.ivr < 45 ? "up" : x.ivr != null && x.ivr < 70 ? "warn" : "dn"}` }, num(x.ivr, (v) => v + "%")), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, x.catalyst), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `oi-risk oi-risk--${x.riskTone}` }, x.risk)), /* @__PURE__ */ React.createElement("td", { className: "r" }, REAL ? /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, x.premM >= 0.01 ? "$" + x.premM.toFixed(1) + "M" : "\u2014") : /* @__PURE__ */ React.createElement("span", { className: "oi-conv mono", "data-c": x.conv }, "\u25CF".repeat(x.conv), /* @__PURE__ */ React.createElement("span", { className: "oi-conv-off" }, "\u25CF".repeat(5 - x.conv)))), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, sz.contracts > 0 ? /* @__PURE__ */ React.createElement("span", { className: "oi-size-cell" }, /* @__PURE__ */ React.createElement("b", { className: "up" }, sz.contracts, "\xD7"), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " $", (sz.dollars / 1e3).toFixed(1), "k \xB7 ", sz.pctRisk.toFixed(1), "%")) : /* @__PURE__ */ React.createElement("span", { className: "dim2" }, sz.note)), /* @__PURE__ */ React.createElement("td", { className: "r mono dim" }, "\u203A"));
+  })))), /* @__PURE__ */ React.createElement("div", { className: "of-playbook mono" }, /* @__PURE__ */ React.createElement("span", { className: "of-pb-tag", style: { color: "var(--gn)" } }, "STRUCTURE RULES"), /* @__PURE__ */ React.createElement("span", { className: "of-pb-txt" }, "IV-rank picks the structure: ", /* @__PURE__ */ React.createElement("b", null, "<45"), " = buy premium (long call/put \u2014 cheap optionality); ", /* @__PURE__ */ React.createElement("b", null, "45\u201370"), " = debit spread (cap the vol you overpay); ", /* @__PURE__ */ React.createElement("b", null, ">70"), " = sell premium or calendar (IV rich, time-decay works for you). R:R \u2265 2.0 floor. Earnings inside the hold window \u2192 size \u221225% or skip the binary. Every idea is a starting structure \u2014 set your own size off the Risk lens.")), /* @__PURE__ */ React.createElement("div", { className: "pm-note mono dim2" }, REAL ? /* @__PURE__ */ React.createElement(React.Fragment, null, "Names are the live unusual-options-activity tape (", /* @__PURE__ */ React.createElement("b", { className: "cop" }, "critical.options_flow_top30"), "): bias from put/call ratio, structure suggested by IV-rank, net premium from the aggregate. Per-leg pricing (debit / max-loss / BE / POP / Greeks / Kelly) is ", /* @__PURE__ */ React.createElement("b", null, "not"), " fabricated here \u2014 open a name's ", /* @__PURE__ */ React.createElement("b", null, "Options lens"), " for the real Schwab chain. Click any row \u2192 14-lens detail.") : /* @__PURE__ */ React.createElement(React.Fragment, null, "Ideas ranked from scan verdicts \xD7 ", /* @__PURE__ */ React.createElement("b", null, "Schwab /markets/options/chains"), " (real bid/ask/IV/Greeks, 6s poll) \xB7 structure auto-selected by IV-rank \xB7 debit/max-loss/BE/POP Black-Scholes priced \xB7 catalyst from EODHD /calendar + /news. Click any row \u2192 14-lens detail + full Options lens.")));
 }
 window.SurfaceOptionsIdeas = SurfaceOptionsIdeas;
 function SurfaceOptions({ onTicker }) {
@@ -31209,6 +31467,11 @@ Object.assign(window, { SurfaceNews, NewsHub, SentimentTabs });
 </script>
 <script>/* src/surface-social.jsx */
 const { useState: useSocS, useMemo: useSocM } = React;
+const SOC_SERVED = typeof window !== "undefined" && !!window.__BV;
+const socRealFeed = () => {
+  const BV = typeof window !== "undefined" ? window.__BV : null;
+  return BV && Array.isArray(BV.social) && BV.social.length ? BV.social : null;
+};
 function socGen(end, start, n = 16, jit = 0.05) {
   const a = [];
   for (let i = 0; i < n; i++) {
@@ -31445,7 +31708,7 @@ const SOC_SETUP_DEF = {
 };
 const socTagTip = (k) => `${k.toUpperCase()} \xB7 ${SOC_SETUP_DEF[k].what}. ${SOC_SETUP_DEF[k].read}`;
 const socDiv = (r) => r.sentPct - r.pxPct;
-const SOC_UNIV = SOC_RAW.map((r) => ({ ...r, read: r.read || socReadAuto(r), trend: socGen(r.sent, r.sent - r.d24 * 1.6) }));
+const SOC_UNIV_DEMO = SOC_RAW.map((r) => ({ ...r, read: r.read || socReadAuto(r), trend: socGen(r.sent, r.sent - r.d24 * 1.6) }));
 function SocSpark({ data, tone, w = 64, h = 22 }) {
   const min = Math.min(...data), max = Math.max(...data), r = max - min || 1;
   const x = (i) => i / (data.length - 1) * w;
@@ -31570,6 +31833,11 @@ function SurfaceSocial({ onTicker, tabs }) {
   const [view, setView] = useSocS("map");
   const [sort, setSort] = useSocS({ col: "div", dir: -1 });
   const [hover, setHover] = useSocS(null);
+  const realFeed = socRealFeed();
+  if (SOC_SERVED && !realFeed) {
+    return /* @__PURE__ */ React.createElement("div", { className: "surface sx-surface" }, /* @__PURE__ */ React.createElement("div", { className: "sx-hdr" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sx-eyebrow" }, "SOCIAL SENTIMENT \xB7 CROWD POSITIONING"), /* @__PURE__ */ React.createElement("h1", { className: "sx-title" }, "Social-sentiment feed not connected")), /* @__PURE__ */ React.createElement("div", { className: "sx-hdr-r" }, /* @__PURE__ */ React.createElement("div", { className: "sx-prov" }, "Reddit \xB7 X \xB7 StockTwits \xB7 WSB"))), tabs, /* @__PURE__ */ React.createElement("div", { className: "sx-card", style: { padding: 28, textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", { className: "mono dim2", style: { fontSize: 13, lineHeight: 1.7, maxWidth: 560, margin: "0 auto" } }, "Social-sentiment feed not connected yet. The StockTwits / WSB / Reddit scrapers are on the roadmap but not currently wired into this deployment, so there is no live crowd-positioning data to show. This surface stays intentionally empty rather than display fabricated mention counts or tone.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("br", null), "When the social aggregator is reconnected it will populate here as a crowd \xD7 tape divergence map (contrarian read), ranked by the gap between crowd tone and price.")));
+  }
+  const SOC_UNIV = realFeed ? realFeed.map((r) => ({ ...r, read: r.read || socReadAuto(r), trend: r.trend || socGen(r.sent || 0, (r.sent || 0) - (r.d24 || 0) * 1.6) })) : SOC_UNIV_DEMO;
   const net = SOC_UNIV.reduce((a, r) => a + r.sent, 0) / SOC_UNIV.length;
   const breadth = Math.round(SOC_UNIV.filter((r) => r.sent >= 0).length / SOC_UNIV.length * 100);
   const fadeN = SOC_UNIV.filter((r) => socQuad(r).k === "fade").length;
@@ -36000,60 +36268,181 @@ function StaleStamp({ staleAfter = 60, label = "computed", src }) {
 window.StaleStamp = StaleStamp;
 </script>
 <script>/* src/surface-risk.jsx */
-const { useState: useRiskS, useMemo: useRiskM } = React;
-const RK_POS = [
-  { sym: "ARGN", name: "Argentum Robotics", sector: "Industrials", side: "L", w: 8.4, beta: 1.32, vol: 38, varc: 14.2, corr: 0.41 },
-  { sym: "NMBS", name: "Nimbus Cloud", sector: "Software", side: "L", w: 7.1, beta: 1.18, vol: 34, varc: 11, corr: 0.55 },
-  { sym: "VELO", name: "Velocity Motors", sector: "Autos", side: "L", w: 6.8, beta: 1.44, vol: 46, varc: 13.6, corr: 0.38 },
-  { sym: "KOSM", name: "Kosmos Compute", sector: "Semis", side: "L", w: 6.2, beta: 1.61, vol: 52, varc: 15.1, corr: 0.62 },
-  { sym: "QBIT", name: "Quanta Systems", sector: "Semis", side: "L", w: 5.5, beta: 1.55, vol: 49, varc: 12.4, corr: 0.62 },
-  { sym: "PALA", name: "Palatine Energy", sector: "Energy", side: "L", w: 5, beta: 0.88, vol: 31, varc: 6.1, corr: 0.12 },
-  { sym: "IONX", name: "Ionix Power", sector: "Utilities", side: "L", w: 4.4, beta: 0.51, vol: 19, varc: 2.4, corr: 0.08 },
-  { sym: "ARCM", name: "Arclight Materials", sector: "Materials", side: "L", w: 4, beta: 1.05, vol: 33, varc: 5.5, corr: 0.22 },
-  { sym: "MERC", name: "Mercia Semi", sector: "Semis", side: "S", w: -4.8, beta: 1.49, vol: 47, varc: 9.8, corr: 0.62 },
-  { sym: "VANTA", name: "Vanta Logistics", sector: "Transports", side: "S", w: -3.6, beta: 1.12, vol: 36, varc: 4.2, corr: 0.18 },
-  { sym: "SOLA", name: "Solara Energy", sector: "Energy", side: "S", w: -3.1, beta: 0.94, vol: 40, varc: 3.6, corr: 0.12 },
-  { sym: "MAPL", name: "Maple Retail", sector: "Consumer", side: "S", w: -2.7, beta: 0.79, vol: 29, varc: 2.1, corr: 0.1 }
-];
-const RK_FACTORS = [
-  { label: "Market \u03B2", value: 0.42, tone: "amb" },
-  { label: "Momentum", value: 0.61, tone: "gn" },
-  { label: "Growth", value: 0.38, tone: "gn" },
-  { label: "Size (SMB)", value: 0.29, tone: "cy" },
-  { label: "Volatility", value: 0.24, tone: "amb" },
-  { label: "Quality", value: -0.12, tone: "rd" },
-  { label: "Value (HML)", value: -0.34, tone: "rd" }
-];
-const RK_STRESS = [
-  { sc: "Market \u22122\u03C3 (\u2248 \u22124.6%)", pnl: -6.8, tone: "rd" },
-  { sc: "Rates +50bp shock", pnl: -2.4, tone: "rd" },
-  { sc: "Semis \u221210% (sector)", pnl: -3.9, tone: "rd" },
-  { sc: "Momentum unwind (\u22121.5\u03C3)", pnl: -5.1, tone: "rd" },
-  { sc: "Vol spike VIX\u219232", pnl: -3.2, tone: "amb" },
-  { sc: "Risk-on melt-up +2\u03C3", pnl: 5.4, tone: "gn" }
-];
+const { useState: useRiskS, useMemo: useRiskM, useEffect: useRiskE } = React;
+const RK_SERVED = typeof window !== "undefined" && !!window.__BV;
+const rkN = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+const RK_DEMO_BOOK = {
+  equity: 108420,
+  cash: 84600,
+  invested: 23820,
+  short_exposure: 7164,
+  open_count: 4,
+  max_positions: 5,
+  config_label: "showcase demo",
+  positions: [
+    { ticker: "DEMO1", direction: "long", shares: 240, entry_price: 28.4, current_price: 31.1, stop: 27.2, setup_type: "Cont. BO", days_held: 8, unrealized_pnl_dollars: 648 },
+    { ticker: "DEMO2", direction: "long", shares: 60, entry_price: 162, current_price: 168.4, stop: 154, setup_type: "Pullback", days_held: 12, unrealized_pnl_dollars: 384 },
+    { ticker: "DEMO3", direction: "long", shares: 120, entry_price: 44, current_price: 46.2, stop: 41, setup_type: "VCP", days_held: 5, unrealized_pnl_dollars: 264 },
+    { ticker: "DEMO4", direction: "short", shares: 180, entry_price: 41.2, current_price: 39.8, stop: 43.4, setup_type: "Range", days_held: 4, unrealized_pnl_dollars: 252 }
+  ]
+};
+const RK_DEMO_SECTORS = { DEMO1: "Industrials", DEMO2: "Software", DEMO3: "Semis", DEMO4: "Consumer" };
+function useRkBook() {
+  const read = () => window.__BV && (window.__BV.portfolio || window.__BV._bookCache) || null;
+  const [book, setBook] = useRiskS(RK_SERVED ? read : RK_DEMO_BOOK);
+  useRiskE(() => {
+    if (!RK_SERVED) return;
+    let on = true;
+    try {
+      if (window.__BV && window.__BV.get) {
+        window.__BV.get("/api/portfolio").then((d) => {
+          if (!on || !d) return;
+          window.__BV._bookCache = d;
+          window.__BV.portfolio = d;
+          setBook(d);
+        }).catch(() => {
+        });
+      }
+    } catch (e) {
+    }
+    return () => {
+      on = false;
+    };
+  }, []);
+  return book;
+}
+function useRkRiskBySym(syms) {
+  const [map, setMap] = useRiskS({});
+  const key = (syms || []).join(",");
+  useRiskE(() => {
+    if (!RK_SERVED || !window.__BV || !window.__BV.get || !syms || !syms.length) return;
+    let on = true;
+    syms.forEach((sym) => {
+      try {
+        window.__BV.get("/api/pattern/risk/" + encodeURIComponent(sym) + "?mode=swing").then((d) => {
+          if (on && d && d.ok) setMap((m) => Object.assign({}, m, { [sym]: d }));
+        }).catch(() => {
+        });
+      } catch (e) {
+      }
+    });
+    return () => {
+      on = false;
+    };
+  }, [key]);
+  return map;
+}
+function sectorOf(sym) {
+  if (RK_SERVED) {
+    try {
+      const r = window.__BV.findRow && window.__BV.findRow(sym);
+      if (r && r.sector) return r.sector;
+    } catch (e) {
+    }
+    return "\u2014";
+  }
+  return RK_DEMO_SECTORS[sym] || "\u2014";
+}
 function RkKpi({ k, v, tone, s }) {
   return /* @__PURE__ */ React.createElement("div", { className: `wsx-kpi wsx-kpi--${tone}` }, /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-l mono" }, k), /* @__PURE__ */ React.createElement("div", { className: `wsx-kpi-v mono kpi-tone--${tone}` }, v), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpi-s mono dim2" }, s));
 }
 function SurfaceRisk({ onTicker }) {
-  const [sort, setSort] = useRiskS({ col: "varc", dir: -1 });
-  const longs = RK_POS.filter((p) => p.side === "L"), shorts = RK_POS.filter((p) => p.side === "S");
-  const gross = RK_POS.reduce((a, p) => a + Math.abs(p.w), 0);
-  const net = RK_POS.reduce((a, p) => a + p.w, 0);
-  const betaNet = RK_POS.reduce((a, p) => a + p.w * p.beta, 0) / 100;
-  const top5 = [...RK_POS].sort((a, b) => Math.abs(b.w) - Math.abs(a.w)).slice(0, 5).reduce((a, p) => a + Math.abs(p.w), 0);
-  const secMap = {};
-  RK_POS.forEach((p) => {
-    secMap[p.sector] = (secMap[p.sector] || 0) + p.w;
-  });
-  const sectors = Object.entries(secMap).map(([label, value]) => ({ label, value, tone: value >= 0 ? "gn" : "rd" })).sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
-  const rows = useRiskM(() => [...RK_POS].sort((a, b) => {
+  const [sort, setSort] = useRiskS({ col: "riskDol", dir: -1 });
+  const book = useRkBook();
+  const pos = useRiskM(() => {
+    const raw = book && Array.isArray(book.positions) ? book.positions : [];
+    return raw.map((p) => {
+      var _a;
+      const sym = String(p.ticker || "").toUpperCase();
+      const short = String(p.direction || "").toLowerCase() === "short" || rkN(p.signed_qty) < 0;
+      const qty = Math.abs((_a = rkN(p.shares)) != null ? _a : 0);
+      const entry = rkN(p.entry_price), last = rkN(p.current_price), stop = rkN(p.stop);
+      const mv = last != null ? qty * last : null;
+      const signedMv = mv != null ? short ? -mv : mv : null;
+      let riskDol = null;
+      if (entry != null && stop != null) {
+        const adverse = short ? stop - entry : entry - stop;
+        riskDol = adverse > 0 ? adverse * qty : 0;
+      }
+      return {
+        sym,
+        short,
+        qty,
+        entry,
+        last,
+        stop,
+        mv,
+        signedMv,
+        riskDol,
+        sector: sectorOf(sym),
+        sleeve: p.setup_type || "\u2014"
+      };
+    }).filter((p) => p.sym);
+  }, [book]);
+  const syms = useRiskM(() => pos.map((p) => p.sym), [pos]);
+  const riskBySym = useRkRiskBySym(syms);
+  const equity = rkN(book && book.equity);
+  const grossMv = pos.reduce((a, p) => a + (p.mv || 0), 0);
+  const netMv = pos.reduce((a, p) => a + (p.signedMv || 0), 0);
+  const longs = pos.filter((p) => !p.short), shorts = pos.filter((p) => p.short);
+  const grossPct = equity && equity > 0 ? grossMv / equity * 100 : null;
+  const netPct = equity && equity > 0 ? netMv / equity * 100 : null;
+  const totalRisk = pos.reduce((a, p) => a + (p.riskDol || 0), 0);
+  const riskNavPct = equity && equity > 0 ? totalRisk / equity * 100 : null;
+  const cash = rkN(book && book.cash);
+  const cashPct = equity && equity > 0 && cash != null ? cash / equity * 100 : null;
+  const top5 = grossMv > 0 ? [...pos].sort((a, b) => (b.mv || 0) - (a.mv || 0)).slice(0, 5).reduce((a, p) => a + (p.mv || 0), 0) / grossMv * 100 : null;
+  const largest = grossMv > 0 ? Math.max(...pos.map((p) => p.mv || 0)) / grossMv * 100 : null;
+  const betaNet = useRiskM(() => {
+    if (!equity || equity <= 0 || !pos.length) return null;
+    let any = false, acc = 0;
+    pos.forEach((p) => {
+      const rm = riskBySym[p.sym];
+      const b = rm && rm.ok ? rkN(rm.beta) : null;
+      if (b != null && p.signedMv != null) {
+        any = true;
+        acc += p.signedMv / equity * b;
+      }
+    });
+    return any ? acc : null;
+  }, [pos, riskBySym, equity]);
+  const sectors = useRiskM(() => {
+    if (!equity || equity <= 0) return [];
+    const m = {};
+    pos.forEach((p) => {
+      if (p.signedMv != null && p.sector && p.sector !== "\u2014") m[p.sector] = (m[p.sector] || 0) + p.signedMv;
+    });
+    return Object.entries(m).map(([label, v]) => ({ label, value: v / equity * 100, tone: v >= 0 ? "gn" : "rd" })).sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+  }, [pos, equity]);
+  const maxRisk = pos.reduce((a, p) => Math.max(a, p.riskDol || 0), 0) || 1;
+  const rows = useRiskM(() => [...pos].sort((a, b) => {
     const va = a[sort.col], vb = b[sort.col];
-    const v = typeof va === "number" ? Math.abs(vb) - Math.abs(va) : String(va).localeCompare(String(vb));
+    let v;
+    if (typeof va === "number" || typeof vb === "number") v = Math.abs(vb || 0) - Math.abs(va || 0);
+    else v = String(va).localeCompare(String(vb));
     return v * (sort.dir < 0 ? 1 : -1);
-  }), [sort]);
+  }), [sort, pos]);
   const setS = (c) => setSort((s) => ({ col: c, dir: s.col === c ? -s.dir : -1 }));
-  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--copper rkx" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "PORTFOLIO RISK \xB7 EXPOSURE"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "Risk"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "gross/net \xB7 beta-adjusted \xB7 factor & sector concentration \xB7 parametric + historical VaR \xB7 stress scenarios")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement(StaleStamp, { staleAfter: 45, label: "risk model run", src: "Schwab /positions \xB7 betas EODHD 252d \xB7 Barra-style factor model" }))), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpis rkx-kpis" }, /* @__PURE__ */ React.createElement(RkKpi, { k: "GROSS EXPOSURE", v: `${gross.toFixed(0)}%`, tone: "copper", s: `${longs.length}L \xB7 ${shorts.length}S` }), /* @__PURE__ */ React.createElement(RkKpi, { k: "NET EXPOSURE", v: `${net >= 0 ? "+" : ""}${net.toFixed(0)}%`, tone: net >= 0 ? "gn" : "rd", s: "long-biased" }), /* @__PURE__ */ React.createElement(RkKpi, { k: "BETA-ADJ NET", v: `${betaNet >= 0 ? "+" : ""}${betaNet.toFixed(2)}\u03B2`, tone: "amb", s: "vs SPY" }), /* @__PURE__ */ React.createElement(RkKpi, { k: "1-DAY VaR 95%", v: "\u22123.8%", tone: "rd", s: "\u2248 \u2212$4,130 parametric" }), /* @__PURE__ */ React.createElement(RkKpi, { k: "TOP-5 CONC.", v: `${top5.toFixed(0)}%`, tone: "amb", s: "name concentration" }), /* @__PURE__ */ React.createElement(RkKpi, { k: "DAYS TO LIQ.", v: "1.4d", tone: "gn", s: "@ 20% ADV" }), /* @__PURE__ */ React.createElement(RkKpi, { k: "CASH", v: "22%", tone: "cy", s: "dry powder" })), /* @__PURE__ */ React.createElement("div", { className: "rkx-grid" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-card rkx-card" }, /* @__PURE__ */ React.createElement("div", { className: "rkx-card-h mono" }, "FACTOR EXPOSURE ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 standardized loadings vs risk model")), /* @__PURE__ */ React.createElement(QDiverge, { rows: RK_FACTORS, fmt: (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}` })), /* @__PURE__ */ React.createElement("div", { className: "wsx-card rkx-card" }, /* @__PURE__ */ React.createElement("div", { className: "rkx-card-h mono" }, "SECTOR NET EXPOSURE ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 long \u2212 short, % NAV")), /* @__PURE__ */ React.createElement(QDiverge, { rows: sectors, fmt: (v) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%` }))), /* @__PURE__ */ React.createElement("div", { className: "rkx-grid rkx-grid--7030" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-card rkx-card" }, /* @__PURE__ */ React.createElement("div", { className: "rkx-card-h mono" }, "POSITIONS \xB7 RISK CONTRIBUTION ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 click to open")), /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl rkx-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, [["sym", "Sym"], ["sector", "Sector"], ["w", "Weight"], ["beta", "\u03B2"], ["vol", "Vol"], ["corr", "\u03C1\xB7book"], ["varc", "% of risk"]].map(([c, l]) => /* @__PURE__ */ React.createElement("th", { key: c, className: ["w", "beta", "vol", "corr", "varc"].includes(c) ? "r" : "", onClick: () => setS(c), style: { cursor: "pointer" } }, l, sort.col === c ? sort.dir > 0 ? " \u25B2" : " \u25BC" : "")))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((p) => /* @__PURE__ */ React.createElement("tr", { key: p.sym, onClick: () => onTicker(p.sym), style: { cursor: "pointer" } }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, p.sym), " ", /* @__PURE__ */ React.createElement("span", { className: `rkx-side rkx-side--${p.side === "L" ? "l" : "s"}` }, p.side)), /* @__PURE__ */ React.createElement("td", { className: "dim" }, p.sector), /* @__PURE__ */ React.createElement("td", { className: `r mono ${p.w >= 0 ? "up" : "dn"}` }, p.w >= 0 ? "+" : "", p.w.toFixed(1), "%"), /* @__PURE__ */ React.createElement("td", { className: "r mono" }, p.beta.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: "r mono dim2" }, p.vol, "%"), /* @__PURE__ */ React.createElement("td", { className: "r mono dim2" }, p.corr.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: "r" }, /* @__PURE__ */ React.createElement("span", { className: "rkx-risk-bar" }, /* @__PURE__ */ React.createElement("i", { style: { width: `${p.varc / 0.16}%` } })), " ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, p.varc.toFixed(1), "%"))))))), /* @__PURE__ */ React.createElement("div", { className: "wsx-card rkx-card" }, /* @__PURE__ */ React.createElement("div", { className: "rkx-card-h mono" }, "STRESS SCENARIOS ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 est. book P&L")), /* @__PURE__ */ React.createElement("div", { className: "rkx-stress" }, RK_STRESS.map((s, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "rkx-stress-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono rkx-stress-l" }, s.sc), /* @__PURE__ */ React.createElement("span", { className: "rkx-stress-bar" }, /* @__PURE__ */ React.createElement("i", { className: `kpi-tone-bg--${s.tone === "gn" ? "gn" : s.tone === "amb" ? "amb" : "rd"}`, style: { width: `${Math.min(50, Math.abs(s.pnl) * 6)}%`, left: s.pnl >= 0 ? "50%" : `${50 - Math.min(50, Math.abs(s.pnl) * 6)}%` } }), /* @__PURE__ */ React.createElement("b", null)), /* @__PURE__ */ React.createElement("span", { className: `mono rkx-stress-v ${s.pnl >= 0 ? "up" : "dn"}` }, s.pnl >= 0 ? "+" : "", s.pnl.toFixed(1), "%")))), /* @__PURE__ */ React.createElement("div", { className: "rkx-note mono dim2" }, "Beta-adjusted net +0.62\u03B2 leaves the book long-biased; Semis is the crowded sleeve (3 names, 18% gross) and the dominant VaR contributor. Momentum-factor unwind is the largest single-factor risk."))));
+  const mkt = RK_SERVED && window.__BV && window.__BV.market || null;
+  const money = (v) => v == null ? "\u2014" : (v < 0 ? "\u2212$" : "$") + Math.abs(Math.round(v)).toLocaleString();
+  const Header = () => /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-l" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-eyebrow mono" }, "AUTOMATED BOOK \xB7 RISK & EXPOSURE"), /* @__PURE__ */ React.createElement("h1", { className: "wsx-title mono" }, "Risk"), /* @__PURE__ */ React.createElement("div", { className: "wsx-sub mono dim2" }, "model book exposure \xB7 $-at-risk to stops \xB7 name & sector concentration \xB7 per-position \u03B2/vol/VaR \xB7 regime risk")), /* @__PURE__ */ React.createElement("div", { className: "wsx-hdr-r" }, /* @__PURE__ */ React.createElement(StaleStamp, { staleAfter: 120, label: "book sync", src: "/api/portfolio (Alpaca paper) \xB7 \u03B2/vol/VaR engines/risk.py \xB7 regime /api/* market" })));
+  if (RK_SERVED && !book) {
+    return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--copper rkx" }, /* @__PURE__ */ React.createElement(Header, null), /* @__PURE__ */ React.createElement("div", { className: "lab-verdict mono dim2", style: { padding: 20 } }, "Waiting on sync \u2014 loading the automated book's exposure from ", /* @__PURE__ */ React.createElement("b", { className: "copper" }, "/api/portfolio"), " (Alpaca paper)\u2026"));
+  }
+  if (RK_SERVED && pos.length === 0) {
+    return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--copper rkx" }, /* @__PURE__ */ React.createElement(Header, null), /* @__PURE__ */ React.createElement("div", { className: "lab-verdict mono dim2", style: { padding: 20 } }, "Flat \u2014 the automated paper book holds no positions, so there is no book exposure or position risk to report.", cash != null ? ` Cash ${money(cash)}.` : ""), mkt && /* @__PURE__ */ React.createElement("div", { className: "wsx-card rkx-card", style: { marginTop: 14 } }, /* @__PURE__ */ React.createElement("div", { className: "rkx-card-h mono" }, "REGIME RISK CONTEXT ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 market backdrop for new exposure")), /* @__PURE__ */ React.createElement("div", { className: "rkx-stress" }, /* @__PURE__ */ React.createElement("div", { className: "rkx-stress-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono rkx-stress-l" }, "Regime"), /* @__PURE__ */ React.createElement("span", { className: "mono rkx-stress-v" }, mkt.regimeLabel || "\u2014", mkt.regimeTrend ? " \xB7 " + mkt.regimeTrend : "")), mkt.breadthPct != null && /* @__PURE__ */ React.createElement("div", { className: "rkx-stress-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono rkx-stress-l" }, "Breadth (% > 50d)"), /* @__PURE__ */ React.createElement("span", { className: `mono rkx-stress-v ${mkt.breadthPct >= 50 ? "up" : "dn"}` }, mkt.breadthPct.toFixed(0), "%")), mkt.maxSize != null && /* @__PURE__ */ React.createElement("div", { className: "rkx-stress-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono rkx-stress-l" }, "Regime size cap"), /* @__PURE__ */ React.createElement("span", { className: "mono rkx-stress-v" }, mkt.maxSize.toFixed(0), "% / position")))));
+  }
+  return /* @__PURE__ */ React.createElement("div", { className: "surface wsx wsx--copper rkx" }, /* @__PURE__ */ React.createElement(Header, null), /* @__PURE__ */ React.createElement("div", { className: "wsx-kpis rkx-kpis" }, /* @__PURE__ */ React.createElement(RkKpi, { k: "GROSS EXPOSURE", v: grossPct != null ? `${grossPct.toFixed(0)}%` : "\u2014", tone: "copper", s: `${longs.length}L \xB7 ${shorts.length}S \xB7 ${money(grossMv)}` }), /* @__PURE__ */ React.createElement(RkKpi, { k: "NET EXPOSURE", v: netPct != null ? `${netPct >= 0 ? "+" : ""}${netPct.toFixed(0)}%` : "\u2014", tone: netPct == null ? "ink" : netPct >= 0 ? "gn" : "rd", s: netPct == null ? "\u2014" : netPct >= 0 ? "long-biased" : "short-biased" }), /* @__PURE__ */ React.createElement(RkKpi, { k: "BETA-ADJ NET", v: betaNet != null ? `${betaNet >= 0 ? "+" : ""}${betaNet.toFixed(2)}\u03B2` : "\u2014", tone: "amb", s: betaNet != null ? "vs SPY \xB7 real \u03B2" : "\u03B2 loading\u2026" }), /* @__PURE__ */ React.createElement(RkKpi, { k: "$ AT RISK", v: money(totalRisk), tone: "rd", s: riskNavPct != null ? `${riskNavPct.toFixed(2)}% NAV to stops` : "to stops" }), /* @__PURE__ */ React.createElement(RkKpi, { k: "TOP-5 CONC.", v: top5 != null ? `${top5.toFixed(0)}%` : "\u2014", tone: "amb", s: largest != null ? `largest ${largest.toFixed(0)}%` : "name concentration" }), /* @__PURE__ */ React.createElement(RkKpi, { k: "SLOTS", v: `${book && book.open_count != null ? book.open_count : pos.length}/${book && book.max_positions != null ? book.max_positions : "\u2014"}`, tone: "ink", s: "positions used" }), /* @__PURE__ */ React.createElement(RkKpi, { k: "CASH", v: cashPct != null ? `${cashPct.toFixed(0)}%` : "\u2014", tone: "cy", s: cash != null ? `${money(cash)} dry powder` : "dry powder" })), /* @__PURE__ */ React.createElement("div", { className: "rkx-grid" }, /* @__PURE__ */ React.createElement("div", { className: "wsx-card rkx-card" }, /* @__PURE__ */ React.createElement("div", { className: "rkx-card-h mono" }, "SECTOR NET EXPOSURE ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 long \u2212 short, % NAV \xB7 sectors via scan feed")), sectors.length ? /* @__PURE__ */ React.createElement(QDiverge, { rows: sectors, fmt: (v) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%` }) : /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 no sector classification available for the held names")), /* @__PURE__ */ React.createElement("div", { className: "wsx-card rkx-card" }, /* @__PURE__ */ React.createElement("div", { className: "rkx-card-h mono" }, "REGIME RISK CONTEXT ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 market backdrop")), mkt ? /* @__PURE__ */ React.createElement("div", { className: "rkx-stress" }, /* @__PURE__ */ React.createElement("div", { className: "rkx-stress-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono rkx-stress-l" }, "Regime"), /* @__PURE__ */ React.createElement("span", { className: `mono rkx-stress-v ${mkt.regimeOn ? "up" : "dn"}` }, mkt.regimeLabel || "\u2014", mkt.regimeTrend ? " \xB7 " + mkt.regimeTrend : "")), /* @__PURE__ */ React.createElement("div", { className: "rkx-stress-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono rkx-stress-l" }, "Breadth (% > 50d)"), /* @__PURE__ */ React.createElement("span", { className: `mono rkx-stress-v ${mkt.breadthPct != null && mkt.breadthPct >= 50 ? "up" : "dn"}` }, mkt.breadthPct != null ? mkt.breadthPct.toFixed(0) + "%" : "\u2014")), /* @__PURE__ */ React.createElement("div", { className: "rkx-stress-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono rkx-stress-l" }, "Regime size cap"), /* @__PURE__ */ React.createElement("span", { className: "mono rkx-stress-v" }, mkt.maxSize != null ? mkt.maxSize.toFixed(0) + "% / position" : "\u2014")), /* @__PURE__ */ React.createElement("div", { className: "rkx-stress-row" }, /* @__PURE__ */ React.createElement("span", { className: "mono rkx-stress-l" }, "Put/Call"), /* @__PURE__ */ React.createElement("span", { className: "mono rkx-stress-v" }, mkt.putCall != null ? mkt.putCall.toFixed(2) : "\u2014")), /* @__PURE__ */ React.createElement("div", { className: "rkx-note mono dim2" }, "Net exposure ", netPct != null ? `${netPct >= 0 ? "+" : ""}${netPct.toFixed(0)}% of NAV` : "\u2014", " into a ", /* @__PURE__ */ React.createElement("b", null, mkt.regimeLabel || "\u2014"), " tape. Size caps and breadth define how much fresh risk the model book should add.")) : /* @__PURE__ */ React.createElement("div", { className: "smc-empty mono dim2" }, "\u2014 no live regime context (market feed absent)"))), /* @__PURE__ */ React.createElement("div", { className: "wsx-card rkx-card" }, /* @__PURE__ */ React.createElement("div", { className: "rkx-card-h mono" }, "POSITIONS \xB7 RISK CONTRIBUTION ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "\xB7 $-at-risk to stop \xB7 \u03B2/vol/VaR from risk engine \xB7 click to open")), /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl rkx-tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, [["sym", "Sym"], ["sector", "Sector"], ["mv", "Mkt Val"], ["wPct", "% Gross"], ["beta", "\u03B2"], ["vol", "Vol"], ["var95", "VaR95"], ["riskDol", "$ at risk"]].map(([c, l]) => /* @__PURE__ */ React.createElement("th", { key: c, className: ["mv", "wPct", "beta", "vol", "var95", "riskDol"].includes(c) ? "r" : "", onClick: () => setS(c), style: { cursor: "pointer" } }, l, sort.col === c ? sort.dir > 0 ? " \u25B2" : " \u25BC" : "")))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((p) => {
+    const rm = riskBySym[p.sym];
+    const beta = rm && rm.ok ? rkN(rm.beta) : null;
+    const vol = rm && rm.ok ? rkN(rm.vol_ann_pct) : null;
+    const var95 = rm && rm.ok ? rkN(rm.var95_pct) : null;
+    const wPct = grossMv > 0 && p.mv != null ? p.mv / grossMv * 100 : null;
+    return /* @__PURE__ */ React.createElement("tr", { key: p.sym, onClick: () => onTicker && onTicker(p.sym), style: { cursor: "pointer" } }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, /* @__PURE__ */ React.createElement("b", null, p.sym), " ", /* @__PURE__ */ React.createElement("span", { className: `rkx-side rkx-side--${p.short ? "s" : "l"}` }, p.short ? "S" : "L")), /* @__PURE__ */ React.createElement("td", { className: "dim" }, p.sector), /* @__PURE__ */ React.createElement("td", { className: "r mono" }, p.mv != null ? money(p.mv) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r mono dim2" }, wPct != null ? wPct.toFixed(0) + "%" : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r mono" }, beta != null ? beta.toFixed(2) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r mono dim2" }, vol != null ? vol.toFixed(0) + "%" : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r mono dim2" }, var95 != null ? "\u2212" + var95.toFixed(1) + "%" : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "r" }, p.riskDol != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "rkx-risk-bar" }, /* @__PURE__ */ React.createElement("i", { style: { width: `${Math.min(100, p.riskDol / maxRisk * 100)}%` } })), " ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, money(p.riskDol))) : /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "\u2014")));
+  }))), /* @__PURE__ */ React.createElement("div", { className: "rkx-note mono dim2" }, /* @__PURE__ */ React.createElement("b", null, "$ at risk"), " = (entry \u2212 stop) \xD7 shares \u2014 the realized loss if every stop fills. \u03B2 / vol / 1-day 95% VaR are computed per name from real 126-day returns (", /* @__PURE__ */ React.createElement("b", null, "engines/risk.py"), '); "\u2014" until the engine responds or when a name is off-universe. Concentration is % of gross market value.')), /* @__PURE__ */ React.createElement("div", { className: "rkx-note mono dim2", style: { marginTop: 14 } }, "Shared model portfolio \u2014 auto-traded Alpaca paper account, same book for every viewer. Not your personal book. Exposure & $-at-risk from ", /* @__PURE__ */ React.createElement("b", null, "/api/portfolio"), "; per-position risk from ", /* @__PURE__ */ React.createElement("b", null, "/api/pattern/risk"), "; regime context from the live market feed.", RK_SERVED ? "" : " (standalone showcase \u2014 demo book, no served data.)"));
 }
 window.SurfaceRisk = SurfaceRisk;
 </script>
