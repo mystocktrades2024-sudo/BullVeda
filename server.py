@@ -3962,6 +3962,9 @@ async def regime_live_api():
             "distribution_days": reg.get("distribution_days"),
             "distribution_state": reg.get("distribution_state"),
             "vix_close": (reg.get("vix") or {}).get("vix_current") if isinstance(reg.get("vix"), dict) else reg.get("vix_current"),
+            "vix_trend": (reg.get("vix") or {}).get("trend") if isinstance(reg.get("vix"), dict) else None,
+            "hmm_p_bull": (reg.get("hmm_regime") or {}).get("p_bull") if isinstance(reg.get("hmm_regime"), dict) else None,
+            "market_cycle": reg.get("market_cycle"),
             "as_of_date": b.get("run_date"),
             "_stale_fields": ["breadth_pct_50d", "distribution_days", "distribution_state"],
         }
@@ -3980,6 +3983,10 @@ async def regime_live_api():
                 "last": last,
                 "net_change": qd.get("netChange"),
                 "pct_change": qd.get("netPercentChange"),
+                "open": qd.get("openPrice"),
+                "high": qd.get("highPrice"),
+                "low": qd.get("lowPrice"),
+                "prev_close": qd.get("closePrice"),
             }
         out["live"] = live
         try:
@@ -4019,6 +4026,116 @@ async def regime_live_api():
             }
     except Exception as e:
         out["provisional_error"] = str(e)
+
+    # ── 4. Strategist-style narrative + live intraday trajectory ──
+    # The regime LABEL (risk_on_choppy) is a stable quant classification and reads
+    # the same for weeks at a time. This narrative makes the COMMENTARY rich and
+    # day-dynamic (it reflects today's drivers + the live tape path), so the read
+    # feels alive even when the label is unchanged. Grounded entirely in our data —
+    # no LLM, no external source. Does NOT change the classification.
+    try:
+        o = out.get("official") or {}
+        reg4 = o.get("regime4") or "risk_on_choppy"
+        spy_live = (live.get("SPY") or {}).get("last")
+        vix_live = (live.get("$VIX") or {}).get("last")
+        ema50, sma200 = o.get("spy_ema50"), o.get("spy_sma200")
+        vix = vix_live if vix_live is not None else o.get("vix_close")
+        dd = o.get("distribution_days")
+        breadth = o.get("breadth_pct_50d")
+        p_bull = o.get("hmm_p_bull")
+        maxsz = o.get("max_size_pct")
+
+        HEADLINE = {
+            "risk_on_trending": "Risk-on, trending",
+            "risk_on_choppy": "Constructive but choppy",
+            "risk_off_trending": "Risk-off, defensive",
+            "panic": "Panic — capital preservation",
+        }
+        headline = HEADLINE.get(reg4, reg4.replace("_", " ").title())
+
+        # structure
+        if spy_live and ema50 and sma200:
+            if spy_live > ema50 and spy_live > sma200:
+                structure = "bullish structure (SPY above its 50- and 200-day)"
+            elif spy_live > sma200:
+                structure = "still above the 200-day but back under the 50-day"
+            else:
+                structure = "below its key moving averages"
+        else:
+            structure = "bullish structure" if reg4.startswith("risk_on") else "weak structure"
+        if p_bull is not None:
+            structure += f", trend model {round(p_bull * 100)}% bull"
+
+        # volatility
+        if vix is None:
+            vol = "volatility unknown"
+        elif vix < 15:
+            vol = f"calm tape (VIX {vix:.1f})"
+        elif vix < 20:
+            vol = f"moderate volatility (VIX {vix:.1f})"
+        elif vix < 28:
+            vol = f"elevated volatility (VIX {vix:.1f})"
+        else:
+            vol = f"stressed volatility (VIX {vix:.1f})"
+
+        # caution drivers
+        cautions = []
+        if dd is not None and dd >= 6:
+            cautions.append(f"{dd} distribution days flag institutional selling")
+        if breadth is not None and breadth < 50:
+            cautions.append(f"narrow participation ({round(breadth)}% above 50-DMA)")
+        caution = "; ".join(cautions) if cautions else "no major red flags"
+
+        # ── live intraday trajectory from Schwab OHLC ──
+        traj_word, traj_detail = None, None
+        sq = live.get("SPY") or {}
+        op, hi, lo, pc, last = sq.get("open"), sq.get("high"), sq.get("low"), sq.get("prev_close"), sq.get("last")
+        if all(isinstance(x, (int, float)) and x for x in (op, hi, lo, pc, last)):
+            net = (last / pc - 1) * 100          # vs prior close
+            gap = (op / pc - 1) * 100            # open vs prior close
+            frm_open = (last / op - 1) * 100     # current vs open
+            rng = (hi - lo) or 1
+            rpos = (last - lo) / rng             # 0=low of day, 1=high of day
+            sgn = lambda v: ("+" if v >= 0 else "") + f"{v:.1f}%"
+            if gap < -0.25 and frm_open > 0.25:
+                traj_word = "recovering"
+                traj_detail = f"opened lower ({sgn(gap)}) and is climbing back ({sgn(net)} now)"
+            elif gap > 0.25 and frm_open < -0.25:
+                traj_word = "fading"
+                traj_detail = f"opened higher ({sgn(gap)}) but gave it back toward the day's low ({sgn(net)} now)"
+            elif net > 0.25 and rpos > 0.66:
+                traj_word = "firm"
+                traj_detail = f"holding near the day's high, {sgn(net)} on the session"
+            elif net < -0.25 and rpos < 0.34:
+                traj_word = "weak"
+                traj_detail = f"pinned near the day's low, {sgn(net)} on the session"
+            elif abs(net) <= 0.25:
+                traj_word = "rangebound"
+                traj_detail = f"chopping around flat ({sgn(net)})"
+            else:
+                traj_word = "mixed"
+                traj_detail = f"{sgn(net)} on the session, mid-range"
+
+        parts = [f"{headline}: {structure} — but {vol}"]
+        if caution != "no major red flags":
+            parts[0] += f", and {caution}"
+        sentence = parts[0] + "."
+        if traj_detail:
+            sentence += f" Intraday, SPY {traj_detail}."
+        if maxsz is not None:
+            sentence += f" Stay selective — regime caps size at {maxsz}%."
+
+        out["narrative"] = {
+            "headline": headline,
+            "text": sentence,
+            "trajectory": ({"word": traj_word, "detail": traj_detail} if traj_word else None),
+            "drivers": {
+                "structure": structure, "volatility": vol, "caution": caution,
+            },
+            "_source": "Composed from our own signals (regime4 + HMM + VIX + distribution days + breadth + live Schwab OHLC). No LLM, no external feed. Does not change the classification.",
+        }
+    except Exception as e:
+        out["narrative_error"] = str(e)
 
     return out
 

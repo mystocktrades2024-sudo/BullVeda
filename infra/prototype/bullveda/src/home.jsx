@@ -1218,7 +1218,10 @@ function LiveTapeLine() {
   const prov = live.provisional;
   const diverges = prov && prov.diverges_from_official;
   const tip = (live.note || "") + " " + ((prov && prov._caveat) || "");
+  const narr = live.narrative;
+  const trajTone = narr && narr.trajectory ? ({ recovering: "up", firm: "up", fading: "dn", weak: "dn" }[narr.trajectory.word] || "amb") : "amb";
   return (
+    <>
     <div className="hh-brief" style={{ marginTop: 2 }}>
       <span className="hh-brief-tag mono" style={{ background: "rgba(80,200,140,.10)", color: "var(--up,#3fb96b)" }}>
         LIVE TAPE{live.market_open === false ? " · CLOSED" : ""}
@@ -1227,10 +1230,20 @@ function LiveTapeLine() {
         {q.SPY && cell("SPY", q.SPY)}
         {q.QQQ && cell("QQQ", q.QQQ)}
         {vix.last != null ? <> · VIX <b className={(vix.pct_change || 0) <= 0 ? "up" : "dn"}>{vix.last.toFixed(1)}{(vix.pct_change || 0) <= 0 ? " ↓" : " ↑"}</b></> : null}
-        {prov ? <> · provisional <b className="dim2">{String(prov.read).replace(/_/g, " ").replace(" candidate", "")}</b></> : null}
+        {narr && narr.trajectory ? <> · <b className={trajTone}>{narr.trajectory.word}</b></> : (prov ? <> · provisional <b className="dim2">{String(prov.read).replace(/_/g, " ").replace(" candidate", "")}</b></> : null)}
         {diverges ? <span className="amb" style={{ marginLeft: 6 }} title="Live price+VIX read differs from the anchored regime. This is informational only — regime4 needs a completed daily bar + 2-bar hysteresis to flip.">⚠ live diverges (display-only)</span> : null}
       </span>
     </div>
+    {narr && narr.text ? (
+      <div className="hh-brief hh-regime-read" style={{ marginTop: 2, alignItems: "flex-start" }}>
+        <span className="hh-brief-tag mono" style={{ background: "rgba(180,140,90,.12)", color: "var(--copper,#c79a63)" }}>REGIME READ</span>
+        <span className="hh-brief-txt" style={{ fontStyle: "normal", lineHeight: 1.45 }}
+              title={(narr._source || "") + "  ·  Day-dynamic strategist read composed from our own signals; the regime label itself is a stable quant classification."}>
+          {narr.text}
+        </span>
+      </div>
+    ) : null}
+    </>
   );
 }
 
