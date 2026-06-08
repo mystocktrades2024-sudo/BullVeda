@@ -62,7 +62,7 @@ const _FIX_READ = "Context → structure → projection all align. TD flags exha
 const _FIX_INV  = { price: 206.0, note: "Close below $206.00 LPS / VAL (breakout fails) — stand aside." };
 
 // Fixture model assembled in the shape the view consumes
-var FIXTURE_MODEL = {
+var CF_FIXTURE_MODEL = {
   isReal: false, source: "illustrative",
   methods:   _FIX_METHODS,
   composite: _FIX_COMPOSITE,
@@ -78,9 +78,9 @@ var FIXTURE_MODEL = {
 
 // CE_COMPOSITE / CE_THRESHOLD / CE_CONSENSUS — preserved for backward-compat
 // (lens-patterns-v2.jsx reads these globals)
-const CE_THRESHOLD = FIXTURE_MODEL.composite.threshold;
-const CE_COMPOSITE = FIXTURE_MODEL.composite.score;
-const CE_CONSENSUS = Math.round(FIXTURE_MODEL.composite.pct_agree * 100);
+const CE_THRESHOLD = CF_FIXTURE_MODEL.composite.threshold;
+const CE_COMPOSITE = CF_FIXTURE_MODEL.composite.score;
+const CE_CONSENSUS = Math.round(CF_FIXTURE_MODEL.composite.pct_agree * 100);
 
 // ──────────────────────────────────────────────────────────────────────────────
 // DATA HOOK
@@ -120,14 +120,14 @@ function useEnsembleModel(ticker, mode) {
 
   if (state === "loaded" && real && real.ok) {
     return {
-      model: { ...FIXTURE_MODEL, tf },
+      model: { ...CF_FIXTURE_MODEL, tf },
       state: "none", sym, tf, usable: false,
       message: (real && real.message) || "Insufficient data for ensemble consensus.",
     };
   }
 
   return {
-    model: { ...FIXTURE_MODEL },
+    model: { ...CF_FIXTURE_MODEL },
     state: state === "loading" ? "loading" : "mock", sym, tf, usable: false,
   };
 }

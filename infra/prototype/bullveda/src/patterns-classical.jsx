@@ -41,7 +41,7 @@ const FIXTURE_LINES = [
 
 const FIXTURE_ZONES = [{ lo: 186, hi: 205.2, tone: "cy", label: "Base" }];
 
-var FIXTURE_TARGETS = [
+var CL_FIXTURE_TARGETS = [
   { label: "Breakout pivot",       basis: "flat resistance of the base", price: "205.2", rr: "trigger", conf: null,  tone: "copper" },
   { label: "T1 · measured move",   basis: "base height (20) added to pivot", price: "225.0", rr: "+5.5%", conf: 0.64, tone: "gn" },
   { label: "T2 · 1.5× extension", basis: "1.5 × base height",           price: "235.0", rr: "+10.2%", conf: 0.41, tone: "amb" },
@@ -56,7 +56,7 @@ const FIXTURE_LIBRARY = [
   { p: "Inverse H&S",        st: "WATCH",    mm: "$238", conf: 0.49, tone: "amb" },
 ];
 
-var FIXTURE_STAT = {
+var CL_FIXTURE_STAT = {
   primary_pattern: "VCP · Asc. triangle",
   stage: "Breakout + retest",
   contractions: "5 · 18%→3%",
@@ -64,16 +64,16 @@ var FIXTURE_STAT = {
   confidence: 0.64,
 };
 
-var FIXTURE_MODEL = {
+var CL_FIXTURE_MODEL = {
   isReal: false, source: "illustrative",
   pattern: { name: "VCP / Ascending Triangle", tone: "cy" },
   contractions: FIXTURE_CONTRACTIONS,
   pivot: CL_PIVOT, stop: CL_STOP,
-  targets: FIXTURE_TARGETS,
+  targets: CL_FIXTURE_TARGETS,
   lines: FIXTURE_LINES,
   zones: FIXTURE_ZONES,
   library: FIXTURE_LIBRARY,
-  stat: FIXTURE_STAT,
+  stat: CL_FIXTURE_STAT,
   read: "VCP / ascending triangle — 5 contractions into a pivot at $205.20, broken on 2.2× volume and retested. Measured move targets $225 → $235. Fails below pivot.",
   cur_close: 213.4,
   broke_out: true,
@@ -118,7 +118,7 @@ function useClassicalModel(ticker, mode) {
   // real responded but state="none"
   if (state === "loaded" && real && real.ok) {
     return {
-      model: { ...FIXTURE_MODEL, bars: mockBars, tf },
+      model: { ...CL_FIXTURE_MODEL, bars: mockBars, tf },
       state: "none", sym, tf, usable: false,
       message: real.message,
     };
@@ -126,7 +126,7 @@ function useClassicalModel(ticker, mode) {
 
   // loading / mock
   return {
-    model: { ...FIXTURE_MODEL, bars: mockBars },
+    model: { ...CL_FIXTURE_MODEL, bars: mockBars },
     state: state === "loading" ? "loading" : "mock",
     sym, tf, usable: false,
   };
@@ -174,7 +174,7 @@ function VCPLadder({ contractions }) {
 
 // ── measured-move targets + invalidation ──────────────────────────
 function ClassicalTargets({ targets, pivot, stop }) {
-  const list = (targets && targets.length) ? targets : FIXTURE_TARGETS;
+  const list = (targets && targets.length) ? targets : CL_FIXTURE_TARGETS;
   const inv_px = stop || CL_STOP;
   return (
     <div className="pv-targets">
@@ -223,7 +223,7 @@ function ClassicalLibrary({ library, dense }) {
 
 // ── stat header strip ────────────────────────────────────────────
 function ClassicalStat({ stat }) {
-  const s = stat || FIXTURE_STAT;
+  const s = stat || CL_FIXTURE_STAT;
   const patColor = (s.primary_pattern || "").includes("Triangle") ? "cy"
                   : (s.primary_pattern || "").includes("VCP") ? "cy"
                   : (s.primary_pattern || "").includes("Cup") ? "gn"

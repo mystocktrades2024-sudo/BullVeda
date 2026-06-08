@@ -60,7 +60,7 @@ function _buildMockBars(ticker) {
   return buildSeries({ n: 51, anchors, seed, volSpikes: { 6: 1.6, 30: 1.5 } });
 }
 
-var FIXTURE_MODEL = {
+var FB_FIXTURE_MODEL = {
   isReal: false, source: "illustrative",
   swing: FB_FIX_SWING, golden_pocket: FB_FIX_GOLDEN,
   retr_levels: FB_FIX_RETR, ext_levels: FB_FIX_EXT,
@@ -109,14 +109,14 @@ function useFibonacciModel(ticker, mode) {
 
   if (state === "loaded" && real && real.ok) {
     return {
-      model: { ...FIXTURE_MODEL, bars: mockBars, tf },
+      model: { ...FB_FIXTURE_MODEL, bars: mockBars, tf },
       state: "none", sym, tf, usable: false,
       message: (real && real.message) || "No usable Fibonacci structure detected.",
     };
   }
 
   return {
-    model: { ...FIXTURE_MODEL, bars: mockBars },
+    model: { ...FB_FIXTURE_MODEL, bars: mockBars },
     state: state === "loading" ? "loading" : "mock", sym, tf, usable: false,
   };
 }
@@ -306,7 +306,7 @@ function FibClusters({ clusters }) {
 
 // ── stat strip ───────────────────────────────────────────────────────────────
 function FibStat({ stat, confidence, current }) {
-  const s   = stat || FIXTURE_MODEL.stat;
+  const s   = stat || FB_FIXTURE_MODEL.stat;
   const cur = current || {};
   const nrs = cur.nearest_support;
   const nrr = cur.nearest_resistance;
@@ -341,7 +341,7 @@ function FibStat({ stat, confidence, current }) {
 
 // ── invalidation ─────────────────────────────────────────────────────────────
 function FibInvalid({ invalidation }) {
-  const inv = invalidation || FIXTURE_MODEL.invalidation;
+  const inv = invalidation || FB_FIXTURE_MODEL.invalidation;
   return (
     <div className="pv-invalid" style={{ margin: "0 16px 14px" }}>
       <span className="label-cap">Invalidation</span>

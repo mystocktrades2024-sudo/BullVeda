@@ -113,7 +113,7 @@ const CS_REL_STATIC = [
   { name: "Doji",                 glyph: "doji",     reliability: 0.50, n: 540, ff: "±0.4%", note: "context-only · no edge alone" },
 ];
 
-var FIXTURE_MODEL = {
+var CS_FIXTURE_MODEL = {
   isReal: false,
   source: "illustrative",
   bars: [],             // populated by buildMockBars
@@ -165,14 +165,14 @@ function useCandlesModel(ticker, mode) {
   // real responded but no patterns
   if (state === "loaded" && real && real.ok) {
     return {
-      model: { ...FIXTURE_MODEL, bars: mockBars, tf },
+      model: { ...CS_FIXTURE_MODEL, bars: mockBars, tf },
       state: "none", sym, tf, usable: false,
       message: real.message || "No notable patterns in recent bars.",
     };
   }
   // loading or server absent
   return {
-    model: { ...FIXTURE_MODEL, bars: mockBars },
+    model: { ...CS_FIXTURE_MODEL, bars: mockBars },
     state: state === "loading" ? "loading" : "mock",
     sym, tf, usable: false,
   };

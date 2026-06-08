@@ -46,7 +46,7 @@ function buildFixtureBars(ticker) {
 }
 
 // Static fixture stat/signals/lines/targets (for standalone showcase)
-var FIXTURE_STAT = {
+var IC_FIXTURE_STAT = {
   cloud: "Above", tk_cross: "Bullish", chikou: "Free",
   future_kumo: "Green · bullish twist", confidence: 0.74,
   bull_count: 5, verdict: "strong_bull",
@@ -68,7 +68,7 @@ const FIXTURE_SIGNALS = [
   { s: "Price above Kijun baseline",          v: "PASS · above",       tone: "gn" },
 ];
 
-var FIXTURE_TARGETS = {
+var IC_FIXTURE_TARGETS = {
   kumo_target: 222.0, kijun_stop: 201.4,
   cloud_top: 205.0, cloud_bottom: 197.2, cloud_height: 7.8,
   rr: 3.4, bull: true,
@@ -93,10 +93,10 @@ function buildFixtureModel(ticker) {
       { price: 201.4, label: "Kijun 201.40", tone: "copper", dash: "4 4" },
       { price: 222.0, label: "T1 222.00",    tone: "gn",     dash: "5 4" },
     ],
-    stat:      FIXTURE_STAT,
+    stat:      IC_FIXTURE_STAT,
     signals:   FIXTURE_SIGNALS,
     ich_lines: FIXTURE_ICH_LINES,
-    targets:   FIXTURE_TARGETS,
+    targets:   IC_FIXTURE_TARGETS,
     read:      FIXTURE_READ,
     span:      80 + ICH_FWD,
     projectFrom: 80,
@@ -104,7 +104,7 @@ function buildFixtureModel(ticker) {
 }
 
 // Fixture model constant used as fallback reference
-var FIXTURE_MODEL = buildFixtureModel({ symbol: "ARGN" });
+var IC_FIXTURE_MODEL = buildFixtureModel({ symbol: "ARGN" });
 
 // ── data hook: real → fixture fallback (mode-aware) ───────────────────────────
 function useIchimokuModel(ticker, mode) {
@@ -154,10 +154,10 @@ function useIchimokuModel(ticker, mode) {
 
 // ── chart ─────────────────────────────────────────────────────────────────────
 function IchimokuChart({ model, height = 330 }) {
-  const bars       = (model || {}).bars       || FIXTURE_MODEL.bars;
-  const cloud      = (model || {}).cloud      || FIXTURE_MODEL.cloud;
-  const chartLines = (model || {}).lines      || FIXTURE_MODEL.lines;
-  const hlines     = (model || {}).hlines     || FIXTURE_MODEL.hlines;
+  const bars       = (model || {}).bars       || IC_FIXTURE_MODEL.bars;
+  const cloud      = (model || {}).cloud      || IC_FIXTURE_MODEL.cloud;
+  const chartLines = (model || {}).lines      || IC_FIXTURE_MODEL.lines;
+  const hlines     = (model || {}).hlines     || IC_FIXTURE_MODEL.hlines;
   const spanCols   = (model || {}).span       || (bars.length + ICH_FWD);
   const projFrom   = (model || {}).projectFrom != null ? model.projectFrom : bars.length;
 
@@ -178,7 +178,7 @@ function IchimokuChart({ model, height = 330 }) {
 
 // ── stat bar ──────────────────────────────────────────────────────────────────
 function IchStat({ stat }) {
-  const s   = stat || FIXTURE_STAT;
+  const s   = stat || IC_FIXTURE_STAT;
   const conf = (s.confidence != null) ? s.confidence : 0.74;
   // tone helpers
   const cloudTone  = s.cloud === "Above"    ? "up" : s.cloud === "Below" ? "dn" : "dim2";
@@ -252,7 +252,7 @@ function IchSignals({ rows, dense }) {
 
 // ── targets + invalidation ────────────────────────────────────────────────────
 function IchTargets({ targets }) {
-  const t = (targets && targets.kumo_target != null) ? targets : FIXTURE_TARGETS;
+  const t = (targets && targets.kumo_target != null) ? targets : IC_FIXTURE_TARGETS;
   const bull = t.bull !== false;   // default bullish for fixture
   const invNote = t.invalidation_note ||
     "A close back inside the Kumo neutralises the signal.";

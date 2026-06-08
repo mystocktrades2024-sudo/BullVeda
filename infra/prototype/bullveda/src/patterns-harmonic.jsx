@@ -67,7 +67,7 @@ function _buildFixtureBars(ticker) {
   return buildSeries({ n: 66, anchors, seed, volSpikes });
 }
 
-var FIXTURE_MODEL = {
+var HM_FIXTURE_MODEL = {
   isReal: false, source: "illustrative",
   // chart annotations
   hmPts: HM_PTS_FIXTURE,
@@ -161,14 +161,14 @@ function useHarmonicModel(ticker, mode) {
   // Real responded but no usable structure
   if (state === "loaded" && real && real.ok) {
     return {
-      model: { ...FIXTURE_MODEL, bars: fixtureBars },
+      model: { ...HM_FIXTURE_MODEL, bars: fixtureBars },
       state: "none", sym, tf, usable: false, message: real.message,
     };
   }
 
   // Pre-load / server absent → illustrative fixture
   return {
-    model: { ...FIXTURE_MODEL, bars: fixtureBars },
+    model: { ...HM_FIXTURE_MODEL, bars: fixtureBars },
     state: state === "loading" ? "loading" : "mock", sym, tf, usable: false,
   };
 }

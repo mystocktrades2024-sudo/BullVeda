@@ -42,7 +42,7 @@ function _buildFixtureLines() {
   ];
 }
 
-var FIXTURE_MODEL = {
+var GN_FIXTURE_MODEL = {
   isReal: false, source: "illustrative",
   bars: null, // filled lazily per-ticker in useGannModel
   fan_lines: _buildFixtureLines(),
@@ -164,14 +164,14 @@ function useGannModel(ticker, mode) {
   // Real responded but no structure → honest "none"
   if (state === "loaded" && real && real.ok) {
     return {
-      model: { ...FIXTURE_MODEL, bars: fixtureBars, tf, mode: md },
+      model: { ...GN_FIXTURE_MODEL, bars: fixtureBars, tf, mode: md },
       state: "none", message: real.message, sym, tf, usable: false,
     };
   }
 
   // Not yet loaded or server absent → illustrative fixture
   return {
-    model: { ...FIXTURE_MODEL, bars: fixtureBars, mode: md },
+    model: { ...GN_FIXTURE_MODEL, bars: fixtureBars, mode: md },
     state: state === "loading" ? "loading" : "mock", sym, tf, usable: false,
   };
 }
@@ -198,7 +198,7 @@ function GannChart({ model, ticker, height = 330 }) {
 
 // ── angle table ───────────────────────────────────────────────────────────────
 function GannAngles({ angles, dense }) {
-  const list = (angles && angles.length) ? angles : FIXTURE_MODEL.angles;
+  const list = (angles && angles.length) ? angles : GN_FIXTURE_MODEL.angles;
   return (
     <MiniTable dense={dense}
       cols={[
@@ -221,7 +221,7 @@ function GannAngles({ angles, dense }) {
 
 // ── sq9 table ─────────────────────────────────────────────────────────────────
 function GannSq9({ sq9, dense }) {
-  const list = (sq9 && sq9.length) ? sq9 : FIXTURE_MODEL.sq9;
+  const list = (sq9 && sq9.length) ? sq9 : GN_FIXTURE_MODEL.sq9;
   return (
     <MiniTable dense={dense}
       cols={[
@@ -240,7 +240,7 @@ function GannSq9({ sq9, dense }) {
 
 // ── time cycles table ─────────────────────────────────────────────────────────
 function GannTime({ cycles, dense }) {
-  const list = (cycles && cycles.length) ? cycles : FIXTURE_MODEL.cycles;
+  const list = (cycles && cycles.length) ? cycles : GN_FIXTURE_MODEL.cycles;
   return (
     <MiniTable dense={dense}
       cols={[
@@ -259,7 +259,7 @@ function GannTime({ cycles, dense }) {
 
 // ── stat header strip ─────────────────────────────────────────────────────────
 function GannStat({ stat }) {
-  const s = stat || FIXTURE_MODEL.stat;
+  const s = stat || GN_FIXTURE_MODEL.stat;
   const confTone = (s.confidence || 0) >= 0.50 ? "copper" : "amb";
   return (
     <div className="pv-stat">
@@ -291,8 +291,8 @@ function GannStat({ stat }) {
 
 // ── "The Read" box ────────────────────────────────────────────────────────────
 function GannReadBox({ model }) {
-  const read   = (model && model.read)    || FIXTURE_MODEL.read;
-  const sqNote = (model && model.sq_note) || FIXTURE_MODEL.sq_note;
+  const read   = (model && model.read)    || GN_FIXTURE_MODEL.read;
+  const sqNote = (model && model.sq_note) || GN_FIXTURE_MODEL.sq_note;
   return (
     <div className="pv-invalid" style={{ border: "1px solid var(--line)", background: "var(--bg-1)", margin: "12px 16px" }}>
       <span className="label-cap">Read</span>

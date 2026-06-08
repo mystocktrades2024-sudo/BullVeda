@@ -70,8 +70,8 @@ function _buildFixtureBars(ticker) {
   return buildSeries({ n: 53, anchors, seed, volSpikes });
 }
 
-// FIXTURE_MODEL — keeps original fixture for standalone showcase
-var FIXTURE_MODEL = {
+// WF_FIXTURE_MODEL — keeps original fixture for standalone showcase
+var WF_FIXTURE_MODEL = {
   isReal: false, source: "illustrative",
   wfPts: WF_PTS_FIXTURE,
   epa: WF_EPA_FIXTURE,
@@ -173,14 +173,14 @@ function useWolfeModel(ticker, mode) {
   // Real responded but no usable structure
   if (state === "loaded" && real && real.ok) {
     return {
-      model: { ...FIXTURE_MODEL, bars: fixtureBars },
+      model: { ...WF_FIXTURE_MODEL, bars: fixtureBars },
       state: "none", sym, tf, usable: false, message: real.message,
     };
   }
 
   // Pre-load / server absent → illustrative fixture
   return {
-    model: { ...FIXTURE_MODEL, bars: fixtureBars },
+    model: { ...WF_FIXTURE_MODEL, bars: fixtureBars },
     state: state === "loading" ? "loading" : "mock", sym, tf, usable: false,
   };
 }

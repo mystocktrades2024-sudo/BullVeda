@@ -127,7 +127,7 @@ const EW_INV_FIXTURE = {
 };
 
 // canonical fixture model for standalone showcase / fallback
-var FIXTURE_MODEL = {
+var EL_FIXTURE_MODEL = {
   isReal: false,
   stat: EW_STAT_FIXTURE,
   rules: EW_RULES_FIXTURE,
@@ -197,12 +197,12 @@ function useElliottModel(ticker, mode) {
   }
   if (state === "loaded" && real && real.ok) {
     return {
-      model: FIXTURE_MODEL, state: "none", sym, tf, usable: false,
+      model: EL_FIXTURE_MODEL, state: "none", sym, tf, usable: false,
       message: real.message || `No clean Elliott Wave count on ${sym || "this name"}'s ${tf || "daily"} chart.`,
     };
   }
   return {
-    model: FIXTURE_MODEL,
+    model: EL_FIXTURE_MODEL,
     state: state === "loading" ? "loading" : "mock",
     sym, tf, usable: false,
   };

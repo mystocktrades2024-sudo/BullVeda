@@ -67,7 +67,7 @@ function _buildFixtureBars(ticker) {
   return buildSeries({ n: TD_BARS, anchors: TD_FIX_ANCHORS, seed, volSpikes: {} });
 }
 
-var FIXTURE_MODEL = {
+var TD_FIXTURE_MODEL = {
   bars:        null,   // populated dynamically from ticker seed in the hook
   tdst:        TD_FIX_HLINES,
   markers:     TD_FIX_MARKERS,
@@ -113,7 +113,7 @@ function useTdModel(ticker, mode) {
   // Real responded but no active structure
   if (state === "loaded" && real && real.ok) {
     return {
-      model: { ...FIXTURE_MODEL, bars: fixtureBars },
+      model: { ...TD_FIXTURE_MODEL, bars: fixtureBars },
       state: "none", sym, tf, usable: false,
       message: real.message || "No active TD Setup or Countdown found on this timeframe.",
     };
@@ -121,7 +121,7 @@ function useTdModel(ticker, mode) {
 
   // Not yet loaded (or server absent) → illustrative fixture
   return {
-    model: { ...FIXTURE_MODEL, bars: fixtureBars },
+    model: { ...TD_FIXTURE_MODEL, bars: fixtureBars },
     state: state === "loading" ? "loading" : "mock",
     sym, tf, usable: false, message: null,
   };

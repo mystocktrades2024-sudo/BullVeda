@@ -59,7 +59,7 @@ const FIX_STAT = {
   poc_raw: 205, vah_raw: 211, val_raw: 199,
 };
 
-var FIXTURE_MODEL = {
+var VP_FIXTURE_MODEL = {
   isReal: false, source: "illustrative",
   profile: _FIX_VP.bins, poc: _FIX_VP.poc, vah: _FIX_VP.vah, val: _FIX_VP.val,
   nodes: FIX_NODES, targets: FIX_TARGETS, invalidation: FIX_INVALIDATION,
@@ -118,7 +118,7 @@ function useVolProfileModel(ticker, mode) {
   // real responded but no usable structure
   if (state === "loaded" && real && real.ok) {
     return {
-      model: { ...FIXTURE_MODEL, bars: fixtureBars, tf },
+      model: { ...VP_FIXTURE_MODEL, bars: fixtureBars, tf },
       state: "none", sym, tf, usable: false,
       message: real.message || "No usable volume profile for this window.",
     };
@@ -126,7 +126,7 @@ function useVolProfileModel(ticker, mode) {
 
   // not yet loaded or server absent → illustrative fixture
   return {
-    model: { ...FIXTURE_MODEL, bars: fixtureBars },
+    model: { ...VP_FIXTURE_MODEL, bars: fixtureBars },
     state: state === "loading" ? "loading" : "mock",
     sym, tf, usable: false,
   };
