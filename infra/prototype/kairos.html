@@ -38822,7 +38822,12 @@ body.strat-position .qln-exec-badge { background:#5EA1FF; color:#fff }
   // tied to live DOM nodes.
   function _qdCacheKey(tk, sub, t) {
     const enriched = (t && t._enriched) ? '1' : '0';
-    return tk + '|' + sub + '|' + enriched;
+    // Strategy must be part of the key: SWING/POSITION/INVESTMENT each render a
+    // distinct hero rail (NOW/T1/T2/STOP) + engine-target map. Without this, the
+    // first-rendered strategy's HTML is served from cache on every toggle and the
+    // price-line map never updates. (2026-06-08)
+    const strat = (window._qdStrategy || (typeof _qdStrategyCurrent === 'function' ? _qdStrategyCurrent() : 'POSITION') || 'POSITION');
+    return tk + '|' + sub + '|' + strat + '|' + enriched;
   }
   function _qdCacheGet(k) {
     if (_qdHtmlCache.has(k)) {
@@ -41885,7 +41890,8 @@ body.light .qov-strip{box-shadow:0 4px 20px rgba(0,0,0,.08)}
       const t1Pct = t2c ? Math.max(20, Math.min(95, (pct / (((t2c.price - price) / price) * 100)) * 100)) : 70;
       rows.push({ lbl:'t1', name:`T1 · ${_qovFmtPx(t1c.price)}`, fill:t1Pct, color:'rgba(183,148,244,', pct });
     }
-    rows.push({ lbl:'entry', name:`ENTRY · ${_qovFmtPx(price)}`, fill:48, color:'rgba(230,234,242,', pct:0 });
+    const entryPx = (p?.entry?.price != null) ? +p.entry.price : price;
+    rows.push({ lbl:'entry', name:`ENTRY · ${_qovFmtPx(entryPx)}`, fill:48, color:'rgba(230,234,242,', pct: ((entryPx - price) / price) * 100 });
     if (stopC) rows.push({ lbl:'stop', name:`STOP · ${_qovFmtPx(stopC)}`, fill:0, color:'rgba(255,107,91,', pct: ((stopC - price) / price) * 100 });
     setHTML('qovTargetMap', rows.map(r => `<div class="qov-map-row"><div class="qov-map-lbl ${r.lbl}">${r.name}</div><div class="qov-map-track"><div class="qov-map-fill" style="width:${r.fill}%; background:${r.lbl==='entry'?'rgba(230,234,242,.18)':r.lbl==='stop'?'rgba(255,107,91,.30)':`linear-gradient(90deg, ${r.color}.10) 0%, ${r.color}.40) 100%)`}"></div></div><div class="qov-map-px ${r.lbl}">${_qovFmtPct(r.pct, 1)}</div></div>`).join(''));
     function tCard(tg, label, cls) {

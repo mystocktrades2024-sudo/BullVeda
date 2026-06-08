@@ -97,6 +97,7 @@ function LensTV({ ticker, mode }) {
   const md = mode || "swing";
   const interval = TV_INTERVAL[md] || "D";
   const [push, setPush] = useTVs({ state: "idle", msg: "" });
+  const [ind, setInd] = useTVs({ state: "idle", studies: [], msg: "" });
 
   const num = (v) => { const n = parseFloat(v); return isFinite(n) ? n : null; };
   const entry = num(t.pivot) ?? num(t.price);
@@ -117,6 +118,21 @@ function LensTV({ ticker, mode }) {
       .catch(() => setPush({ state: "fallback", msg: cli }));
   };
   const copyCli = () => { try { navigator.clipboard.writeText(cli); setPush({ state: "copied", msg: "Command copied — paste it in your terminal." }); } catch (e) {} };
+
+  const readIndicators = () => {
+    setInd({ state: "loading", studies: [], msg: "Reading your chart's Data Window…" });
+    fetch(`/api/tv/values?t=${encodeURIComponent(sym)}`)
+      .then((r) => r.json())
+      .then((j) => {
+        if (j && j.ok) {
+          const studies = (j.studies || []).filter((s) => s.values && Object.keys(s.values).length);
+          if (!studies.length) setInd({ state: "empty", studies: [], msg: "Chart found, but no studies expose Data-Window values right now. Bring the TradingView chart to the front and retry." });
+          else setInd({ state: "ok", studies, msg: "" });
+        } else if (j && j.needs_tab) setInd({ state: "info", studies: [], msg: j.message });
+        else setInd({ state: "info", studies: [], msg: (j && (j.message || j.error)) || "Desktop bridge unavailable." });
+      })
+      .catch(() => setInd({ state: "info", studies: [], msg: "Server unreachable — is the SwingTrade server + TradingView Desktop running?" }));
+  };
 
   return (
     <div className="lens-pad" style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 14 }}>
@@ -181,6 +197,48 @@ function LensTV({ ticker, mode }) {
             </div>
           )}
         </div>
+      </div>
+
+      {/* ── YOUR TRADINGVIEW INDICATORS (LuxAlgo et al — live read) ── */}
+      <div style={{ background: "var(--bg-1)", border: "1px solid var(--ink-2)", borderRadius: 12, padding: "12px 16px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+          <span className="label-cap mono" style={{ fontSize: 10, color: "var(--ink-2)", letterSpacing: ".12em" }}>YOUR TRADINGVIEW INDICATORS</span>
+          <span className="mono" style={{ fontSize: 9.5, padding: "2px 7px", borderRadius: 5, background: "color-mix(in oklab, var(--violet) 16%, var(--bg-2))", border: "1px solid color-mix(in oklab, var(--violet) 35%, transparent)", color: "var(--violet)" }}>EXTERNAL · INFORMATIONAL</span>
+          <button onClick={readIndicators} disabled={ind.state === "loading"}
+            style={{ marginLeft: "auto", padding: "6px 12px", borderRadius: 8, cursor: "pointer",
+              background: "var(--bg-2)", border: "1px solid var(--ink-2)", color: "var(--ink-1)",
+              fontFamily: "var(--mono, monospace)", fontSize: 11.5 }}>
+            {ind.state === "loading" ? "Reading…" : "↻ Read my chart"}
+          </button>
+        </div>
+        <div className="mono dim2" style={{ fontSize: 10.5, lineHeight: 1.5, marginBottom: 10 }}>
+          Reads the live Data Window of the Pine studies on <b>your</b> licensed {sym} chart (LuxAlgo PAC, AlgoAlpha, Andean…).
+          We <b>read — never recompute</b> their output; the logic stays their black box. A second opinion — it <b>never gates</b> the verdict above.
+        </div>
+
+        {ind.state === "ok" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {ind.studies.map((s, si) => (
+              <div key={si} style={{ background: "var(--bg-2)", border: "1px solid var(--ink-2)", borderRadius: 9, padding: "9px 12px" }}>
+                <div className="mono" style={{ fontSize: 11.5, fontWeight: 600, color: "var(--violet)", marginBottom: 6 }}>{s.name}</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {Object.entries(s.values).map(([k, v]) => (
+                    <span key={k} style={{ display: "inline-flex", gap: 6, alignItems: "baseline", padding: "3px 8px", borderRadius: 6, background: "var(--bg-1)", border: "1px solid var(--ink-2)" }}>
+                      <span className="mono dim2" style={{ fontSize: 10 }}>{k}</span>
+                      <span className="mono" style={{ fontSize: 11.5, fontWeight: 600, color: "var(--ink-0)" }}>{v}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {ind.state !== "idle" && ind.state !== "ok" && (
+          <div className="mono dim2" style={{ fontSize: 11, padding: "8px 10px", background: "var(--bg-2)", border: "1px solid var(--ink-2)", borderRadius: 8 }}>{ind.msg}</div>
+        )}
+        {ind.state === "idle" && (
+          <div className="mono dim2" style={{ fontSize: 10.5 }}>Click <b>↻ Read my chart</b> with {sym} open (and frontmost) on TradingView Desktop.</div>
+        )}
       </div>
 
       {/* guardrail footer */}

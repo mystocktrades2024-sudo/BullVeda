@@ -49,6 +49,18 @@ const SRC_COLOR = { BSL:'#F472B6', HVN:'#FCD34D', SWING:'#A78BFA', VAH:'#22D3EE'
 // ─── module-level state for current ticker's async data ──────────────────
 const STATE = { ticker:null, payloads:{}, portfolio:null, mounted:false, activeStrategy:'SWING' };
 
+// Active-mode payload selector — mode-dependent sections read through this so
+// they stay in sync with the SWING/POSITION/INVEST toggle. Falls back to any
+// loaded payload (preserving the prior POSITION-first fallback order) so a
+// section never goes blank when the active mode's engine call returned null.
+const _activeP = () => STATE.payloads[STATE.activeStrategy]
+                    || STATE.payloads.POSITION
+                    || STATE.payloads.SWING
+                    || STATE.payloads.INVESTMENT;
+
+// Human label for the active strategy (used in dynamic section copy).
+const _activeLabel = () => ({ SWING:'SWING', POSITION:'POSITION', INVESTMENT:'INVEST' }[STATE.activeStrategy] || 'SWING');
+
 // ─── embedded scoped CSS (idempotent inject) ─────────────────────────────
 const QOV_CSS = `
 .qov-root {
@@ -90,6 +102,8 @@ const QOV_CSS = `
 .qov-h .lbl{font:700 9px var(--qmono);color:var(--qink-3);letter-spacing:.12em}
 .qov-h .val{font:800 11.5px var(--qmono);margin-top:2px}
 .qov-h.gn .val{color:var(--gn)} .qov-h.am .val{color:var(--am)} .qov-h.rd .val{color:var(--rd)}
+.qov-h.on{border-color:var(--lead);box-shadow:0 0 0 1px var(--lead) inset}
+.qov-h.on .lbl{color:var(--lead)}
 .qov-stamp{font:500 10px var(--qmono);color:var(--qink-3);text-align:right;line-height:1.6}
 
 /* panel */
@@ -108,6 +122,7 @@ const QOV_CSS = `
 .qov-fit{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 .qov-fc{background:var(--qbg-2);border:1.5px solid var(--qline);border-radius:4px;padding:12px 14px;position:relative}
 .qov-fc.best{border-color:var(--gn)}
+.qov-fc.active{box-shadow:0 0 0 1.5px var(--lead) inset, 0 0 12px rgba(183,148,244,.18)}
 .qov-fc.swing{border-left:3px solid var(--am)}
 .qov-fc.position{border-left:3px solid #5EA1FF}
 .qov-fc.investment{border-left:3px solid var(--lead)}
@@ -288,6 +303,7 @@ const QOV_CSS = `
 .qov-trig-card.swing{border-top-color:var(--am)}
 .qov-trig-card.position{border-top-color:#5EA1FF}
 .qov-trig-card.investment{border-top-color:var(--lead)}
+.qov-trig-card.active{box-shadow:0 0 0 1.5px var(--lead) inset, 0 0 12px rgba(183,148,244,.18)}
 .qov-trig-mode{font:800 10.5px var(--qmono);letter-spacing:.14em;margin-bottom:8px}
 .qov-trig-mode.am{color:var(--am)} .qov-trig-mode.blue{color:#5EA1FF} .qov-trig-mode.lead{color:var(--lead)}
 .qov-trig-rule{padding:8px 0;border-bottom:1px dashed var(--qline)}
@@ -958,7 +974,16 @@ window.__qovCollapseAll = () => {
 
 window.__qovSetStrat = (s) => {
   STATE.activeStrategy = s;
-  renderExecBrief();
+  // Re-render every mode-dependent section so the toggle is fully live:
+  // exec brief, B1 engine targets, B2 setup strip, B3 risk, B4 forward
+  // outcomes, B5 pre-flight, B6 decision matrix, B8 strategy-fit highlight,
+  // B9 action-trigger highlight, and the (dead-code) verdict strip horizons.
+  // renderAll() is idempotent (pure STATE re-reads, no fetch / listener leak),
+  // so re-running the mode-agnostic panels is cheap and side-effect-free.
+  // renderVerdictStrip targets a sticky-strip that the current shell does not
+  // mount; guard it so its null-DOM access can never abort the rest.
+  try { renderVerdictStrip(); } catch (e) { /* verdict strip not mounted */ }
+  renderAll();
 };
 
 // ─── section renderers ──────────────────────────────────────────────────
@@ -999,7 +1024,8 @@ function renderVerdictStrip() {
   });
   setHTML('qovHorizons', hor.map(h => {
     const lbl = h.lbl === 'INVESTMENT' ? 'INVEST' : h.lbl;
-    return `<div class="qov-h ${h.cls}"><div class="lbl">${lbl}</div><div class="val">${h.val}</div></div>`;
+    const on = h.lbl === STATE.activeStrategy ? ' on' : '';
+    return `<div class="qov-h ${h.cls}${on}"><div class="lbl">${lbl}</div><div class="val">${h.val}</div></div>`;
   }).join(''));
 
   const anyP = payloads.SWING || payloads.POSITION || payloads.INVESTMENT;
@@ -1036,7 +1062,8 @@ function renderStrategyFit() {
     const tgts = t1
       ? `<b>T1</b> ${fmtPx(t1.price)} (conf ${(t1.confluence||0).toFixed(1)} · ${escapeHtml(safeStr(t1.behavior))})${t2 ? ` · <b>T2</b> ${fmtPx(t2.price)} (conf ${(t2.confluence||0).toFixed(1)} · ${escapeHtml(safeStr(t2.behavior))})` : ''}<br><b>Stop</b> ${fmtPx(p?.stop?.price)} · <b>P(reach)</b> ${t1.p_reach != null ? Math.round(t1.p_reach*100)+'%' : '—'}`
       : '<span style="color:var(--qink-3)">no targets</span>';
-    return `<div class="qov-fc ${m.cls}${isBest ? ' best' : ''}">${isBest ? '<div class="qov-best-badge">★ BEST FIT</div>' : ''}<div class="qov-fc-mode">${m.label}</div><div class="qov-fc-hold">${m.hold}</div><div class="qov-fc-verdict ${v.cls}">${v.label}</div><div class="qov-fc-reason">${reason}</div><div class="qov-fc-tgts">${tgts}</div></div>`;
+    const isActive = m.ui === STATE.activeStrategy;
+    return `<div class="qov-fc ${m.cls}${isBest ? ' best' : ''}${isActive ? ' active' : ''}">${isBest ? '<div class="qov-best-badge">★ BEST FIT</div>' : ''}<div class="qov-fc-mode">${m.label}</div><div class="qov-fc-hold">${m.hold}</div><div class="qov-fc-verdict ${v.cls}">${v.label}</div><div class="qov-fc-reason">${reason}</div><div class="qov-fc-tgts">${tgts}</div></div>`;
   }).join('');
   setHTML('qovFitGrid', html);
   const bestMode = bestIdx >= 0 ? modes[bestIdx].label : '—';
@@ -1045,8 +1072,8 @@ function renderStrategyFit() {
 
 function renderDecisionMatrix() {
   const T = _T() || {};
-  const { payloads, ticker } = STATE;
-  const pPos = payloads.POSITION;
+  const { ticker } = STATE;
+  const pPos = _activeP();
   const t1 = pPos?.t1, stopP = pPos?.stop?.price;
   const score = num(T.score, 0);
 
@@ -1089,8 +1116,7 @@ function renderDecisionMatrix() {
 
 function renderEngineTargets() {
   const T = _T() || {};
-  const { payloads } = STATE;
-  const p = payloads.POSITION || payloads.SWING || payloads.INVESTMENT;
+  const p = _activeP();
   const price = num(T.price, p?.price_at_analysis ?? 0);
   const t1 = p?.t1, t2 = p?.t2, stopP = p?.stop?.price;
 
@@ -1104,7 +1130,8 @@ function renderEngineTargets() {
     const t1Pct = t2 ? Math.max(20, Math.min(95, (pct / (((t2.price - price) / price) * 100)) * 100)) : 70;
     rows.push({ lbl:'t1', name:`T1 · ${fmtPx(t1.price)}`, fill:t1Pct, color:'rgba(183,148,244,', pct });
   }
-  rows.push({ lbl:'entry', name:`ENTRY · ${fmtPx(price)}`, fill:48, color:'rgba(230,234,242,', pct:0 });
+  const entryPx = (p?.entry?.price != null) ? num(p.entry.price, price) : price;
+  rows.push({ lbl:'entry', name:`ENTRY · ${fmtPx(entryPx)}`, fill:48, color:'rgba(230,234,242,', pct: ((entryPx - price) / price) * 100 });
   if (stopP) {
     const pct = ((stopP - price) / price) * 100;
     rows.push({ lbl:'stop', name:`STOP · ${fmtPx(stopP)}`, fill:0, color:'rgba(255,107,91,', pct });
@@ -1269,8 +1296,9 @@ function renderMTF() {
 
 function renderSetupStrip() {
   const T = _T() || {};
-  const { payloads } = STATE;
-  const p = payloads.POSITION || payloads.SWING || payloads.INVESTMENT;
+  // Only the →T1/→T2/→STOP cells are mode-dependent (read from the active
+  // engine payload); EMA/MACD/RSI/RVOL/BETA/EARN cells stay sourced from T.
+  const p = _activeP();
   const price = num(T.price, p?.price_at_analysis ?? 0);
   const t1 = p?.t1, t2 = p?.t2, stopP = p?.stop?.price;
   const cells = [
@@ -1290,7 +1318,7 @@ function renderSetupStrip() {
 
 function renderRiskProfile() {
   const T = _T() || {};
-  const p = STATE.payloads.POSITION || STATE.payloads.SWING || STATE.payloads.INVESTMENT;
+  const p = _activeP();
   const price = num(T.price, p?.price_at_analysis ?? 0);
   const stopP = p?.stop?.price;
   const sizing = p?.sizing || {};
@@ -1342,7 +1370,7 @@ function renderNewsPulse() {
 
 function renderForwardOutcomes() {
   const T = _T() || {};
-  const p = STATE.payloads.POSITION || STATE.payloads.SWING || STATE.payloads.INVESTMENT;
+  const p = _activeP();
   const t1 = p?.t1 || {}, t2 = p?.t2 || {};
   const pT1 = t1.p_reach ?? 0;
   const pT2 = t2.p_reach ?? 0;
@@ -1353,7 +1381,7 @@ function renderForwardOutcomes() {
   }
   setHTML('qovFoGrid', `
     <div>
-      <div style="font:700 9.5px var(--qmono); color:var(--qink-3); letter-spacing:.13em; margin-bottom:8px">PROBABILITY · POSITION lens</div>
+      <div style="font:700 9.5px var(--qmono); color:var(--qink-3); letter-spacing:.13em; margin-bottom:8px">PROBABILITY · ${_activeLabel()} lens</div>
       ${bar('P(REACH T1)', pT1, 'var(--gn)')}
       ${bar('P(REACH T2)', pT2, 'var(--am)')}
       ${bar('P(STOP HIT)', pStop, 'var(--rd)')}
@@ -1376,7 +1404,7 @@ function renderForwardOutcomes() {
 
 function renderPreFlight() {
   const T = _T() || {};
-  const p = STATE.payloads.POSITION || STATE.payloads.SWING || STATE.payloads.INVESTMENT;
+  const p = _activeP();
   const warns = p?.warnings || [];
   const items = [];
   items.push({ pass: T.market_cap >= 1e9, k:'Liquidity gate · ' + (T.market_cap ? '$'+(T.market_cap/1e9).toFixed(1)+'B mcap' : '—') });
@@ -1410,8 +1438,9 @@ function renderActionTriggers() {
   const T = _T() || {};
   const { payloads } = STATE;
   function buildCard(modeUi, cls, modeCls, p) {
+    const act = modeUi === STATE.activeStrategy ? ' active' : '';
     if (!p || p.decision === 'reject') {
-      return `<div class="qov-trig-card ${cls}"><div class="qov-trig-mode ${modeCls}">${modeUi} · NO TRADE</div><div style="padding:8px 0; color:var(--qink-3); font:500 11px var(--qmono)">Engine cannot generate ${modeUi} targets.</div></div>`;
+      return `<div class="qov-trig-card ${cls}${act}"><div class="qov-trig-mode ${modeCls}">${modeUi} · NO TRADE</div><div style="padding:8px 0; color:var(--qink-3); font:500 11px var(--qmono)">Engine cannot generate ${modeUi} targets.</div></div>`;
     }
     const t1 = p.t1 || {}, t2 = p.t2 || {}, stopP = p.stop?.price;
     const rules = [];
@@ -1425,7 +1454,7 @@ function renderActionTriggers() {
       rules.push({ lbl:'ADD TRIGGER (value)', body:`<span class="when">IF price &lt; ${fmtPx(T.analyst_target * 0.85)} (MoS &gt; 15%)</span> → <span class="then">ADD on weakness · hold to IV ${fmtPx(T.analyst_target)}</span>` });
     }
     rules.push({ lbl:'INVALIDATION', body:`<span class="when">IF daily close &lt; ${fmtPx(stopP)}</span> <span class="and">OR</span> <span class="when">score drops &lt; 60</span> → <span class="neg">EXIT FULL · thesis broken</span>` });
-    return `<div class="qov-trig-card ${cls}"><div class="qov-trig-mode ${modeCls}">${modeUi} · ${(p.decision || 'TRADE').toUpperCase()}</div>${rules.map(r => `<div class="qov-trig-rule"><div class="label">${r.lbl}</div><div class="ruleBody">${r.body}</div></div>`).join('')}</div>`;
+    return `<div class="qov-trig-card ${cls}${act}"><div class="qov-trig-mode ${modeCls}">${modeUi} · ${(p.decision || 'TRADE').toUpperCase()}</div>${rules.map(r => `<div class="qov-trig-rule"><div class="label">${r.lbl}</div><div class="ruleBody">${r.body}</div></div>`).join('')}</div>`;
   }
   setHTML('qovTrigGrid',
     buildCard('SWING', 'swing', 'am', payloads.SWING) +
