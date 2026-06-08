@@ -345,6 +345,10 @@ function App() {
             <div className="main-home">
               <SurfaceInsider onTicker={handleTickerClick} />
             </div>
+          ) : surface === "congress" ? (
+            <div className="main-home">
+              <SurfaceCongress onTicker={handleTickerClick} />
+            </div>
           ) : surface === "smc-patterns" ? (
             <div className="main-home">
               <SurfaceSMCPatterns onTicker={handleTickerClick} />

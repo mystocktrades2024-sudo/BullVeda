@@ -3614,6 +3614,7 @@ async def universe_api(limit: int = 0):
         ctp = r.get("canonical_trade_plan") or {}
         entry = ctp.get("entry") or {}
         elo = entry.get("low"); stop = ctp.get("stop"); t1 = ctp.get("target1"); t2 = ctp.get("target2")
+        t3 = ctp.get("target3")  # Phase 2 cutover — bull-stretch (None when unarmed/ATR fallback)
         rr = None
         try:
             if elo and stop and t1 and (elo - stop): rr = round((t1 - elo) / (elo - stop), 2)
@@ -3636,7 +3637,7 @@ async def universe_api(limit: int = 0):
             "setup": r.get("setup_family"), "conviction_tier": conv.get("label"),
             "catalyst_tier": r.get("catalyst_tier"), "entry_quality": r.get("entry_quality"),
             "price": r.get("price"), "pct_chg": r.get("perf_1d"),
-            "rr": rr, "stop": stop, "entry_lo": elo, "t1": t1, "t2": t2,
+            "rr": rr, "stop": stop, "entry_lo": elo, "t1": t1, "t2": t2, "t3": t3,
             "rvol": r.get("rvol"), "rs_rank": r.get("rs_rank"), "rsi": r.get("rsi"),
             "beta": r.get("beta"), "market_cap": r.get("market_cap"),
             "iv_rank": ok.get("iv_rank") if ok.get("iv_rank") is not None else r.get("iv_rank"),
@@ -11198,19 +11199,176 @@ async def options_alerts_check_api():
 
 _SENATE_CACHE = {"data": None, "fetched": 0.0}
 
+# ── Congress / political-flow surface (unified multi-source cache) ──────────
+_CONGRESS_DOC_CACHE = {"mtime": 0.0, "doc": None}
+
+
+def _load_congress_doc():
+    """Read cache/congressional_picks.json (built by congress_trades.py), cached by mtime."""
+    p = BASE_DIR / "cache" / "congressional_picks.json"
+    if not p.exists():
+        return None
+    try:
+        mt = p.stat().st_mtime
+        if _CONGRESS_DOC_CACHE["mtime"] != mt or _CONGRESS_DOC_CACHE["doc"] is None:
+            _CONGRESS_DOC_CACHE["doc"] = json.loads(p.read_text())
+            _CONGRESS_DOC_CACHE["mtime"] = mt
+        return _CONGRESS_DOC_CACHE["doc"]
+    except Exception:
+        return None
+
+
+_CONGRESS_XREF_CACHE = {"mtime": 0.0, "data": None}
+
+
+def _congress_crossref_index():
+    """{ticker: {score, verdict, price, sector, mode}} from last_bundle for the
+    'does OUR engine like what Congress is buying?' join. The design center of
+    this surface — a raw mirror of Quiver adds nothing without our verdict."""
+    p = BASE_DIR / "cache" / "last_bundle.json"
+    if not p.exists():
+        return {}
+    try:
+        mt = p.stat().st_mtime
+        if _CONGRESS_XREF_CACHE["mtime"] == mt and _CONGRESS_XREF_CACHE["data"] is not None:
+            return _CONGRESS_XREF_CACHE["data"]
+        doc = json.loads(p.read_text())
+        idx = {}
+        for key in ("all_scored", "buy_candidates", "watch_list", "killed",
+                    "medium_term_picks", "long_term_picks"):
+            for r in (doc.get(key) or []):
+                if not isinstance(r, dict):
+                    continue
+                t = r.get("ticker") or r.get("symbol")
+                if not t or t in idx:
+                    continue
+                idx[t] = {
+                    "score": r.get("score"),
+                    "verdict": r.get("verdict") or r.get("decision"),
+                    "price": r.get("price") or r.get("last") or r.get("close"),
+                    "sector": r.get("sector") or "",
+                    "setup_family": r.get("setup_family") or "",
+                }
+        _CONGRESS_XREF_CACHE.update(mtime=mt, data=idx)
+        return idx
+    except Exception:
+        return {}
+
+
+@app.get("/api/congress")
+async def congress_board_api(limit: int = 30, side: str = "buy", min_buyers: int = 1,
+                             chamber: str = "", party: str = ""):
+    """Cross-universe political-flow leaderboard + live feed, joined to our scan.
+
+    Sources (multi, never single-sourced): Quiver beta + Capitol Trades +
+    House Clerk / Senate eFD provenance — all free, built by congress_trades.py.
+    Each leaderboard row carries our own score/verdict/price so the UI can show
+    'Congress bought X; we say WATCH @ $Y'. NOTE: 45-day STOCK Act disclosure
+    lag makes this a slow, crowded signal — context for Position/Invest horizons,
+    never a swing trigger or scoring gate.
+    """
+    doc = _load_congress_doc()
+    if not doc or "leaderboard" not in doc:
+        return {"leaderboard": [], "feed": [], "available": False,
+                "reason": "congress cache not built — run scripts/refresh_congress.py"}
+    xref = _congress_crossref_index()
+    ch = (chamber or "").strip().lower()
+    pty = (party or "").strip().upper()[:1]
+
+    def _ch_match(e):
+        if not ch:
+            return True
+        chambers = {k.lower() for k in (e.get("chambers") or {}).keys()}
+        return any(ch in c for c in chambers)
+
+    def _pty_match(e):
+        if not pty:
+            return True
+        return pty in (e.get("party_split") or {})
+
+    board = []
+    for e in doc["leaderboard"]:
+        if e.get("n_buyers", 0) < min_buyers:
+            continue
+        if not _ch_match(e) or not _pty_match(e):
+            continue
+        x = xref.get(e["ticker"], {})
+        board.append({**e,
+                      "our_score": x.get("score"), "our_verdict": x.get("verdict"),
+                      "our_price": x.get("price"), "our_sector": x.get("sector"),
+                      "our_setup": x.get("setup_family")})
+        if len(board) >= limit:
+            break
+
+    feed = []
+    for f in doc.get("feed", []):
+        if side in ("buy", "sell") and f.get("type") != side:
+            if side != "all":
+                continue
+        x = xref.get(f["ticker"], {})
+        feed.append({**f, "our_score": x.get("score"), "our_verdict": x.get("verdict")})
+        if len(feed) >= 200:
+            break
+
+    return {"leaderboard": board, "feed": feed, "available": True,
+            "meta": doc.get("_meta", {})}
+
+
+@app.get("/api/congress/{ticker}")
+async def congress_ticker_api(ticker: str):
+    """Per-ticker congressional rollup (buyers, $ committed, party/chamber split)."""
+    doc = _load_congress_doc()
+    tk = (ticker or "").upper().strip()
+    if not doc or "by_ticker" not in doc:
+        return {"ticker": tk, "available": False,
+                "reason": "congress cache not built"}
+    rec = doc["by_ticker"].get(tk)
+    xref = _congress_crossref_index().get(tk, {})
+    if not rec:
+        return {"ticker": tk, "available": True, "purchases": 0, "sales": 0,
+                "net": "neutral", "buyers": [], "no_activity": True,
+                "our_score": xref.get("score"), "our_verdict": xref.get("verdict"),
+                "meta": doc.get("_meta", {})}
+    return {"ticker": tk, "available": True, **rec,
+            "our_score": xref.get("score"), "our_verdict": xref.get("verdict"),
+            "our_price": xref.get("price"), "meta": doc.get("_meta", {})}
+
+
 @app.get("/api/senate-trades")
 async def senate_trades_api(t: str = "", days: int = 90, limit: int = 50):
     """Senate / Congressional trades for a ticker (or all if t='').
 
-    Source: the Senate Stock Watcher GitHub mirror (free, public-domain JSON).
-    The old S3 buckets now 403; this mirror is the working free feed but is
-    HISTORICAL (last refreshed ~2020) -- so we return the most recent AVAILABLE
-    filings for the ticker (no hard `days` cutoff) and surface `as_of`/`stale`
-    so the UI can label it honestly rather than show a misleading empty window.
-    Fresh real-time congressional data needs a paid API (out of policy).
+    Repointed (2026-06-08) to the unified multi-source congress cache
+    (cache/congressional_picks.json, built by congress_trades.py). The old
+    Senate-Stock-Watcher GitHub mirror is historical (~2020) and the S3 buckets
+    403 — the unified feed (Quiver beta primary) is fresh. Falls back to the
+    legacy mirror only if the cache is unbuilt.
     """
-    import urllib.request, time as _time
     from datetime import datetime
+    tk = t.upper().strip()
+    doc = _load_congress_doc()
+    if doc and "feed" in doc:
+        rows = []
+        for f in doc["feed"]:
+            if tk and f.get("ticker") != tk:
+                continue
+            rows.append({"senator": f.get("politician"), "ticker": f.get("ticker"),
+                         "type": ("Purchase" if f.get("type") == "buy" else
+                                  "Sale" if f.get("type") == "sell" else f.get("type")),
+                         "date": f.get("trade_date"), "amount": f.get("size_range"),
+                         "chamber": f.get("chamber"), "party": f.get("party"),
+                         "source": f.get("source")})
+            if len(rows) >= limit:
+                break
+        meta = doc.get("_meta", {})
+        as_of = meta.get("provenance", {}).get("house_clerk", {}).get("latest_filing") or \
+                (rows[0]["date"] if rows else None)
+        return {"trades": rows, "count": len(rows), "filter_ticker": tk or "all",
+                "as_of": as_of, "stale": False,
+                "source": "unified (Quiver + Capitol + House Clerk / Senate eFD)"}
+
+    # ── legacy fallback: Senate Stock Watcher GitHub mirror (historical) ──
+    import urllib.request, time as _time
     def _norm_date(x):
         x = (x or "").strip()
         if not x: return ""
@@ -11226,7 +11384,6 @@ async def senate_trades_api(t: str = "", days: int = 90, limit: int = 50):
             with urllib.request.urlopen(req, timeout=10) as resp:
                 _SENATE_CACHE["data"] = json.loads(resp.read()); _SENATE_CACHE["fetched"] = _time.time()
         data = _SENATE_CACHE["data"] or []
-        tk = t.upper().strip()
         all_dates, rows = [], []
         for r in data if isinstance(data, list) else []:
             d = _norm_date(r.get("transaction_date"))

@@ -192,6 +192,10 @@ function HomeView({ onTicker, onSurface, mode, surface }) {
         </HomeCard>
       </div>
 
+      {/* SMART MONEY · CONGRESS — what House + Senate are buying (slow, lagged signal) */}
+      <div className="home-sec-label"><span className="mono">SMART MONEY · CONGRESS</span><span className="mono dim2">most-bought by House + Senate · 45-day disclosure lag → positional context, not a swing trigger</span></div>
+      <CongressBuyingStrip onTicker={onTicker} onSurface={onSurface} />
+
       {/* TIER 4 · MARKETS · NEWS — news-forward board, moved to the end (2026-06-08) */}
       <div className="home-sec-label"><span className="mono">MARKETS · NEWS</span><span className="mono dim2">the tape in words · trending names · today's movers</span></div>
       <NewsMarketsBoard onTicker={onTicker} onSurface={onSurface} />
@@ -1303,6 +1307,46 @@ function BookStrip({ onTicker }) {
   );
 }
 window.BookStrip = BookStrip;
+
+// ─── Congress buying strip — top-5 most-bought, joined to our verdict ───────
+// REAL: GET /api/congress (built by congress_trades.py). Honest empty when the
+// feed isn't built or the server is absent (standalone showcase).
+function CongressBuyingStrip({ onTicker, onSurface }) {
+  const [st, setSt] = React.useState({ loading: !!window.__BV, rows: [], err: null });
+  React.useEffect(() => {
+    if (!window.__BV) { setSt({ loading: false, rows: [], err: "showcase" }); return; }
+    let alive = true;
+    fetch("/api/congress?limit=5&side=buy&min_buyers=2", { credentials: "same-origin" })
+      .then(r => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then(d => { if (alive) setSt({ loading: false, rows: (d && d.leaderboard) || [], err: d && d.available ? null : "unavailable" }); })
+      .catch(e => { if (alive) setSt({ loading: false, rows: [], err: String(e) }); });
+    return () => { alive = false; };
+  }, []);
+
+  const tone = (v) => { const s = (v || "").toUpperCase(); return s === "BUY" ? "gn" : (s === "WATCH" || s === "WAIT") ? "amb" : (s === "AVOID" || s === "SHORT") ? "rd" : "ink"; };
+  const usd = (v) => v == null ? "—" : v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(0)}K` : `$${Math.round(v)}`;
+
+  if (st.loading) return <div className="cg-strip"><div className="ss-empty mono dim2" style={{ padding: 18 }}>Loading congressional flow…</div></div>;
+  if (!st.rows.length) return <div className="ss-empty mono dim2" style={{ padding: 18 }}>No congressional buys to show{st.err && st.err !== "showcase" ? ` (${st.err})` : ""}. {window.__BV ? <a className="mono" style={{ cursor: "pointer", color: "var(--violet)" }} onClick={() => onSurface && onSurface("congress")}>Open Congress board →</a> : null}</div>;
+
+  return (
+    <div className="cg-strip">
+      {st.rows.map((e) => (
+        <button key={e.ticker} className="cg-card" onClick={() => onTicker && onTicker(e.ticker)}>
+          <div className="cg-card-top">
+            <span className="cg-card-sym">{e.ticker}</span>
+            <span className="cg-card-buyers">{e.n_buyers} buyers</span>
+          </div>
+          <div className="cg-card-meta">
+            <span className="cg-card-usd">{usd(e.total_amount_min)}</span>
+            {e.our_verdict ? <Pill tone={tone(e.our_verdict)} small>{e.our_verdict}</Pill> : <span className="mono dim2" style={{ fontSize: 10 }}>—</span>}
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+window.CongressBuyingStrip = CongressBuyingStrip;
 
 window.HomeView = HomeView;
 

@@ -646,10 +646,11 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
                 <td className={`r mono tabular ${t.off52 >= -5 ? "up" : t.off52 >= -15 ? "" : "dim"}`} title="distance from 52-week high">{t.off52 == null ? "—" : t.off52 + "%"}</td>
                 <td className={`r mono tabular ${t.vwap >= 0 ? "up" : "dn"}`} title="price vs session VWAP">{t.vwap == null ? "—" : (t.vwap >= 0 ? "+" : "") + t.vwap + "%"}</td>
                 <td className="r mono tabular"><b className={parseFloat(t.rr) >= 2 ? "up" : ""}>{t.rr}</b></td>
-                <td className="mono ss2-plan" title="Stop · Entry · Target">
+                <td className="mono ss2-plan" title={t.t3plan ? "Stop · Entry · Target · T3 bull-stretch (armed)" : "Stop · Entry · Target"}>
                   <span className="dn"><i className="ss2-plan-k">S</i>${t.stop}</span>
                   <span className="copper"><i className="ss2-plan-k">E</i>${t.entry}</span>
                   <span className="up"><i className="ss2-plan-k">T</i>${t.t1plan}</span>
+                  {t.t3plan ? <span style={{ color: "var(--violet)" }} title="T3 bull-stretch extension — momentum-confirmed runner target beyond T2"><i className="ss2-plan-k">T3</i>${t.t3plan}</span> : null}
                 </td>
                 <td className="r mono tabular dim">{t.atr == null ? "—" : t.atr}</td>
                 <td className={`r mono tabular ${parseFloat(t.rvol) >= 1.5 ? "up" : "dim"}`}>{t.rvol == null || t.rvol === "—" ? "—" : t.rvol + "×"}</td>
@@ -807,12 +808,12 @@ function ScannerDetailPane({ sym, onTicker }) {
         </Sec>
         <Sec n="03" title="MECHANISM"><div className="sdp-mech mono">{t.mechanism} <span className="dim2">· falsify: closes below stop on vol</span></div></Sec>
         <Sec n="04" title="ENTRY TRIGGERS"><KV k="zone" v={`$${t.entry}–$${(parseFloat(t.entry)*1.005).toFixed(2)}`} /><KV k="EQ" v={t.eq} tone={t.eq==="MISSED"?"rd":t.eq==="EXTENDED"?"amb":"gn"} /></Sec>
-        <Sec n="05" title="PLAN · HOLD"><KV k="stop" v={`$${t.stop}`} tone="rd" /><KV k="T1" v={`$${t.t1plan}`} tone="gn" /><KV k="R:R" v={t.rr} tone="copper" /><KV k="hold" v="8–14 sessions" /></Sec>
+        <Sec n="05" title="PLAN · HOLD"><KV k="stop" v={`$${t.stop}`} tone="rd" /><KV k="T1" v={`$${t.t1plan}`} tone="gn" />{t.t3plan ? <KV k="T3 stretch" v={`$${t.t3plan}`} tone="violet" /> : null}<KV k="R:R" v={t.rr} tone="copper" /><KV k="hold" v="8–14 sessions" /></Sec>
         <Sec n="06" title="SMC ZONES"><KV k="OB demand" v={`$${(t.price*0.94).toFixed(2)}`} tone="gn" /><KV k="FVG" v={`$${(t.price*1.03).toFixed(2)}`} /><KV k="BoS" v="confirmed" tone="gn" /></Sec>
         <Sec n="07" title="SETUP STATS"><KV k="family" v={t.setup} /><KV k="win-rate" v={`${(t.wlb+8)}%`} /><KV k="Wilson LB" v={`${t.wlb}%`} tone={t.wlb>=50?"gn":"amb"} /><KV k="n · PF" v={`${t.n} · ${t.pf}`} /></Sec>
         <Sec n="08" title="EARNINGS"><KV k="reports in" v={`${t.er<=70?t.er+"d":"—"}`} tone={t.er<=10?"amb":"ink"} /><KV k="implied move" v={`±${(t.iv/6).toFixed(1)}%`} /></Sec>
         <Sec n="09" title="OPTIONS SKEW"><KV k="IV rank" v={`${t.iv}%`} tone={t.iv>=70?"amb":"ink"} /><KV k="put/call" v="0.78" tone="gn" /></Sec>
-        <Sec n="10" title="SMART MONEY"><KV k="insider 90d" v={`${t.insider>0?"+":""}${t.insider} net`} tone={t.insider>0?"gn":t.insider<0?"rd":"ink"} /><KV k="13F" v={t.insider>0?"adds":"flat"} /><KV k="news sent" v={t.sent?`${t.sent>0?"+":""}${t.sent.toFixed(2)}`:"+0.4"} tone="gn" /></Sec>
+        <Sec n="10" title="SMART MONEY"><KV k="insider 90d" v={`${t.insider>0?"+":""}${t.insider} net`} tone={t.insider>0?"gn":t.insider<0?"rd":"ink"} /><KV k="13F" v={t.insider>0?"adds":"flat"} />{(()=>{const c=t.congress;return c&&c.net&&c.net!=="neutral"?<KV k="congress" v={`${c.n} ${c.net==="bullish"?"buy":"sell"}`} tone={c.net==="bullish"?"gn":"rd"} />:<KV k="congress" v="—" tone="ink" />;})()}<KV k="news sent" v={t.sent?`${t.sent>0?"+":""}${t.sent.toFixed(2)}`:"+0.4"} tone="gn" /></Sec>
         <Sec n="11" title="PORTFOLIO IMPACT"><KV k="correl-to-book" v="0.34" tone="gn" /><KV k="NAV after" v="6.8%" /><KV k="sector tilt" v={`+${(t.sector || "Mat").slice(0,4)}`} tone="amb" /></Sec>
         <Sec n="12" title="DECISION GATES"><KV k="gates passed" v={`${t.verdict==="AVOID"?"6":"9"} / 10`} tone={t.verdict==="AVOID"?"rd":"gn"} /><KV k="audit" v="logged" /></Sec>
         <Sec n="13" title="KILL-LIST">{t.verdict==="AVOID"

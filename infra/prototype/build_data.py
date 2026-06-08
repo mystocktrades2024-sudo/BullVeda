@@ -1726,6 +1726,12 @@ def compact_row(r: dict) -> dict:
         "perf_1w":        (r.get("technicals") or {}).get("perf_week"),
         "insider_recent": ((r.get("insider_data") or {}).get("recent_buys") or 0) - ((r.get("insider_data") or {}).get("recent_sells") or 0),
         "insider_days":   (r.get("insider_data") or {}).get("days_since_last"),
+        # Congressional flow (compact) — net + #buyers for the Smart-Money tile.
+        # Source: per-ticker rollup attached by analysis.py (unified multi-source
+        # cache via data_fetcher.get_congressional_trades). Honest {} when absent.
+        "congress":       (lambda c: {"net": c.get("net"), "n": c.get("n_buyers", c.get("purchases", 0)),
+                                       "latest": c.get("latest", "")} if isinstance(c, dict) and not c.get("source_unavailable")
+                                       and (c.get("n_buyers") or c.get("purchases")) else None)(r.get("congressional") or {}),
         "short_pct":      r.get("short_float_pct") or (r.get("borrow") or {}).get("short_float_pct") or (r.get("finviz_elite") or {}).get("short_float_pct"),
         "tv_rec_str":     (r.get("tv_rating") or {}).get("recommendation") if isinstance(r.get("tv_rating"), dict) else None,
         # 2026-05-08 — Finviz Elite performance strip + squeeze flag for tile/row UI

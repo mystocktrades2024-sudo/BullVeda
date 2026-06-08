@@ -62,6 +62,7 @@ const RAIL_GROUPS = [
     { id: "ai-predict",    icon: "ai",        label: "ML Predictions",  count: 5,  tone: "violet" },
     { id: "options",       icon: "optflow",   label: "Options Flow",    count: 19, tone: "amb" },
     { id: "insider",       icon: "insider",   label: "Insider Trading", count: 38, tone: "cy" },
+    { id: "congress",      icon: "insider",   label: "Congress Buying", tone: "violet" },
     { id: "smc-patterns",  icon: "structure", label: "SMC / Patterns",  count: 16, tone: "violet" },
   ]},
   { group: "Research", items: [

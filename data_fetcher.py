@@ -6137,6 +6137,50 @@ def get_fear_greed() -> dict:
 _CONGRESSIONAL_CACHE: dict | None = None
 _CONGRESSIONAL_CACHE_TIME: float = 0.0
 
+# Unified multi-source rollup cache (cache/congressional_picks.json by_ticker)
+_CONGRESS_ROLLUP_CACHE: dict | None = None
+_CONGRESS_ROLLUP_TIME: float = 0.0
+
+
+def _read_congress_rollup(ticker: str):
+    """Return the per-ticker rollup from the unified cache built by
+    ``congress_trades.py``. Returns a dict (possibly an honest empty rollup if
+    the ticker has no recent activity but the cache IS fresh), or ``None`` if
+    the cache is absent/unreadable so callers fall through to the legacy path."""
+    import os as _os
+    import time as _time
+    global _CONGRESS_ROLLUP_CACHE, _CONGRESS_ROLLUP_TIME
+    try:
+        from pathlib import Path as _P
+        f = _P(__file__).resolve().parent / "cache" / "congressional_picks.json"
+        if not f.exists():
+            return None
+        now = _time.time()
+        # Re-read at most every 30 min (file refreshed nightly by refresh_congress.py)
+        if _CONGRESS_ROLLUP_CACHE is None or (now - _CONGRESS_ROLLUP_TIME) > 1800:
+            import json as _json
+            data = _json.loads(f.read_text())
+            if "by_ticker" not in data:          # legacy/empty file shape — let fallback run
+                return None
+            _CONGRESS_ROLLUP_CACHE = data
+            _CONGRESS_ROLLUP_TIME = now
+        data = _CONGRESS_ROLLUP_CACHE
+        meta = data.get("_meta", {})
+        if not meta.get("ticker_level_ok"):       # no live ticker source this build
+            return None
+        by_ticker = data.get("by_ticker", {})
+        rec = by_ticker.get(ticker.upper())
+        if rec:
+            return rec
+        # Cache is fresh but this ticker has no recent congressional activity —
+        # that is a real "neutral / no activity", NOT a source outage.
+        return {"purchases": 0, "sales": 0, "net": "neutral", "latest": "",
+                "latest_date": "", "n_buyers": 0, "n_sellers": 0,
+                "buyers": [], "total_amount_min": 0,
+                "error": None, "source_unavailable": False, "source": "multi"}
+    except Exception:
+        return None
+
 def _capitol_trades_fetch_bulk(pages: int = 5) -> list:
     """Scrape Capitol Trades bulk listing — replaces dead Senate Stock Watcher S3.
 
@@ -6219,12 +6263,14 @@ def _capitol_trades_fetch_bulk(pages: int = 5) -> list:
 @_mem_cached(ttl_seconds=3600)
 @_with_enrichment_cache('congressional')
 def get_congressional_trades(ticker: str, days: int = 90) -> dict:
-    """Fetch congressional stock trades. Sources congressed in priority order:
+    """Per-ticker congressional trade rollup.
 
-      1. Capitol Trades (free, public, both Senate + House) — primary
-      2. Senate Stock Watcher S3 (decommissioned 2026-05-03) — fallback only
+    PRIMARY: the unified multi-source cache built by ``congress_trades.py``
+    (Quiver beta + Capitol Trades + House Clerk / Senate eFD provenance). That
+    module is the single place sourcing lives now — the dead Capitol-direct /
+    Senate-Stock-Watcher paths below are retained only as a degraded fallback.
 
-    Returns aggregated counts + most-recent trader for the requested ticker.
+    Returns aggregated counts + most-recent buyer for the requested ticker.
     """
     import time as _time
     global _CONGRESSIONAL_CACHE, _CONGRESSIONAL_CACHE_TIME
@@ -6232,7 +6278,12 @@ def get_congressional_trades(ticker: str, days: int = 90) -> dict:
     empty = {"purchases": 0, "sales": 0, "net": "neutral", "latest": "",
              "error": None, "source_unavailable": False, "source": None}
 
-    # ── PRIMARY: Capitol Trades ──
+    # ── PRIMARY: unified multi-source cache (cache/congressional_picks.json) ──
+    rollup = _read_congress_rollup(ticker)
+    if rollup is not None:
+        return rollup
+
+    # ── FALLBACK: Capitol Trades direct ──
     try:
         now = _time.time()
         # Cache ~6h (fresh enough for daily scans, lighter than 24h since they update intra-day)

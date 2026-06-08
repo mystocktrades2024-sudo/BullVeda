@@ -70,6 +70,40 @@
   BV.wyckCache = BV.patternCache;
   BV.fetchWyckoff = function (sym, mode) { return BV.fetchPattern("wyckoff", sym, mode); };
 
+  // ── trade_engine: the RICH per-mode trade plan (real, per-ticker) ──
+  // /api/universe scan rows only vary `stop` per mode; t1/t2 are identical and
+  // entry/r_multiple are null. /api/trade_engine returns fully-distinct per-mode
+  // t1/t2/stop + a real entry object + r_multiple + confluence + p_reach +
+  // warnings. The Overview hero (DecisionHero) reads this so SWING/POSITION/INVEST
+  // actually move every rung, not just STOP. Cache key is SYM|MODE (UI mode tokens
+  // SWING/POSITION/INVESTMENT) so each horizon caches independently. The API mode
+  // token is `swing|position|invest` (NOT `investment` — that returns {detail:…}).
+  BV.tradeEngineCache = {};
+  function teApiMode(mode) {
+    var m = (mode || "SWING").toUpperCase();
+    return m === "POSITION" ? "position" : (m === "INVESTMENT" || m === "INVEST") ? "invest" : "swing";
+  }
+  BV.fetchTradeEngine = function (sym, mode) {
+    sym = (sym || "").toUpperCase();
+    var uiMode = (mode || "SWING").toUpperCase();
+    if (!sym) return Promise.resolve(null);
+    var key = sym + "|" + uiMode;
+    if (BV.tradeEngineCache[key] !== undefined) return Promise.resolve(BV.tradeEngineCache[key]);
+    var apiMode = teApiMode(uiMode);
+    return BV.get("/api/trade_engine?t=" + encodeURIComponent(sym) + "&mode=" + encodeURIComponent(apiMode))
+      .then(function (d) {
+        // a real plan has the top-level entry/t1/t2/stop objects (no {detail} error wrapper)
+        var ok = d && !d.detail && d.t1 && d.stop;
+        BV.tradeEngineCache[key] = ok ? d : null;
+        return BV.tradeEngineCache[key];
+      })
+      .catch(function () { BV.tradeEngineCache[key] = null; return null; });
+  };
+  BV.tradeEngineCached = function (sym, mode) {
+    var key = (sym || "").toUpperCase() + "|" + (mode || "SWING").toUpperCase();
+    return BV.tradeEngineCache[key];   // undefined = not fetched yet, null = no plan, obj = plan
+  };
+
   // ── sector normaliser: real GICS sector → prototype short bucket ──
   var SECMAP = {
     "Technology": "Tech", "Information Technology": "Tech",
@@ -169,6 +203,7 @@
       entry: num(r.entry_lo) != null ? r.entry_lo.toFixed(2) : "—",
       t1plan: num(r.t1) != null ? r.t1.toFixed(2) : "—",
       t2plan: num(r.t2) != null ? r.t2.toFixed(2) : "—",
+      t3plan: num(r.t3) != null ? r.t3.toFixed(2) : null,   // bull-stretch (null when unarmed)
       atr: null, // not in scan feed → feed-honest "—"
       rr: rr ? rr.toFixed(1) : "—",
       rvol: rvol != null ? rvol.toFixed(2) : "—",
@@ -193,6 +228,7 @@
       newsAge: num(r.news_age_h) != null ? Math.round(r.news_age_h) : null,
       insUsd: num(r.insider_usd) ? +(r.insider_usd / 1e6).toFixed(1) : 0,
       insNet: num(r.insider_net, 0),
+      congress: r.congress || null,   // {net, n, latest} or null (Smart-Money tile)
       star: num(r.star_rating),
       sharpe: num(r.sharpe_126d),
       pillarPct: { technical: techPct, fundamental: fundPct, smc: smcPct, sentiment: sentPct },
