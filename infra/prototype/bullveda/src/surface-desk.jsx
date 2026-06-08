@@ -1,27 +1,61 @@
 // surface-desk.jsx — Alerts (real-time triage) · Trade Journal (log + behavioral analytics) · Playbook (regime matrix + discipline)
 // Alerts derive from held positions + scan change-log. Journal reads trade_log. Playbook reads regime context + SLEEVES.
 
-const { useState: useDesk, useMemo: useDeskm } = React;
+const { useState: useDesk, useMemo: useDeskm, useEffect: useDeske } = React;
+
+// ── served-aware ────────────────────────────────────────────────────
+// BULLVEDA served deploy → window.__BV present. Journal reads real closed
+// trades from /api/performance (recent_closed); Alerts have no persistent
+// real-time alert stream wired, so served renders honest-empty. Demo arrays
+// below are standalone-showcase fallbacks ONLY (never in the served path).
+const DESK_SERVED = (typeof window !== "undefined" && !!window.__BV);
 
 // ═══════════════════════════════════════════════════════════════
-//  ALERTS — derived in real-time from scan state + held positions
+//  ALERTS — no real alert stream wired (honest-empty when served)
 // ═══════════════════════════════════════════════════════════════
-const ALERTS = [
-  { sev: "P0", type: "STOP BREACHED", sym: "INPR", detail: "Held 180sh below stop $38.40 → last $37.95 (−1.2% past stop). Defend or exit on close.", act: "EXIT", age: "2m", held: true },
-  { sev: "P0", type: "EARNINGS ≤2d", sym: "FLNX", detail: "Held 60sh · reports AMC tomorrow. Binary event on live money — flatten before the bell.", act: "FLATTEN", age: "14m", held: true },
-  { sev: "P0", type: "STOP NEAR", sym: "ARCM", detail: "Held 110sh within 0.8% of stop $62.40 (last $62.90). One red close triggers the bracket.", act: "WATCH", age: "6m", held: true },
-  { sev: "P1", type: "T1 HIT", sym: "BORA", detail: "Held 240sh reached T1 $34.50 (+$1,608, +2.4R). Trim ⅔ and trail stop to breakeven.", act: "TRIM", age: "3m", held: true },
-  { sev: "P1", type: "NEW BUY", sym: "ARGN", detail: "Passed all 10 gates · score 81 · Cont. BO · R:R 2.6 to T1 · Wilson 48%. Fresh entry candidate.", act: "PLAN", age: "21m", held: false },
+const ALERTS_DEMO = [
+  { sev: "P0", type: "STOP BREACHED", sym: "DMOM", detail: "Held 180sh below stop $38.40 → last $37.95 (−1.2% past stop). Defend or exit on close.", act: "EXIT", age: "2m", held: true },
+  { sev: "P0", type: "EARNINGS ≤2d", sym: "DMOG", detail: "Held 60sh · reports AMC tomorrow. Binary event on live money — flatten before the bell.", act: "FLATTEN", age: "14m", held: true },
+  { sev: "P0", type: "STOP NEAR", sym: "DMOB", detail: "Held 110sh within 0.8% of stop $62.40 (last $62.90). One red close triggers the bracket.", act: "WATCH", age: "6m", held: true },
+  { sev: "P1", type: "T1 HIT", sym: "DMOK", detail: "Held 240sh reached T1 $34.50 (+$1,608, +2.4R). Trim ⅔ and trail stop to breakeven.", act: "TRIM", age: "3m", held: true },
+  { sev: "P1", type: "NEW BUY", sym: "DMOA", detail: "Passed all 10 gates · score 81 · Cont. BO · R:R 2.6 to T1 · Wilson 48%. Fresh entry candidate.", act: "PLAN", age: "21m", held: false },
   { sev: "P1", type: "SETUP DRIFT", sym: "—", detail: "Gap & Go sleeve: Wilson LB fell 6pts over 60 trades — edge erosion (principle 11). Size down.", act: "REVIEW", age: "1h", held: false },
-  { sev: "P1", type: "DEMOTED", sym: "MERC", detail: "BUY → WATCH · failed RS gate (RS 41 < 45 floor). Removed from BUY candidates this scan.", act: "REVIEW", age: "32m", held: false },
-  { sev: "P2", type: "PROMOTED", sym: "DRSH", detail: "WATCH → BUY · cleared catalyst-tier gate after energy sector RS flip. Now on the board.", act: "VIEW", age: "44m", held: false },
-  { sev: "P2", type: "SCORE SHIFT", sym: "NVRH", detail: "Composite +11 (60 → 71) on volume + RS expansion. Crossed the BUY floor.", act: "VIEW", age: "52m", held: false },
-  { sev: "P2", type: "EARN IMMINENT", sym: "GENO", detail: "Unheld watch name reports in 2 days · implied ±9.4%. New swing entries blocked (blackout).", act: "VIEW", age: "1h", held: false },
+  { sev: "P1", type: "DEMOTED", sym: "DMOI", detail: "BUY → WATCH · failed RS gate (RS 41 < 45 floor). Removed from BUY candidates this scan.", act: "REVIEW", age: "32m", held: false },
+  { sev: "P2", type: "PROMOTED", sym: "DMOE", detail: "WATCH → BUY · cleared catalyst-tier gate after energy sector RS flip. Now on the board.", act: "VIEW", age: "44m", held: false },
+  { sev: "P2", type: "SCORE SHIFT", sym: "DMOD", detail: "Composite +11 (60 → 71) on volume + RS expansion. Crossed the BUY floor.", act: "VIEW", age: "52m", held: false },
+  { sev: "P2", type: "EARN IMMINENT", sym: "DMOC", detail: "Unheld watch name reports in 2 days · implied ±9.4%. New swing entries blocked (blackout).", act: "VIEW", age: "1h", held: false },
 ];
 const SEV = { P0: ["rd", "critical"], P1: ["amb", "attention"], P2: ["blue", "info"] };
 
 function SurfaceAlerts({ onTicker }) {
   const [filt, setFilt] = useDesk("all");
+
+  // Served + no real alert stream → honest-empty. Never fabricate alerts.
+  if (DESK_SERVED) {
+    return (
+      <div className="surface wsx wsx--rd q-alerts">
+        <div className="wsx-hdr">
+          <div className="wsx-hdr-l">
+            <div className="wsx-eyebrow mono">REAL-TIME TRIAGE</div>
+            <h1 className="wsx-title mono">Alerts</h1>
+            <div className="wsx-sub mono dim2">stop breaches · earnings windows · promotions / demotions on your book + scan</div>
+          </div>
+          <div className="wsx-hdr-r"><span className="mono dim2">src · no alert feed wired</span></div>
+        </div>
+        <div className="wsx-body"><div className="lab-verdict mono dim2" style={{ padding: 24, lineHeight: 1.7 }}>
+          No alert feed wired. There is no persistent alert stream in this deployment
+          yet, so this surface stays empty rather than show fabricated triage rows.
+          <br /><br />
+          When connected, alerts will be derived in real time from your open book
+          (stop breaches, T1 hits, earnings ≤ 2d) and scan deltas (new BUYs,
+          promotions / demotions, setup-edge drift). For now, manage open risk from
+          the <b>Portfolio</b> surface and new candidates from the <b>Scanner</b>.
+        </div></div>
+      </div>
+    );
+  }
+
+  const ALERTS = ALERTS_DEMO;
   const rows = ALERTS.filter(a => filt === "all" || a.sev === filt);
   const c = s => ALERTS.filter(a => a.sev === s).length;
   const kpis = [
@@ -91,23 +125,180 @@ function SurfaceAlerts({ onTicker }) {
 // ═══════════════════════════════════════════════════════════════
 //  TRADE JOURNAL — log + R-analytics + behavioral attribution
 // ═══════════════════════════════════════════════════════════════
-const JOURNAL = [
-  { date: "May 24", sym: "ARGN", sleeve: "Cont. BO", dir: "L", entry: 198.40, exit: 213.40, r: 1.84, pnl: 1210, days: 9, grade: "A", plan: true, tag: "—" },
-  { date: "May 21", sym: "VLCT", sleeve: "Pullback", dir: "L", entry: 44.10, exit: 42.80, r: -1.00, pnl: -420, days: 3, grade: "B", plan: true, tag: "—" },
-  { date: "May 16", sym: "ZOTR", sleeve: "Flag", dir: "L", entry: 38.20, exit: 44.60, r: 2.10, pnl: 1480, days: 14, grade: "A", plan: true, tag: "—" },
-  { date: "May 12", sym: "MERC", sleeve: "Range", dir: "L", entry: 18.40, exit: 17.20, r: -0.60, pnl: -252, days: 5, grade: "C", plan: false, tag: "chased entry" },
-  { date: "May 08", sym: "NVRH", sleeve: "Pullback", dir: "L", entry: 138.0, exit: 142.1, r: 0.41, pnl: 320, days: 7, grade: "B", plan: true, tag: "early exit" },
-  { date: "May 02", sym: "DRSH", sleeve: "Breakout", dir: "L", entry: 51.20, exit: 56.10, r: 1.62, pnl: 980, days: 6, grade: "A", plan: true, tag: "—" },
-  { date: "Apr 28", sym: "BIVO", sleeve: "Mean Rev", dir: "L", entry: 74.0, exit: 71.4, r: -1.00, pnl: -390, days: 2, grade: "B", plan: true, tag: "—" },
-  { date: "Apr 22", sym: "FRAC", sleeve: "Gap & Go", dir: "L", entry: 24.10, exit: 22.60, r: -0.85, pnl: -310, days: 1, grade: "C", plan: false, tag: "no stop set" },
-  { date: "Apr 15", sym: "INDX", sleeve: "Cont. BO", dir: "L", entry: 88.4, exit: 96.2, r: 2.40, pnl: 1640, days: 11, grade: "A", plan: true, tag: "—" },
-  { date: "Apr 09", sym: "HAVN", sleeve: "Pullback", dir: "L", entry: 41.0, exit: 39.8, r: -0.70, pnl: -280, days: 4, grade: "B", plan: true, tag: "—" },
-  { date: "Apr 03", sym: "KOPL", sleeve: "VCP", dir: "L", entry: 30.2, exit: 34.1, r: 1.55, pnl: 860, days: 8, grade: "A", plan: true, tag: "—" },
-  { date: "Mar 27", sym: "TWPN", sleeve: "Range", dir: "S", entry: 62.0, exit: 64.4, r: -1.00, pnl: -480, days: 3, grade: "C", plan: false, tag: "fought trend" },
+const JOURNAL_DEMO = [
+  { date: "May 24", sym: "DEMO1", sleeve: "Cont. BO", dir: "L", entry: 198.40, exit: 213.40, r: 1.84, pnl: 1210, days: 9, grade: "A", plan: true, tag: "—" },
+  { date: "May 21", sym: "DEMO2", sleeve: "Pullback", dir: "L", entry: 44.10, exit: 42.80, r: -1.00, pnl: -420, days: 3, grade: "B", plan: true, tag: "—" },
+  { date: "May 16", sym: "DEMO3", sleeve: "Flag", dir: "L", entry: 38.20, exit: 44.60, r: 2.10, pnl: 1480, days: 14, grade: "A", plan: true, tag: "—" },
+  { date: "May 12", sym: "DEMO4", sleeve: "Range", dir: "L", entry: 18.40, exit: 17.20, r: -0.60, pnl: -252, days: 5, grade: "C", plan: false, tag: "chased entry" },
+  { date: "May 08", sym: "DEMO5", sleeve: "Pullback", dir: "L", entry: 138.0, exit: 142.1, r: 0.41, pnl: 320, days: 7, grade: "B", plan: true, tag: "early exit" },
+  { date: "May 02", sym: "DEMO6", sleeve: "Breakout", dir: "L", entry: 51.20, exit: 56.10, r: 1.62, pnl: 980, days: 6, grade: "A", plan: true, tag: "—" },
+  { date: "Apr 28", sym: "DEMO7", sleeve: "Mean Rev", dir: "L", entry: 74.0, exit: 71.4, r: -1.00, pnl: -390, days: 2, grade: "B", plan: true, tag: "—" },
+  { date: "Apr 22", sym: "DEMO8", sleeve: "Gap & Go", dir: "L", entry: 24.10, exit: 22.60, r: -0.85, pnl: -310, days: 1, grade: "C", plan: false, tag: "no stop set" },
+  { date: "Apr 15", sym: "DEMO9", sleeve: "Cont. BO", dir: "L", entry: 88.4, exit: 96.2, r: 2.40, pnl: 1640, days: 11, grade: "A", plan: true, tag: "—" },
+  { date: "Apr 09", sym: "DEMO10", sleeve: "Pullback", dir: "L", entry: 41.0, exit: 39.8, r: -0.70, pnl: -280, days: 4, grade: "B", plan: true, tag: "—" },
+  { date: "Apr 03", sym: "DEMO11", sleeve: "VCP", dir: "L", entry: 30.2, exit: 34.1, r: 1.55, pnl: 860, days: 8, grade: "A", plan: true, tag: "—" },
+  { date: "Mar 27", sym: "DEMO12", sleeve: "Range", dir: "S", entry: 62.0, exit: 64.4, r: -1.00, pnl: -480, days: 3, grade: "C", plan: false, tag: "fought trend" },
 ];
 
-function SurfaceJournal({ onTicker }) {
+// Map /api/performance recent_closed → journal rows (real closed trades).
+function deskMapClosed(rc) {
+  const r = (rc.realized_pct != null) ? Number(rc.realized_pct) : null;          // %, used as the P&L proxy
+  const result = String(rc.outcome || "").toLowerCase();
+  const win = result.includes("win") || result.includes("target") || (r != null && r > 0);
+  const dstr = (s) => { const d = String(s || ""); return d ? d.slice(5, 10) : "—"; };
+  return {
+    date: dstr(rc.exit_date || rc.date),
+    sym: String(rc.ticker || "").toUpperCase(),
+    sleeve: rc.strategy || "—",
+    dir: "L",
+    rr: (rc.rr != null) ? Number(rc.rr) : null,
+    score: (rc.score != null) ? Number(rc.score) : null,
+    rPct: r,                              // realized % (real); R-multiple not in feed
+    win,
+    days: (rc.hold_days != null) ? rc.hold_days : null,
+    exitReason: rc.exit_reason || "—",
+    outcome: rc.outcome || "—",
+  };
+}
+
+// Read real closed trades from /api/performance (served only).
+function useDeskPerf() {
+  const [perf, setPerf] = useDesk(null);
+  useDeske(() => {
+    if (!DESK_SERVED) return;
+    let on = true;
+    fetch("/api/performance").then(r => (r.ok ? r.json() : null))
+      .then(d => { if (on) setPerf(d); }).catch(() => {});
+    return () => { on = false; };
+  }, []);
+  return perf;
+}
+
+// ── Served journal: real closed trades from /api/performance (realized %) ──
+function ServedJournal({ onTicker, perf }) {
   const [gf, setGf] = useDesk("all");
+  const closed = useDeskm(() => {
+    const rc = (perf && Array.isArray(perf.recent_closed)) ? perf.recent_closed : [];
+    return rc.map(deskMapClosed).filter(t => t.sym && t.rPct != null);
+  }, [perf]);
+
+  if (perf == null) {
+    return (
+      <div className="surface wsx wsx--violet q-journal">
+        <JournalHeader real />
+        <div className="wsx-body"><div className="lab-verdict mono dim2" style={{ padding: 24 }}>
+          Loading closed-trade journal from <b className="cop">/api/performance</b>…
+        </div></div>
+      </div>
+    );
+  }
+  if (!closed.length) {
+    return (
+      <div className="surface wsx wsx--violet q-journal">
+        <JournalHeader real />
+        <div className="wsx-body"><div className="lab-verdict mono dim2" style={{ padding: 24, lineHeight: 1.7 }}>
+          No closed trades yet. The journal logs every closed position from the live
+          signal log (<b className="cop">/api/performance</b> → recent_closed). Once
+          trades close, they appear here with realized return, hold time, and exit
+          reason. No fabricated history is shown.
+        </div></div>
+      </div>
+    );
+  }
+
+  const wins = closed.filter(t => t.rPct > 0), losses = closed.filter(t => t.rPct <= 0);
+  const wr = closed.length ? wins.length / closed.length * 100 : 0;
+  const avgW = wins.length ? wins.reduce((a, t) => a + t.rPct, 0) / wins.length : 0;
+  const avgL = losses.length ? losses.reduce((a, t) => a + t.rPct, 0) / losses.length : 0;
+  const grossW = wins.reduce((a, t) => a + t.rPct, 0);
+  const grossL = Math.abs(losses.reduce((a, t) => a + t.rPct, 0));
+  const pf = grossL ? grossW / grossL : (grossW > 0 ? Infinity : 0);
+  const exp = closed.length ? closed.reduce((a, t) => a + t.rPct, 0) / closed.length : 0;
+
+  const bySleeve = (() => {
+    const m = {}; closed.forEach(t => { (m[t.sleeve] = m[t.sleeve] || []).push(t); });
+    return Object.entries(m).map(([k, ts]) => ({ label: k, value: +(ts.reduce((a, t) => a + t.rPct, 0)).toFixed(2), n: ts.length }))
+      .sort((a, b) => b.value - a.value);
+  })();
+  const rows = closed.filter(t => gf === "all" || (gf === "win" ? t.rPct > 0 : t.rPct <= 0));
+
+  return (
+    <div className="surface wsx wsx--violet q-journal">
+      <JournalHeader real />
+      <div className="q-kpis">
+        {[["WIN RATE", `${wr.toFixed(0)}%`, "gn", `${wins.length}W / ${losses.length}L`],
+          ["TRADES", closed.length, "violet", "closed (recent)"],
+          ["AVG RETURN", `${exp >= 0 ? "+" : ""}${exp.toFixed(2)}%`, exp >= 0 ? "gn" : "rd", "per trade · realized"],
+          ["PROFIT FACTOR", Number.isFinite(pf) ? pf.toFixed(2) : "∞", pf >= 1.2 ? "gn" : "amb", "gross W ÷ L (%)"],
+          ["AVG WIN", `+${avgW.toFixed(2)}%`, "gn", `vs ${avgL.toFixed(2)}% loss`],
+          ["PAYOFF", avgL ? `${(avgW / Math.abs(avgL)).toFixed(2)}×` : "—", "gn", "win ÷ loss size"]].map((k, i) => (
+          <div key={i} className={`q-kpi q-kpi--${k[2]}`}>
+            <div className="q-kpi-l mono">{k[0]}</div>
+            <div className={`q-kpi-v mono kpi-tone--${k[2]}`}>{k[1]}</div>
+            <div className="q-kpi-s mono dim2">{k[3]}</div>
+          </div>
+        ))}
+      </div>
+
+      {bySleeve.length > 0 && (
+        <div className="q-grid2">
+          <div className="lab-card">
+            <div className="lab-card-h mono">EDGE BY STRATEGY · net realized %</div>
+            <QDiverge rows={bySleeve} fmt={v => `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`} />
+          </div>
+        </div>
+      )}
+
+      <div className="q-chips">
+        {[["all", "All trades", closed.length], ["win", "Winners", wins.length], ["loss", "Losers", losses.length]].map(([id, l, n]) => (
+          <button key={id} className={`q-chip-btn ${gf === id ? "is-on" : ""}`} onClick={() => setGf(id)}>{l} <span className="q-chip-n mono">{n}</span></button>
+        ))}
+      </div>
+
+      <div className="wsx-body">
+        <table className="dtable wsx-tbl q-journal-tbl">
+          <thead><tr><th>Exit</th><th>Sym</th><th>Strategy</th><th className="r">Score</th><th className="r">R:R</th><th className="r">Realized</th><th className="r">Held</th><th className="c">Outcome</th><th>Exit reason</th></tr></thead>
+          <tbody>{rows.map((t, i) => (
+            <tr key={i} onClick={() => onTicker(t.sym)}>
+              <td className="mono dim2">{t.date}</td>
+              <td><b className="mono">{t.sym}</b></td>
+              <td className="dim2">{t.sleeve}</td>
+              <td className="r tabular dim">{t.score != null ? t.score.toFixed(0) : "—"}</td>
+              <td className="r tabular dim">{t.rr != null ? t.rr.toFixed(1) : "—"}</td>
+              <td className={`r tabular ${t.rPct >= 0 ? "up" : "dn"}`}><b>{t.rPct >= 0 ? "+" : ""}{t.rPct.toFixed(2)}%</b></td>
+              <td className="r tabular dim">{t.days != null ? t.days + "d" : "—"}</td>
+              <td className="c"><span className={`q-dir ${t.win ? "up" : "dn"}`}>{t.win ? "WIN" : "LOSS"}</span></td>
+              <td className="dim2">{t.exitReason}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      <div className="pf-note mono dim2">Real closed trades from the live signal log (<b className="cop">/api/performance</b> → recent_closed). Realized % is the actual outcome; R:R and Score are the entry-time values. No R-multiple normalization, execution grade, or plan-adherence tag is shown because those are not recorded in the feed — only what is genuinely logged.</div>
+    </div>
+  );
+}
+
+function JournalHeader({ real }) {
+  return (
+    <div className="wsx-hdr">
+      <div className="wsx-hdr-l">
+        <div className="wsx-eyebrow mono">{real ? "CLOSED-TRADE LOG · REALIZED OUTCOMES" : "TRADE LOG · R-ANALYTICS · BEHAVIORAL ATTRIBUTION"}</div>
+        <h1 className="wsx-title mono">Trade Journal</h1>
+        <div className="wsx-sub mono dim2">{real ? "every closed position · realized return · strategy + exit reason · the live feedback loop" : "every closed trade · R-multiple normalized · grade + plan-adherence + mistake tags · the feedback loop that makes the system learn"}</div>
+      </div>
+      <div className="wsx-hdr-r">
+        {real ? <span className="mono dim2">src · /api/performance · signal_log</span> : <><FreshnessPill state="live" age="synced" /><span className="mono dim2">src · trade_log · portfolio_state</span></>}
+      </div>
+    </div>
+  );
+}
+
+function SurfaceJournal({ onTicker }) {
+  const perf = useDeskPerf();
+  if (DESK_SERVED) return <ServedJournal onTicker={onTicker} perf={perf} />;
+
+  const [gf, setGf] = useDesk("all");
+  const JOURNAL = JOURNAL_DEMO;
   const D = useDeskm(() => {
     let cum = 0; const eq = JOURNAL.slice().reverse().map(t => { cum += t.r; return +cum.toFixed(2); });
     const wins = JOURNAL.filter(t => t.r > 0), losses = JOURNAL.filter(t => t.r <= 0);

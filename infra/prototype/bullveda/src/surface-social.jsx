@@ -3,6 +3,19 @@
 // divergence map; the leaderboard is sorted by divergence (the alpha), not raw mentions.
 const { useState: useSocS, useMemo: useSocM } = React;
 
+// ── served-aware ────────────────────────────────────────────────────
+// BULLVEDA: the StockTwits / WSB / Reddit scrapers are NOT currently wired
+// (known roadmap gap — no live social-sentiment feed exists yet). When served
+// we therefore render an HONEST-EMPTY state and never fabricate crowd data.
+// A real feed would land on window.__BV.social (array of {sym, sent, …}); if
+// that ever appears we wire it. The demo universe below is the standalone-
+// showcase fallback ONLY (no window.__BV) and never renders in the served path.
+const SOC_SERVED = (typeof window !== "undefined" && !!window.__BV);
+const socRealFeed = () => {
+  const BV = (typeof window !== "undefined") ? window.__BV : null;
+  return (BV && Array.isArray(BV.social) && BV.social.length) ? BV.social : null;
+};
+
 // ── enriched universe ──────────────────────────────────────────────
 // sent      crowd tone  −1..+1
 // sentPct   percentile of THIS name's own 90d sentiment history (extremity)
@@ -20,20 +33,20 @@ function socGen(end, start, n = 16, jit = 0.05) {
 const SOC_RAW = [
   { sym:"GRVT", name:"Graviton AI",        sector:"Software",    sent:+0.66, sentPct:94, d24:+0.41, px5:-1.2, pxPct:42, mentions:5120, mult:4.6, vel:+88, src:[52,38,10], crowd:"retail",
     read:"Most-hyped name on the tape, and price won't confirm — peak crowding. Classic blow-off; fade strength, don't chase." },
-  { sym:"ARGN", name:"Argentum Robotics",  sector:"Industrials", sent:+0.62, sentPct:88, d24:+0.18, px5:+5.2, pxPct:90, mentions:4820, mult:3.1, vel:+38, src:[40,46,14], crowd:"mixed",
+  { sym:"DMOA", name:"Demo Robotics",  sector:"Industrials", sent:+0.62, sentPct:88, d24:+0.18, px5:+5.2, pxPct:90, mentions:4820, mult:3.1, vel:+38, src:[40,46,14], crowd:"mixed",
     read:"Sentiment and tape aligned and extreme — momentum confirm. Trail risk; late-stage crowding." },
-  { sym:"VELO", name:"Velocity Motors",    sector:"Autos",       sent:+0.58, sentPct:86, d24:+0.22, px5:+2.1, pxPct:68, mentions:4210, mult:2.9, vel:+44, src:[44,42,14], crowd:"mixed" },
-  { sym:"GENO", name:"Genoa Biosystems",   sector:"Biotech",     sent:+0.55, sentPct:91, d24:+0.31, px5:-3.1, pxPct:24, mentions:3640, mult:4.2, vel:+74, src:[58,34,8],  crowd:"retail",
+  { sym:"DMOP", name:"Demo Motors",    sector:"Autos",       sent:+0.58, sentPct:86, d24:+0.22, px5:+2.1, pxPct:68, mentions:4210, mult:2.9, vel:+44, src:[44,42,14], crowd:"mixed" },
+  { sym:"DMOC", name:"Demo Biosystems",   sector:"Biotech",     sent:+0.55, sentPct:91, d24:+0.31, px5:-3.1, pxPct:24, mentions:3640, mult:4.2, vel:+74, src:[58,34,8],  crowd:"retail",
     read:"Crowd euphoric while the tape rolls over — textbook distribution. Strength is for selling, not chasing." },
   { sym:"NMBS", name:"Nimbus Cloud",       sector:"Software",    sent:+0.36, sentPct:70, d24:+0.11, px5:+3.8, pxPct:82, mentions:3120, mult:2.1, vel:+19, src:[25,58,17], crowd:"mixed" },
   { sym:"HELX", name:"Helix Therapeutics", sector:"Biotech",     sent:+0.49, sentPct:84, d24:+0.27, px5:-2.4, pxPct:30, mentions:2980, mult:3.4, vel:+52, src:[55,33,12], crowd:"retail",
     read:"Crowd loading a name the tape is rejecting — wide divergence. Treat rallies as exits until price turns." },
   { sym:"QBIT", name:"Quanta Systems",     sector:"Semis",       sent:+0.47, sentPct:80, d24:+0.29, px5:+5.9, pxPct:92, mentions:2730, mult:3.6, vel:+61, src:[40,46,14], crowd:"retail" },
-  { sym:"BIVO", name:"Bivota Pharma",      sector:"Biotech",     sent:-0.51, sentPct:8,  d24:-0.34, px5:+0.6, pxPct:55, mentions:2470, mult:3.8, vel:+41, src:[64,28,8],  crowd:"retail",
+  { sym:"DMOL", name:"Demo Pharma",      sector:"Biotech",     sent:-0.51, sentPct:8,  d24:-0.34, px5:+0.6, pxPct:55, mentions:2470, mult:3.8, vel:+41, src:[64,28,8],  crowd:"retail",
     read:"Bearish chatter spiking while price holds the line — squeeze watch. Fade the panic, don't join it." },
-  { sym:"ARCM", name:"Arclight Materials", sector:"Materials",   sent:+0.41, sentPct:66, d24:+0.09, px5:+1.4, pxPct:62, mentions:2110, mult:1.6, vel:+12, src:[30,50,20], crowd:"mixed",
+  { sym:"DMOB", name:"Demo Materials", sector:"Materials",   sent:+0.41, sentPct:66, d24:+0.09, px5:+1.4, pxPct:62, mentions:2110, mult:1.6, vel:+12, src:[30,50,20], crowd:"mixed",
     read:"Mild bullish bias confirmed by a constructive tape — in-trend, nothing extreme. Standard continuation." },
-  { sym:"MERC", name:"Mercia Semi",        sector:"Semis",       sent:-0.38, sentPct:14, d24:-0.22, px5:+2.6, pxPct:74, mentions:1890, mult:1.4, vel:+9,  src:[22,60,18], crowd:"pro",
+  { sym:"DMOI", name:"Demo Semi",        sector:"Semis",       sent:-0.38, sentPct:14, d24:-0.22, px5:+2.6, pxPct:74, mentions:1890, mult:1.4, vel:+9,  src:[22,60,18], crowd:"pro",
     read:"Crowd bearish into a rising tape — disbelief rally. Short fuel for a squeeze, not a short." },
   { sym:"MAPL", name:"Maple Retail",       sector:"Consumer",    sent:-0.47, sentPct:10, d24:-0.26, px5:+0.9, pxPct:56, mentions:1760, mult:2.8, vel:+29, src:[60,30,10], crowd:"retail",
     read:"Retail piling into shorts while price refuses to break — squeeze fuel building. Don't add to the bear case here." },
@@ -45,7 +58,7 @@ const SOC_RAW = [
     read:"Crowd bearish and tape confirming weakness — no edge. Sentiment merely echoes price. Avoid." },
   { sym:"CRYO", name:"Cryotech Labs",      sector:"Biotech",     sent:+0.33, sentPct:64, d24:+0.06, px5:-0.9, pxPct:47, mentions:1180, mult:1.3, vel:+8,  src:[38,40,22], crowd:"retail" },
   { sym:"SOLA", name:"Solara Energy",      sector:"Energy",      sent:-0.41, sentPct:13, d24:-0.19, px5:-4.8, pxPct:9,  mentions:1020, mult:1.5, vel:+7,  src:[34,42,24], crowd:"mixed" },
-  { sym:"DRSH", name:"Druseh Energy",      sector:"Energy",      sent:+0.28, sentPct:61, d24:+0.04, px5:-4.2, pxPct:14, mentions:980,  mult:1.2, vel:-3,  src:[20,38,42], crowd:"retail",
+  { sym:"DMOE", name:"Demo Energy",      sector:"Energy",      sent:+0.28, sentPct:61, d24:+0.04, px5:-4.2, pxPct:14, mentions:980,  mult:1.2, vel:-3,  src:[20,38,42], crowd:"retail",
     read:"Bag-holder hope: crowd still bullish as price bleeds. Divergence says fade the bounce." },
   { sym:"THRM", name:"Thermo Dynamics",    sector:"Industrials", sent:-0.31, sentPct:19, d24:-0.09, px5:+2.8, pxPct:76, mentions:930,  mult:1.3, vel:+6,  src:[28,50,22], crowd:"pro" },
   { sym:"ORYX", name:"Oryx Mining",        sector:"Materials",   sent:-0.29, sentPct:22, d24:-0.08, px5:-3.6, pxPct:16, mentions:870,  mult:1.1, vel:+4,  src:[30,40,30], crowd:"mixed" },
@@ -83,7 +96,8 @@ const socTagTip = k => `${k.toUpperCase()} · ${SOC_SETUP_DEF[k].what}. ${SOC_SE
 // signed divergence: how far crowd tone sits ABOVE/BELOW where price says it should
 const socDiv = r => r.sentPct - r.pxPct;
 
-const SOC_UNIV = SOC_RAW.map(r => ({ ...r, read: r.read || socReadAuto(r), trend: socGen(r.sent, r.sent - r.d24 * 1.6) }));
+// Standalone-showcase demo universe ONLY (rendered when no window.__BV).
+const SOC_UNIV_DEMO = SOC_RAW.map(r => ({ ...r, read: r.read || socReadAuto(r), trend: socGen(r.sent, r.sent - r.d24 * 1.6) }));
 
 // ── inline sparkline (no load-order dependency) ─────────────────────
 function SocSpark({ data, tone, w = 64, h = 22 }) {
@@ -244,6 +258,45 @@ function SurfaceSocial({ onTicker, tabs }) {
   const [view, setView] = useSocS("map");                   // map · ranked · heatmap
   const [sort, setSort] = useSocS({ col:"div", dir:-1 });   // default: most-divergent first
   const [hover, setHover] = useSocS(null);
+
+  // Real feed if one is ever wired; standalone showcase uses the demo universe.
+  const realFeed = socRealFeed();
+  // Served + no real feed → honest-empty (scrapers not connected). Never fabricate.
+  if (SOC_SERVED && !realFeed) {
+    return (
+      <div className="surface sx-surface">
+        <div className="sx-hdr">
+          <div>
+            <div className="sx-eyebrow">SOCIAL SENTIMENT · CROWD POSITIONING</div>
+            <h1 className="sx-title">Social-sentiment feed not connected</h1>
+          </div>
+          <div className="sx-hdr-r">
+            <div className="sx-prov">Reddit · X · StockTwits · WSB</div>
+          </div>
+        </div>
+        {tabs}
+        <div className="sx-card" style={{ padding: 28, textAlign: "center" }}>
+          <div className="mono dim2" style={{ fontSize: 13, lineHeight: 1.7, maxWidth: 560, margin: "0 auto" }}>
+            Social-sentiment feed not connected yet. The StockTwits / WSB / Reddit
+            scrapers are on the roadmap but not currently wired into this deployment,
+            so there is no live crowd-positioning data to show. This surface stays
+            intentionally empty rather than display fabricated mention counts or tone.
+            <br /><br />
+            When the social aggregator is reconnected it will populate here as a
+            crowd × tape divergence map (contrarian read), ranked by the gap between
+            crowd tone and price.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Source universe: real feed (served) or demo (standalone). Real rows are
+  // enriched the same way the demo is, so the view code below is source-agnostic.
+  const SOC_UNIV = realFeed
+    ? realFeed.map(r => ({ ...r, read: r.read || socReadAuto(r), trend: r.trend || socGen(r.sent || 0, (r.sent || 0) - (r.d24 || 0) * 1.6) }))
+    : SOC_UNIV_DEMO;
+
   const net = SOC_UNIV.reduce((a, r) => a + r.sent, 0) / SOC_UNIV.length;
   const breadth = Math.round(SOC_UNIV.filter(r => r.sent >= 0).length / SOC_UNIV.length * 100);
   const fadeN = SOC_UNIV.filter(r => socQuad(r).k === "fade").length;

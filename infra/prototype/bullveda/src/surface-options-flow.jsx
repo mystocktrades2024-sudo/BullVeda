@@ -28,6 +28,7 @@ const OF_PRINTS = (() => {
       };
     }).sort((a, b) => b.prem - a.prem);
   }
+  if (BV) return [];  // served (real deploy) → honest empty when no real options flow; never fabricate
   const names = [
     ["NVDA","Tech",118.4], ["ARGN","Tech",213.4], ["CRWV","Tech",62.1], ["GENO","Healthcare",29.4],
     ["ARCM","Materials",67.4], ["DRSH","Energy",56.1], ["MERC","Tech",17.2], ["NVRH","Healthcare",142.1],
@@ -102,6 +103,15 @@ function SurfaceOptionsFlow({ onTicker }) {
     return Object.values(m).map(x => ({ ...x, net: x.call - x.put }))
       .sort((a, b) => Math.abs(b.net) - Math.abs(a.net)).slice(0, 7);
   }, []);
+
+  if (!OF_PRINTS.length) {
+    return (
+      <div className="surface wsx wsx--amb oflow">
+        <div className="wsx-hdr"><div className="wsx-hdr-l"><div className="wsx-eyebrow mono">OPTIONS FLOW · UNUSUAL ACTIVITY</div><h1 className="wsx-title mono">Options Flow</h1></div></div>
+        <div className="wsx-body"><div className="mono dim2" style={{ padding: 24 }}>No unusual options activity in the feed right now — the UOA tape (<span className="mono">critical.options_flow_top30</span> · Schwab) is empty or not loaded for today.</div></div>
+      </div>
+    );
+  }
 
   return (
     <div className="surface wsx wsx--amb oflow">
@@ -210,26 +220,32 @@ function SurfaceOptionsFlow({ onTicker }) {
           <div className="lab-card">
             <div className="lab-card-h mono">⚡ DEALER GAMMA · est. positioning</div>
             <div className="of-gamma">
-              <div className="of-gamma-flip mono"><span className="dim2">Gamma flip</span> <b className="amb">$5,820 SPX</b></div>
-              <div className="of-gamma-row"><span className="mono dim2">Net GEX</span><span className="mono dn">−$1.4B</span><span className="mono dim2">short gamma · vol amplifies</span></div>
-              <div className="of-gamma-row"><span className="mono dim2">Call wall</span><span className="mono up">$6,200</span><span className="mono dim2">resistance magnet</span></div>
-              <div className="of-gamma-row"><span className="mono dim2">Put wall</span><span className="mono rd">$6,000</span><span className="mono dim2">support magnet</span></div>
-              <div className="lab-verdict mono dim2">Below flip = dealers short gamma → moves get amplified, not dampened. Expect range expansion.</div>
+              <div className="of-gamma-flip mono"><span className="dim2">Gamma flip</span> <b className="dim2">—</b></div>
+              <div className="of-gamma-row"><span className="mono dim2">Net GEX</span><span className="mono dim2">—</span><span className="mono dim2">no dealer-gamma feed wired</span></div>
+              <div className="of-gamma-row"><span className="mono dim2">Call wall</span><span className="mono dim2">—</span><span className="mono dim2">requires full SPX chain GEX</span></div>
+              <div className="of-gamma-row"><span className="mono dim2">Put wall</span><span className="mono dim2">—</span><span className="mono dim2">—</span></div>
+              <div className="lab-verdict mono dim2">Dealer-gamma (GEX) needs a full options-chain feed not currently wired — shown honestly empty rather than estimated.</div>
             </div>
           </div>
 
           <div className="lab-card">
-            <div className="lab-card-h mono">📊 IV RANK · movers</div>
+            <div className="lab-card-h mono">📊 IV RANK · from today's flow</div>
             <div className="of-ivr">
-              {[["GENO",82,"+14","rd"],["BIVO",71,"+9","rd"],["ARCM",48,"−6","gn"],["NVDA",38,"+3","amb"],["ARGN",34,"−4","gn"]].map((r,i)=>(
-                <button key={i} className="of-ivr-row" onClick={()=>onTicker(r[0])}>
-                  <span className="mono of-ivr-sym"><b>{r[0]}</b></span>
-                  <div className="of-ivr-bar"><i style={{width:`${r[1]}%`,background:r[1]>=70?"var(--rd)":r[1]>=40?"var(--amb)":"var(--gn)"}} /></div>
-                  <span className="mono dim2">{r[1]}%</span>
-                  <span className={`mono ${r[2].startsWith("+")?"dn":"up"}`}>{r[2]}</span>
-                </button>
-              ))}
-              <div className="lab-verdict mono dim2">High IV-rank (GENO 82) = options rich → favor premium selling. Low (ARGN 34) = buy premium.</div>
+              {(() => {
+                const ivBySym = Array.from(new Map(OF_PRINTS.filter(p => p.iv).map(p => [p.sym, p.iv])).entries())
+                  .sort((a, b) => b[1] - a[1]).slice(0, 5);
+                if (!ivBySym.length) return <div className="lab-verdict mono dim2">No IV data in today's flow.</div>;
+                return <>
+                  {ivBySym.map(([sym, iv], i) => (
+                    <button key={i} className="of-ivr-row" onClick={() => onTicker(sym)}>
+                      <span className="mono of-ivr-sym"><b>{sym}</b></span>
+                      <div className="of-ivr-bar"><i style={{ width: `${Math.min(100, iv)}%`, background: iv >= 70 ? "var(--rd)" : iv >= 40 ? "var(--amb)" : "var(--gn)" }} /></div>
+                      <span className="mono dim2">{iv}%</span>
+                    </button>
+                  ))}
+                  <div className="lab-verdict mono dim2">ATM IV per name from the live flow tape. High IV = options rich (favor selling); low = buy premium.</div>
+                </>;
+              })()}
             </div>
           </div>
 
