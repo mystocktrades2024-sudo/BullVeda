@@ -3684,6 +3684,13 @@ async def universe_api(limit: int = 0):
             "perf_3m": ((r.get("finviz_elite") or {}).get("perf_quarter_pct")),
             "analyst_upside": ((r.get("analyst") or {}).get("upside_pct")),
             "insider_usd": ((r.get("insider_data") or {}).get("total_buy_value")),
+            # Congressional flow (compact) for the Smart-Money tile — net + #buyers.
+            # Source: per-ticker rollup attached during scan (data_fetcher.get_congressional_trades
+            # → unified cache). Honest None when absent / source unavailable.
+            "congress": (lambda c: ({"net": c.get("net"), "n": c.get("n_buyers", c.get("purchases", 0)),
+                                     "latest": c.get("latest", "")}
+                                    if isinstance(c, dict) and not c.get("source_unavailable")
+                                    and (c.get("n_buyers") or c.get("purchases")) else None))(r.get("congressional") or {}),
             "spread_pct": ((r.get("quote_snapshot") or {}).get("spread_pct")),
             "news_age_h": _news_age_hours(r.get("news_articles")),
             "grade_value": (r.get("grade_value") if r.get("grade_value") not in (None, "", "N/A", "NA") else None),
