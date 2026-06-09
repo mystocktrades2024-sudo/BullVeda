@@ -283,11 +283,11 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
       window.__scanFilter = null;
     }
   }, []);
-  const [sort, setSort] = useStateSS({ col: "sym", dir: 1 });
+  const [sort, setSort] = useStateSS({ col: "topbuy", dir: -1 });
   const [selected, setSelected] = useStateSS(() => new Set());
   const [secF, setSecF] = useStateSS("all");
   const [setupF, setSetupF] = useStateSS("all");
-  const [sortSel, setSortSel] = useStateSS("Ticker A→Z");
+  const [sortSel, setSortSel] = useStateSS("Top Buys");
   const [q, setQ] = useStateSS("");
   const [wlTick, setWlTick] = useStateSS(0);
   React.useEffect(() => {
@@ -338,7 +338,7 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
     const g = {}; SS_COLS.forEach(c => { (g[c.grp] = g[c.grp] || []).push(c); }); return g;
   }, []);
   // wire the Sort dropdown → sort state
-  const SORT_MAP = { "Ticker A→Z": { col: "sym", dir: 1 }, "EDGE ↓": { col: "edgePct", dir: -1 }, "Score ↓": { col: "score", dir: -1 }, "R:R ↓": { col: "rr", dir: -1 }, "RVOL ↓": { col: "rvol", dir: -1 } };
+  const SORT_MAP = { "Top Buys": { col: "topbuy", dir: -1 }, "Ticker A→Z": { col: "sym", dir: 1 }, "EDGE ↓": { col: "edgePct", dir: -1 }, "Score ↓": { col: "score", dir: -1 }, "R:R ↓": { col: "rr", dir: -1 }, "RVOL ↓": { col: "rvol", dir: -1 } };
   const onSortSel = (label) => { setSortSel(label); if (SORT_MAP[label]) setSort(SORT_MAP[label]); };
   const sectorOpts = useMemoSS(() => ["all", ...Array.from(new Set(SS_UNIVERSE.map(r => r.sector))).sort()], []);
   const setupOpts = useMemoSS(() => ["all", ...Array.from(new Set(SS_UNIVERSE.map(r => r.setup).filter(Boolean))).sort()], []);
@@ -394,12 +394,25 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
     if (secF !== "all") r = r.filter(t => t.sector === secF);
     if (setupF !== "all") r = r.filter(t => t.setup === setupF);
     if (q.trim()) { const s = q.trim().toLowerCase(); r = r.filter(t => (t.sym + " " + (t.name || "")).toLowerCase().includes(s)); }
-    r = [...r].sort((a, b) => {
-      const av = a[sort.col], bv = b[sort.col];
-      const aN = parseFloat(av), bN = parseFloat(bv);
-      if (!isNaN(aN) && !isNaN(bN)) return (aN - bN) * sort.dir;
-      return String(av).localeCompare(String(bv)) * sort.dir;
-    });
+    if (sort.col === "topbuy") {
+      // "Top Buys" — surface the strongest actionable longs first:
+      // BUY → WATCH → others/AVOID, then by EDGE composite, then score, then R:R.
+      const vRank = (t) => { const v = (t.verdict || "").toUpperCase(); return v === "BUY" ? 0 : v === "WATCH" ? 1 : (v === "AVOID" || v === "SHORT") ? 3 : 2; };
+      const num = (x) => { const n = parseFloat(x); return isNaN(n) ? -Infinity : n; };
+      r = [...r].sort((a, b) =>
+        (vRank(a) - vRank(b)) ||
+        (num(b.edgePct) - num(a.edgePct)) ||
+        (num(b.score) - num(a.score)) ||
+        (num(b.rr) - num(a.rr)) ||
+        String(a.sym).localeCompare(String(b.sym)));
+    } else {
+      r = [...r].sort((a, b) => {
+        const av = a[sort.col], bv = b[sort.col];
+        const aN = parseFloat(av), bN = parseFloat(bv);
+        if (!isNaN(aN) && !isNaN(bN)) return (aN - bN) * sort.dir;
+        return String(av).localeCompare(String(bv)) * sort.dir;
+      });
+    }
     if (tab === "ai-edge") r = [...r].sort((a, b) => b.aiEdge - a.aiEdge); // rank by ML edge
     return r;
   }, [tab, pills, side, sort, secF, setupF, q, wlTick]);
@@ -458,7 +471,7 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
         <label className="ss2-field">
           <span className="ss2-field-l mono">SORT</span>
           <select className="ss2-sel mono" value={sortSel} onChange={e => onSortSel(e.target.value)}>
-            {["Ticker A→Z","EDGE ↓","Score ↓","R:R ↓","RVOL ↓"].map((o, i) => <option key={i} value={o}>{o}</option>)}
+            {["Top Buys","Ticker A→Z","EDGE ↓","Score ↓","R:R ↓","RVOL ↓"].map((o, i) => <option key={i} value={o}>{o}</option>)}
           </select>
         </label>
         <label className="ss2-field">
