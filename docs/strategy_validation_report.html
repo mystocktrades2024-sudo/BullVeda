@@ -177,13 +177,16 @@
   <h2>Phase 2 — A/B single-window <span class="pill pill--run">running</span></h2>
   <p>Testing <b>delta #1 — breakout-family entry_quality bypass</b> (the root-cause fix). Apparatus: a flag-gated bypass in <code>make_decision</code> (default OFF; toggled by <code>ENTRY_QUALITY_BREAKOUT_BYPASS=1</code> env var) so the A/B runs with <b>zero config/production change</b>. Unit-verified: VCP EXTENDED flips WATCH→BUY; Trend Continuation EXTENDED stays WATCH (correctly excluded).</p>
   <table>
-    <thead><tr><th>Arm</th><th>Config</th><th>Status</th></tr></thead>
+    <thead><tr><th>Arm</th><th>Config</th><th>Elapsed</th><th>Status</th></tr></thead>
     <tbody>
-      <tr><td><b>A · baseline</b></td><td class="mono dim">252d · min-score 65 · min-rs 75 · env OFF</td><td><span class="pill pill--run">running</span></td></tr>
-      <tr><td><b>B · breakout-bypass</b></td><td class="mono dim">same + <code>ENTRY_QUALITY_BREAKOUT_BYPASS=1</code></td><td><span class="pill pill--run">running</span></td></tr>
+      <tr><td><b>A · baseline</b></td><td class="mono dim">252d · min-score 65 · min-rs 75 · env OFF</td><td class="mono dim">~1h07m</td><td><span class="pill pill--run">running</span></td></tr>
+      <tr><td><b>B · breakout-bypass</b></td><td class="mono dim">same + <code>ENTRY_QUALITY_BREAKOUT_BYPASS=1</code></td><td class="mono dim">~34m</td><td><span class="pill pill--run">running</span></td></tr>
     </tbody>
   </table>
-  <p class="dim">On completion: BUY count (esp. VCP/52wk/10WP), PF, Sharpe, win-rate, max-DD side by side. Gate to advance to Phase 3: B beats A on PF <em>and</em> Sharpe without worsening max-DD, and the added breakout BUYs don't drag aggregate PF below the haircut floor.</p>
+  <div class="callout callout--amb">
+    <b>Runtime note.</b> Full-universe 252d runs are slow (&gt;1h) because <code>use_structural_targets</code> is ON system-wide (flipped 2026-06-08) — every ticker × every day now runs the heavier confluence-target computation. <b>Decision: keep full fidelity (no shorter window / no disabling structural targets) — best-quality result over speed.</b> Both arms healthy (~105% CPU), still computing.
+  </div>
+  <p class="dim">On completion: BUY count (esp. VCP/52wk/10WP), PF, Sharpe, win-rate, max-DD side by side. Gate to advance to Phase 3: B beats A on PF <em>and</em> Sharpe without worsening max-DD, and the added breakout BUYs don't drag aggregate PF below the haircut floor. <b>The definitive test is Phase 3 (4-fold walk-forward)</b> — this single-window A/B is directional evidence only.</p>
 
   <!-- ============ PHASE 3 ============ -->
   <h2>Phase 3 — Walk-forward validation <span class="pill pill--wait">pending</span></h2>
@@ -201,6 +204,8 @@
   <div class="log-entry"><span class="ts">2026-06-09</span> · Phase 0a corrected (BUY-only, n=1,320) — aggregate selection alpha <b>−0.55% sig. negative</b> (real). BE only −0.34% (n.s.) on actual BUYs, not −1.17%. Alpha setups (VCP/52wk) rarely fire as BUYs (n&lt;20); 10WP +11.5% (n=35). <b>Lever re-prioritised: surface alpha setups as BUYs &gt; kill BE.</b></div>
   <div class="log-entry"><span class="ts">2026-06-09</span> · Phase 0b baseline 252d backtest — running.</div>
   <div class="log-entry"><span class="ts">2026-06-09</span> · <b>ROOT CAUSE</b> — VCP/52wk stuck at WATCH because the <code>entry_quality</code> gate demotes EXTENDED/MISSED (410/462 WATCH breakouts), the breakout's natural entry state. 6 catalyst sleeves bypass this gate; the breakout-alpha setups don't. Phase-1 delta #1 = add a breakout-family bypass (symmetric on entry_quality + decision_state). Proposed for approval; NOT yet changed.</div>
+  <div class="log-entry"><span class="ts">2026-06-09</span> · <b>Phase 2 A/B launched</b> — flag-gated breakout-bypass apparatus (default OFF, env-toggle, zero config change; commit c5967fc18). Unit-verified: VCP EXTENDED flips WATCH→BUY, TC stays WATCH. Arm A (baseline) + Arm B (env on), 252d, running in parallel.</div>
+  <div class="log-entry"><span class="ts">2026-06-09</span> · Runtime: full 252d runs &gt;1h (structural targets ON). <b>Decision: keep full fidelity — best solution over speed</b> (declined the faster --days 120 / targets-off shortcut). Both arms healthy, still computing. Awaiting results.</div>
 
   <div class="footer">
     SwingTrade strategy validation · generated 2026-06-09 · this file is updated in place as phases complete ·
