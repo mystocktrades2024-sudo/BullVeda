@@ -4944,7 +4944,23 @@ def get_options_iv_data(ticker: str) -> dict:
     cache_key = f"opts_iv_{ticker}_{int(time.time()//7200)}"
     cached = _cache_read(cache_key, 7200)
     if cached is not None:
-        return cached
+        # Market-session-aware cache. The 2h cache bucket spans the 06:30 PT options
+        # open, and the daily scan runs ~05:15 PT (market CLOSED) — so it caches a
+        # zero-volume snapshot that would otherwise poison every intraday read until
+        # the bucket rolls at 07:00 PT, starving the UOA flow scanner. A real
+        # market-hours snapshot ALWAYS has volume; a cached zero-flow entry during
+        # market hours is a stale pre-market capture → treat as a miss and refetch.
+        _stale_zero = not (cached.get("total_call_vol") or cached.get("total_put_vol"))
+        _mkt_open = False
+        if _stale_zero:
+            try:
+                import schwab_client as _sc
+                _mkt_open = _sc.is_market_open_now()
+            except Exception:
+                _mkt_open = False
+        if not (_stale_zero and _mkt_open):
+            return cached
+        # else fall through — refetch live intraday flow
 
     out["source"] = "schwab"
 

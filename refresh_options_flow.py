@@ -397,13 +397,33 @@ def main(force: bool = False) -> int:
     # Snapshot prior STRONG before overwriting, for delta-based Slack alert
     prev_strong = _read_previous_strong()
 
+    out_path = BASE / "infra" / "prototype" / "options_flow.json"
+
+    # PRESERVE-ON-DEGRADE — the launchd job runs every 15 min ALL day, but options
+    # volume only exists during market hours. An after-hours / pre-open run returns
+    # 0 candidates; writing that empty payload would wipe the good intraday snapshot
+    # (and blank the dashboard's Options-Flow engine overnight). When this scan is
+    # empty but a prior file HAS candidates, keep the prior — just stamp it stale.
+    if not top30 and out_path.exists():
+        try:
+            prior = json.loads(out_path.read_text())
+            if (prior.get("top30") or []):
+                prior["last_empty_refresh_at"] = datetime.now(timezone.utc).isoformat()
+                prior["stale"] = True
+                out_path.write_text(json.dumps(prior, default=str))
+                log.info(f"0 candidates (market likely closed) — kept prior "
+                         f"{len(prior['top30'])}-row snapshot, stamped stale")
+                return 0
+        except Exception as _pe:
+            log.warning(f"preserve-on-degrade read failed: {_pe}")
+
     payload = {
         "refreshed_at":  datetime.now(timezone.utc).isoformat(),
         "universe_size": len(options),
         "top30":          top30,
+        "stale":          False,
     }
 
-    out_path = BASE / "infra" / "prototype" / "options_flow.json"
     tmp = out_path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(payload, default=str))
     tmp.replace(out_path)  # atomic on POSIX

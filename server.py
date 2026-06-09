@@ -578,6 +578,26 @@ async def bullveda_boot(auth: HTTPBasicCredentials = Depends(_check_auth)):
     out["crypto"] = _rj("data_crypto.json")
     out["earnings"] = _rj("data_earnings.json")
     out["critical"] = _rj("data.critical.json")
+    # Serve-time options-flow overlay. data.critical.json bakes options_flow_top30
+    # at dashboard-build time, but refresh_options_flow.py rewrites
+    # infra/prototype/options_flow.json every 15 min during market hours (the daily
+    # scan runs pre-open, so its baked flow is empty). Overlay the live file when it
+    # has candidates / is newer, so BV.optionsFlow (home Best-Ideas engine + options
+    # surface) reflects the freshest UOA without waiting for a full rebuild.
+    try:
+        if isinstance(out.get("critical"), dict):
+            _of_live = _rj("options_flow.json")
+            if isinstance(_of_live, dict):
+                _live30 = _of_live.get("top30") or _of_live.get("candidates") or []
+                _live50 = _of_live.get("top50") or _live30
+                _baked30 = out["critical"].get("options_flow_top30") or []
+                if isinstance(_live30, list) and (len(_live30) > len(_baked30) or
+                        (_live30 and len(_baked30) == 0)):
+                    out["critical"]["options_flow_top30"] = _live30
+                    out["critical"]["options_flow_top50"] = _live50 if isinstance(_live50, list) else _live30
+                    out["critical"]["options_flow_refreshed_at"] = _of_live.get("refreshed_at")
+    except Exception:
+        pass
     # True headline-index quotes (Schwab live indices + EODHD crypto) — fresh,
     # off-scan-cadence; overrides any stale index_quotes baked into critical.
     out["index_quotes"] = await _index_quotes_cached()
@@ -10730,10 +10750,36 @@ async def earnings_prediction_log_api(auth: HTTPBasicCredentials = Depends(_chec
     rows.sort(key=lambda r: (r.get("report_date") or ""), reverse=True)
     return {"total": len(rows), "rows": rows}
 
-# -- Options Flow Scanner — REMOVED 2026-04-25 (no options data in EODHD plan) --
+# -- Options Flow Scanner — repointed 2026-06-09 to the live Schwab-fed UOA feed.
+# Source: infra/prototype/options_flow.json, rewritten every 15 min during market
+# hours by refresh_options_flow.py (Schwab chains → options_flow_scanner). EODHD has
+# no options data; Schwab is the authorized provider.
 @app.get("/api/options-flow")
 async def options_flow_api():
-    return {"total": 0, "results": [], "error": "options data removed; not in EODHD All-In-One"}
+    import datetime as _dt2
+    of = None
+    try:
+        _ofp = BASE_DIR / "infra" / "prototype" / "options_flow.json"
+        if _ofp.exists():
+            of = json.loads(_ofp.read_text())
+    except Exception as _e:
+        return {"total": 0, "results": [], "error": f"read failed: {_e}"}
+    if not isinstance(of, dict):
+        return {"total": 0, "results": [], "error": "options_flow.json not built — run refresh_options_flow.py"}
+    rows = of.get("top30") or of.get("candidates") or []
+    refreshed = of.get("refreshed_at")
+    stale = False
+    try:
+        if refreshed:
+            age_h = (_dt2.datetime.now(_dt2.timezone.utc) -
+                     _dt2.datetime.fromisoformat(refreshed.replace("Z", "+00:00"))).total_seconds() / 3600.0
+            stale = age_h > 24
+    except Exception:
+        pass
+    return {"total": len(rows), "results": rows, "top50": of.get("top50") or rows,
+            "refreshed_at": refreshed, "stale": stale,
+            "universe_size": of.get("universe_size"), "source": "schwab",
+            "error": None}
 
 
 @app.get("/api/iv-history")
