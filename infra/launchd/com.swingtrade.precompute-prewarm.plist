@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.swingtrade.precompute-prewarm</string>
+
+    <!-- Run daily at 3:00 AM PT (Mon-Fri only), BEFORE the 6:30 AM scan.
+         Post-midnight so the EODHD daily quota has reset to a fresh budget.
+         Pre-warms cache/target_engine/{TICKER}_{MODE}.json for the whole
+         universe so the morning-briefing scan reads warm structural-target
+         cache instead of recomputing ~3,000 confluence targets live
+         (each now pulls 4H Schwab + EW weekly/monthly + SMC after the
+         2026-06-08 use_structural_targets cutover).
+
+         Throttling is enforced at the client level — NOT here:
+           · EODHD: 950 req/min token bucket (cross-process shared) + daily
+             quota guard (throttle@85% / abort@97%) in eodhd_client.py
+           · Schwab (4H): paced to 100/min w/ 429 backoff in schwab_client.py
+         precompute runs without --force-refresh, so 12h-fresh caches are
+         skipped (cache hits, zero API). -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Hour</key><integer>3</integer>
+            <key>Minute</key><integer>0</integer>
+            <key>Weekday</key><integer>1</integer>
+        </dict>
+        <dict>
+            <key>Hour</key><integer>3</integer>
+            <key>Minute</key><integer>0</integer>
+            <key>Weekday</key><integer>2</integer>
+        </dict>
+        <dict>
+            <key>Hour</key><integer>3</integer>
+            <key>Minute</key><integer>0</integer>
+            <key>Weekday</key><integer>3</integer>
+        </dict>
+        <dict>
+            <key>Hour</key><integer>3</integer>
+            <key>Minute</key><integer>0</integer>
+            <key>Weekday</key><integer>4</integer>
+        </dict>
+        <dict>
+            <key>Hour</key><integer>3</integer>
+            <key>Minute</key><integer>0</integer>
+            <key>Weekday</key><integer>5</integer>
+        </dict>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Volumes/MyMacDisk/Claude Skills/SwingTrade</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Volumes/MyMacDisk/Claude Skills/SwingTrade/scripts/launchd_wrapper.sh</string>
+        <string>com.swingtrade.precompute-prewarm</string>
+        <string>/usr/bin/python3</string>
+        <string>scripts/precompute_targets.py</string>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/precompute-prewarm.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/precompute-prewarm.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <!-- RunAtLoad=false: don't fire on plist install, only on schedule -->
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

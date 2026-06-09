@@ -37,6 +37,7 @@ HEAVY_LABELS=(
   "com.swingtrade.ml-edge-intraday"
   "com.swingtrade.weekly-backtest"
   "com.swingtrade.enrich-nightly"
+  "com.swingtrade.precompute-prewarm"
 )
 for heavy in "${HEAVY_LABELS[@]}"; do
   if [ "$LABEL" = "$heavy" ]; then
