@@ -35,6 +35,7 @@ HEAVY_LABELS=(
   "com.swingtrade.walk-forward-tonight"
   "com.swingtrade.ml-edge"
   "com.swingtrade.ml-edge-intraday"
+  "com.swingtrade.ml-retrain-weekly"
   "com.swingtrade.weekly-backtest"
   "com.swingtrade.enrich-nightly"
   "com.swingtrade.precompute-prewarm"
@@ -75,15 +76,37 @@ if [ "$LABEL" = "com.swingtrade.eod-targets" ]; then
   done
 fi
 
+# 2026-06-09 (Phase 5 — Resilience, Open Risk #11): caffeinate the overnight
+# load window. If the Mac idle-sleeps overnight it misses the 19:30 EOD targets
+# and the morning passes, and a half-run job can be killed mid-flight. For the
+# labels below we run the wrapped command under `caffeinate -i` so idle-sleep is
+# prevented FOR THE JOB'S DURATION ONLY (caffeinate exits when the child exits —
+# the Mac is NOT kept awake 24/7). -i = prevent idle sleep; the display may still
+# sleep. Other heavy jobs (ml-predict) already self-caffeinate internally.
+CAFFEINATE_LABELS=(
+  "com.swingtrade.eod-targets"
+  "com.swingtrade.precompute-prewarm"
+  "com.swingtrade.strategy-warm"
+  "com.swingtrade.morning-briefing"
+)
+CAFFEINATE_PREFIX=()
+for c in "${CAFFEINATE_LABELS[@]}"; do
+  if [ "$LABEL" = "$c" ] && command -v caffeinate > /dev/null 2>&1; then
+    CAFFEINATE_PREFIX=(caffeinate -i)
+    break
+  fi
+done
+
 START_EPOCH=$(date +%s)
 START_ISO=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-echo "[$START_ISO] $LABEL: START · $CMD" >> "$LOG"
+echo "[$START_ISO] $LABEL: START · ${CAFFEINATE_PREFIX[*]:+caffeinate -i }$CMD" >> "$LOG"
 
 # Run the command, capture stdout/stderr + exit code.
 # "$@" preserves arguments with spaces (e.g. the project path).
+# CAFFEINATE_PREFIX is empty for non-load-window labels (no behavior change).
 TMPOUT=$(mktemp)
-"$@" > "$TMPOUT" 2>&1
+"${CAFFEINATE_PREFIX[@]}" "$@" > "$TMPOUT" 2>&1
 EXIT_CODE=$?
 
 END_EPOCH=$(date +%s)
