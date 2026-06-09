@@ -459,7 +459,13 @@ def main():
                     # tradable=False catches delisted; status!="active" catches the
                     # "asset is not active" rejection class (e.g. ALE: tradable but
                     # inactive) that previously slipped through to a failed submit.
-                    _astatus = str(getattr(_asset, "status", "active") or "active").lower()
+                    # 2026-06-09 FIX: alpaca-py returns status as an AssetStatus enum;
+                    # str(AssetStatus.ACTIVE) == "AssetStatus.ACTIVE" (NOT "active"), so
+                    # the old str().lower() check was "assetstatus.active" != "active" →
+                    # TRUE for EVERY active name, silently skipping all tradable stocks
+                    # since this check shipped. Read the enum .value ("active") instead.
+                    _status_raw = getattr(_asset, "status", "active")
+                    _astatus = str(getattr(_status_raw, "value", _status_raw) or "active").lower()
                     if not getattr(_asset, "tradable", True) or _astatus != "active":
                         print(f"  SKIP {entry['ticker']:6s} — not tradable on Alpaca")
                         log.info(f"skip {entry['ticker']}: asset not tradable/active (status={_astatus})")
