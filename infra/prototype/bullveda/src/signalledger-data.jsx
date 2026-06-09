@@ -113,8 +113,20 @@
     return SIGNALS.filter(s => !filter || !filter.source || s.source === filter.source).map(s => {
       const path = HZ.map(hz => { const r = ret(s, hz); return { hz: hz.id, days: hz.days, v: metric === "raw" ? r.raw : r.edge, mature: r.mature }; });
       const mat = path.filter(p => p.mature); const last = mat.length ? mat[mat.length - 1] : null;
-      const m12 = HZ_BY["M9"] || HZ_BY["M12"] || HZ[HZ.length - 1];
-      return { ...s, label: (SOURCE_BY[s.source] || {}).label || s.source, path, last, status: s.age < m12.days ? "maturing" : "matured", maturedN: mat.length };
+      // Tiered maturity (2026-06-09). The old binary flag only flipped to "matured"
+      // once a call cleared its LONGEST horizon (~M9/189d), so a track record younger
+      // than 6mo showed "maturing" for everything. Anchor the meaningful milestone on
+      // the SWING band (W4 ≈ 20d) — once it elapses the swing thesis is resolved — and
+      // keep "matured" for fully-resolved (all horizons in). status = CSS-safe key;
+      // statusLabel = display text.
+      const _terminal = (HZ_BY["M12"] || HZ_BY["M9"] || HZ[HZ.length - 1]).days;
+      const _swingDays = (HZ_BY["W4"] || {}).days || 20;
+      const _st = s.age >= _terminal ? "matured"
+                : s.age >= _swingDays ? "swing"
+                : s.age >= 3 ? "maturing"
+                : "fresh";
+      const _stLabel = { matured: "matured", swing: "swing ✓", maturing: "maturing", fresh: "fresh" }[_st];
+      return { ...s, label: (SOURCE_BY[s.source] || {}).label || s.source, path, last, status: _st, statusLabel: _stLabel, maturedN: mat.length };
     }).sort((a, b) => a.age - b.age);
   }
   function calibration(metric) {

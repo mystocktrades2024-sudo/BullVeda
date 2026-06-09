@@ -318,7 +318,7 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
               <td>{spark(r.path) || <span className="trk-mat-lbl mono dim2">maturing…</span>}</td>
               <td className={`r tabular ${r.last && r.last.v >= 0 ? "up" : "dn"}`}>{r.last ? <b>{trPct(r.last.v)}</b> : "—"}<span className="dim2 mono" style={{ fontSize: 9 }}> {r.last ? r.last.hz || "" : ""}</span></td>
               <td className="r tabular dim2">{r.maturedN}/{NH}</td>
-              <td><span className={`trk-status trk-status--${r.status}`}>{r.status}</span></td>
+              <td><span className={`trk-status trk-status--${r.status}`} title={`${r.maturedN}/${NH} horizons matured`}>{r.statusLabel || r.status}</span></td>
             </tr>
             );
           })}</tbody>
