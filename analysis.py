@@ -8575,11 +8575,28 @@ def make_decision(total_score: float, rr_ratio: float, config: dict,
     # demotes are bypassed (data shows MISSED PF 2.06 — best segment). Falls
     # through to _eq_rules dispatch below which respects the override.
     _eq_override_active = (config.get("entry_quality_rules_override") or {}).get("_enabled", False)
-    if direction == "long" and entry_quality == "EXTENDED" and not _eq_override_active:
+    # BREAKOUT-FAMILY BYPASS (2026-06-09, Phase 1 candidate — FLAG-GATED, default OFF).
+    # Breakout-alpha setups (VCP / 52wk / Stage-2 / 10-Week Pullback) are EXTENDED or
+    # MISSED past their base BY CONSTRUCTION — a breakout buys strength. The entry-
+    # quality gate (built for pullback mechanics) therefore demotes exactly the setups
+    # that carry alpha (Phase 0: VCP +18%, 52wk +6.6%, 10WP +7.3%; the gate's own data
+    # shows MISSED PF 2.59 / EXTENDED 1.33 beat PULLBACK 0.88). The 6 catalyst sleeves
+    # already bypass this gate; this extends the same treatment to the breakout-alpha
+    # families. Toggled by config.entry_quality_breakout_bypass._enabled OR the
+    # ENTRY_QUALITY_BREAKOUT_BYPASS=1 env var (used to A/B without touching config).
+    import os as _os
+    _eq_bo = config.get("entry_quality_breakout_bypass") or {}
+    _eq_bo_on = _eq_bo.get("_enabled", False) or _os.environ.get("ENTRY_QUALITY_BREAKOUT_BYPASS") == "1"
+    _eq_bo_setups = [s.lower() for s in (_eq_bo.get("setups") or
+                     ["vcp", "52wk", "52-week", "52 week", "stage 2 breakout", "10-week pullback", "10 week pullback"])]
+    _setup_l = (setup_type or "").lower()
+    _is_breakout_alpha = _eq_bo_on and any(s in _setup_l for s in _eq_bo_setups)
+    _eq_bypass = _eq_override_active or _is_breakout_alpha
+    if direction == "long" and entry_quality == "EXTENDED" and not _eq_bypass:
         return {"verdict": "WATCH", "emoji": "eye", "color": "#d97706",
                 "bear_type": "",
                 "reason": f"Price extended — wait for value zone (>1.25 ATR above EMA21, score {total_score:.0f})"}
-    if direction == "long" and entry_quality == "MISSED" and not _eq_override_active:
+    if direction == "long" and entry_quality == "MISSED" and not _eq_bypass:
         return {"verdict": "WATCH", "emoji": "eye", "color": "#d97706",
                 "bear_type": "",
                 "reason": f"Price extended — wait for value zone (broke through resistance, wait for next base)"}
