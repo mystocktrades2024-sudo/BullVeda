@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SwingTrade · Strategy Validation Report</title>
+<style>
+  :root{
+    --bg-0:#0a0d0c; --bg-1:#101413; --bg-2:#161b1a; --line:#222a28; --line-2:#2e3835;
+    --ink-0:#eef2f0; --ink-1:#c6cfca; --ink-2:#8d9892; --ink-3:#5c6660;
+    --gn:#43c59e; --rd:#e0556b; --amb:#e0a458; --copper:#d97757; --cy:#5bc0c9; --violet:#9a86c4; --blue:#5b9bd5;
+    --gn-bg:rgba(67,197,158,.12); --rd-bg:rgba(224,85,107,.12); --amb-bg:rgba(224,164,88,.12);
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg-0);color:var(--ink-1);font-family:var(--sans);font-size:14px;line-height:1.6;}
+  .wrap{max-width:1080px;margin:0 auto;padding:40px 28px 120px;}
+  h1{font-size:26px;color:var(--ink-0);margin:0 0 4px;letter-spacing:-.3px;}
+  h2{font-size:19px;color:var(--ink-0);margin:38px 0 6px;padding-top:22px;border-top:1px solid var(--line);letter-spacing:-.2px;}
+  h3{font-size:15px;color:var(--copper);margin:22px 0 8px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;}
+  p{margin:8px 0;color:var(--ink-1);}
+  .mono{font-family:var(--mono);}
+  .dim{color:var(--ink-2);} .dim2{color:var(--ink-3);}
+  code{font-family:var(--mono);background:var(--bg-2);padding:1px 6px;border-radius:4px;font-size:12.5px;color:var(--cy);}
+  a{color:var(--blue);}
+  .eyebrow{font-family:var(--mono);font-size:11px;color:var(--copper);text-transform:uppercase;letter-spacing:.14em;margin-bottom:10px;}
+  .meta{display:flex;flex-wrap:wrap;gap:8px 22px;font-family:var(--mono);font-size:12px;color:var(--ink-2);margin:14px 0 8px;}
+  .meta b{color:var(--ink-1);font-weight:600;}
+  /* status pills */
+  .pill{display:inline-block;font-family:var(--mono);font-size:10.5px;font-weight:700;padding:2px 9px;border-radius:999px;text-transform:uppercase;letter-spacing:.05em;vertical-align:middle;}
+  .pill--done{color:var(--gn);background:var(--gn-bg);border:1px solid color-mix(in oklab,var(--gn) 40%,transparent);}
+  .pill--run{color:var(--amb);background:var(--amb-bg);border:1px solid color-mix(in oklab,var(--amb) 40%,transparent);}
+  .pill--wait{color:var(--ink-3);background:var(--bg-2);border:1px solid var(--line-2);}
+  .pill--fail{color:var(--rd);background:var(--rd-bg);border:1px solid color-mix(in oklab,var(--rd) 40%,transparent);}
+  /* phase tracker */
+  .tracker{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 6px;}
+  .tk{flex:1;min-width:150px;background:var(--bg-1);border:1px solid var(--line);border-radius:10px;padding:11px 13px;}
+  .tk-n{font-family:var(--mono);font-size:10px;color:var(--ink-3);letter-spacing:.1em;}
+  .tk-t{font-size:13px;color:var(--ink-0);font-weight:600;margin:3px 0 7px;}
+  /* cards / callouts */
+  .card{background:var(--bg-1);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:14px 0;}
+  .callout{border-left:3px solid var(--copper);background:var(--bg-1);border-radius:0 8px 8px 0;padding:12px 16px;margin:14px 0;}
+  .callout--gn{border-left-color:var(--gn);} .callout--rd{border-left-color:var(--rd);} .callout--amb{border-left-color:var(--amb);}
+  .callout b{color:var(--ink-0);}
+  /* tables */
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px;}
+  th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);}
+  th{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600;}
+  td{color:var(--ink-1);} td.mono,th.r,td.r{text-align:right;} td.mono{font-family:var(--mono);}
+  tr:hover td{background:rgba(255,255,255,.015);}
+  .up{color:var(--gn);} .dn{color:var(--rd);} .neu{color:var(--ink-2);}
+  .tag{font-family:var(--mono);font-size:10px;padding:1px 7px;border-radius:4px;}
+  .tag--keep{color:var(--gn);background:var(--gn-bg);} .tag--kill{color:var(--rd);background:var(--rd-bg);} .tag--watch{color:var(--amb);background:var(--amb-bg);} .tag--data{color:var(--violet);background:rgba(154,134,196,.14);}
+  ul{margin:8px 0;padding-left:22px;} li{margin:4px 0;}
+  .gate{display:flex;align-items:flex-start;gap:8px;margin:6px 0;}
+  .gate .chk{color:var(--gn);font-family:var(--mono);}
+  .footer{margin-top:50px;padding-top:18px;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--ink-3);}
+  .log-entry{font-family:var(--mono);font-size:12px;padding:6px 0;border-bottom:1px dashed var(--line);}
+  .log-entry .ts{color:var(--copper);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow">SwingTrade · Quant Validation</div>
+  <h1>Strategy Validation &amp; Ticker-Picking Improvement</h1>
+  <p class="dim">Living report — tracks every phase of the backtest-and-improve effort. Updated as each phase completes. No config change ships without walk-forward backing + per-item owner approval.</p>
+  <div class="meta">
+    <span>Owner&nbsp; <b>phanirajgarimella</b></span>
+    <span>Branch&nbsp; <b>bullveda-real-data</b></span>
+    <span>Opened&nbsp; <b>2026-06-09</b></span>
+    <span>Status&nbsp; <span class="pill pill--run">Phase 0 in progress</span></span>
+    <span>Change authority&nbsp; <b>Propose-only · owner approves each</b></span>
+  </div>
+
+  <!-- PHASE TRACKER -->
+  <div class="tracker">
+    <div class="tk"><div class="tk-n">PHASE 0</div><div class="tk-t">Re-measure</div><span class="pill pill--run">running</span></div>
+    <div class="tk"><div class="tk-n">PHASE 1</div><div class="tk-t">Define deltas</div><span class="pill pill--wait">pending</span></div>
+    <div class="tk"><div class="tk-n">PHASE 2</div><div class="tk-t">A/B window</div><span class="pill pill--wait">pending</span></div>
+    <div class="tk"><div class="tk-n">PHASE 3</div><div class="tk-t">Walk-forward</div><span class="pill pill--wait">pending</span></div>
+    <div class="tk"><div class="tk-n">PHASE 4</div><div class="tk-t">Outcome</div><span class="pill pill--wait">pending</span></div>
+  </div>
+
+  <!-- ============ THE PLAN ============ -->
+  <h2>The Plan</h2>
+  <p><b>Problem.</b> The signal scanner floods BUYs with two high-volume setups (Trend Continuation, Breakout Expansion) that carry <em>no skill</em> — they make money only from momentum-factor exposure and bleed in chop. The genuine alpha lives in three low-volume setups (VCP / 52-week Breakout / 10-Week Pullback). The mix dilutes — and now appears to erode — edge.</p>
+  <p><b>Objective.</b> Quantify what's actually working, then shift the picking mix toward alpha and away from beta — validated, not tuned by feel.</p>
+
+  <h3>Methodology — 5 phases, evidence-gated</h3>
+  <table>
+    <thead><tr><th>Phase</th><th>What</th><th>Cost</th><th>Gate to advance</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">0</td><td>Re-measure: factor attribution (current n) + baseline 252d backtest</td><td class="mono dim">~0 API · mins</td><td>establishes the "before" picture</td></tr>
+      <tr><td class="mono">1</td><td>Define candidate config deltas (all flag-gated, reversible)</td><td class="mono dim">0</td><td>no execution — spec only</td></tr>
+      <tr><td class="mono">2</td><td>A/B single-window: baseline vs each delta vs combined (252d)</td><td class="mono dim">~0 API · 15–30m</td><td>a variant must beat baseline</td></tr>
+      <tr><td class="mono">3</td><td>Walk-forward (4 folds) on the winning variant only</td><td class="mono dim">~0 API · 2–3h</td><td>holds across folds, not one window</td></tr>
+      <tr><td class="mono">4</td><td>Propose validated config deltas → owner approves each → paper-observe</td><td class="mono dim">0</td><td>—</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Validation gates — a change ships only if ALL hold</h3>
+  <div class="gate"><span class="chk">▹</span><span>Walk-forward aggregate <b>PF ≥ 1.20</b> (retail floor) after the −0.20 survivorship/slippage haircut</span></div>
+  <div class="gate"><span class="chk">▹</span><span><b>Sharpe improves</b> vs baseline AND <b>max-drawdown does not worsen</b></span></div>
+  <div class="gate"><span class="chk">▹</span><span>The alpha setups' <b>Wilson 95% lower bound stays positive</b> at n ≥ 30</span></div>
+  <div class="gate"><span class="chk">▹</span><span><b>Consistent across folds</b> — not one lucky window (principle 5 regime-conditioning, principle 20 no acting on noise)</span></div>
+
+  <h3>API / quota budget</h3>
+  <p>Backtesting is cheap here: OHLCV bars are cached to parquet (<b>2,184 files on disk</b>) and reused across every variant; only <em>params</em> change between A/B and walk-forward runs. EODHD usage today <b>30,013 / 100,000</b> (70K headroom). Whole effort ≈ a few hundred one-time calls — the real cost is wall-clock compute, not quota.</p>
+
+  <!-- ============ PHASE 0 ============ -->
+  <h2>Phase 0 — Re-measure <span class="pill pill--run">running</span></h2>
+
+  <h3>0a · Factor attribution &nbsp;<span class="pill pill--done">done</span></h3>
+  <p class="dim mono">Source: <code>scripts/p2_factor_attribution_spike.py</code> · n=4,355 closed trades · 2026-06-09 · regression <code>pnl = α + β_mkt·SPY + β_mom·(QQQ−SPY)</code></p>
+
+  <div class="callout callout--rd">
+    <b>Headline:</b> aggregate alpha has turned <b>significantly negative</b> — <b>−0.51% / trade (t=−2.84, p=0.005)</b>, up from a non-significant +0.50% in May. Market β = +1.70. The book is making money <em>from</em> being long the market, while its own selection adds slightly negative skill over the recent chop/correction tape.
+  </div>
+
+  <table>
+    <thead><tr><th>Setup</th><th class="r">n</th><th class="r">Alpha</th><th>Significant?</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>VCP Breakout</td><td class="r mono">89</td><td class="r mono up">+18.1%</td><td class="up">✅ yes</td><td><span class="tag tag--keep">lean in</span></td></tr>
+      <tr><td>10-Week Pullback</td><td class="r mono">93</td><td class="r mono up">+7.3%</td><td class="up">✅ yes</td><td><span class="tag tag--keep">lean in</span></td></tr>
+      <tr><td>52-week Breakout</td><td class="r mono">109</td><td class="r mono up">+6.6%</td><td class="up">✅ yes</td><td><span class="tag tag--keep">lean in · <b>currently excluded!</b></span></td></tr>
+      <tr><td>Trend Continuation</td><td class="r mono">2,088</td><td class="r mono neu">−0.09%</td><td class="dim">zero</td><td><span class="tag tag--watch">pure beta</span></td></tr>
+      <tr><td>Breakout Expansion</td><td class="r mono">1,409</td><td class="r mono dn">−1.17%</td><td class="dn">✅ neg.</td><td><span class="tag tag--kill">quarantine</span></td></tr>
+      <tr><td>Impulse Catalyst</td><td class="r mono">336</td><td class="r mono dn">−1.19%</td><td class="dn">✅ neg.</td><td><span class="tag tag--kill">quarantine</span></td></tr>
+      <tr><td>EMA21 Pullback</td><td class="r mono">54</td><td class="r mono neu">−0.14%</td><td class="dim">zero</td><td><span class="tag tag--watch">neutral</span></td></tr>
+      <tr><td>Insider Cluster</td><td class="r mono">32</td><td class="r mono dn">−1.69%</td><td class="dim">n.s.</td><td><span class="tag tag--watch">untested</span></td></tr>
+      <tr><td>"Breakdown"</td><td class="r mono">29</td><td class="r mono dn">−182%</td><td class="dim">⚠</td><td><span class="tag tag--data">data bug</span></td></tr>
+    </tbody>
+  </table>
+  <p class="dim">Reads: the entire edge sits in ~290 trades across VCP / 52wk / 10WP. The ~1,750 trades in Breakout Expansion + Impulse Catalyst carry <b>significant negative</b> alpha. Trend Continuation (2,088) is dead-weight beta. "Breakdown" (−182%) is corrupt — almost certainly a short-side P&L sign bug; flagged for a separate fix, excluded from conclusions.</p>
+
+  <h3>0b · Baseline 252d backtest &nbsp;<span class="pill pill--run">running</span></h3>
+  <p class="dim">Command: <code>python3 backtest.py --days 252 --min-score 65 --min-rs 75</code> · current production config · cached bars.</p>
+  <div class="card">
+    <p class="mono dim">⏳ Running in background — results (PF · Sharpe · win-rate · max-DD · per-setup) will populate here on completion.</p>
+    <p class="mono dim2">Prior reference (2026-06-06, min-score 35, <em>52wk excluded</em>): 154 trades · WR 46.8% · PF 1.31 · Sharpe 0.65 · +11.8% · max-DD pending.</p>
+  </div>
+
+  <!-- ============ PHASE 1 ============ -->
+  <h2>Phase 1 — Candidate config deltas <span class="pill pill--wait">pending</span></h2>
+  <p>All flag-gated in <code>config/config.json</code>, all reversible via <code>config.json.bak</code>. Defined here once Phase 0 baseline lands; tested in Phase 2.</p>
+  <table>
+    <thead><tr><th>#</th><th>Delta</th><th>Rationale (Phase 0)</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">1</td><td>Strengthen <code>factor_alpha_overlay</code>: VCP/52wk/10WP ×1.15→×1.25; TC/BE ×0.85→×0.70</td><td class="dim">tilt toward the only setups with alpha</td></tr>
+      <tr><td class="mono">2</td><td>Quarantine Breakout Expansion — hard-block (not just demote) when QQQ−SPY 21d &lt; 0</td><td class="dim">−1.17% sig. negative over 1,409 trades</td></tr>
+      <tr><td class="mono">3</td><td>Stop excluding 52-week Breakout from scoring/backtest</td><td class="dim">+6.6% sig. alpha being discarded</td></tr>
+      <tr><td class="mono">4</td><td>Raise the BUY bar for TC/BE (require catalyst tier or higher score)</td><td class="dim">zero/neg alpha — demand more to act</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ PHASE 2 ============ -->
+  <h2>Phase 2 — A/B single-window <span class="pill pill--wait">pending</span></h2>
+  <p>Baseline vs each delta vs combined, 252d. Comparison table (PF · Sharpe · per-setup · max-DD) populates here.</p>
+
+  <!-- ============ PHASE 3 ============ -->
+  <h2>Phase 3 — Walk-forward validation <span class="pill pill--wait">pending</span></h2>
+  <p>4-fold walk-forward on the winning variant only (needs explicit owner go — ~2–3h). Per-fold + aggregate results vs the gates populate here.</p>
+
+  <!-- ============ PHASE 4 ============ -->
+  <h2>Phase 4 — Outcome &amp; decisions <span class="pill pill--wait">pending</span></h2>
+  <p>Final verdict: which deltas cleared every gate, the validated config diffs proposed for approval, what shipped, and rollback notes.</p>
+
+  <!-- ============ DECISION LOG ============ -->
+  <h2>Decision &amp; change log</h2>
+  <div class="log-entry"><span class="ts">2026-06-09</span> · Effort opened. Scope: validate strategies + improve scanner ticker-picking. Change authority: propose-only, owner approves each.</div>
+  <div class="log-entry"><span class="ts">2026-06-09</span> · Phase 0a done — factor attribution refreshed (n=4,355). Aggregate alpha −0.51% (sig.). BE −1.17% + Impulse −1.19% sig. negative; VCP/52wk/10WP remain sig. positive. Fixed NaN-poisoning in the attribution regression (measurement-only).</div>
+  <div class="log-entry"><span class="ts">2026-06-09</span> · Phase 0b baseline 252d backtest — running.</div>
+
+  <div class="footer">
+    SwingTrade strategy validation · generated 2026-06-09 · this file is updated in place as phases complete ·
+    source data: <code>cache/factor_attribution_2026-06-09.json</code>, <code>cache/portfolio_backtest*.json</code>, <code>cache/picks_history.json</code>
+  </div>
+
+</div>
+</body>
+</html>
