@@ -54,6 +54,18 @@ def _row_for_run(result: dict, raw_stdout: str | None = None) -> dict:
             config_snapshot = json.loads(DEFAULT_CONFIG_PATH.read_text())
         except Exception:
             pass
+    # 2026-06-09 — capture backtest-time ENV OVERRIDES into the snapshot so A/B
+    # variants are self-describing in Supabase. The toggles below change scoring
+    # behaviour but live in env (not config.json), so config_snapshot alone made
+    # baseline vs variant runs look identical. Records exactly which variant ran.
+    _bt_env_keys = ("ENTRY_QUALITY_BREAKOUT_BYPASS", "ENTRY_QUALITY_RULES_OVERRIDE",
+                    "SCORING_MODE", "BACKTEST_NO_FUNDAMENTALS", "SLIPPAGE_MODEL",
+                    "BT_VARIANT_LABEL")
+    _env_overrides = {k: os.environ[k] for k in _bt_env_keys if os.environ.get(k)}
+    if _env_overrides:
+        if not isinstance(config_snapshot, dict):
+            config_snapshot = {}
+        config_snapshot["_backtest_env_overrides"] = _env_overrides
     return {
         "run_id": run_id,
         "started_at": cfg.get("started_at") or datetime.now(timezone.utc).isoformat(),
