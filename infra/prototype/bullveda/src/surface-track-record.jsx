@@ -184,6 +184,8 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
   const [view, setView] = useTR("path"); // path | full
   const [period, setPeriod] = useTR("all"); // 1m|3m|6m|1y|ytd|all
   const [tickerQ, setTickerQ] = useTR(""); // ticker filter (comma/space-separated, substring match)
+  const [dateFrom, setDateFrom] = useTR(""); // explicit logged-date range (YYYY-MM-DD)
+  const [dateTo, setDateTo] = useTR("");
   const [page, setPage] = useTR(0);
   const PAGE = 25;
   const all = useTRm(() => SL.ledger(metric, srcFilter ? { source: srcFilter } : null).filter(r => dir === "all" || r.dir === dir), [metric, srcFilter, dir]);
@@ -192,10 +194,18 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
   // ticker filter — accepts one or many symbols (space/comma separated); a row matches
   // if its symbol starts with ANY token (so "nv aap" surfaces NVDA + AAPL).
   const tickerTokens = useTRm(() => tickerQ.toUpperCase().split(/[\s,]+/).filter(Boolean), [tickerQ]);
-  const rows = useTRm(() => all.filter(r =>
-    r.age <= maxAge &&
-    (tickerTokens.length === 0 || tickerTokens.some(tok => String(r.sym).toUpperCase().startsWith(tok)))
-  ), [all, maxAge, tickerTokens]);
+  // row logged-date as YYYY-MM-DD (derived from age-in-days) for the explicit date range.
+  const rowDate = (r) => new Date(Date.now() - r.age * 86400000).toISOString().slice(0, 10);
+  const rows = useTRm(() => all.filter(r => {
+    if (r.age > maxAge) return false;
+    if (tickerTokens.length && !tickerTokens.some(tok => String(r.sym).toUpperCase().startsWith(tok))) return false;
+    if (dateFrom || dateTo) {
+      const d = rowDate(r);
+      if (dateFrom && d < dateFrom) return false;
+      if (dateTo && d > dateTo) return false;
+    }
+    return true;
+  }), [all, maxAge, tickerTokens, dateFrom, dateTo]);
   const PERIODS = [["1m", "1M"], ["3m", "3M"], ["6m", "6M"], ["1y", "1Y"], ["ytd", "YTD"], ["all", "All"]];
   // sortable: col is "age" | "sym" | "label" | "dir" | "refPrice" | "last" | "maturedN"
   // | "status" | a horizon id (D1…M12, sorted by that horizon's matured value).
@@ -226,7 +236,7 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
   const pg = Math.min(page, pages - 1);
   const pageRows = sortedRows.slice(pg * PAGE, pg * PAGE + PAGE);
   const pickPeriod = (p) => { setPeriod(p); setPage(0); };
-  React.useEffect(() => { setPage(0); }, [dir, srcFilter, view, tickerQ, period]);
+  React.useEffect(() => { setPage(0); }, [dir, srcFilter, view, tickerQ, period, dateFrom, dateTo]);
   // sortable header cell — arrow shows active column + direction
   const Sh = ({ col, label, r, cls }) => (
     <th className={`${cls || ""} ${r ? "r" : ""} ${srt.col === col ? "is-active" : ""}`.trim()} style={{ cursor: "pointer" }} onClick={() => sortBy(col)}>
@@ -245,7 +255,7 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
     });
     const blob = new Blob([lines.join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob); const a = document.createElement("a");
-    a.href = url; a.download = `track-record_${metric}_${srcFilter || "all"}${tickerTokens.length ? "_" + tickerTokens.join("-") : ""}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.href = url; a.download = `track-record_${metric}_${srcFilter || "all"}${tickerTokens.length ? "_" + tickerTokens.join("-") : ""}${(dateFrom || dateTo) ? `_${dateFrom || "start"}_to_${dateTo || "now"}` : ""}_${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   const spark = (path) => {
@@ -269,6 +279,14 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
               placeholder="🔎 ticker…" spellCheck={false} autoCapitalize="characters"
               title="Filter the ledger by symbol — one or many (e.g. NVDA AAPL)" />
             {tickerQ ? <button className="trk-ticker-clear" onClick={() => setTickerQ("")} title="Clear ticker filter">✕</button> : null}
+          </div>
+          <div className="trk-daterange" title="Filter the ledger by the date a call was logged">
+            <input className="trk-date-input mono" type="date" value={dateFrom} max={dateTo || undefined}
+              onChange={e => setDateFrom(e.target.value)} title="From (logged on/after)" />
+            <span className="trk-date-sep mono dim2">→</span>
+            <input className="trk-date-input mono" type="date" value={dateTo} min={dateFrom || undefined}
+              onChange={e => setDateTo(e.target.value)} title="To (logged on/before)" />
+            {(dateFrom || dateTo) ? <button className="trk-ticker-clear trk-date-clear" onClick={() => { setDateFrom(""); setDateTo(""); }} title="Clear date range">✕</button> : null}
           </div>
           <div className="trk-toggle trk-toggle--sm">
             {PERIODS.map(([id, l]) => <button key={id} className={period === id ? "is-on" : ""} onClick={() => pickPeriod(id)} title={`Show calls from the last ${l}`}>{l}</button>)}
@@ -336,7 +354,7 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
         <span className="mono dim2">{rows.length === 0 ? "0 calls" : `${pg * PAGE + 1}–${Math.min(rows.length, pg * PAGE + PAGE)} of ${rows.length}`} · page {pg + 1}/{pages}</span>
         <button className="trk-page-btn" disabled={pg >= pages - 1} onClick={() => setPage(pg + 1)}>Next ›</button>
       </div>
-      <div className="lab-verdict mono dim2">{rows.length} calls{tickerTokens.length ? ` · ${tickerTokens.join(", ")}` : ""}{srcFilter ? ` · ${SL.SOURCE_BY[srcFilter].label}` : ""} · {period === "all" ? "all history (≤1y)" : period === "ytd" ? "year-to-date" : "last " + period.toUpperCase()} · {metric === "edge" ? "edge vs SPY" : "raw return"}. <b>⤓ Export CSV</b> downloads the filtered set across all {NH} horizons. Click a row → ticker detail.</div>
+      <div className="lab-verdict mono dim2">{rows.length} calls{tickerTokens.length ? ` · ${tickerTokens.join(", ")}` : ""}{srcFilter ? ` · ${SL.SOURCE_BY[srcFilter].label}` : ""} · {(dateFrom || dateTo) ? `${dateFrom || "…"} → ${dateTo || "…"}` : (period === "all" ? "all history (≤1y)" : period === "ytd" ? "year-to-date" : "last " + period.toUpperCase())} · {metric === "edge" ? "edge vs SPY" : "raw return"}. <b>⤓ Export CSV</b> downloads the filtered set across all {NH} horizons. Click a row → ticker detail.</div>
     </div>
   );
 }

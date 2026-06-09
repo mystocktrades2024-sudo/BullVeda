@@ -9168,6 +9168,14 @@ body {
 .trk-ticker-clear { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px;
   border: none; background: transparent; color: var(--ink-3); cursor: pointer; font-size: 11px; line-height: 1; padding: 0; }
 .trk-ticker-clear:hover { color: var(--rd); }
+/* ledger date range */
+.trk-daterange { display: inline-flex; align-items: center; gap: 5px; }
+.trk-date-input { padding: 4px 7px; border: 1px solid var(--line-2); background: var(--bg-2); color: var(--ink-1);
+  font-family: var(--mono); font-size: 10.5px; border-radius: var(--r-1); color-scheme: dark; }
+.trk-date-input:focus { outline: none; border-color: var(--copper); background: var(--bg-1); }
+.trk-date-sep { font-size: 11px; }
+.trk-date-clear { position: static; transform: none; margin-left: 2px; }
+body.light .trk-date-input { color-scheme: light; }
 /* ledger pagination */
 .trk-pager { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 12px 0 4px; }
 .trk-page-btn { padding: 5px 14px; border: 1px solid var(--line-2); background: var(--bg-2); color: var(--ink-1); cursor: pointer; font-family: var(--mono); font-size: 11px; font-weight: 600; border-radius: var(--r-2); transition: all .12s; }
@@ -34849,15 +34857,25 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
   const [view, setView] = useTR("path");
   const [period, setPeriod] = useTR("all");
   const [tickerQ, setTickerQ] = useTR("");
+  const [dateFrom, setDateFrom] = useTR("");
+  const [dateTo, setDateTo] = useTR("");
   const [page, setPage] = useTR(0);
   const PAGE = 25;
   const all = useTRm(() => SL.ledger(metric, srcFilter ? { source: srcFilter } : null).filter((r) => dir === "all" || r.dir === dir), [metric, srcFilter, dir]);
   const ytdDays = Math.floor((Date.now() - new Date((/* @__PURE__ */ new Date()).getFullYear(), 0, 1).getTime()) / 864e5);
   const maxAge = period === "all" ? Infinity : period === "ytd" ? ytdDays : { "1m": 30, "3m": 90, "6m": 180, "1y": 365 }[period];
   const tickerTokens = useTRm(() => tickerQ.toUpperCase().split(/[\s,]+/).filter(Boolean), [tickerQ]);
-  const rows = useTRm(() => all.filter(
-    (r) => r.age <= maxAge && (tickerTokens.length === 0 || tickerTokens.some((tok) => String(r.sym).toUpperCase().startsWith(tok)))
-  ), [all, maxAge, tickerTokens]);
+  const rowDate = (r) => new Date(Date.now() - r.age * 864e5).toISOString().slice(0, 10);
+  const rows = useTRm(() => all.filter((r) => {
+    if (r.age > maxAge) return false;
+    if (tickerTokens.length && !tickerTokens.some((tok) => String(r.sym).toUpperCase().startsWith(tok))) return false;
+    if (dateFrom || dateTo) {
+      const d = rowDate(r);
+      if (dateFrom && d < dateFrom) return false;
+      if (dateTo && d > dateTo) return false;
+    }
+    return true;
+  }), [all, maxAge, tickerTokens, dateFrom, dateTo]);
   const PERIODS = [["1m", "1M"], ["3m", "3M"], ["6m", "6M"], ["1y", "1Y"], ["ytd", "YTD"], ["all", "All"]];
   const [srt, setSrt] = useTR({ col: "age", dir: 1 });
   const sortBy = (col) => setSrt((s) => s.col === col ? { col, dir: -s.dir } : { col, dir: col === "age" ? 1 : -1 });
@@ -34902,7 +34920,7 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
   };
   React.useEffect(() => {
     setPage(0);
-  }, [dir, srcFilter, view, tickerQ, period]);
+  }, [dir, srcFilter, view, tickerQ, period, dateFrom, dateTo]);
   const Sh = ({ col, label, r, cls }) => /* @__PURE__ */ React.createElement("th", { className: `${cls || ""} ${r ? "r" : ""} ${srt.col === col ? "is-active" : ""}`.trim(), style: { cursor: "pointer" }, onClick: () => sortBy(col) }, label, srt.col === col ? /* @__PURE__ */ React.createElement("span", { className: "wsx-arr mono" }, srt.dir > 0 ? "\u25B2" : "\u25BC") : null);
   const NH = SL.HZ.length;
   const exportCSV = () => {
@@ -34921,7 +34939,7 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `track-record_${metric}_${srcFilter || "all"}${tickerTokens.length ? "_" + tickerTokens.join("-") : ""}_${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.csv`;
+    a.download = `track-record_${metric}_${srcFilter || "all"}${tickerTokens.length ? "_" + tickerTokens.join("-") : ""}${dateFrom || dateTo ? `_${dateFrom || "start"}_to_${dateTo || "now"}` : ""}_${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -34947,14 +34965,37 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
       autoCapitalize: "characters",
       title: "Filter the ledger by symbol \u2014 one or many (e.g. NVDA AAPL)"
     }
-  ), tickerQ ? /* @__PURE__ */ React.createElement("button", { className: "trk-ticker-clear", onClick: () => setTickerQ(""), title: "Clear ticker filter" }, "\u2715") : null), /* @__PURE__ */ React.createElement("div", { className: "trk-toggle trk-toggle--sm" }, PERIODS.map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: period === id ? "is-on" : "", onClick: () => pickPeriod(id), title: `Show calls from the last ${l}` }, l))), /* @__PURE__ */ React.createElement("div", { className: "trk-toggle trk-toggle--sm" }, ["all", "long", "short"].map((d) => /* @__PURE__ */ React.createElement("button", { key: d, className: dir === d ? "is-on" : "", onClick: () => setDir(d) }, d))), /* @__PURE__ */ React.createElement("div", { className: "trk-toggle trk-toggle--sm" }, /* @__PURE__ */ React.createElement("button", { className: view === "path" ? "is-on" : "", onClick: () => setView("path") }, "Path"), /* @__PURE__ */ React.createElement("button", { className: view === "full" ? "is-on" : "", onClick: () => setView("full") }, "All horizons")), /* @__PURE__ */ React.createElement("button", { className: "trk-export", onClick: exportCSV, title: "Download every call \xD7 every horizon as CSV (opens in Excel)" }, "\u2913 Export CSV"))), view === "path" ? /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl trk-led" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement(Sh, { col: "age", label: "Logged" }), /* @__PURE__ */ React.createElement(Sh, { col: "age", label: "Date" }), /* @__PURE__ */ React.createElement(Sh, { col: "sym", label: "Symbol" }), /* @__PURE__ */ React.createElement(Sh, { col: "label", label: "Source" }), /* @__PURE__ */ React.createElement(Sh, { col: "dir", label: "Dir" }), /* @__PURE__ */ React.createElement(Sh, { col: "refPrice", label: "Ref px", r: true }), /* @__PURE__ */ React.createElement("th", null, "Forward path"), /* @__PURE__ */ React.createElement(Sh, { col: "last", label: "Latest", r: true }), /* @__PURE__ */ React.createElement(Sh, { col: "maturedN", label: "Matured", r: true }), /* @__PURE__ */ React.createElement(Sh, { col: "status", label: "Status" }))), /* @__PURE__ */ React.createElement("tbody", null, pageRows.map((r) => {
+  ), tickerQ ? /* @__PURE__ */ React.createElement("button", { className: "trk-ticker-clear", onClick: () => setTickerQ(""), title: "Clear ticker filter" }, "\u2715") : null), /* @__PURE__ */ React.createElement("div", { className: "trk-daterange", title: "Filter the ledger by the date a call was logged" }, /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      className: "trk-date-input mono",
+      type: "date",
+      value: dateFrom,
+      max: dateTo || void 0,
+      onChange: (e) => setDateFrom(e.target.value),
+      title: "From (logged on/after)"
+    }
+  ), /* @__PURE__ */ React.createElement("span", { className: "trk-date-sep mono dim2" }, "\u2192"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      className: "trk-date-input mono",
+      type: "date",
+      value: dateTo,
+      min: dateFrom || void 0,
+      onChange: (e) => setDateTo(e.target.value),
+      title: "To (logged on/before)"
+    }
+  ), dateFrom || dateTo ? /* @__PURE__ */ React.createElement("button", { className: "trk-ticker-clear trk-date-clear", onClick: () => {
+    setDateFrom("");
+    setDateTo("");
+  }, title: "Clear date range" }, "\u2715") : null), /* @__PURE__ */ React.createElement("div", { className: "trk-toggle trk-toggle--sm" }, PERIODS.map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: period === id ? "is-on" : "", onClick: () => pickPeriod(id), title: `Show calls from the last ${l}` }, l))), /* @__PURE__ */ React.createElement("div", { className: "trk-toggle trk-toggle--sm" }, ["all", "long", "short"].map((d) => /* @__PURE__ */ React.createElement("button", { key: d, className: dir === d ? "is-on" : "", onClick: () => setDir(d) }, d))), /* @__PURE__ */ React.createElement("div", { className: "trk-toggle trk-toggle--sm" }, /* @__PURE__ */ React.createElement("button", { className: view === "path" ? "is-on" : "", onClick: () => setView("path") }, "Path"), /* @__PURE__ */ React.createElement("button", { className: view === "full" ? "is-on" : "", onClick: () => setView("full") }, "All horizons")), /* @__PURE__ */ React.createElement("button", { className: "trk-export", onClick: exportCSV, title: "Download every call \xD7 every horizon as CSV (opens in Excel)" }, "\u2913 Export CSV"))), view === "path" ? /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl trk-led" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement(Sh, { col: "age", label: "Logged" }), /* @__PURE__ */ React.createElement(Sh, { col: "age", label: "Date" }), /* @__PURE__ */ React.createElement(Sh, { col: "sym", label: "Symbol" }), /* @__PURE__ */ React.createElement(Sh, { col: "label", label: "Source" }), /* @__PURE__ */ React.createElement(Sh, { col: "dir", label: "Dir" }), /* @__PURE__ */ React.createElement(Sh, { col: "refPrice", label: "Ref px", r: true }), /* @__PURE__ */ React.createElement("th", null, "Forward path"), /* @__PURE__ */ React.createElement(Sh, { col: "last", label: "Latest", r: true }), /* @__PURE__ */ React.createElement(Sh, { col: "maturedN", label: "Matured", r: true }), /* @__PURE__ */ React.createElement(Sh, { col: "status", label: "Status" }))), /* @__PURE__ */ React.createElement("tbody", null, pageRows.map((r) => {
     const d = new Date(Date.now() - r.age * 864e5);
     const dStr = d.toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "2-digit" });
     return /* @__PURE__ */ React.createElement("tr", { key: r.id, onClick: () => onTicker && onTicker(r.sym) }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, r.age, "d ago"), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, dStr), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("b", null, r.sym)), /* @__PURE__ */ React.createElement("td", { className: "dim2" }, r.label), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: r.dir === "long" ? "up" : "dn" }, r.dir === "long" ? "LONG" : "SHORT")), /* @__PURE__ */ React.createElement("td", { className: "r tabular dim" }, "$", r.refPrice.toFixed(2)), /* @__PURE__ */ React.createElement("td", null, spark(r.path) || /* @__PURE__ */ React.createElement("span", { className: "trk-mat-lbl mono dim2" }, "maturing\u2026")), /* @__PURE__ */ React.createElement("td", { className: `r tabular ${r.last && r.last.v >= 0 ? "up" : "dn"}` }, r.last ? /* @__PURE__ */ React.createElement("b", null, trPct(r.last.v)) : "\u2014", /* @__PURE__ */ React.createElement("span", { className: "dim2 mono", style: { fontSize: 9 } }, " ", r.last ? r.last.hz || "" : "")), /* @__PURE__ */ React.createElement("td", { className: "r tabular dim2" }, r.maturedN, "/", NH), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `trk-status trk-status--${r.status}` }, r.status)));
   }))) : /* @__PURE__ */ React.createElement("div", { className: "trk-full-wrap" }, /* @__PURE__ */ React.createElement("table", { className: "trk-full" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement(Sh, { col: "age", label: "Date", cls: "trk-full-sticky" }), /* @__PURE__ */ React.createElement(Sh, { col: "sym", label: "Sym", cls: "trk-full-sticky2" }), /* @__PURE__ */ React.createElement(Sh, { col: "label", label: "Src" }), /* @__PURE__ */ React.createElement(Sh, { col: "dir", label: "Dir" }), SL.HZ.map((h) => /* @__PURE__ */ React.createElement(Sh, { key: h.id, col: h.id, label: h.label, cls: "trk-full-hz" })))), /* @__PURE__ */ React.createElement("tbody", null, pageRows.map((r) => {
     const dStr = new Date(Date.now() - r.age * 864e5).toLocaleDateString("en-US", { day: "2-digit", month: "short" });
     return /* @__PURE__ */ React.createElement("tr", { key: r.id, onClick: () => onTicker && onTicker(r.sym) }, /* @__PURE__ */ React.createElement("td", { className: "trk-full-sticky mono dim2" }, dStr), /* @__PURE__ */ React.createElement("td", { className: "trk-full-sticky2" }, /* @__PURE__ */ React.createElement("b", null, r.sym)), /* @__PURE__ */ React.createElement("td", { className: "dim2", style: { fontSize: 10 } }, r.label), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `mono ${r.dir === "long" ? "up" : "dn"}`, style: { fontSize: 10 } }, r.dir === "long" ? "L" : "S")), r.path.map((p, i) => /* @__PURE__ */ React.createElement("td", { key: i, className: "trk-full-cell", style: { background: p.mature ? heatColor(p.v, 6) : "var(--bg-2)" }, title: p.mature ? `${SL.HZ[i].label}: ${trPct(p.v)}` : "maturing" }, p.mature ? (p.v >= 0 ? "+" : "\u2212") + Math.abs(p.v).toFixed(1) : "\xB7")));
-  })))), /* @__PURE__ */ React.createElement("div", { className: "trk-pager" }, /* @__PURE__ */ React.createElement("button", { className: "trk-page-btn", disabled: pg <= 0, onClick: () => setPage(pg - 1) }, "\u2039 Prev"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, rows.length === 0 ? "0 calls" : `${pg * PAGE + 1}\u2013${Math.min(rows.length, pg * PAGE + PAGE)} of ${rows.length}`, " \xB7 page ", pg + 1, "/", pages), /* @__PURE__ */ React.createElement("button", { className: "trk-page-btn", disabled: pg >= pages - 1, onClick: () => setPage(pg + 1) }, "Next \u203A")), /* @__PURE__ */ React.createElement("div", { className: "lab-verdict mono dim2" }, rows.length, " calls", tickerTokens.length ? ` \xB7 ${tickerTokens.join(", ")}` : "", srcFilter ? ` \xB7 ${SL.SOURCE_BY[srcFilter].label}` : "", " \xB7 ", period === "all" ? "all history (\u22641y)" : period === "ytd" ? "year-to-date" : "last " + period.toUpperCase(), " \xB7 ", metric === "edge" ? "edge vs SPY" : "raw return", ". ", /* @__PURE__ */ React.createElement("b", null, "\u2913 Export CSV"), " downloads the filtered set across all ", NH, " horizons. Click a row \u2192 ticker detail."));
+  })))), /* @__PURE__ */ React.createElement("div", { className: "trk-pager" }, /* @__PURE__ */ React.createElement("button", { className: "trk-page-btn", disabled: pg <= 0, onClick: () => setPage(pg - 1) }, "\u2039 Prev"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, rows.length === 0 ? "0 calls" : `${pg * PAGE + 1}\u2013${Math.min(rows.length, pg * PAGE + PAGE)} of ${rows.length}`, " \xB7 page ", pg + 1, "/", pages), /* @__PURE__ */ React.createElement("button", { className: "trk-page-btn", disabled: pg >= pages - 1, onClick: () => setPage(pg + 1) }, "Next \u203A")), /* @__PURE__ */ React.createElement("div", { className: "lab-verdict mono dim2" }, rows.length, " calls", tickerTokens.length ? ` \xB7 ${tickerTokens.join(", ")}` : "", srcFilter ? ` \xB7 ${SL.SOURCE_BY[srcFilter].label}` : "", " \xB7 ", dateFrom || dateTo ? `${dateFrom || "\u2026"} \u2192 ${dateTo || "\u2026"}` : period === "all" ? "all history (\u22641y)" : period === "ytd" ? "year-to-date" : "last " + period.toUpperCase(), " \xB7 ", metric === "edge" ? "edge vs SPY" : "raw return", ". ", /* @__PURE__ */ React.createElement("b", null, "\u2913 Export CSV"), " downloads the filtered set across all ", NH, " horizons. Click a row \u2192 ticker detail."));
 }
 function CalibrationView({ SL, metric }) {
   const cal = useTRm(() => SL.calibration(metric), [metric]);
