@@ -55,7 +55,7 @@ def load_trades():
                 exit_d = entry_d + pd.Timedelta(days=int(hold * 1.5)).to_pytimedelta()
             except (TypeError, ValueError):
                 continue
-            if abs(pnl) > 1.0: continue
+            if pnl != pnl or abs(pnl) > 1.0: continue  # pnl != pnl drops NaN (open/unrealized rows)
             trades.append({
                 "ticker": t.get("ticker"),
                 "setup": t.get("setup_family") or t.get("strategy") or "?",
@@ -124,11 +124,24 @@ def main():
 
     # Aggregate OLS: pnl = alpha + beta_mkt × market + beta_mom × mom_proxy
     import statsmodels.api as sm
-    pnls = np.array([t["pnl"] for t in decomposed])
-    mkt = np.array([t["market"] for t in decomposed])
-    mom = np.array([t["mom_proxy"] for t in decomposed])
+
+    def _finite(*arrs):
+        """Drop any row where pnl or a factor is non-finite (NaN/inf) so a single
+        bad row (e.g. a trade whose dates fall outside SPY history → NaN factor)
+        can't poison the whole regression — it previously NaN'd the high-n setups."""
+        mask = np.ones(len(arrs[0]), dtype=bool)
+        for a in arrs:
+            mask &= np.isfinite(a)
+        return [a[mask] for a in arrs], int(mask.sum())
+
+    pnls = np.array([t["pnl"] for t in decomposed], dtype=float)
+    mkt = np.array([t["market"] for t in decomposed], dtype=float)
+    mom = np.array([t["mom_proxy"] for t in decomposed], dtype=float)
+    (pnls, mkt, mom), _nfit = _finite(pnls, mkt, mom)
     X = sm.add_constant(np.column_stack([mkt, mom]))
     model = sm.OLS(pnls, X).fit()
+    if _nfit < len(decomposed):
+        print(f"  (dropped {len(decomposed) - _nfit} non-finite rows from regression)")
 
     print("=" * 80)
     print("  AGGREGATE FACTOR ATTRIBUTION (Market + Tech-Momentum proxy)")
@@ -154,9 +167,11 @@ def main():
         by_setup[t["setup"]].append(t)
     for setup, group in sorted(by_setup.items(), key=lambda x: -len(x[1])):
         if len(group) < 20: continue
-        p = np.array([t["pnl"] for t in group])
-        m = np.array([t["market"] for t in group])
-        mo = np.array([t["mom_proxy"] for t in group])
+        p = np.array([t["pnl"] for t in group], dtype=float)
+        m = np.array([t["market"] for t in group], dtype=float)
+        mo = np.array([t["mom_proxy"] for t in group], dtype=float)
+        (p, m, mo), _ng = _finite(p, m, mo)
+        if _ng < 20: continue
         X = sm.add_constant(np.column_stack([m, mo]))
         try:
             mdl = sm.OLS(p, X).fit()
@@ -178,9 +193,11 @@ def main():
         by_regime[t["regime"] or "?"].append(t)
     for regime, group in sorted(by_regime.items(), key=lambda x: -len(x[1])):
         if len(group) < 20: continue
-        p = np.array([t["pnl"] for t in group])
-        m = np.array([t["market"] for t in group])
-        mo = np.array([t["mom_proxy"] for t in group])
+        p = np.array([t["pnl"] for t in group], dtype=float)
+        m = np.array([t["market"] for t in group], dtype=float)
+        mo = np.array([t["mom_proxy"] for t in group], dtype=float)
+        (p, m, mo), _ng = _finite(p, m, mo)
+        if _ng < 20: continue
         X = sm.add_constant(np.column_stack([m, mo]))
         try:
             mdl = sm.OLS(p, X).fit()
