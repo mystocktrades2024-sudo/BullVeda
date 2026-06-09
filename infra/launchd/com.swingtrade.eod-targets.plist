@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.swingtrade.eod-targets</string>
+
+    <!-- Daily-Clock rebuild · 7:30 PM PT (Mon-Fri).
+         Structural targets (T1/T2/T3) are a deterministic function of the FINAL
+         daily bar, so compute them ONCE at EOD when the bar is fresh and the 4H
+         is freshest — NOT crammed into the 3 AM pre-market pass. This moves the
+         heavy ~28-min Schwab-4H lift (≈8.3k EODHD + ≈2.8k Schwab-4H) off the
+         pre-market critical path.
+
+         Runs: precompute_top1000.py --phase eod --wait-for-eod
+           · --phase eod  → structural targets (×3 modes) + SMC only (the
+             bar-dependent heavy lift). Fundamentals are deferred to the morning.
+           · --wait-for-eod → polls EODHD (~1 cheap SPY EOD call / 15 min, ≤3h)
+             until TODAY's EOD bar is posted, then warms. If the bar never posts
+             (holiday / EODHD delay) it logs "EOD bar not posted, skipping" and
+             exits cleanly — NEVER computing targets on a stale bar (Open Risk #3).
+
+         HEAVY-labeled in launchd_wrapper.sh → guard_heavy_job.sh defers it if a
+         swing scan or another heavy job is running. Evening ordering:
+           ML close-loop (7:00 PM) → EOD targets (7:30 PM) → audit (EOD rebuild).
+         The HEAVY guard also serializes against ML close-loop so they don't
+         contend for the EODHD/min token bucket (Open Risk #2).
+
+         Throttling is client-enforced (EODHD 950 req/min bucket + daily-quota
+         guard; Schwab-4H paced 100/min w/ 429 backoff). Runs without --force so
+         12h-fresh caches are skipped. -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>1</integer></dict>
+        <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>2</integer></dict>
+        <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>3</integer></dict>
+        <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>4</integer></dict>
+        <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>5</integer></dict>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Volumes/MyMacDisk/Claude Skills/SwingTrade</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Volumes/MyMacDisk/Claude Skills/SwingTrade/scripts/launchd_wrapper.sh</string>
+        <string>com.swingtrade.eod-targets</string>
+        <string>/usr/bin/python3</string>
+        <string>scripts/precompute_top1000.py</string>
+        <string>--phase</string>
+        <string>eod</string>
+        <string>--wait-for-eod</string>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/eod-targets.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/eod-targets.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <!-- RunAtLoad=false: don't fire on install, only on schedule -->
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

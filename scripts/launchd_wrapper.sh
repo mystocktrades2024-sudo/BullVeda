@@ -38,6 +38,9 @@ HEAVY_LABELS=(
   "com.swingtrade.weekly-backtest"
   "com.swingtrade.enrich-nightly"
   "com.swingtrade.precompute-prewarm"
+  "com.swingtrade.eod-targets"
+  "com.swingtrade.strategy-warm"
+  "com.swingtrade.rolling-tail"
 )
 for heavy in "${HEAVY_LABELS[@]}"; do
   if [ "$LABEL" = "$heavy" ]; then
@@ -45,6 +48,32 @@ for heavy in "${HEAVY_LABELS[@]}"; do
     break
   fi
 done
+
+# 2026-06-09: Evening EODHD sequencer (Daily-Clock Open Risk #2).
+# The evening stacks ML close-loop (7:00 PM, EODHD) → EOD targets (7:30 PM,
+# EODHD) → audit. To avoid EODHD/min token-bucket contention, the EOD-targets
+# job WAITS (not skips) until ML close-loop and the audit-ledger rebuild are
+# done, so the three run in sequence rather than parallel. Bounded wait so a
+# hung predecessor can't pin EOD targets forever.
+if [ "$LABEL" = "com.swingtrade.eod-targets" ]; then
+  SEQ_WAIT_PATTERNS=(
+    "scripts/ml_close_loop_runner\.sh"
+    "scripts/ml_close_loop_labels\.py"
+    "infra/prototype/build_audit_ledger\.py"
+  )
+  SEQ_MAX=1800   # 30 min ceiling
+  SEQ_WAITED=0
+  while [ "$SEQ_WAITED" -lt "$SEQ_MAX" ]; do
+    BUSY=""
+    for pat in "${SEQ_WAIT_PATTERNS[@]}"; do
+      if pgrep -f "$pat" > /dev/null 2>&1; then BUSY="$pat"; break; fi
+    done
+    [ -z "$BUSY" ] && break
+    echo "[$(date -u +%FT%TZ)] $LABEL: WAIT · evening predecessor active ($BUSY) · waited=${SEQ_WAITED}s" >> "$LOG"
+    sleep 60
+    SEQ_WAITED=$((SEQ_WAITED + 60))
+  done
+fi
 
 START_EPOCH=$(date +%s)
 START_ISO=$(date -u +"%Y-%m-%dT%H:%M:%SZ")

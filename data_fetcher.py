@@ -381,6 +381,16 @@ def get_russell2000() -> list[str]:
     return _eodhd_universe("RUT") or []
 
 
+def get_russell3000() -> list[str]:
+    """Russell 3000 constituents via EODHD (index code RUA → RUA.INDX).
+
+    R3000 ≈ R1000 ∪ R2000, both of which the scan already fetches, so this is
+    largely redundant — provided for authoritative completeness. Wired into the
+    scan union behind config flag universe.include_russell3000 (default FALSE).
+    One cached call (≈10 credits)."""
+    return _eodhd_universe("RUA") or []
+
+
 # 2026-05-21 · Tier-1 universe expansion · MID + SML + NDX
 # All three are EODHD-native index constituents — cheap (1 call each, cached).
 # These fill the structural gap in the existing SP500+R1000+R2000 universe:
@@ -7438,101 +7448,202 @@ def get_finviz_bulk() -> dict[str, dict]:
             name = futs[fut]
             frames[name] = fut.result()
 
-    # Column mappings per view
-    _col_map: dict[str, dict[str, str]] = {
-        "valuation": {
-            "EPS Growth This Year": "eps_growth_this_yr",
-            "EPS Growth Next Year": "eps_growth_next_yr",
-            "PEG":                  "peg",
-            "Forward P/E":          "fwd_pe",
-            "P/S":                  "ps",
-        },
-        "ownership": {
-            "Shares Float":          "shares_float",
-            "Short Float":           "short_float_pct",
-            "Short Ratio":           "short_ratio",
-            "Insider Ownership":     "insider_own_pct",
-            "Institutional Ownership": "inst_own_pct",
-        },
-        "performance": {
-            "Relative Volume":         "rel_volume",
-            "Average Volume":          "avg_volume",
-            "Performance (Week)":      "perf_week_pct",
-            "Performance (Month)":     "perf_month_pct",
-            "Performance (Quarter)":   "perf_quarter_pct",
-            "Performance (Half Year)": "perf_half_pct",
-            "Performance (Year)":      "perf_year_pct",
-            "Performance (YTD)":       "perf_ytd_pct",
-            "Volatility (Week)":       "volatility_w_pct",
-            "Change":                  "change_pct",
-            "Gap":                     "gap_pct",
-        },
-        "financial": {
-            "Return on Equity":      "roe_pct",
-            "Return on Assets":      "roa_pct",
-            "Gross Margin":          "gross_margin_pct",
-            "Operating Margin":      "oper_margin_pct",
-            "Profit Margin":         "profit_margin_pct",
-            "Current Ratio":         "current_ratio",
-            "Earnings Date":         "earnings_date",
-        },
-        "technical": {
-            "Beta":                  "beta",
-            "Average True Range":    "atr",
-            "Relative Strength Index (14)": "rsi14",
-            "52-Week High":          "high_52w",
-            "52-Week Low":           "low_52w",
-            "20-Day Simple Moving Average": "sma20_pct",
-            "50-Day Simple Moving Average": "sma50_pct",
-            "200-Day Simple Moving Average": "sma200_pct",
-        },
-    }
+    # Merge + parse all views (shared with get_finviz_universe)
+    merged = _finviz_merge_views(frames)
 
-    # Merge all views into one dict keyed by ticker
+    if merged:
+        _cache_write(cache_key, merged)
+        log.info(f"FINVIZ bulk: fetched {len(merged)} tickers across {len(frames)} views")
+    return merged
+
+
+# Shared column maps + numeric-field sets for any merged-views Finviz fetch
+# (get_finviz_bulk and get_finviz_universe). Kept module-level so both callers
+# parse identically.
+_FINVIZ_COL_MAP: dict[str, dict[str, str]] = {
+    "valuation": {
+        "EPS Growth This Year": "eps_growth_this_yr",
+        "EPS Growth Next Year": "eps_growth_next_yr",
+        "PEG":                  "peg",
+        "Forward P/E":          "fwd_pe",
+        "P/S":                  "ps",
+    },
+    "ownership": {
+        "Shares Float":            "shares_float",
+        "Short Float":             "short_float_pct",
+        "Short Ratio":             "short_ratio",
+        "Insider Ownership":       "insider_own_pct",
+        "Institutional Ownership": "inst_own_pct",
+    },
+    "performance": {
+        "Relative Volume":         "rel_volume",
+        "Average Volume":          "avg_volume",
+        "Performance (Week)":      "perf_week_pct",
+        "Performance (Month)":     "perf_month_pct",
+        "Performance (Quarter)":   "perf_quarter_pct",
+        "Performance (Half Year)": "perf_half_pct",
+        "Performance (Year)":      "perf_year_pct",
+        "Performance (YTD)":       "perf_ytd_pct",
+        "Volatility (Week)":       "volatility_w_pct",
+        "Change":                  "change_pct",
+        "Gap":                     "gap_pct",
+    },
+    "financial": {
+        "Return on Equity": "roe_pct",
+        "Return on Assets": "roa_pct",
+        "Gross Margin":     "gross_margin_pct",
+        "Operating Margin": "oper_margin_pct",
+        "Profit Margin":    "profit_margin_pct",
+        "Current Ratio":    "current_ratio",
+        "Earnings Date":    "earnings_date",
+    },
+    "technical": {
+        "Beta":               "beta",
+        "Average True Range": "atr",
+        "Relative Strength Index (14)": "rsi14",
+        "52-Week High":       "high_52w",
+        "52-Week Low":        "low_52w",
+        "20-Day Simple Moving Average":  "sma20_pct",
+        "50-Day Simple Moving Average":  "sma50_pct",
+        "200-Day Simple Moving Average": "sma200_pct",
+    },
+}
+_FINVIZ_PCT_FIELDS = {
+    "eps_growth_this_yr", "eps_growth_next_yr", "short_float_pct",
+    "insider_own_pct", "inst_own_pct", "perf_week_pct", "perf_month_pct",
+    "perf_quarter_pct", "perf_half_pct", "perf_year_pct", "perf_ytd_pct",
+    "change_pct", "gap_pct", "volatility_w_pct", "roe_pct", "roa_pct",
+    "gross_margin_pct", "oper_margin_pct", "profit_margin_pct",
+    "sma20_pct", "sma50_pct", "sma200_pct",
+}
+_FINVIZ_FLOAT_FIELDS = {
+    "peg", "fwd_pe", "ps", "shares_float", "short_ratio", "rel_volume",
+    "avg_volume", "current_ratio", "beta", "atr", "rsi14", "high_52w", "low_52w",
+}
+
+
+def _finviz_merge_views(frames: dict[str, "pd.DataFrame | None"]) -> dict[str, dict]:
+    """Merge the 5 Finviz export views into one dict keyed by ticker, parsing
+    numeric types. Shared by get_finviz_bulk + get_finviz_universe."""
     merged: dict[str, dict] = {}
     for view_name, df in frames.items():
         if df is None:
             continue
-        col_map = _col_map.get(view_name, {})
+        col_map = _FINVIZ_COL_MAP.get(view_name, {})
         for ticker, row in df.iterrows():
             if ticker not in merged:
                 merged[ticker] = {}
             for src_col, dst_col in col_map.items():
-                # Try exact column name first; FINVIZ may add spaces
                 val = row.get(src_col)
                 if val is None:
-                    # Try case-insensitive partial match
                     for c in df.columns:
                         if src_col.lower() in c.lower():
                             val = row.get(c)
                             break
                 if val is not None and str(val).strip() not in ("-", "N/A", ""):
                     merged[ticker][dst_col] = str(val).strip()
-
-    # Parse numeric types
-    pct_fields = {
-        "eps_growth_this_yr", "eps_growth_next_yr", "short_float_pct",
-        "insider_own_pct", "inst_own_pct", "perf_week_pct", "perf_month_pct",
-        "perf_quarter_pct", "perf_half_pct", "perf_year_pct", "perf_ytd_pct",
-        "change_pct", "gap_pct",
-        "volatility_w_pct", "roe_pct", "roa_pct", "gross_margin_pct",
-        "oper_margin_pct", "profit_margin_pct", "sma20_pct", "sma50_pct", "sma200_pct",
-    }
-    float_fields = {
-        "peg", "fwd_pe", "ps", "shares_float", "short_ratio", "rel_volume",
-        "avg_volume", "current_ratio", "beta", "atr", "rsi14", "high_52w", "low_52w",
-    }
     for ticker, data in merged.items():
-        for f in pct_fields:
+        for f in _FINVIZ_PCT_FIELDS:
             if f in data:
                 data[f] = _finviz_pct(data[f])
-        for f in float_fields:
+        for f in _FINVIZ_FLOAT_FIELDS:
             if f in data:
                 data[f] = _finviz_float(data[f])
+    return merged
 
+
+def get_finviz_universe(min_dollar_vol: float = 5_000_000,
+                        min_price: float = 5.0,
+                        max_price: float | None = None) -> dict[str, dict]:
+    """
+    Full-US-liquid-universe Finviz Elite export — the wider sibling of
+    get_finviz_bulk(). Where get_finviz_bulk() pulls every screener row
+    (~11k tickers incl. illiquid junk), this applies a server-side liquidity
+    floor (avg volume + price) so it returns the full LIQUID US universe with
+    the same ~25 merged fields per ticker. This offloads EODHD fundamentals for
+    far more names than the index-member base.
+
+    The Finviz export endpoint returns the ENTIRE filtered result set in a
+    single CSV call (it ignores the `r=` offset param) — so no true pagination
+    is required. We still fetch the 5 column-views, each as one call, and run
+    them with a small inter-call sleep to respect Finviz fair-use.
+
+    Args:
+        min_dollar_vol: approximate $ daily-volume floor. Mapped to the closest
+            Finviz avg-share-volume bucket (Finviz has no native $-volume filter;
+            we translate $vol → share-vol using min_price as the divisor, then
+            snap to the nearest documented `sh_avgvol_o*` bucket).
+        min_price: hard price floor (`sh_price_o*` bucket).
+        max_price: optional price ceiling (`sh_price_u*` bucket).
+
+    Returns: dict keyed by uppercase ticker → merged row (same schema as
+        get_finviz_bulk). Cache TTL 4h.
+    """
+    today = datetime.now().strftime("%Y%m%d")
+    cache_key = f"finviz_universe_{int(min_dollar_vol)}_{int(min_price)}_{int(max_price or 0)}_{today}"
+    cached = _cache_read(cache_key, ttl_seconds=4 * 3600)
+    if cached:
+        return cached
+
+    token = _finviz_token()
+    if not token:
+        log.warning("FINVIZ: no token configured — skipping universe fetch")
+        return {}
+
+    # ── Translate the requested floors into Finviz filter codes ──────────────
+    # Finviz avg-volume buckets (shares): documented values for sh_avgvol_o*.
+    _AVGVOL_BUCKETS = [50, 100, 200, 300, 400, 500, 750, 1000, 2000]  # in thousands
+    # Approx share-vol floor implied by the $-vol target at the price floor.
+    _share_floor_k = (min_dollar_vol / max(min_price, 1.0)) / 1000.0
+    _bucket = max([b for b in _AVGVOL_BUCKETS if b <= _share_floor_k] or [_AVGVOL_BUCKETS[0]])
+    _filters = ["ind_stocksonly", f"sh_avgvol_o{_bucket}"]
+    # Price buckets — snap to documented sh_price_o* / sh_price_u* values.
+    _PRICE_BUCKETS = [1, 2, 3, 4, 5, 7, 10, 15, 20, 30, 40, 50]
+    _pf = max([b for b in _PRICE_BUCKETS if b <= min_price] or [1])
+    _filters.append(f"sh_price_o{_pf}")
+    if max_price:
+        _pc = min([b for b in _PRICE_BUCKETS if b >= max_price] or [_PRICE_BUCKETS[-1]])
+        _filters.append(f"sh_price_u{_pc}")
+    f_param = ",".join(_filters)
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "Accept": "text/csv,*/*",
+        "Referer": "https://elite.finviz.com/screener.ashx",
+    }
+
+    def _fetch_view(view_id: int) -> "pd.DataFrame | None":
+        url = f"{_FINVIZ_BASE}/export.ashx"
+        params = {"v": view_id, "f": f_param, "auth": token}
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=45)
+            if r.status_code != 200:
+                log.warning(f"FINVIZ universe view {view_id}: HTTP {r.status_code}")
+                return None
+            from io import StringIO
+            df = pd.read_csv(StringIO(r.text))
+            if "Ticker" not in df.columns:
+                log.warning(f"FINVIZ universe view {view_id}: no Ticker column")
+                return None
+            df["Ticker"] = df["Ticker"].str.upper().str.strip()
+            return df.set_index("Ticker")
+        except Exception as e:
+            log.warning(f"FINVIZ universe view {view_id}: {e}")
+            return None
+
+    # Sequential with a small fair-use sleep between calls (not parallel — this
+    # is a heavier full-universe pull; courteous pacing over raw speed).
+    frames: dict[str, "pd.DataFrame | None"] = {}
+    for i, (name, vid) in enumerate(_FINVIZ_VIEWS.items()):
+        if i:
+            time.sleep(0.6)  # Finviz fair-use: small gap between page pulls
+        frames[name] = _fetch_view(vid)
+
+    merged = _finviz_merge_views(frames)
     if merged:
         _cache_write(cache_key, merged)
-        log.info(f"FINVIZ bulk: fetched {len(merged)} tickers across {len(frames)} views")
+        log.info(f"FINVIZ universe: fetched {len(merged)} liquid tickers "
+                 f"(filters: {f_param}) across {len(frames)} views")
     return merged
 
 
@@ -7701,6 +7812,29 @@ def get_finviz_quote(ticker: str) -> pd.DataFrame | None:
 _FAILOVER_COUNTS = {"eodhd": 0, "archive": 0, "yfinance": 0, "failed": 0}
 
 
+def _record_failover_success(ticker: str) -> None:
+    """Clear any in-progress delisting-failure streak for `ticker`.
+
+    Wrapped so a missing/disabled registry never breaks a fetch. Called on any
+    successful tier (eodhd / schwab / archive)."""
+    try:
+        import delisted_registry as _dr
+        _dr.record_success(ticker)
+    except Exception:
+        pass
+
+
+def _record_failover_newly_tombstoned(ticker: str) -> bool:
+    """Record an all-tier failure; return True iff this flipped it to tombstoned.
+
+    Wrapped so a missing/disabled registry never breaks a fetch."""
+    try:
+        import delisted_registry as _dr
+        return bool(_dr.record_failure(ticker))
+    except Exception:
+        return False
+
+
 def get_polygon_ohlcv(ticker, days=400, timespan="day", **kwargs):
     """Back-compat shim for callers (backtest.py) that pre-date the EODHD migration.
     Routes to fetch_ohlcv_with_failover and returns just the dataframe.
@@ -7749,6 +7883,7 @@ def fetch_ohlcv_with_failover(ticker: str, days: int = 400) -> tuple[pd.DataFram
                     "close": "Close", "adjusted_close": "Adj Close", "volume": "Volume",
                 })
                 _FAILOVER_COUNTS["eodhd"] += 1
+                _record_failover_success(ticker)
                 return df, "eodhd"
         except Exception as e:
             log.debug(f"[failover] {ticker}: eodhd error — {e}")
@@ -7772,6 +7907,7 @@ def fetch_ohlcv_with_failover(ticker: str, days: int = 400) -> tuple[pd.DataFram
                 if len(df) >= 20:
                     _FAILOVER_COUNTS["schwab"] = _FAILOVER_COUNTS.get("schwab", 0) + 1
                     log.info(f"  [failover] {ticker}: schwab pricehistory (eodhd failed)")
+                    _record_failover_success(ticker)
                     return df, "schwab"
     except Exception as e:
         log.debug(f"[failover] {ticker}: schwab pricehistory error — {e}")
@@ -7784,11 +7920,25 @@ def fetch_ohlcv_with_failover(ticker: str, days: int = 400) -> tuple[pd.DataFram
             if df is not None and len(df) >= 20:
                 _FAILOVER_COUNTS["archive"] += 1
                 log.info(f"  [failover] {ticker}: archive fallback (eodhd+schwab failed)")
+                # Archive is a successful (if stale) read — do NOT count it toward
+                # the delisting streak: a name in our archive is not delisted, it
+                # just couldn't be reached live this cycle.
+                _record_failover_success(ticker)
                 return df, "archive"
     except Exception as e:
         log.debug(f"[failover] {ticker}: archive error — {e}")
 
     _FAILOVER_COUNTS["failed"] += 1
+    # All tiers (live + archive) failed → record toward the delisting streak.
+    # After N consecutive such cycles the ticker is tombstoned and the universe
+    # stops re-fetching it (history is untouched). See delisted_registry.py.
+    try:
+        if _record_failover_newly_tombstoned(ticker):
+            log.warning(f"  [failover] {ticker}: TOMBSTONED — "
+                        f"consecutive all-tier failures hit threshold; "
+                        f"will be skipped until retry window (data/delisted_tickers.json)")
+    except Exception as _e:
+        log.debug(f"[failover] {ticker}: tombstone record error — {_e}")
     return None, "failed"
 
 

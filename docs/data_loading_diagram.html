@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SwingTrade — Data Loading & Execution Baseline</title>
+<style>
+  :root{
+    --bg:#0a0d0c; --panel:#111614; --panel2:#0e1311; --ink:#e6ece8; --dim:#8a9690;
+    --line:#1d2823; --lead:#3fb98f; --lead2:#2a8f6c; --amber:#e0a13c; --red:#e0625a;
+    --blue:#5aa6e0; --violet:#a98fe0; --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#0e1512,#0a0d0c);
+    color:var(--ink);font:14px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1160px;margin:0 auto;padding:34px 28px 90px}
+  h1{font-size:25px;font-weight:700;letter-spacing:-.02em;margin:0 0 4px;text-align:center}
+  .tag{text-align:center;color:var(--dim);font-family:var(--mono);font-size:12px;margin-bottom:22px}
+  /* tabs */
+  .tabs{display:flex;gap:6px;justify-content:center;margin-bottom:28px;border-bottom:1px solid var(--line);padding-bottom:0}
+  .tab{padding:10px 22px;font-weight:600;font-size:13.5px;color:var(--dim);cursor:pointer;
+    border:1px solid transparent;border-bottom:2px solid transparent;border-radius:8px 8px 0 0;user-select:none}
+  .tab:hover{color:var(--ink)}
+  .tab.on{color:var(--lead);border-color:var(--line);border-bottom:2px solid var(--lead);background:var(--panel)}
+  .page{display:none} .page.on{display:block}
+  .section-h{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--lead);margin:34px 0 14px;display:flex;align-items:center;gap:10px}
+  .section-h::after{content:"";flex:1;height:1px;background:var(--line)}
+  .section-h:first-of-type{margin-top:6px}
+  /* supplier cards */
+  .suppliers{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+  .sup{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px;border-top:3px solid var(--c,var(--lead))}
+  .sup .nm{font-weight:700;font-size:13.5px}
+  .sup .gives{color:var(--dim);font-size:11.5px;margin:6px 0 8px;min-height:54px}
+  .sup .lim{font-family:var(--mono);font-size:10.5px;color:var(--c,var(--lead));font-weight:600}
+  .e{--c:var(--lead)} .s{--c:var(--blue)} .fv{--c:var(--violet)} .a{--c:#c98} .f{--c:var(--amber)} .z{--c:#9a8}
+  /* trick */
+  .trick{display:flex;gap:18px;align-items:center;background:linear-gradient(135deg,rgba(63,185,143,.09),rgba(63,185,143,.02));
+    border:1px solid var(--lead2);border-radius:14px;padding:16px 22px}
+  .trick .big{font-family:var(--mono);font-size:26px;font-weight:700;color:var(--lead);white-space:nowrap}
+  .trick .vs{color:var(--red);text-decoration:line-through;font-family:var(--mono);font-size:12px}
+  .trick p{margin:0;font-size:13px}
+  /* timeline */
+  .tl{display:grid;grid-template-columns:repeat(4,1fr)}
+  .ph{background:var(--panel);border:1px solid var(--line);padding:15px;position:relative}
+  .ph:first-child{border-radius:12px 0 0 12px}.ph:last-child{border-radius:0 12px 12px 0}.ph+.ph{border-left:none}
+  .ph .time{font-family:var(--mono);font-size:11px;color:var(--amber);font-weight:700}
+  .ph .ttl{font-weight:700;font-size:13.5px;margin:4px 0 8px}
+  .ph .desc{color:var(--dim);font-size:11.5px;min-height:56px}
+  .ph .set{font-family:var(--mono);font-size:10.5px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:5px 8px;margin-top:8px}
+  .ph .api{margin-top:9px;display:flex;gap:5px;flex-wrap:wrap}
+  .arrow{position:absolute;right:-9px;top:50%;transform:translateY(-50%);z-index:2;width:16px;height:16px;background:var(--lead);clip-path:polygon(0 0,100% 50%,0 100%);opacity:.6}
+  .chip{display:inline-block;font-family:var(--mono);font-size:9.5px;font-weight:600;padding:2px 7px;border-radius:20px;border:1px solid}
+  .c-e{color:var(--lead);border-color:var(--lead2)}.c-s{color:var(--blue);border-color:#2c4a63}.c-fv{color:var(--violet);border-color:#4a3a63}
+  .c-cpu-lo{color:var(--dim);border-color:var(--line)}.c-cpu-md{color:var(--amber);border-color:#6b5320}
+  .endcap{text-align:center;margin-top:14px;font-family:var(--mono);font-size:12.5px;color:var(--lead);font-weight:700}
+  /* guards + lanes */
+  .guards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .gd{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;border-left:3px solid var(--g)}
+  .gd.speed{--g:var(--lead)}.gd.budget{--g:var(--amber)}.gd.cpu{--g:var(--red)}
+  .gd .h{font-weight:700;font-size:12.5px}.gd .b{color:var(--dim);font-size:11.5px;margin-top:7px}
+  .gd code,td code,.desc code{font-family:var(--mono);font-size:11px;color:var(--ink)}
+  .lanes{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .lane{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:15px}
+  .lane.api{border-top:3px solid var(--lead)}.lane.compute{border-top:3px solid var(--red)}
+  .lane h4{margin:0 0 4px;font-size:13px}.lane .sub{color:var(--dim);font-size:11px;margin-bottom:9px}
+  .lrow{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px}
+  .lrow:last-child{border-bottom:none}.lrow .when{font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px}
+  .d-lo{background:var(--lead)}.d-md{background:var(--amber)}.d-hi{background:var(--red)}
+  .note{background:rgba(224,98,90,.06);border:1px solid #6b2e2a;border-radius:10px;padding:12px 16px;margin-top:14px;font-size:12px}
+  .note b{color:var(--red)}
+  .fix{background:rgba(63,185,143,.06);border:1px solid var(--lead2);border-radius:10px;padding:12px 16px;margin-top:14px;font-size:12px}
+  .fix b{color:var(--lead)}
+  /* flowchart */
+  .flow{max-width:860px;margin:0 auto}
+  .flayer{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:15px 18px;text-align:center}
+  .flayer .flabel{font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--lead);margin-bottom:11px}
+  .flayer .fbody{font-size:13px;color:var(--ink)}
+  .flayer .fbody .dimit{color:var(--dim);font-size:11.5px}
+  .fboxes{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+  .fbox{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:9px 13px;font-size:12.5px;font-weight:600;min-width:108px}
+  .fbox .s{display:block;font-family:var(--mono);font-size:10px;color:var(--dim);font-weight:400;margin-top:3px}
+  .fdown{text-align:center;color:var(--lead);font-family:var(--mono);font-size:10.5px;padding:8px 0;opacity:.85}
+  .fdown::before{content:"▼  ";opacity:.55}
+  .flayer.cache{border-color:#6b5320;border-left:3px solid var(--amber)}
+  .flayer.cache .flabel{color:var(--amber)}
+  .flayer.scan{border-color:var(--lead2);border-left:3px solid var(--lead);background:linear-gradient(135deg,rgba(63,185,143,.07),transparent)}
+  .flayer.feedback{border-color:#4a3a63;border-left:3px solid var(--violet)}
+  .flayer.feedback .flabel{color:var(--violet)}
+  .fcols3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:2px}
+  .fcol{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:13px;border-top:3px solid var(--c,var(--lead));font-size:12px}
+  .fcol .ct{font-weight:700;font-size:13px;margin-bottom:4px}
+  .fcol.dash{--c:var(--blue)}.fcol.exec{--c:var(--violet)}.fcol.alert{--c:var(--amber)}
+  .gov{background:linear-gradient(135deg,rgba(63,185,143,.08),rgba(63,185,143,.02));border:1px solid var(--lead2);
+    border-radius:12px;padding:14px 18px;margin-top:22px;font-size:12.5px}
+  .gov b{color:var(--lead)}
+  .srctbl{font-size:12px;margin:0}
+  .srctbl td,.srctbl th{vertical-align:top}
+  .srctbl .how{display:block;font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:3px;font-weight:400}
+  .srctbl .pw{color:var(--dim);font-size:11px}
+  .srctbl td:first-child{white-space:nowrap}
+  /* detailed timeline */
+  .tl2{max-width:960px;margin:6px auto 0}
+  .tlphase{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.08em;color:var(--amber);text-transform:uppercase;margin:20px 0 8px;padding-left:74px}
+  .tlrow{display:flex;gap:0;margin-bottom:7px;position:relative}
+  .tltime{width:58px;text-align:right;font-family:var(--mono);font-size:12px;font-weight:700;color:var(--amber);padding-top:12px;flex-shrink:0}
+  .tlbody{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 14px;margin-left:24px;position:relative}
+  .tlbody::before{content:"";position:absolute;left:-29px;top:15px;width:11px;height:11px;border-radius:50%;background:var(--lead);border:2px solid var(--bg);box-shadow:0 0 0 1px var(--line)}
+  .tlrow.reset .tlbody::before{background:var(--amber)}
+  .tlrow.heavy .tlbody{border-left:3px solid var(--lead)}
+  .tlrow.reset .tlbody{background:rgba(224,161,60,.06);border-color:#6b5320}
+  .tlact{font-weight:600;font-size:13px}
+  .tlact .sm{color:var(--dim);font-weight:400;font-size:11.5px}
+  .tlmeta{margin-top:7px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--dim)}
+  .mchip{font-family:var(--mono);font-size:10px;font-weight:600;padding:2px 8px;border-radius:5px;border:1px solid;white-space:nowrap}
+  .m-e{color:var(--lead);border-color:var(--lead2)}.m-s{color:var(--blue);border-color:#2c4a63}
+  .m-fv{color:var(--violet);border-color:#4a3a63}.m-a{color:#c98;border-color:#5a4a3a}
+  .m-loc{color:var(--dim);border-color:var(--line)}.m-t{color:var(--dim);border-color:var(--line)}
+  .totals{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:24px}
+  .tot{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;text-align:center;border-top:3px solid var(--c)}
+  .tot.eod{--c:var(--lead)}.tot.sch{--c:var(--blue)}.tot.fv2{--c:var(--violet)}
+  .tot .big2{font-family:var(--mono);font-size:24px;font-weight:700;color:var(--c);margin:4px 0}
+  .tot .lbl2{font-size:11px;color:var(--dim)}
+  /* tables */
+  table{width:100%;border-collapse:collapse;margin:8px 0 4px;font-size:12.5px}
+  th,td{text-align:left;padding:8px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em}
+  tbody tr:hover{background:var(--panel2)}
+  td b{color:var(--lead)}
+  .freq{font-family:var(--mono);font-size:11px;white-space:nowrap}
+  .sev{display:inline-block;font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 8px;border-radius:5px}
+  .sv-crit{background:rgba(224,98,90,.14);color:var(--red)}
+  .sv-warn{background:rgba(224,161,60,.14);color:var(--amber)}
+  .sv-info{background:rgba(63,185,143,.12);color:var(--lead)}
+  .sv-new{background:rgba(169,143,224,.14);color:var(--violet);margin-left:6px}
+  .yes{color:var(--lead);font-weight:700}.no{color:var(--dim)}.opt{color:var(--amber)}
+  .phase-band{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.06em;
+    color:var(--amber);text-transform:uppercase;padding:14px 0 4px}
+  .foot{margin-top:42px;padding-top:16px;border-top:1px solid var(--line);color:var(--dim);font-size:11px;font-family:var(--mono);text-align:center}
+  @media(max-width:860px){.suppliers,.tl,.guards,.lanes{grid-template-columns:1fr 1fr}.trick{flex-direction:column}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>SwingTrade — Data Loading &amp; Execution Baseline</h1>
+  <div class="tag">~3,500 stocks always available · 6 suppliers · speed + budget + CPU governed · 2026-06-09</div>
+
+  <div class="tabs">
+    <div class="tab on" onclick="showTab(0,this)">① Big Picture</div>
+    <div class="tab" onclick="showTab(1,this)">② Data Loading</div>
+    <div class="tab" onclick="showTab(2,this)">③ Execution Baseline</div>
+    <div class="tab" onclick="showTab(3,this)">④ Data Sources</div>
+    <div class="tab" onclick="showTab(4,this)">⑤ Finviz Elite</div>
+    <div class="tab" onclick="showTab(5,this)">⑥ Strategies</div>
+    <div class="tab" onclick="showTab(6,this)">⑦ Daily Clock</div>
+    <div class="tab" onclick="showTab(7,this)">⑧ Open Risks</div>
+    <div class="tab" onclick="showTab(8,this)">⑨ Regime</div>
+  </div>
+
+  <!-- ================= TAB 0 · BIG PICTURE ================= -->
+  <div class="page on" id="pflow">
+    <div class="section-h">The whole system on one screen — top flows to bottom</div>
+    <div class="flow">
+
+      <div class="flayer" style="text-align:left">
+        <div class="flabel" style="text-align:center">① Data suppliers — exactly what we pull from each, and which tab it powers</div>
+        <table class="srctbl">
+          <thead><tr><th>Source</th><th>What we pull (the details)</th><th>Powers</th></tr></thead>
+          <tbody>
+            <tr><td><b style="color:var(--lead)">EODHD</b><span class="how">bulk + per-ticker</span></td>
+              <td>Daily OHLCV (<b>bulk</b> = whole exchange in 1 call) · full price history · <b>fundamentals</b> (rev/EPS/margins/valuation/5-yr financials) · news + sentiment · earnings calendar · splits/dividends · index members (SP500/R1000/R2000/NDX) · insider transactions · weekly + monthly bars</td>
+              <td class="pw">Chart · Overview/Plan targets · Fundamentals · scan scoring</td></tr>
+            <tr><td><b style="color:var(--blue)">Schwab</b><span class="how">per-symbol · in-session</span></td>
+              <td>Options chains (strikes · greeks · OI · volume) · <b>UOA</b> · ATM <b>IV</b> + IV-rank · <b>4-hour</b> intraday bars · live quotes</td>
+              <td class="pw">Intelligence (options/IV) · 4H technicals · entry-refine · position-watch</td></tr>
+            <tr><td><b style="color:var(--violet)">Finviz Elite</b><span class="how">bulk CSV API</span></td>
+              <td>Ownership % (institutional + insider) · <b>short float %</b> · shares float · SMA 20/50/200 distance · perf week/month · fwd P/E · PEG · P/S · beta · earnings-date backfill</td>
+              <td class="pw">Fundamentals · Smart-money pillar · <b>offloads EODHD</b></td></tr>
+            <tr><td><b style="color:#c98">Alpaca</b><span class="how">your account</span></td>
+              <td>Paper positions · fills · open orders · equity / buying-power</td>
+              <td class="pw">Portfolio tab · executor · fill-monitor</td></tr>
+            <tr><td><b style="color:var(--amber)">Free web</b><span class="how">scrape/API</span></td>
+              <td>SEC EDGAR (filings · XBRL rev/EPS · risk factors) · Congress trades (Quiver/Capitol/House/Senate) · Reddit + StockTwits sentiment · X/Nitter chatter</td>
+              <td class="pw">Intelligence (insider/congress/social) · sentiment pillar</td></tr>
+            <tr><td><b style="color:#9a8">Zacks</b><span class="how">login</span></td>
+              <td>Zacks Rank #1 list · ESP (earnings surprise prediction) · premium portfolios</td>
+              <td class="pw">universe seed · ESP sleeve · catalyst tier</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="fdown">feed the loader — one bulk call, not 4,800</div>
+
+      <div class="flayer">
+        <div class="flabel">② Loading engine — stock the fridge before you need it</div>
+        <div class="fboxes">
+          <div class="fbox">Pass 1 · 3 AM<span class="s">top1000 + portfolio + track-record</span></div>
+          <div class="fbox">Pass 2 · post-scan<span class="s">top 20 × 7 sleeves</span></div>
+          <div class="fbox">Pass 3 · all day<span class="s">rolling tail (the rest)</span></div>
+        </div>
+      </div>
+      <div class="fdown">write warm data into</div>
+
+      <div class="flayer cache">
+        <div class="flabel">③ The cache — a 12-hour "fridge"</div>
+        <div class="fbody">targets · fundamentals · SMC · ML · options &nbsp;<span class="dimit">→ so every read is instant (0.15s), not a 3s live fetch</span></div>
+      </div>
+      <div class="fdown">read instantly by</div>
+
+      <div class="flayer scan">
+        <div class="flabel">④ The daily scan — 5 AM</div>
+        <div class="fbody">assemble universe → price → liquidity filter → 5-pillar score → classify into <b>7 sleeves</b> → <b>BUY / WATCH / AVOID</b> + trade plan (entry · stop · T1/T2/T3)</div>
+      </div>
+      <div class="fdown">produces three outputs</div>
+
+      <div class="flayer">
+        <div class="flabel">⑤ Outputs</div>
+        <div class="fcols3">
+          <div class="fcol dash"><div class="ct">📊 Dashboard</div>BullVeda — scanner lists + per-ticker detail tabs (Overview/Plan/Fund/Intel/ML). Reads the cache → instant.</div>
+          <div class="fcol exec"><div class="ct">🤖 Paper execution</div>executor → fills → position-watch on Alpaca paper. No live money.</div>
+          <div class="fcol alert"><div class="ct">🔔 Slack alerts</div>morning briefing · new sleeve signals · stop/T1 hits · health &amp; quota.</div>
+        </div>
+      </div>
+      <div class="fdown">every trade's outcome loops back</div>
+
+      <div class="flayer feedback">
+        <div class="flabel">⑥ Feedback loop — the system learns</div>
+        <div class="fbody">outcomes → <b>audit_ledger / signal_log</b> (track record) → guarantees those tickers stay in the universe forever &nbsp;<span class="dimit">+ feeds ML retrain + per-setup win-rates back into scoring</span></div>
+      </div>
+
+    </div>
+
+    <div class="gov">🛡️ <b>Wrapping all of it — 3 governors that run automatically:</b><br>
+      <b>Speed</b> (can't exceed 950/min EODHD · 100/min Schwab) · <b>Budget</b> (light mode at 85%, stop at 97% of daily credits) · <b>CPU</b> (heavy jobs skip if load&nbsp;&gt;&nbsp;8 or a scan is running). These guarantee the system never blows the data bill or freezes the machine.</div>
+  </div>
+
+  <!-- ================= TAB 1 · DATA LOADING ================= -->
+  <div class="page" id="p0">
+    <div class="section-h">1 · Where the data comes from (6 suppliers)</div>
+    <div class="suppliers">
+      <div class="sup e"><div class="nm">EODHD</div><div class="gives">Prices, fundamentals, news, daily bars — every stock</div><div class="lim">⚡ 950/min · 100k/day</div></div>
+      <div class="sup s"><div class="nm">Schwab</div><div class="gives">Options chains, IV, 4-hour intraday bars</div><div class="lim">⚡ 100/min · no daily cap</div></div>
+      <div class="sup fv"><div class="nm">Finviz Elite</div><div class="gives">BULK CSV export API — ownership, short %, float, SMA, PEG for the whole screener; offloads EODHD fundamentals</div><div class="lim">Elite API · token-auth · bulk</div></div>
+      <div class="sup a"><div class="nm">Alpaca</div><div class="gives">Your paper positions &amp; fills</div><div class="lim">tiny · account only</div></div>
+      <div class="sup f"><div class="nm">Free web</div><div class="gives">SEC filings, congress, Reddit / X chatter</div><div class="lim">free · fragile</div></div>
+      <div class="sup z"><div class="nm">Zacks</div><div class="gives">Zacks Rank #1 list</div><div class="lim">login scrape</div></div>
+    </div>
+
+    <div class="section-h">2 · The trick — one bulk trip, not 4,800</div>
+    <div class="trick">
+      <div class="big">1 call → whole market</div>
+      <p>EODHD's <b>bulk</b> endpoint returns yesterday's price for every US stock in one request = <b>100 credits</b> for ~4,800 names.
+         <span class="vs">dumb way: 4,800 calls = 4,800 credits</span><br>
+         <b>Listing + pricing the whole universe ≈ 150 of 100,000 daily credits.</b> And the <b>Finviz Elite export API</b> is a <em>second bulk lever</em> — one CSV pull returns ownership/short/float/SMA/PEG for the whole screener, off EODHD's meter entirely.
+         The cost is never the list — it's the <b>deep detail per stock</b>.</p>
+    </div>
+
+    <div class="section-h">3 · Daily stocking plan (fill the 12-hour cache)</div>
+    <div class="tl">
+      <div class="ph"><div class="arrow"></div><div class="time">~3:00 AM</div><div class="ttl">Pass 1 · Hot pre-warm</div>
+        <div class="desc">Fresh credits. Stock the names that matter so they're instant at the open.</div>
+        <div class="set">top 1000 ∪ portfolio ∪ track-record ≈ 1,380</div>
+        <div class="api"><span class="chip c-e">EODHD</span><span class="chip c-fv">Finviz</span><span class="chip c-s">Schwab 4H</span><span class="chip c-cpu-md">CPU med</span></div></div>
+      <div class="ph"><div class="arrow"></div><div class="time">~6:30 AM</div><div class="ttl">The Scan</div>
+        <div class="desc">Scores everyone, produces each sleeve's picks. Reads warm cache.</div>
+        <div class="set">deep-enrich top 1000</div>
+        <div class="api"><span class="chip c-e">EODHD</span><span class="chip c-fv">Finviz</span><span class="chip c-s">Schwab</span><span class="chip c-cpu-md">CPU med</span></div></div>
+      <div class="ph"><div class="arrow"></div><div class="time">after scan</div><div class="ttl">Pass 2 · Strategy picks</div>
+        <div class="desc">Warm top 20 of each of the 7 sleeves (only exist post-scan).</div>
+        <div class="set">Pullback·Mom·Def·MeanRev·PEAD·Insider·ESP ≤140</div>
+        <div class="api"><span class="chip c-e">EODHD</span><span class="chip c-s">Schwab</span><span class="chip c-cpu-lo">CPU low</span></div></div>
+      <div class="ph"><div class="time">all day</div><div class="ttl">Pass 3 · Rolling tail</div>
+        <div class="desc">Quietly fill the rest in ~150 batches on idle capacity. Niced.</div>
+        <div class="set">~2,100 remaining · yields to all</div>
+        <div class="api"><span class="chip c-e">EODHD</span><span class="chip c-s">Schwab</span><span class="chip c-cpu-lo">CPU ~0</span></div></div>
+    </div>
+    <div class="endcap">↳ by end of day, all ~3,500 are warm &amp; instant · 12h cache rolls forward</div>
+
+    <div class="section-h">4 · Three governors keep us safe</div>
+    <div class="guards">
+      <div class="gd speed"><div class="h">⚙️ Speed governor</div><div class="b">Can't exceed <code>950/min</code> EODHD or <code>100/min</code> Schwab — extra calls wait in line. Can't floor it.</div></div>
+      <div class="gd budget"><div class="h">💳 Budget guard</div><div class="b"><code>85%</code> → light mode; <code>97%</code> → stop scan. Never run dry.</div></div>
+      <div class="gd cpu"><div class="h">🧮 CPU guard</div><div class="b">Heavy jobs skip if <code>load&gt;8</code> or scan running. Background warm runs <code>nice</code>.</div></div>
+    </div>
+
+    <div class="section-h">5 · "Will it eat the CPU?" — two lanes</div>
+    <div class="lanes">
+      <div class="lane api"><h4>🟢 API-bound (light on CPU)</h4><div class="sub">~95% waiting on the network — barely touches the processor.</div>
+        <div class="lrow"><span><span class="dot d-lo"></span>Pass 1 / 2 / 3 warm</span><span class="when">3 AM · post-scan · all day</span></div>
+        <div class="lrow"><span><span class="dot d-lo"></span>options / IV polling</span><span class="when">session</span></div>
+        <div class="lrow"><span><span class="dot d-lo"></span>Finviz Elite export (API)</span><span class="when">daily</span></div></div>
+      <div class="lane compute"><h4>🔴 CPU-bound (the real hogs)</h4><div class="sub">Off-hours / weekend, behind the load&gt;8 guard.</div>
+        <div class="lrow"><span><span class="dot d-hi"></span>ML retrain</span><span class="when">→ move to Sat</span></div>
+        <div class="lrow"><span><span class="dot d-hi"></span>walk-forward (5–9 h)</span><span class="when">23:00 guarded</span></div>
+        <div class="lrow"><span><span class="dot d-hi"></span>weekly backtest</span><span class="when">Sat 2 AM</span></div></div>
+    </div>
+    <div class="note"><b>The point:</b> warm-loading lives in the green lane (API-bound + niced) — it can't starve the scan/server. CPU risk is the red lane (ML retrain + backtests), already off-hours; the fix is registering <em>every</em> red-lane job under the load&gt;8 guard.</div>
+  </div>
+
+  <!-- ================= TAB 2 ================= -->
+  <div class="page" id="p1">
+
+    <div class="section-h">A · Reorganized master schedule (≈60 jobs → 9 sequenced pipelines)</div>
+    <table>
+      <thead><tr><th>Time PT</th><th>Pipeline</th><th>What it does</th><th>Systems hit</th></tr></thead>
+      <tbody>
+        <tr><td colspan="4" class="phase-band">◆ OVERNIGHT — load &amp; warm (fresh quota, sequenced)</td></tr>
+        <tr><td class="freq">01:30</td><td><b>Universe-Layers</b></td><td>thematic ETFs, insider-cluster, congress, membership snapshot</td><td><span class="chip c-e">EODHD</span> <span class="chip c-fv">Finviz</span> free</td></tr>
+        <tr><td class="freq">02:00</td><td><b>Data-Load (Pass 1)</b></td><td>universe assemble → bulk price → archive delta → <b>hot warm</b> (top1000 ∪ portfolio ∪ track-record): structural ×3, Finviz bulk, fundamentals, SMC</td><td><span class="chip c-e">EODHD</span> <span class="chip c-fv">Finviz</span> <span class="chip c-s">Schwab 4H</span></td></tr>
+        <tr><td class="freq">04:30</td><td><b>Catalysts data</b></td><td>earnings watchlist, corporate events (IPO/splits), beat-predict</td><td><span class="chip c-e">EODHD</span></td></tr>
+        <tr><td colspan="4" class="phase-band">◆ PRE-MARKET — scan &amp; report</td></tr>
+        <tr><td class="freq">05:00</td><td><b>Scan</b></td><td>the daily scan (reads warm cache, deep-enrich top 1000)</td><td><span class="chip c-e">EODHD</span> <span class="chip c-fv">Finviz</span> <span class="chip c-s">Schwab</span> Zacks</td></tr>
+        <tr><td class="freq">06:15</td><td><b>Post-scan (Pass 2)</b></td><td>warm top-20 × 7 sleeves + ML predict (cap → 1,380)</td><td><span class="chip c-e">EODHD</span> <span class="chip c-s">Schwab</span></td></tr>
+        <tr><td class="freq">06:30</td><td><b>Reporting-AM</b></td><td>morning briefing + newsletter (merged), beat alert, ML-stale alert</td><td>Slack</td></tr>
+        <tr><td class="freq">06:35</td><td><b>Executor</b></td><td>paper auto exits → buys → shorts</td><td><span class="chip c-s">Schwab</span> Alpaca</td></tr>
+        <tr><td colspan="4" class="phase-band">◆ IN-SESSION — recurring (06:30–13:00)</td></tr>
+        <tr><td class="freq">every 60s</td><td><b>Position-watch</b></td><td>stop / T1 alerts on open positions</td><td>Alpaca · Slack</td></tr>
+        <tr><td class="freq">every 5m</td><td><b>Portfolio-sync</b></td><td>reconcile paper book with Alpaca</td><td>Alpaca</td></tr>
+        <tr><td class="freq">every 10m</td><td><b>Fill-monitor</b></td><td>cancel stale orders</td><td>Alpaca</td></tr>
+        <tr><td class="freq">every 15m</td><td><b>Options-flow (UOA)</b></td><td>unusual options scan on active set</td><td><span class="chip c-s">Schwab</span></td></tr>
+        <tr><td class="freq">every 30m</td><td><b>Options-exit</b></td><td>options position management</td><td><span class="chip c-s">Schwab</span></td></tr>
+        <tr><td class="freq">every 45m</td><td><b>Rolling-tail (Pass 3)</b></td><td>warm ~150 tail names · <b>niced</b></td><td><span class="chip c-e">EODHD</span> <span class="chip c-s">Schwab</span></td></tr>
+        <tr><td class="freq">12:50</td><td><b>IV snapshot</b></td><td>ATM IV for IV-rank</td><td><span class="chip c-s">Schwab</span></td></tr>
+        <tr><td colspan="4" class="phase-band">◆ END-OF-DAY</td></tr>
+        <tr><td class="freq">13:00</td><td><b>EOD manager</b></td><td>exits / trims / stop-tighten (paper)</td><td>Alpaca</td></tr>
+        <tr><td class="freq">13:30</td><td><b>Audit-ledger</b></td><td>resolve forward returns (1× consolidated, was 4×)</td><td><span class="chip c-e">EODHD</span></td></tr>
+        <tr><td class="freq">16:30</td><td><b>Drift alert</b></td><td>live-vs-backtest WR divergence</td><td>Slack</td></tr>
+        <tr><td class="freq">17:00</td><td><b>Reporting-PM</b></td><td>EOD summary + risk/sharpe/VaR snapshots</td><td>Slack</td></tr>
+        <tr><td class="freq">19:00→19:30</td><td><b>ML close-loop → accuracy</b></td><td>resolve labels → accuracy snapshot</td><td><span class="chip c-e">EODHD</span></td></tr>
+        <tr><td class="freq">23:00</td><td><b>Walk-forward</b> 🔴</td><td>validation (5–9h) · <b>load&gt;8 guarded</b></td><td>local</td></tr>
+        <tr><td colspan="4" class="phase-band">◆ WEEKEND (heavy CPU — one non-trading day, guarded)</td></tr>
+        <tr><td class="freq">Sat 02:00</td><td><b>Weekly backtest</b> 🔴</td><td>auto-regen backtest</td><td>local</td></tr>
+        <tr><td class="freq">Sat 03:30</td><td><b>ML retrain</b> 🔴</td><td>champion-challenger (<b>moved from Sun</b>, after backtest)</td><td>local</td></tr>
+        <tr><td class="freq">Sat 17:00</td><td><b>Full-enrich</b></td><td>deep weekly enrich of whole universe</td><td><span class="chip c-e">EODHD</span> <span class="chip c-s">Schwab</span></td></tr>
+        <tr><td class="freq">Sun</td><td><b>Weekly reports</b></td><td>digest, forensics, diagnostics</td><td>Slack</td></tr>
+        <tr><td colspan="4" class="phase-band">◆ ALWAYS-ON INFRA</td></tr>
+        <tr><td class="freq">5m / 30m / 06:00</td><td><b>Infra</b></td><td>server, tunnel + uptime health, Schwab token, Supabase sync, quota snapshot, <b>scraper-health (NEW)</b></td><td>Schwab OAuth · Supabase · Slack</td></tr>
+      </tbody>
+    </table>
+
+    <div class="section-h">B · Data-refresh cadence (per data type)</div>
+    <table>
+      <thead><tr><th>Data</th><th>Refresh frequency</th><th>Source</th><th>Cache TTL</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td><b>EOD prices</b> (all)</td><td class="freq">1×/day post-close</td><td>EODHD bulk (1 call)</td><td class="freq">2h</td><td>swing horizon — daily bar is the unit</td></tr>
+        <tr><td><b>Intraday quotes</b> (held)</td><td class="freq">60s in-session</td><td>Schwab / Alpaca</td><td class="freq">live</td><td>stop / T1 monitoring</td></tr>
+        <tr><td><b>Ownership / short / float / SMA</b></td><td class="freq">daily (bulk)</td><td>Finviz Elite API (CSV export)</td><td class="freq">~24h</td><td>cheap whole-universe; offloads EODHD fundamentals</td></tr>
+        <tr><td><b>Fundamentals</b> (rev/EPS/margins)</td><td class="freq">weekly + on-demand</td><td>EODHD (7d cache)</td><td class="freq">7d</td><td>change slowly; @10 units each</td></tr>
+        <tr><td><b>Options chains / UOA</b></td><td class="freq">15m in-session</td><td>Schwab</td><td class="freq">live</td><td>flow is intraday</td></tr>
+        <tr><td><b>IV / IV-rank</b></td><td class="freq">daily 12:50</td><td>Schwab</td><td class="freq">24h</td><td>IV-rank is a daily series</td></tr>
+        <tr><td><b>News</b></td><td class="freq">4h RTH / 12h off</td><td>EODHD</td><td class="freq">4–12h</td><td>headline sentiment</td></tr>
+        <tr><td><b>Retail sentiment</b> (Reddit/StockTwits)</td><td class="freq">3×/day</td><td>free scrape</td><td class="freq">—</td><td>crowding signal</td></tr>
+        <tr><td><b>X / Twitter chatter</b></td><td class="freq">5×/day</td><td>Nitter</td><td class="freq">—</td><td>social momentum</td></tr>
+        <tr><td><b>Structural targets</b> (T1/T2/T3)</td><td class="freq">nightly + rolling</td><td>EODHD + Schwab 4H</td><td class="freq">12h</td><td>recompute on new daily bar</td></tr>
+        <tr><td><b>ML predictions</b></td><td class="freq">3×/day</td><td>local + EODHD feats</td><td class="freq">—</td><td>06:45 / 11:15 / 14:00</td></tr>
+        <tr><td><b>Insider clusters</b></td><td class="freq">weekly</td><td>EODHD</td><td class="freq">—</td><td>13F/Form-4 cadence</td></tr>
+        <tr><td><b>Congress trades</b></td><td class="freq">daily 07:00</td><td>free (Quiver/Capitol)</td><td class="freq">—</td><td>disclosure lag anyway</td></tr>
+        <tr><td><b>Earnings calendar</b></td><td class="freq">daily 04:30</td><td>EODHD</td><td class="freq">—</td><td>watchlist + blackout</td></tr>
+      </tbody>
+    </table>
+
+    <div class="section-h">C · Schwab usage by sleeve (the 100/min budget)</div>
+    <table>
+      <thead><tr><th>Sleeve</th><th>4H bars</th><th>Options / UOA</th><th>IV</th><th>Cadence</th></tr></thead>
+      <tbody>
+        <tr><td><b>Pullback</b> (core swing)</td><td class="yes">yes</td><td class="opt">optional</td><td class="no">—</td><td class="freq">nightly 4H + on-click</td></tr>
+        <tr><td><b>Momentum</b> (trending)</td><td class="yes">yes</td><td class="yes">UOA confirm</td><td class="opt">opt</td><td class="freq">nightly + 15m UOA in-session</td></tr>
+        <tr><td><b>Defensive Rotation</b> (ETFs)</td><td class="no">no</td><td class="opt">XLU/GLD only</td><td class="opt">opt</td><td class="freq">daily IV (ETFs — daily bar enough)</td></tr>
+        <tr><td><b>Mean Reversion</b> (swing)</td><td class="yes">yes</td><td class="no">—</td><td class="no">—</td><td class="freq">nightly 4H + on-click</td></tr>
+        <tr><td><b>PEAD</b> (post-earnings)</td><td class="yes">yes</td><td class="yes">UOA + gap</td><td class="yes">yes</td><td class="freq">post-scan + 15m UOA (catalyst window)</td></tr>
+        <tr><td><b>Insider Cluster</b></td><td class="opt">optional</td><td class="opt">optional</td><td class="no">—</td><td class="freq">daily (info-edge, not timing)</td></tr>
+        <tr><td><b>ESP Play</b> (pre-earnings)</td><td class="opt">optional</td><td class="opt">opt</td><td class="yes">yes</td><td class="freq">daily IV (pre-earnings drift)</td></tr>
+      </tbody>
+    </table>
+    <div class="fix"><b>Schwab budget check:</b> nightly 4H for hot set ~1,000 (~10 min @100/min) + post-scan picks ~140 + in-session UOA every 15m on the active watchlist (~50 names) ≈ well inside 100/min. 4H is swing-sleeve only; ETF/info sleeves skip it. Rolling-tail 4H drips through the day.</div>
+
+    <div class="section-h">D · Slack alert taxonomy (what fires, when, severity)</div>
+    <table>
+      <thead><tr><th>Alert</th><th>Trigger</th><th>Frequency</th><th>Severity</th></tr></thead>
+      <tbody>
+        <tr><td><b>Position stop / T1 hit</b></td><td>price crosses level on a held name</td><td class="freq">event (60s scan)</td><td><span class="sev sv-crit">CRITICAL</span></td></tr>
+        <tr><td><b>Data-source down</b> <span class="sev sv-new">NEW</span></td><td>Finviz Elite token/quota · Schwab OAuth · free scrapes (Reddit/X/congress)</td><td class="freq">on failure</td><td><span class="sev sv-crit">CRITICAL</span></td></tr>
+        <tr><td><b>Quota &gt; 85%</b> <span class="sev sv-new">NEW</span></td><td>EODHD daily credits near soft-limit</td><td class="freq">on threshold</td><td><span class="sev sv-warn">WARN</span></td></tr>
+        <tr><td><b>Uptime / tunnel down</b></td><td>health check fails</td><td class="freq">on failure (5m poll)</td><td><span class="sev sv-crit">CRITICAL</span></td></tr>
+        <tr><td><b>Morning briefing</b></td><td>in-zone setups for the day</td><td class="freq">06:30 daily</td><td><span class="sev sv-info">DAILY</span></td></tr>
+        <tr><td><b>New sleeve signal</b> <span class="sev sv-new">NEW</span></td><td>fresh BUY in any of the 7 sleeves</td><td class="freq">post-scan, batched</td><td><span class="sev sv-info">INFO</span></td></tr>
+        <tr><td><b>Earnings-beat (STRONG)</b></td><td>new STRONG beat-tier prediction</td><td class="freq">05:45 daily</td><td><span class="sev sv-info">DAILY</span></td></tr>
+        <tr><td><b>Earnings on held position</b></td><td>open position reports ≤ 3 days</td><td class="freq">05:35 daily</td><td><span class="sev sv-warn">WARN</span></td></tr>
+        <tr><td><b>IV elevation</b></td><td>IV jumps &gt; 20% vs 5-day</td><td class="freq">13:00 daily</td><td><span class="sev sv-warn">WATCH</span></td></tr>
+        <tr><td><b>Model drift</b></td><td>live WR diverges from backtest</td><td class="freq">16:30 daily</td><td><span class="sev sv-warn">WATCH</span></td></tr>
+        <tr><td><b>ML model stale</b></td><td>any model &gt; 7 days old</td><td class="freq">06:50 daily</td><td><span class="sev sv-warn">WARN</span></td></tr>
+        <tr><td><b>EOD summary</b></td><td>regime, picks, P&amp;L wrap</td><td class="freq">17:00 daily</td><td><span class="sev sv-info">DAILY</span></td></tr>
+        <tr><td><b>Weekly digest / forensics / diagnostics</b></td><td>summary + post-mortems + regression</td><td class="freq">Sun</td><td><span class="sev sv-info">WEEKLY</span></td></tr>
+      </tbody>
+    </table>
+    <div class="note"><b>Alert discipline:</b> CRITICAL = act now (stops, system down). WARN = review today. INFO/DAILY/WEEKLY = digest, no action required. The 3 <span style="color:var(--violet)">NEW</span> alerts (data-source-down, quota, new-sleeve-signal) close the "silent failure" gap — today a dead Finviz Elite token/quota silently falls back to 10× EODHD fundamentals cost with no warning.</div>
+
+    <div class="section-h">E · Plan of action (execution order)</div>
+    <table>
+      <thead><tr><th>Step</th><th>Work</th><th>Risk</th></tr></thead>
+      <tbody>
+        <tr><td><b>P0</b></td><td>Quick wins: <code>get_russell3000()</code>, track-record guarantee (audit_ledger ∪ portfolio), Finviz health-check alert, move ML retrain → Sat, register all heavy jobs under load&gt;8 guard</td><td><span style="color:var(--lead)">low</span></td></tr>
+        <tr><td><b>P1</b></td><td>Pass 1 hot pre-warm (built) + Pass 2 post-scan strategy warm (7 sleeves) + ML cap → 1,380</td><td><span style="color:var(--amber)">med</span></td></tr>
+        <tr><td><b>P2</b></td><td>Pass 3 rolling-tail warm (niced, 45m batches) → full-universe coverage by EOD</td><td><span style="color:var(--amber)">med</span></td></tr>
+        <tr><td><b>P3</b></td><td>Fleet consolidation: ≈60 jobs → 9 pipelines; budget-owner sequences the pre-market chain; retire redundant plists</td><td><span style="color:var(--amber)">med</span></td></tr>
+        <tr><td><b>P4</b></td><td>Slack taxonomy: add the 3 NEW alerts; merge duplicate AM reporting jobs</td><td><span style="color:var(--lead)">low</span></td></tr>
+      </tbody>
+    </table>
+
+  </div>
+
+  <!-- ================= TAB 3 · DATA SOURCES ================= -->
+  <div class="page" id="psrc">
+
+    <div class="section-h">A · By supplier — every field, endpoint, cost &amp; refresh</div>
+    <table>
+      <thead><tr><th>Source</th><th>Field / detail</th><th>Endpoint / method</th><th>Cost</th><th>Cache</th><th>Refresh</th></tr></thead>
+      <tbody>
+        <tr><td colspan="6" class="phase-band">EODHD — metered (950/min · 100k/day)</td></tr>
+        <tr><td><b>EODHD</b></td><td>Daily OHLCV — whole exchange</td><td><code>eod-bulk-last-day</code></td><td class="freq">100u</td><td class="freq">2h</td><td class="freq">1×/day post-close</td></tr>
+        <tr><td></td><td>Price history (per ticker)</td><td><code>eod/{t}</code></td><td class="freq">1u</td><td class="freq">archive</td><td class="freq">on-demand / delta</td></tr>
+        <tr><td></td><td>Fundamentals (rev/EPS/margins/valuation/5y)</td><td><code>fundamentals/{t}</code></td><td class="freq">10u</td><td class="freq">7d</td><td class="freq">weekly + on-click</td></tr>
+        <tr><td></td><td>News + sentiment</td><td><code>news</code></td><td class="freq">1u</td><td class="freq">4–12h</td><td class="freq">intraday</td></tr>
+        <tr><td></td><td>Earnings calendar / estimates</td><td><code>calendar</code></td><td class="freq">1u</td><td class="freq">—</td><td class="freq">daily 04:30</td></tr>
+        <tr><td></td><td>Splits / dividends</td><td><code>splits · div</code></td><td class="freq">1u</td><td class="freq">—</td><td class="freq">daily</td></tr>
+        <tr><td></td><td>Index members (SP500/R1000/R2000/R3000/NDX)</td><td><code>fundamentals/{IDX}.INDX</code></td><td class="freq">10u</td><td class="freq">24h</td><td class="freq">daily</td></tr>
+        <tr><td></td><td>Insider transactions</td><td><code>insider</code></td><td class="freq">1u</td><td class="freq">—</td><td class="freq">weekly</td></tr>
+        <tr><td></td><td>Weekly + monthly bars (for Elliott Wave)</td><td><code>eod</code> (period)</td><td class="freq">1u</td><td class="freq">12h</td><td class="freq">nightly</td></tr>
+        <tr><td colspan="6" class="phase-band">Schwab — free w/ brokerage (100/min · no daily cap)</td></tr>
+        <tr><td><b>Schwab</b></td><td>Options chain (strikes·greeks·OI·vol) + UOA</td><td><code>get_chains</code></td><td class="freq">—</td><td class="freq">live</td><td class="freq">15m in-session</td></tr>
+        <tr><td></td><td>ATM IV + IV-rank</td><td><code>get_chains</code></td><td class="freq">—</td><td class="freq">24h</td><td class="freq">daily 12:50</td></tr>
+        <tr><td></td><td>4-hour intraday bars</td><td><code>get_pricehistory</code> (30m→4H)</td><td class="freq">—</td><td class="freq">12h</td><td class="freq">nightly + rolling</td></tr>
+        <tr><td></td><td>Live quotes</td><td><code>get_quote</code></td><td class="freq">—</td><td class="freq">live</td><td class="freq">60s (held)</td></tr>
+        <tr><td colspan="6" class="phase-band">Finviz Elite — bulk CSV export API (token)</td></tr>
+        <tr><td><b>Finviz</b></td><td>Ownership % · short float % · float · SMA20/50/200 · perf · fwd P/E · PEG · P/S · beta</td><td><code>elite.finviz.com/export</code></td><td class="freq">—</td><td class="freq">24h</td><td class="freq">daily (5 bulk calls)</td></tr>
+        <tr><td></td><td>Earnings-date backfill</td><td><code>screener export</code></td><td class="freq">—</td><td class="freq">24h</td><td class="freq">daily</td></tr>
+        <tr><td colspan="6" class="phase-band">Alpaca · Free web · Zacks</td></tr>
+        <tr><td><b>Alpaca</b></td><td>Paper positions · fills · orders · equity</td><td>broker API</td><td class="freq">—</td><td class="freq">live</td><td class="freq">5m sync / 60s watch</td></tr>
+        <tr><td><b>SEC EDGAR</b></td><td>Filings · XBRL rev/EPS (point-in-time) · risk factors</td><td>EDGAR companyfacts</td><td class="freq">free</td><td class="freq">—</td><td class="freq">nightly 02:00</td></tr>
+        <tr><td><b>Congress</b></td><td>Congressional trades</td><td>Quiver/Capitol/House/Senate</td><td class="freq">free</td><td class="freq">—</td><td class="freq">daily 07:00 + weekly</td></tr>
+        <tr><td><b>Reddit/StockTwits</b></td><td>Retail sentiment</td><td>public JSON</td><td class="freq">free</td><td class="freq">—</td><td class="freq">3×/day</td></tr>
+        <tr><td><b>X / Nitter</b></td><td>Social chatter</td><td>Nitter scrape</td><td class="freq">free</td><td class="freq">—</td><td class="freq">5×/day</td></tr>
+        <tr><td><b>Zacks</b></td><td>Rank #1 list · ESP · premium portfolios</td><td>Selenium login</td><td class="freq">free</td><td class="freq">—</td><td class="freq">daily (in scan)</td></tr>
+      </tbody>
+    </table>
+
+    <div class="section-h">B · By dashboard tab — what powers each (reverse map)</div>
+    <table>
+      <thead><tr><th>Detail tab</th><th>Fed by</th></tr></thead>
+      <tbody>
+        <tr><td><b>📈 Chart / Technicals</b></td><td>EODHD daily bars + Schwab 4H intraday</td></tr>
+        <tr><td><b>🎯 Overview / Plan</b> (targets)</td><td>EODHD daily + Schwab 4H + EODHD weekly/monthly (Elliott Wave) → structural T1/T2/T3</td></tr>
+        <tr><td><b>📊 Fundamentals</b></td><td>EODHD fundamentals + Finviz (ownership/short/float/SMA/PEG) + SEC EDGAR (point-in-time)</td></tr>
+        <tr><td><b>🧠 Intelligence</b></td><td>Schwab options/UOA/IV + EODHD insider + Congress + Reddit/StockTwits/X</td></tr>
+        <tr><td><b>🤖 ML / AI Edge</b></td><td>features from EODHD + Finviz → ML pipeline (predict 3×/day)</td></tr>
+        <tr><td><b>💼 Portfolio</b></td><td>Alpaca paper (positions · fills · equity)</td></tr>
+      </tbody>
+    </table>
+
+    <div class="section-h">C · By sleeve — what each of the 7 strategies needs</div>
+    <table>
+      <thead><tr><th>Sleeve</th><th>Data it relies on</th></tr></thead>
+      <tbody>
+        <tr><td><b>Pullback</b> (core swing)</td><td>EODHD daily (EMA/support) + Schwab 4H (entry) + fundamentals (quality gate)</td></tr>
+        <tr><td><b>Momentum</b></td><td>EODHD daily (ADX/EMA stack) + RS-vs-SPY + Schwab UOA (confirm)</td></tr>
+        <tr><td><b>Defensive Rotation</b></td><td>EODHD ETF daily (XLU/GLD) + Schwab IV — regime-gated risk-off</td></tr>
+        <tr><td><b>Mean Reversion</b></td><td>EODHD daily (RSI&lt;30 + price&gt;EMA200) + Schwab 4H</td></tr>
+        <tr><td><b>PEAD</b></td><td>EODHD earnings + gap + Schwab UOA/IV (catalyst window)</td></tr>
+        <tr><td><b>Insider Cluster</b></td><td>EODHD insider + Finviz ownership + Congress</td></tr>
+        <tr><td><b>ESP Play</b></td><td>Zacks ESP + EODHD earnings calendar + Schwab IV (pre-earnings)</td></tr>
+      </tbody>
+    </table>
+    <div class="fix"><b>Reading it:</b> a tab/sleeve is only as fresh as its slowest feed — e.g. Fundamentals = EODHD (7-day) + Finviz (daily) + EDGAR (nightly); Intelligence = Schwab (live, in-session) + social (3–5×/day). The cache TTLs in column A are what keep each one warm.</div>
+
+  </div>
+
+  <!-- ================= TAB 4 · FINVIZ ELITE ================= -->
+  <div class="page" id="pfv">
+    <div class="gov" style="margin-top:6px;margin-bottom:8px">🟣 <b>Finviz Elite = the cheap bulk "screener + fundamentals + ownership + short + performance" engine.</b>
+      One CSV export call per preset (token-auth), off EODHD's meter. Best at: <b>(1)</b> offloading the metered fundamentals bill (~21k credits/day),
+      <b>(2)</b> generating sleeve candidates server-side, <b>(3)</b> short-squeeze + relative-strength signals.
+      It has <b>no bars / options / intraday</b> — those stay EODHD + Schwab.</div>
+
+    <div class="section-h">A · Candidate generation — Finviz preset → sleeve (the untapped lever)</div>
+    <table>
+      <thead><tr><th>Sleeve</th><th>Finviz screener preset / signal</th><th>Filter intent (tunable)</th><th>Surfaces</th></tr></thead>
+      <tbody>
+        <tr><td><b>Pullback</b></td><td>Channel-Up · TL/Horizontal support</td><td><code>price &gt; SMA50 &amp; SMA200</code> · RSI 40–60 · near SMA20/50</td><td>uptrends pulling back to value</td></tr>
+        <tr><td><b>Momentum</b></td><td>Top Gainers · <b>New High (52w)</b></td><td><code>RVOL &gt; 1.5</code> · above all SMAs · perf+ </td><td>strength breakouts, incl. off-index movers</td></tr>
+        <tr><td><b>Defensive Rotation</b></td><td>ETF screener · low-beta defensives</td><td>utilities/staples/gold · <code>beta &lt; 0.8</code> · rel-strength</td><td>risk-off rotation names (XLU/GLD + leaders)</td></tr>
+        <tr><td><b>Mean Reversion</b></td><td><b>Oversold</b> signal</td><td><code>RSI &lt; 30</code> · <code>price &gt; SMA200</code></td><td>pullbacks in healthy trends</td></tr>
+        <tr><td><b>PEAD</b></td><td>Earnings Before/After · <b>Gap Up</b></td><td><code>earnings ≤ 1d</code> · gap 3–8% · <code>RVOL &gt; 2</code> · EPS surprise+</td><td>post-earnings drift candidates</td></tr>
+        <tr><td><b>Insider Cluster</b></td><td>Insider page · latest cluster buys</td><td>≥3 insiders · positive insider transactions</td><td>insider-conviction names</td></tr>
+        <tr><td><b>ESP Play</b></td><td>Upgrades · Earnings-soon</td><td><code>earnings 4–14d</code> · EPS-rev+ · analyst upgrades</td><td>pre-earnings drift setups</td></tr>
+        <tr><td style="color:var(--amber)"><b>+ Squeeze overlay</b></td><td>High Short Float</td><td><code>short float &gt; 20%</code> · <code>RVOL &gt; 2</code></td><td>squeeze fuel (feeds Momentum/Special)</td></tr>
+      </tbody>
+    </table>
+    <div class="fix"><b>The play:</b> today we list index members then score <em>everything</em>. These presets hand each sleeve its <b>actual daily movers in one call each</b> — including <b>off-index small-caps we miss now</b> — then the scan only deep-analyzes that focused candidate pool. Cheaper <em>and</em> wider coverage.</div>
+
+    <div class="section-h">B · Field → scoring pillar (what Finviz feeds)</div>
+    <table>
+      <thead><tr><th>Pillar</th><th>Finviz fields we USE today</th><th>Untapped Elite fields</th></tr></thead>
+      <tbody>
+        <tr><td><b>Smart Money</b> (15)</td><td>insider own · institutional own · short float · short ratio</td><td class="freq" style="color:var(--violet)">analyst recom · target price</td></tr>
+        <tr><td><b>Quality Gate</b> (10)</td><td>gross/oper/profit margin · ROE · ROA · EPS growth (this/next yr) · current ratio</td><td class="freq" style="color:var(--violet)">P/B · P/FCF · EV/EBITDA · Debt/Eq · 5-yr EPS &amp; sales growth · dividend</td></tr>
+        <tr><td><b>Technicals</b> (35)</td><td>SMA20/50/200 dist · RVOL · ATR · beta · avg volume</td><td class="freq" style="color:var(--violet)">RSI · perf (Q/half/yr/YTD) · 52-wk range · volatility</td></tr>
+        <tr><td><b>Catalyst</b> (20)</td><td>gap · earnings date</td><td class="freq" style="color:var(--violet)">EPS surprise · sales surprise · upgrades/downgrades</td></tr>
+        <tr><td><b>RS + Sector</b> (20)</td><td>perf week/month</td><td class="freq" style="color:var(--violet)">sector/industry group performance · rel-strength rank</td></tr>
+      </tbody>
+    </table>
+    <div class="note"><b>Boundaries — Finviz never replaces these:</b> OHLCV bars (→ targets/SMC/charts/backtests = EODHD/archive) · options &amp; IV (→ Schwab) · intraday/4H (→ Schwab) · point-in-time fundamentals for backtests (→ EODHD/SEC EDGAR — Finviz is a current snapshot = look-ahead risk).</div>
+
+    <div class="section-h">C · How it's wired &amp; the cost win</div>
+    <table>
+      <thead><tr><th>Aspect</th><th>Detail</th></tr></thead>
+      <tbody>
+        <tr><td>Call</td><td><code>elite.finviz.com/export?v=…&amp;f=&lt;filters&gt;&amp;s=&lt;signal&gt;&amp;auth=TOKEN</code> → CSV, one call per preset</td></tr>
+        <tr><td>Today</td><td><code>get_finviz_bulk()</code> — 5 parallel calls, SP500 + Nasdaq only, ~25 fields</td></tr>
+        <tr><td>Upgrade</td><td>add 7–8 sleeve-preset calls (candidate gen) + widen export to full universe + pull the untapped fields</td></tr>
+        <tr><td>Cost win</td><td>offloads ~<b>21,000 EODHD credits/day</b> of fundamentals; candidate presets replace scanning the whole universe to find movers</td></tr>
+        <tr><td>Risk</td><td>token/quota failure falls back to 10× EODHD silently → needs the <b>data-source-down alert</b> (Tab ③)</td></tr>
+      </tbody>
+    </table>
+
+    <div class="section-h">D · Refresh cadence — how often to re-pull each preset</div>
+    <table>
+      <thead><tr><th>Preset group</th><th>Sensible refresh</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td><b>Momentum · PEAD · Gap · Squeeze</b></td><td class="freq">pre-market + <b>every 15–30 min in-session</b></td><td>intraday-sensitive — movers/gaps/RVOL change within the day</td></tr>
+        <tr><td><b>Pullback · Mean Reversion</b></td><td class="freq">pre-market (05:00) + 1 midday check</td><td>swing entries — daily-bar discipline, not tick-chasing</td></tr>
+        <tr><td><b>Insider · Defensive · ESP</b></td><td class="freq">once daily</td><td>slow catalysts — disclosure lag / regime / earnings calendar</td></tr>
+      </tbody>
+    </table>
+    <div class="note">Finviz Elite is <b>real-time</b>, so it's <em>capable</em> of a re-pull every few minutes (only Finviz fair-use limits it). The disciplined answer is the table above — pre-market for everything, intraday only for the fast/catalyst sleeves. Re-pulling every 2 min just feeds <b>intraday noise</b> into a swing system.</div>
+
+    <div class="section-h">E · Can Finviz replace EODHD? — No. Bars are the wall.</div>
+    <table>
+      <thead><tr><th>What EODHD does</th><th>Finviz replace?</th></tr></thead>
+      <tbody>
+        <tr><td><b>Daily / weekly / monthly price BARS</b> (history)</td><td><span class="no">❌ No</span> — Finviz has no bar-history export, only a live snapshot</td></tr>
+        <tr><td>Fundamentals (margins / ROE / growth / valuation)</td><td><span class="yes">✅ Yes</span> — bulk, cheap</td></tr>
+        <tr><td>Ownership / short / float</td><td><span class="yes">✅ Yes</span></td></tr>
+        <tr><td>Earnings dates</td><td><span class="yes">✅ Yes</span> (backfill)</td></tr>
+        <tr><td>Candidate screening (movers / gaps / new highs)</td><td><span class="yes">✅ Yes</span> — better, server-side</td></tr>
+        <tr><td>News articles</td><td><span class="opt">⚠️ Partial</span></td></tr>
+        <tr><td>Point-in-time fundamentals (backtests)</td><td><span class="no">❌ No</span> — live snapshot = look-ahead risk</td></tr>
+      </tbody>
+    </table>
+    <div class="note"><b>Why bars are the wall:</b> without price-bar history you can't build <b>charts, structural targets (T1/T2/T3), SMC, Elliott Wave, backtests, or any indicator computed from price</b> (RSI/MACD/ATR). That's the entire technical backbone — and it comes <em>only</em> from EODHD (+ Schwab 4H + local archive).</div>
+    <div class="fix"><b>Takeaway: Finviz + EODHD, not Finviz <em>instead of</em> EODHD.</b> Finviz offloads the expensive half — fundamentals (@10/ticker) + screening — so EODHD spend can drop <b>~50–70%</b>. But EODHD stays as the <b>price-bar backbone</b> everything technical is built on. You swap out the costly fundamentals layer, not the data spine.</div>
+
+    <div class="section-h">F · Which sleeves can run on Finviz (replace EODHD for the SIGNAL)</div>
+    <div class="note" style="margin-top:0">The split is by signal type: <b>signal generation</b> (finding the candidate) can be Finviz for screen-based sleeves; the <b>trade plan</b> (entry · stop · T1/T2/T3 · R:R≥3) needs ATR + structure from <b>bars</b> → <b>every</b> sleeve still needs EODHD there. "Replace EODHD" only ever applies to the signal.</div>
+    <table>
+      <thead><tr><th>Sleeve</th><th>Signal driven by</th><th>Finviz drives signal?</th><th>EODHD still needed for</th></tr></thead>
+      <tbody>
+        <tr><td><b>Mean Reversion</b></td><td>RSI&lt;30 + price&gt;SMA200 — <em>Finviz has both</em></td><td><span class="yes">✅ Fully</span></td><td>trade plan only</td></tr>
+        <tr><td><b>PEAD</b></td><td>earnings + gap + RVOL + EPS surprise — <em>Finviz has all</em></td><td><span class="yes">✅ Fully</span></td><td>trade plan only</td></tr>
+        <tr><td><b>Insider Cluster</b></td><td>insider transactions — <em>Finviz insider page</em></td><td><span class="yes">✅ Fully</span></td><td>trade plan only</td></tr>
+        <tr><td><b>ESP Play</b></td><td>Zacks ESP + earnings + analyst (Zacks + Finviz)</td><td><span class="yes">✅ Fully</span> (no EODHD)</td><td>trade plan only</td></tr>
+        <tr><td><b>Momentum</b></td><td>ADX · Sharpe · RS (bars) + perf / new-high (Finviz)</td><td><span class="opt">⚠️ Partial</span> — candidate-gen yes</td><td>ADX/Sharpe/RS + plan</td></tr>
+        <tr><td><b>Defensive Rotation</b></td><td>regime + fixed XLU/GLD set</td><td><span class="opt">⚠️ Partial</span> — pick leaders</td><td>regime, entry timing, plan</td></tr>
+        <tr><td><b>Pullback</b> (core)</td><td>EMA stack · support · structure — <em>all bars</em></td><td><span class="no">❌ No</span></td><td>everything</td></tr>
+      </tbody>
+    </table>
+    <div class="fix"><b>Pattern:</b> the <b>catalyst/info sleeves</b> (Mean-Rev · PEAD · Insider · ESP) live on screen data → <b>signal can be 100% Finviz</b>, EODHD only builds the ticket. The <b>technical sleeves</b> (Pullback · Momentum) live on bars → EODHD-driven. So 4 of 7 sleeves can be signal-generated without touching EODHD.</div>
+
+  </div>
+
+  <!-- ================= TAB 5 · STRATEGIES ================= -->
+  <div class="page" id="pstrat">
+
+    <div class="section-h">A · Strategy roster — 7 sleeves + 1 overlay, gated by regime</div>
+    <table>
+      <thead><tr><th>Strategy</th><th>Active regime</th><th>Mechanism</th><th>PF</th><th>Signal source</th><th>Trade plan</th></tr></thead>
+      <tbody>
+        <tr><td><b>Pullback to Value</b> <span class="dimit" style="color:var(--dim)">core</span></td><td>risk-on choppy (all)</td><td>buy retracement to EMA/support · 3:1</td><td class="freq">1.41</td><td><span class="chip c-e">EODHD bars</span></td><td>EODHD</td></tr>
+        <tr><td><b>Momentum Continuation</b></td><td>risk-on trending / bull</td><td>ADX≥25 · Sharpe≥1.5 · EMA stack</td><td class="freq">1.53</td><td><span class="chip c-e">EODHD</span> <span class="chip c-fv">+Finviz cand.</span></td><td>EODHD</td></tr>
+        <tr><td><b>Defensive Rotation</b></td><td>risk-off / panic</td><td>long XLU + GLD</td><td class="freq">1.03</td><td>regime <span class="chip c-fv">+Finviz</span></td><td>EODHD</td></tr>
+        <tr><td><b>Mean Reversion</b></td><td>choppy / bull</td><td>RSI&lt;30 + price&gt;EMA200</td><td class="freq">1.21</td><td><span class="chip c-fv">Finviz (RSI+SMA)</span></td><td>EODHD</td></tr>
+        <tr><td><b>PEAD</b></td><td>all (catalyst)</td><td>post-earnings beat + gap, 1–3d</td><td class="freq">2.04</td><td><span class="chip c-fv">Finviz (gap+surprise)</span></td><td>EODHD</td></tr>
+        <tr><td><b>Insider Cluster</b></td><td>all (info edge)</td><td>≥3 insiders $200K+ / 30d</td><td class="freq">—</td><td><span class="chip c-fv">Finviz insider</span></td><td>EODHD</td></tr>
+        <tr><td><b>ESP Play</b></td><td>all (catalyst)</td><td>Zacks ESP&gt;0 + Rank≤3 · earn 4–14d</td><td class="freq">—</td><td>Zacks <span class="chip c-fv">+Finviz</span></td><td>EODHD</td></tr>
+        <tr><td><b>Pre-FOMC Drift</b> <span class="dimit" style="color:var(--dim)">overlay</span></td><td>T-1 FOMC eve (calendar)</td><td>×1.25 long sizing</td><td class="freq">armed</td><td>calendar (no data)</td><td>—</td></tr>
+      </tbody>
+    </table>
+
+    <div class="section-h">B · The data-dependency stack — two EODHD bookends</div>
+    <pre>Regime gate     ◄── <b>EODHD bars</b> (SPY/QQQ EMAs · VIX · breadth)   decides which sleeves may fire
+     ▼
+Sleeve signal   ◄── Finviz (4 sleeves) · EODHD (Pullback/Momentum) · Zacks (ESP)
+     ▼
+Trade plan      ◄── <b>EODHD bars</b> (always — entry · stop · T1/T2/T3 · R:R≥3)
+     ▼
+Sizing overlay  ◄── Pre-FOMC calendar + regime / VIX / drawdown multipliers</pre>
+    <div class="note">Even a "Finviz-driven" strategy touches <b>EODHD twice</b>: at the top (to know it's <em>allowed</em> to fire) and at the bottom (to build the ticket). The regime gate and the trade plan are <b>never</b> Finviz.</div>
+
+    <div class="section-h">C · Can Finviz populate the Strategies tab?</div>
+    <table>
+      <thead><tr><th>What the tab shows</th><th>Comes from</th><th>Finviz?</th></tr></thead>
+      <tbody>
+        <tr><td>Strategy definitions (regime · mechanism · sizing rules)</td><td>static config</td><td><span class="no">❌ config, not data</span></td></tr>
+        <tr><td><b>Today's candidates / picks per sleeve</b></td><td>screener presets</td><td><span class="yes">✅ 4 sleeves</span> · <span class="opt">⚠️ Momentum</span></td></tr>
+        <tr><td>Which sleeves are ACTIVE today (regime gate)</td><td>EODHD bars (SPY/QQQ/VIX/breadth)</td><td><span class="no">❌</span></td></tr>
+        <tr><td>Blended WR / PF / Sharpe per strategy</td><td>our track record (audit_ledger / tracker)</td><td><span class="no">❌ our outcomes</span></td></tr>
+        <tr><td>Trade plan per pick (entry/stop/targets)</td><td>EODHD bars + target_engine</td><td><span class="no">❌</span></td></tr>
+      </tbody>
+    </table>
+    <div class="fix"><b>Answer:</b> Finviz populates the <b>"what's firing today"</b> candidate lists for the 4 screen-based sleeves (Mean-Rev · PEAD · Insider · ESP) and Momentum candidates — the live roster of names. But the <b>regime gate</b> (which strategies are on), the <b>performance stats</b> (PF/WR from our own track record), and the <b>trade tickets</b> all come from EODHD bars + our history, not Finviz. So Finviz fills the <em>roster column</em>, not the regime, the scorecard, or the plan.</div>
+
+  </div>
+
+  <!-- ================= TAB 6 · DAILY CLOCK ================= -->
+  <div class="page" id="pclock">
+    <div class="gov" style="margin-top:6px;margin-bottom:6px">🕐 <b>One full trading day, minute by minute</b> — every API call, ticker count &amp; credit estimate. Universe ~3,547 · hot set 1,380 · deep-enrich 1,000 · tail ~2,100.
+      Estimates are <em>cold-cache worst case</em>; warm days (12h cache hits) cost far less.</div>
+
+    <div class="tl2">
+
+      <div class="tlphase">◆ Overnight — load &amp; warm (fresh quota)</div>
+      <div class="tlrow reset"><div class="tltime">00:00</div><div class="tlbody">
+        <div class="tlact">EODHD daily quota resets <span class="sm">→ counter back to 0 / 100,000</span></div>
+        <div class="tlmeta"><span class="mchip m-loc">no calls</span></div></div></div>
+
+      <div class="tlrow"><div class="tltime">01:30</div><div class="tlbody">
+        <div class="tlact">Universe-Layers <span class="sm">— build the candidate universe</span></div>
+        <div class="tlmeta">
+          <span class="mchip m-fv">Finviz ~15 calls</span> full-universe export (~3,500 tickers · ownership/short/SMA/PEG)
+          <span class="mchip m-fv">Finviz 8</span> sleeve presets
+          <span class="mchip m-e">EODHD ~150cr</span> index members (5×10) + insider + thematic ETFs
+          <span class="mchip m-t">~4 min</span></div></div></div>
+
+      <div class="tlrow heavy"><div class="tltime">02:00</div><div class="tlbody">
+        <div class="tlact">Pass 1 · bulk price <span class="sm">— one call prices the whole market</span></div>
+        <div class="tlmeta"><span class="mchip m-e">EODHD 100cr</span> <code>bulk_eod(US)</code> → ~4,800 last-day bars · 1 call <span class="mchip m-t">~5 sec</span></div></div></div>
+
+      <div class="tlrow"><div class="tltime">02:01</div><div class="tlbody">
+        <div class="tlact">Pass 1 · history delta <span class="sm">— archive-first, fetch only what's stale</span></div>
+        <div class="tlmeta"><span class="mchip m-loc">archive 1,544</span> local Parquet <span class="mchip m-e">EODHD ~500cr</span> delta for missing names <span class="mchip m-t">~1 min</span></div></div></div>
+
+      <div class="tlrow"><div class="tltime">02:03</div><div class="tlbody">
+        <div class="tlact">Pass 1 · hot warm (LIGHT) <span class="sm">— targets already built at EOD last night; just gap-fill + SMC + Finviz fund</span></div>
+        <div class="tlmeta">
+          <span class="mchip m-e">EODHD ~1,000cr</span> gap-fill bars (names that changed)
+          <span class="mchip m-s">Schwab ~300</span> 4H gaps
+          <span class="mchip m-loc">SMC local</span>
+          <span class="mchip m-fv">fund via Finviz</span>
+          <span class="mchip m-t">~5 min</span></div></div></div>
+
+      <div class="tlrow"><div class="tltime">02:00</div><div class="tlbody">
+        <div class="tlact">(parallel) SEC EDGAR fundamentals · 20-yr history top-up <span class="sm">— free / bounded</span></div>
+        <div class="tlmeta"><span class="mchip m-loc">SEC free</span> <span class="mchip m-e">EODHD bounded</span> self-skips on quota reserve</div></div></div>
+
+      <div class="tlphase">◆ Pre-market — scan &amp; report</div>
+      <div class="tlrow"><div class="tltime">04:30</div><div class="tlbody">
+        <div class="tlact">Catalysts data <span class="sm">— earnings watchlist, IPO/splits, beat-predict</span></div>
+        <div class="tlmeta"><span class="mchip m-e">EODHD ~10cr</span> calendar + corp events <span class="mchip m-t">~1 min</span></div></div></div>
+
+      <div class="tlrow heavy"><div class="tltime">05:00</div><div class="tlbody">
+        <div class="tlact">The Scan · deep-enrich top 1,000 <span class="sm">— reads warm cache, scores everyone</span></div>
+        <div class="tlmeta">
+          <span class="mchip m-e">EODHD ~5,000cr</span> news/earnings/insider per ticker <span class="sm">(fundamentals offloaded to Finviz)</span>
+          <span class="mchip m-s">Schwab ~1,500</span> options/UOA/IV (top 500)
+          <span class="mchip m-loc">Zacks scrape</span>
+          <span class="mchip m-t">~25 min</span></div></div></div>
+
+      <div class="tlrow"><div class="tltime">06:00</div><div class="tlbody">
+        <div class="tlact">Pre-market scan · Schwab token refresh</div>
+        <div class="tlmeta"><span class="mchip m-e">EODHD ~100cr</span> real-time batch <span class="mchip m-s">Schwab OAuth 1</span></div></div></div>
+
+      <div class="tlrow"><div class="tltime">06:15</div><div class="tlbody">
+        <div class="tlact">Pass 2 · strategy picks <span class="sm">— top 20 × 7 sleeves (~140, mostly already warm)</span></div>
+        <div class="tlmeta"><span class="mchip m-e">EODHD ~240cr</span> ~40 new names <span class="mchip m-s">Schwab ~80</span> <span class="mchip m-loc">ML predict (cap→1,380)</span> <span class="mchip m-t">~3 min</span></div></div></div>
+
+      <div class="tlrow"><div class="tltime">06:30</div><div class="tlbody">
+        <div class="tlact">Reporting-AM · Executor <span class="sm">— briefing + newsletter to Slack; paper exits→buys</span></div>
+        <div class="tlmeta"><span class="mchip m-a">Alpaca</span> <span class="mchip m-s">Schwab</span> <span class="mchip m-loc">Slack</span></div></div></div>
+
+      <div class="tlphase">◆ In-session — recurring (06:30 – 13:00)</div>
+      <div class="tlrow"><div class="tltime">:60s</div><div class="tlbody">
+        <div class="tlact">Position-watch <span class="sm">— stop / T1 on held names</span></div>
+        <div class="tlmeta"><span class="mchip m-a">Alpaca quotes</span> ~5–10 names · negligible</div></div></div>
+
+      <div class="tlrow"><div class="tltime">:15m</div><div class="tlbody">
+        <div class="tlact">Options-flow (UOA) + Finviz intraday presets <span class="sm">— Momentum/PEAD/Squeeze movers</span></div>
+        <div class="tlmeta"><span class="mchip m-s">Schwab ~1,300/day</span> UOA on ~50 active <span class="mchip m-fv">Finviz ~60/day</span> preset re-pulls</div></div></div>
+
+      <div class="tlrow heavy"><div class="tltime">:45m</div><div class="tlbody">
+        <div class="tlact">Pass 3 · rolling tail <span class="sm">— warm ~150/batch, ~10 batches → ~2,100 covered by EOD</span></div>
+        <div class="tlmeta"><span class="mchip m-fv">Finviz bulk (fund)</span> <span class="mchip m-loc">archive bars</span> <span class="mchip m-e">EODHD ~50cr/batch</span> delta only · 4H/targets deferred to on-click · <b>niced</b></div></div></div>
+
+      <div class="tlrow"><div class="tltime">12:50</div><div class="tlbody">
+        <div class="tlact">IV snapshot</div>
+        <div class="tlmeta"><span class="mchip m-s">Schwab ~active set</span> ATM IV for IV-rank</div></div></div>
+
+      <div class="tlphase">◆ End-of-day &amp; evening</div>
+      <div class="tlrow"><div class="tltime">13:00</div><div class="tlbody">
+        <div class="tlact">EOD manager <span class="sm">— exits / trims / stop-tighten (paper)</span></div>
+        <div class="tlmeta"><span class="mchip m-a">Alpaca</span></div></div></div>
+      <div class="tlrow"><div class="tltime">13:30</div><div class="tlbody">
+        <div class="tlact">Audit-ledger <span class="sm">— resolve forward returns (1× consolidated)</span></div>
+        <div class="tlmeta"><span class="mchip m-e">EODHD ~500cr</span> incremental price history</div></div></div>
+      <div class="tlrow"><div class="tltime">17:00</div><div class="tlbody">
+        <div class="tlact">EOD summary + risk snapshots <span class="sm">→ Slack</span></div>
+        <div class="tlmeta"><span class="mchip m-loc">local</span> <span class="mchip m-loc">Slack</span></div></div></div>
+      <div class="tlrow"><div class="tltime">19:00</div><div class="tlbody">
+        <div class="tlact">ML close-loop → accuracy <span class="sm">— resolve labels</span></div>
+        <div class="tlmeta"><span class="mchip m-e">EODHD ~500cr</span> label prices</div></div></div>
+      <div class="tlrow heavy reset"><div class="tltime">19:30</div><div class="tlbody">
+        <div class="tlact">🎯 EOD target precompute <span class="sm">— NEW: build tomorrow's T1/T2/T3 ONCE, while the daily bar is final &amp; 4H is fresh</span></div>
+        <div class="tlmeta">
+          <span class="mchip m-e">EODHD ~8,300cr</span> structural bars (daily/wk/mo)
+          <span class="mchip m-s">Schwab ~2,760</span> 4H (freshest right after close)
+          <span class="mchip m-loc">targets cached overnight → scan reads warm</span>
+          <span class="mchip m-t">~28 min · prev-day quota has headroom</span></div></div></div>
+      <div class="tlrow heavy"><div class="tltime">23:00</div><div class="tlbody">
+        <div class="tlact">Walk-forward validation 🔴 <span class="sm">— 5–9h, load&gt;8 guarded</span></div>
+        <div class="tlmeta"><span class="mchip m-loc">local · cached bars · 0 API</span></div></div></div>
+
+    </div>
+
+    <div class="totals">
+      <div class="tot eod"><div class="lbl2">EODHD per day (cold)</div><div class="big2">~16–20k</div><div class="lbl2">of 95k cap · <b>~18%</b> · 66k headroom</div></div>
+      <div class="tot sch"><div class="lbl2">Schwab per day</div><div class="big2">~6.5k</div><div class="lbl2">calls · no daily cap · paced 100/min over the day</div></div>
+      <div class="tot fv2"><div class="lbl2">Finviz per day</div><div class="big2">~85</div><div class="lbl2">CSV calls · bulk + presets + intraday re-pulls</div></div>
+    </div>
+    <div class="note"><b>How the estimate holds:</b> targets are now built at <b>EOD (19:30)</b> when the daily bar is final — so the big structural chunk (~8.3k EODHD + ~2.8k Schwab 4H · ~28 min) runs in the <b>uncontended evening on the previous day's quota</b>, and the <b>pre-market is light</b> (~1k gap-fill, ~5 min). The only large daytime EODHD left is the scan deep-enrich (~5k). Finviz offloading fundamentals keeps the day ~18% vs ~40%+. T1/T2/T3 are computed <b>once per daily bar</b> — never intraday (that would chase noise). Warm days run a fraction of these.</div>
+  </div>
+
+  <!-- ================= TAB 7 · OPEN RISKS ================= -->
+  <div class="page" id="prisk">
+    <div class="gov" style="margin-top:6px;margin-bottom:8px">🔎 <b>Adversarial re-audit of the baseline.</b> What the 7-tab plan does <em>not</em> yet solve, ranked by how badly it bites — each with its fix. Fix the two flagged ⭐ before anything else.</div>
+
+    <div class="section-h">🔴 Critical — will break or silently fail</div>
+    <table>
+      <thead><tr><th>#</th><th>Gap</th><th>Why it bites</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr><td><b>1</b> ⭐</td><td><b>Universe expansion not wired into the scan</b></td><td>We <em>warm</em> ~3,547 but the live scan only <em>scores</em> ~1,003 (SP500+R1000). The tail gets warmed caches nobody scores — "pull all tickers" is half-plumbed.</td><td>Wire R2000 + NASDAQ-liquid + R3000 into <code>swing_trade</code> universe assembly behind a config flag; align scan universe = warm universe; A/B for signal quality first.</td></tr>
+        <tr><td><b>2</b></td><td><b>New evening collision</b></td><td>Moving structural to 19:30 stacks it with 19:00 ML close-loop + audit-ledger — all EODHD in the 19:00–20:00 window, with no sequencer. We traded the 2 AM crunch for a 7 PM one.</td><td>Build the <b>budget-owner</b> that sequences evening jobs (ML → targets → audit) so they don't co-spend EODHD/min.</td></tr>
+        <tr><td><b>3</b></td><td><b>19:30 assumes EODHD posted the EOD bar</b></td><td>If EODHD posts US EOD later than 19:30 PT, targets compute on an incomplete/stale bar → wrong T1/T2.</td><td>Replace the fixed clock with a <b>"wait-for-fresh-bar" guard</b> — poll until today's bar is posted, then run; retry/backoff.</td></tr>
+        <tr><td><b>4</b></td><td><b>Catalyst sleeves' options/IV not warmed</b></td><td>PEAD &amp; ESP fire on IV/options, but we only warm <em>structural</em> + defer options to on-click → cold options fetch exactly when they signal.</td><td>Pass 2 also warms <b>Schwab options/IV</b> for the PEAD/ESP picks (small set, post-scan).</td></tr>
+        <tr><td><b>5</b> ⭐</td><td><b>Data-source-down alert unbuilt</b></td><td>A dead Finviz token silently falls back to 10× EODHD fundamentals cost — the #1 silent budget-killer — with no warning.</td><td>Build the <b>health-check</b> (Finviz token · Schwab OAuth · scrapes) → Slack CRITICAL + a fallback flag. (Tab ③ alert.)</td></tr>
+      </tbody>
+    </table>
+
+    <div class="section-h">🟠 Validation — shipping architecture on assumption</div>
+    <table>
+      <thead><tr><th>#</th><th>Gap</th><th>Why it bites</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr><td><b>6</b></td><td><b>None of it is backtested</b></td><td>Universe 1,003→3,547, Finviz candidate-gen, EOD targets all change what fires. Principle 7: no evidence the wider universe helps vs. adds microcap noise.</td><td>Backtest the expansion + EOD cadence before flipping; A/B 1,003 vs 3,547 on WR/PF; gate behind a flag.</td></tr>
+        <tr><td><b>7</b></td><td><b>Finviz candidate-gen can't be backtested — ever</b></td><td>Finviz is a live snapshot (no history) → preset→sleeve mappings have no historical validation.</td><td>Use Finviz only to <em>surface candidates</em>; the <b>signal must still be confirmed on EODHD bars</b> (backtestable). Never let an un-backtestable preset gate a trade alone.</td></tr>
+        <tr><td><b>8</b></td><td><b>ML out-of-distribution</b></td><td>Feeding the model 2,500 names it never trained on → unreliable predictions on the new tail.</td><td>Retrain ML on the expanded universe before trusting tail predictions; flag low-confidence on OOD names.</td></tr>
+      </tbody>
+    </table>
+
+    <div class="section-h">🟡 Operational / scale</div>
+    <table>
+      <thead><tr><th>#</th><th>Gap</th><th>Why it bites</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr><td><b>9</b></td><td><b>Corporate actions + delisting</b></td><td>A split makes cached bars/targets wrong until re-adjusted; the track-record guarantee keeps delisted tickers in-universe forever, failing fetches each cycle.</td><td>Invalidate cache on <code>corporate_events</code> (splits); add a <b>delisted-tombstone</b> — keep the history, stop re-fetching.</td></tr>
+        <tr><td><b>10</b></td><td><b>Cache tracked in git</b></td><td>~3,009 <code>cache/target_engine</code> files already committed; at 3,547×3 modes → ~10k+ files bloating history (caused the 54 MB <code>data.json</code> LFS warning).</td><td><code>.gitignore</code> <code>cache/</code> + large <code>data*.json</code>; purge from history / move to LFS.</td></tr>
+        <tr><td><b>11</b></td><td><b>Single machine = SPOF</b></td><td>If the Mac sleeps overnight, both the 19:30 targets and the morning scan miss → cold, slow morning. No failover.</td><td><code>caffeinate</code> overnight + a <b>missed-job alert</b>; longer-term a cloud failover for the load passes.</td></tr>
+        <tr><td><b>12</b></td><td><b>No loader observability</b></td><td>Nothing reports "EOD precompute warmed 1,340/1,380, coverage 97%" — we'd fly blind on whether the warm worked.</td><td>Each pass writes a <b>coverage metric</b> (warmed/failed/%) → Slack + a status tile.</td></tr>
+      </tbody>
+    </table>
+
+    <div class="fix"><b>Sequencing the fixes:</b> do <b>#1</b> (wire the universe — else we warm caches nobody scores) and <b>#5</b> (data-source-down alert — else the first Finviz hiccup torches the budget) first. Then #3 + #2 (make the EOD pass safe + sequenced), #4 (warm catalyst options), then the validation work (#6–8) before flipping anything live, and the operational hygiene (#9–12) in parallel.</div>
+  </div>
+
+  <!-- ================= TAB 8 · REGIME ================= -->
+  <div class="page" id="pregime">
+    <div class="gov" style="margin-top:6px;margin-bottom:8px">🧭 <b>Regime is the meta-strategy</b> (principle 18: "regime detection IS the strategy"). It decides <b>which sleeves may fire</b>, the <b>BUY score floor</b>, and the <b>max position size</b>. Computed in <code>data_fetcher.get_market_regime()</code> on the <b>last completed daily bar</b> — never intraday.</div>
+
+    <div class="section-h">A · The 4 inputs</div>
+    <table>
+      <thead><tr><th>Signal</th><th>What</th><th>Source</th></tr></thead>
+      <tbody>
+        <tr><td><b>Trend</b></td><td>SPY &amp; QQQ vs their <b>EMA50 / EMA200</b> (above = risk-on, below = risk-off)</td><td><span class="chip c-e">EODHD daily bars</span></td></tr>
+        <tr><td><b>Volatility</b></td><td><b>VIX</b> level — the fear gauge (low = calm, &gt;35 = panic)</td><td><span class="chip c-e">EODHD $VIX</span></td></tr>
+        <tr><td><b>Breadth</b></td><td><b>% of universe above its 50-day MA</b> — participation (high = healthy, &lt;20% = washout)</td><td><span class="chip c-e">computed from universe</span></td></tr>
+        <tr><td><b>Macro</b> (context)</td><td>HYG · UUP · GLD · BTC/ETH — risk appetite cross-check</td><td><span class="chip c-e">EODHD</span></td></tr>
+      </tbody>
+    </table>
+    <div class="note">Degraded inputs are tracked explicitly: if VIX or breadth is missing, the engine records it rather than silently defaulting (VIX→20, breadth→50) — because a silent default would mask a data outage as a plausible "risk-on choppy" exactly when regime matters most.</div>
+
+    <div class="section-h">B · The 4-regime decision (exact thresholds)</div>
+    <table>
+      <thead><tr><th>Regime</th><th>SPY / QQQ trend</th><th>VIX</th><th>Breadth</th><th>→ BUY floor</th><th>Max size</th></tr></thead>
+      <tbody>
+        <tr><td><b style="color:var(--lead)">Risk-On Trending</b></td><td>SPY &gt; 50 &amp; 200 · QQQ &gt; 50</td><td class="freq">&lt; 18</td><td class="freq">&gt; 65%</td><td class="freq">65</td><td class="freq">100%</td></tr>
+        <tr><td><b style="color:var(--amber)">Risk-On Choppy</b></td><td>SPY &gt; 50</td><td class="freq">18 – 25</td><td class="freq">40 – 65%</td><td class="freq">72</td><td class="freq">70%</td></tr>
+        <tr><td><b style="color:var(--red)">Risk-Off Trending</b></td><td>SPY &lt; 50</td><td class="freq">25 – 35</td><td class="freq">20 – 40%</td><td class="freq">78</td><td class="freq">35%</td></tr>
+        <tr><td><b style="color:var(--red)">Panic</b></td><td>—</td><td class="freq"><b>&gt; 35</b> OR</td><td class="freq"><b>&lt; 20%</b></td><td class="freq">no longs</td><td class="freq">0%</td></tr>
+      </tbody>
+    </table>
+    <div class="note">Legacy mapping: risk_on_trending → <b>bull</b> · risk_on_choppy → <b>neutral</b> · risk_off_trending / panic → <b>bear</b>. The higher the risk, the <b>higher the BUY bar and the smaller the size</b> — capital preservation scales with the regime.</div>
+
+    <div class="section-h">C · Hysteresis — the anti-whipsaw buffer</div>
+    <div class="fix" style="margin-top:0"><b>Why:</b> a regime that flips on a single noisy close would whipsaw sizing every day. So a flip requires an <b>overshoot + confirmation</b>, not just crossing the line.</div>
+    <table>
+      <thead><tr><th>To flip…</th><th>Requires</th></tr></thead>
+      <tbody>
+        <tr><td>Risk-on → risk-off (VIX)</td><td>VIX must push <b>above 22</b> to enter risk-off, but fall <b>below 18</b> to return (gap buffer)</td></tr>
+        <tr><td>Bull ↔ bear (breadth)</td><td>breadth <b>&gt; 53%</b> to turn bullish, <b>&lt; 47%</b> to turn bearish (dead-band in between)</td></tr>
+        <tr><td>Into risk-off (trend)</td><td><b>consecutive closes</b> below EMA50 (not a single touch) — <code>risk_off_consecutive_closes</code></td></tr>
+      </tbody>
+    </table>
+
+    <div class="section-h">D · What the regime drives</div>
+    <table>
+      <thead><tr><th>Regime</th><th>Sleeves that fire</th><th>Sizing</th></tr></thead>
+      <tbody>
+        <tr><td><b style="color:var(--lead)">Risk-On Trending</b></td><td>Momentum · Pullback · (all catalyst sleeves)</td><td>full half-Kelly × regime/VIX/drawdown mults</td></tr>
+        <tr><td><b style="color:var(--amber)">Risk-On Choppy</b></td><td>Pullback · Mean Reversion · catalyst sleeves</td><td>70% cap</td></tr>
+        <tr><td><b style="color:var(--red)">Risk-Off Trending</b></td><td>Defensive Rotation + catalyst-only (PEAD/Insider bypass the regime gate)</td><td>35% cap</td></tr>
+        <tr><td><b style="color:var(--red)">Panic</b></td><td>No new longs · Defensive only</td><td>0%</td></tr>
+      </tbody>
+    </table>
+
+    <div class="section-h">E · Data discipline</div>
+    <div class="note"><b>Anchored to the daily bar.</b> The official regime is computed on the <b>last completed daily bar</b> (EODHD) — it does <b>not</b> move intraday. The <code>/api/regime/live</code> overlay (Schwab SPY/QQQ/$VIX) is <b>display-only</b>: it shows the live tape under the regime tile but never recomputes or flips the official regime. Why: intraday flips would whipsaw sizing, and <b>breadth (% above 50DMA) can't be computed live</b> — so a "live regime" would be half-blind. Regime is the one thing we compute slowly and deliberately, by design.</div>
+  </div>
+
+  <div class="foot">SwingTrade · docs/data_loading_diagram.html · baseline for execution · 2026-06-09</div>
+</div>
+<script>
+  function showTab(i,el){
+    document.querySelectorAll('.page').forEach((p,n)=>p.classList.toggle('on',n===i));
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+    el.classList.add('on');
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SwingTrade — Universe & Data-Loading Strategy</title>
+<style>
+  :root{
+    --bg:#0a0d0c; --panel:#111614; --panel2:#0e1311; --ink:#e6ece8; --dim:#8a9690;
+    --line:#1d2823; --lead:#3fb98f; --lead2:#2a8f6c; --amber:#e0a13c; --red:#e0625a;
+    --blue:#5aa6e0; --violet:#a98fe0; --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1040px;margin:0 auto;padding:48px 32px 120px}
+  header{border-bottom:1px solid var(--line);padding-bottom:24px;margin-bottom:8px}
+  h1{font-size:30px;font-weight:700;letter-spacing:-.02em;margin:0 0 8px}
+  .sub{color:var(--dim);font-size:13px;font-family:var(--mono)}
+  .thesis{background:linear-gradient(135deg,rgba(63,185,143,.08),rgba(63,185,143,.02));
+    border:1px solid var(--lead2);border-left:3px solid var(--lead);border-radius:10px;
+    padding:18px 22px;margin:28px 0;font-size:15px}
+  .thesis b{color:var(--lead)}
+  h2{font-size:21px;font-weight:650;letter-spacing:-.01em;margin:48px 0 14px;
+    padding-top:20px;border-top:1px solid var(--line)}
+  h2 .n{color:var(--lead);font-family:var(--mono);font-size:16px;margin-right:10px}
+  h3{font-size:16px;font-weight:600;color:var(--ink);margin:26px 0 10px}
+  p{margin:12px 0}
+  a{color:var(--lead);text-decoration:none}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--panel);
+    border:1px solid var(--line);border-radius:5px;padding:1px 6px;color:#bfe8d6}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-weight:600;font-size:11.5px;text-transform:uppercase;
+    letter-spacing:.04em;border-bottom:1px solid var(--line)}
+  tbody tr:hover{background:var(--panel2)}
+  td b{color:var(--lead)}
+  .num{font-family:var(--mono);text-align:right;white-space:nowrap}
+  pre{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:18px 20px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;
+    line-height:1.55;color:#cfe;margin:18px 0}
+  .pill{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:600;
+    padding:2px 9px;border-radius:20px;border:1px solid;vertical-align:middle}
+  .p-low{color:var(--lead);border-color:var(--lead2);background:rgba(63,185,143,.08)}
+  .p-med{color:var(--amber);border-color:#6b5320;background:rgba(224,161,60,.08)}
+  .p-hi{color:var(--red);border-color:#6b2e2a;background:rgba(224,98,90,.08)}
+  .callout{border-radius:10px;padding:14px 18px;margin:18px 0;font-size:14px;border:1px solid}
+  .c-fix{background:rgba(63,185,143,.06);border-color:var(--lead2)}
+  .c-warn{background:rgba(224,98,90,.06);border-color:#6b2e2a}
+  .c-warn b{color:var(--red)}
+  .toc{background:var(--panel2);border:1px solid var(--line);border-radius:12px;
+    padding:18px 24px;margin:26px 0;columns:2;column-gap:40px}
+  .toc a{display:block;padding:4px 0;font-size:13.5px;color:var(--dim);break-inside:avoid}
+  .toc a:hover{color:var(--lead)}
+  .toc a .n{color:var(--lead);font-family:var(--mono);margin-right:8px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:18px 0}
+  @media(max-width:760px){.toc,.grid2{columns:1;grid-template-columns:1fr}.wrap{padding:32px 18px}}
+  .foot{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);
+    color:var(--dim);font-size:12px;font-family:var(--mono)}
+  em.hl{color:var(--amber);font-style:normal;font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>SwingTrade — Universe &amp; Data-Loading Strategy</h1>
+  <div class="sub">Analysis / proposal &nbsp;·&nbsp; 2026-06-09 &nbsp;·&nbsp; owner: phanirajgarimella</div>
+</header>
+
+<div class="thesis">
+  <b>One-line thesis:</b> Listing and price-ranking the <em class="hl">entire ~3,500-name universe</em>
+  costs <b>~150 EODHD units (0.15% of the daily budget)</b>. The cost was never the universe size —
+  it is <b>deep-enrich depth</b>, which a tiered loader controls explicitly. The two real defects are
+  (1) the track-record guarantee misses 2 of 3 outcome stores, and (2) ~5 nightly jobs re-walk the same
+  universe with no per-minute coordination.
+</div>
+
+<div class="toc">
+  <a href="#u1"><span class="n">1</span>Target Universe</a>
+  <a href="#u2"><span class="n">2</span>Five-Layer Cost Model</a>
+  <a href="#u3"><span class="n">3</span>Track-Record + Portfolio Guarantee</a>
+  <a href="#u4"><span class="n">4</span>The Tiered Loader</a>
+  <a href="#u5"><span class="n">5</span>Job Fleet — Current State</a>
+  <a href="#u6"><span class="n">6</span>Proposed Job Architecture</a>
+  <a href="#u7"><span class="n">7</span>Phased Build Plan</a>
+  <a href="#ua"><span class="n">A</span>Rate Limits &amp; Billing</a>
+</div>
+
+<h2 id="u1"><span class="n">1</span>Target Universe</h2>
+<p>Union of the defined index sources plus everything we have ever signaled or held:</p>
+<table>
+<thead><tr><th>Source</th><th>Builder</th><th>EODHD index / endpoint</th><th class="num">~count</th><th class="num">list cost (u)</th></tr></thead>
+<tbody>
+<tr><td>S&amp;P 500</td><td><code>get_sp500()</code></td><td><code>fundamentals/GSPC.INDX</code></td><td class="num">500</td><td class="num">10</td></tr>
+<tr><td>Russell 1000</td><td><code>get_russell1000()</code></td><td><code>RUI.INDX</code></td><td class="num">1,000</td><td class="num">10</td></tr>
+<tr><td>Russell 2000</td><td><code>get_russell2000()</code></td><td><code>RUT.INDX</code></td><td class="num">1,960</td><td class="num">10</td></tr>
+<tr><td>Russell 3000</td><td><em class="hl">add get_russell3000()</em></td><td><code>RUA.INDX</code></td><td class="num">3,000</td><td class="num">10</td></tr>
+<tr><td>NASDAQ (liquid)</td><td><code>get_nasdaq_all()</code></td><td>exch-list + <code>bulk_eod</code></td><td class="num">~1,000</td><td class="num">101</td></tr>
+<tr><td>S&amp;P MidCap 400</td><td><code>get_sp_midcap_400()</code></td><td><code>MID.INDX</code></td><td class="num">400</td><td class="num">10</td></tr>
+<tr><td>S&amp;P SmallCap 600</td><td><code>get_sp_smallcap_600()</code></td><td><code>SML.INDX</code></td><td class="num">600</td><td class="num">10</td></tr>
+<tr><td><b>Track record</b></td><td><em class="hl">from audit_ledger</em></td><td>local JSON</td><td class="num"><b>832</b></td><td class="num">0</td></tr>
+<tr><td><b>Portfolio</b></td><td><code>portfolio_state.json</code></td><td>local JSON</td><td class="num">41</td><td class="num">0</td></tr>
+</tbody>
+</table>
+<p><b>Russell 3000 ≡ Russell 1000 ∪ Russell 2000.</b> Both are already fetched, so R3000 is already covered;
+adding <code>RUA.INDX</code> only gives one authoritative list. After de-dup, the
+<b>net distinct universe ≈ 3,200–3,600 names</b>, and the total cost to <em class="hl">list</em> it is <b>~51 units</b>.</p>
+
+<h2 id="u2"><span class="n">2</span>The Five-Layer Cost Model</h2>
+<p>Cost scales with <b>enrich depth</b>, not universe size:</p>
+<table>
+<thead><tr><th>Layer</th><th>What it does</th><th>Cost driver</th><th class="num">cost · all ~3,500</th></tr></thead>
+<tbody>
+<tr><td><b>0 — Universe</b></td><td>assemble the ticker list</td><td>index@10 ×5–7 + exch@1</td><td class="num">~51 u</td></tr>
+<tr><td><b>1 — Price/Rank</b></td><td>last-day OHLCV for everything</td><td>1× <code>bulk_eod(US)</code></td><td class="num">100 u</td></tr>
+<tr><td><b>2 — History</b></td><td>full OHLCV for survivors</td><td><code>eod</code>@1 (archive-first)</td><td class="num">hundreds</td></tr>
+<tr><td><b>3 — Deep-enrich</b></td><td>~14 endpoints, shortlist only</td><td><code>fundamentals</code>@10</td><td class="num">shortlist × ~26 u</td></tr>
+<tr><td><b>4 — Structural</b></td><td>EW + 4H confluence targets</td><td>Schwab 100/min</td><td class="num">shortlist × ~6</td></tr>
+</tbody>
+</table>
+<p><b>Layers 0–1 score the entire universe for ~150 units (≈0.15% of the 100K/day budget).</b>
+Everything expensive is gated behind the Layer-3 shortlist. The <code>bulk_eod</code> primitive returns
+the last bar for an <em class="hl">entire exchange in one 100-unit call</em> — ~48× cheaper than per-ticker for the price/rank pass.</p>
+
+<h2 id="u3"><span class="n">3</span>Track-Record + Portfolio Guarantee</h2>
+<p><b>Goal:</b> every ticker we have ever signaled or held stays in the scan &amp; bypasses the enrich cap
+<em class="hl">forever</em>, so forward outcomes keep resolving after it drops off the liquid list.</p>
+<table>
+<thead><tr><th>Store</th><th>Path</th><th class="num">distinct</th><th>Canonical for</th></tr></thead>
+<tbody>
+<tr><td><code>picks_history.json</code></td><td>cache/</td><td class="num">482</td><td>tracker feedback / setup WR</td></tr>
+<tr><td><code>signal_log.json</code></td><td>data/</td><td class="num">791</td><td>diagnostic journal, kill-list, Audit tab</td></tr>
+<tr><td><code>audit_ledger.json</code></td><td>cache/ + prototype/</td><td class="num"><b>832</b></td><td><b>canonical superset</b> (+ resolved D/W/M returns)</td></tr>
+<tr><td><code>portfolio_state.json</code></td><td>data/</td><td class="num">41</td><td>real paper P&amp;L (Alpaca)</td></tr>
+</tbody>
+</table>
+<div class="callout c-warn">
+  <b>Defect:</b> <code>always_include</code> (swing_trade.py:899–940) — which bypasses both the liquidity
+  filter and the enrich cap — is built from <b>picks_history (482) + portfolio (41)</b> only. It does
+  <b>not</b> read <code>signal_log</code> or <code>audit_ledger</code>, so <b>~310 historically-signaled
+  tickers are not guaranteed re-scanned</b> and can stop resolving outcomes.
+</div>
+<div class="callout c-fix">
+  <b>Fix (~5 lines):</b> source <code>always_include</code> from <b>audit_ledger (832) ∪ portfolio (41)</b> —
+  the canonical union. Permanent track-record + portfolio guarantee, ~0 added cost.
+</div>
+
+<h2 id="u4"><span class="n">4</span>The Tiered Loader</h2>
+<p>Replace the scattered cache-warmers with <b>one orchestrated nightly data-load pipeline</b>,
+sequenced under an explicit per-minute + daily budget:</p>
+<pre>NIGHTLY DATA-LOAD  (single job, ~02:00–04:30 PT, budget-owned)
+ 1. Universe assemble  SP500 ∪ R1000 ∪ R2000 (∪ RUA) ∪ NASDAQ-liquid
+                       ∪ audit_ledger(832) ∪ portfolio(41)              ~51 u
+ 2. Bulk price         1× bulk_eod(US) → rank all ~3,500 by $-volume     100 u
+ 3. History delta      archive-first (1,544 Parquet files);
+                       EODHD only for missing/stale bars                 ~hundreds u
+ 4. Prescreen          score all in-memory (0 API); shortlist =
+                       top-N ∪ guaranteed(track-record ∪ portfolio
+                       ∪ index-core ∪ earnings/PEAD window)              0 u
+ 5. Deep-enrich        shortlist only, ~14 endpoints,
+                       paced &lt; 950/min EODHD + 100/min Schwab           shortlist × ~26 u
+ 6. Structural + SMC   ONE merged pass (was 2 jobs);
+                       weekly/monthly bars via Schwab to spare EODHD     shortlist × ~6</pre>
+<div class="grid2">
+  <div>
+    <h3>Three efficiency wins</h3>
+    <p><b>1. Archive-first for history</b> — the 1,544 Parquet files already hold full history; fetch only the daily delta from EODHD. (Today the archive is failover-only; promote it to history-primary.)</p>
+    <p><b>2. Schwab for structural weekly/monthly</b> — <code>get_pricehistory</code> is free; per-symbol anyway, so no bulk benefit lost. Removes ~3K/day off EODHD.</p>
+    <p><b>3. Merge the duplicate structural passes</b> — <code>precompute-prewarm</code> + <code>precompute-patterns</code> walk the same 1,500 tickers/bars.</p>
+  </div>
+  <div>
+    <h3>Budget verification</h3>
+    <pre>Universe + bulk         ~150 u
+History delta           ~300–800 u
+Deep-enrich 1,000×26    ~26,000 u
+Structural (Schwab)     ~2,000 u
+                        ─────────
+TOTAL    ~28–29K units  vs 95K soft
+         → ~66K headroom</pre>
+    <p>Deep-enrich 1,000 ≈ ~9.5 min EODHD / ~15 min Schwab; structural ≈ ~30 min Schwab-bound. Finishes before the 06:30 scan.</p>
+  </div>
+</div>
+
+<h2 id="u5"><span class="n">5</span>Job Fleet — Current State</h2>
+<p>~60 <code>com.swingtrade.*</code> launchd agents. The redundancy &amp; collision findings:</p>
+<h3>Redundancy (consolidation targets)</h3>
+<table>
+<thead><tr><th>Overlap</th><th>Jobs</th></tr></thead>
+<tbody>
+<tr><td>5 nightly jobs re-walk the same universe / bars</td><td><code>enrich-nightly</code>, <code>archive-sync</code>, <code>precompute-prewarm</code>, <code>precompute-patterns</code>, <code>insider-cluster-weekly</code></td></tr>
+<tr><td>Structural precompute split into 2 jobs (same 1,500 tickers)</td><td><code>precompute-prewarm</code> + <code>precompute-patterns</code></td></tr>
+<tr><td>Audit ledger rebuilt 4×/day (same fwd-return prices)</td><td><code>audit-ledger-eod</code> + <code>audit-ledger-intraday</code> ×3</td></tr>
+<tr><td>Schwab options polled by 4 jobs</td><td><code>optionsflow</code>, <code>options-exit</code>, <code>ivsnapshot</code>, <code>options-buy</code></td></tr>
+<tr><td>2 AM reporting jobs read the same scan output</td><td><code>morning-briefing</code> + <code>daily-newsletter-morning</code></td></tr>
+</tbody>
+</table>
+<div class="callout c-warn">
+  <b>Pre-market collision risk (00:00–06:30 PT):</b> 10 EODHD jobs fire 02:15–05:45 with
+  <b>no per-minute coordination</b> — the HEAVY-job guard keys only on load-average / scan-running,
+  <em class="hl">not</em> on the EODHD 950/min or daily quota. Densest window: the 05:15 heavy scan still
+  running while corporate-events, earnings, premarket-scan, beatpredict, thematic all fire.
+</div>
+
+<h2 id="u6"><span class="n">6</span>Proposed Job Architecture — ~9 Pipelines</h2>
+<table>
+<thead><tr><th class="num">#</th><th>Pipeline</th><th>Absorbs</th><th>When (PT)</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td><b>Universe-Layers</b></td><td>thematic, insider-cluster, congressional, membership</td><td>01:30</td></tr>
+<tr><td class="num">2</td><td><b>Data-Load</b> (§4 loader)</td><td>enrich-nightly, archive-sync, precompute-prewarm, precompute-patterns, time-anatomy</td><td>02:00</td></tr>
+<tr><td class="num">3</td><td><b>Scan</b></td><td>the <code>daily</code> heavy run</td><td>05:00</td></tr>
+<tr><td class="num">4</td><td><b>Catalysts</b></td><td>earnings → earnposcheck → beatpredict → beatalert</td><td>05:30</td></tr>
+<tr><td class="num">5</td><td><b>Reporting-AM</b></td><td>morning-briefing + daily-newsletter (merged)</td><td>06:30</td></tr>
+<tr><td class="num">6</td><td><b>Options/IV</b> (Schwab)</td><td>optionsflow, options-exit, ivsnapshot, options-buy</td><td>session</td></tr>
+<tr><td class="num">7</td><td><b>Portfolio</b> (paper)</td><td>executor, fill, portfolio-sync, positionwatch</td><td>session</td></tr>
+<tr><td class="num">8</td><td><b>ML</b></td><td>predict, close-loop → accuracy, retrain, drift</td><td>eve/weekly</td></tr>
+<tr><td class="num">9</td><td><b>Reporting-PM + Audit</b></td><td>eod-summary, audit-ledger (1×), digests, diagnostics</td><td>EOD/weekly</td></tr>
+</tbody>
+</table>
+<p><b>Keep as-is:</b> free-source jobs (congress, retail-sentiment, x-signal, edgar) + infra (server, tunnel,
+uptime, schwabtoken, supabase-sync, quota-snapshot, dq-checks). <b>Add:</b> one <em class="hl">budget owner</em>
+so pre-market pipelines 1→2→3→4 run in dependency order instead of colliding on 950/min.</p>
+
+<h2 id="u7"><span class="n">7</span>Phased Build Plan</h2>
+<table>
+<thead><tr><th>Phase</th><th>Work</th><th>Risk</th><th class="num">Effort</th></tr></thead>
+<tbody>
+<tr><td><b>P0 — Quick wins</b></td><td>(a) <code>get_russell3000()</code>; (b) track-record guarantee → <code>always_include</code> from <code>audit_ledger ∪ portfolio</code>; (c) merge the 2 structural precompute jobs</td><td><span class="pill p-low">low</span></td><td class="num">~1 day</td></tr>
+<tr><td><b>P1 — Tiered loader</b></td><td>archive → history-primary (delta-only EODHD); Schwab-first structural; single Data-Load pipeline</td><td><span class="pill p-med">med</span></td><td class="num">2–3 days</td></tr>
+<tr><td><b>P2 — Budget owner</b></td><td>cross-job pre-market sequencer honoring 950/min + daily quota</td><td><span class="pill p-med">med</span></td><td class="num">1–2 days</td></tr>
+<tr><td><b>P3 — Fleet consolidation</b></td><td>collapse ~60 agents → 9 pipelines; retire redundant plists</td><td><span class="pill p-med">med</span></td><td class="num">2–3 days</td></tr>
+</tbody>
+</table>
+<p>Each phase is independently shippable and reversible (config-flagged where it touches scan behavior).</p>
+
+<h2 id="ua"><span class="n">A</span>Rate Limits &amp; Billing</h2>
+<div class="grid2">
+  <div>
+    <h3>EODHD</h3>
+    <p>Caps: <code>17/s</code> · <code>950/min</code> · <code>95,000/day</code> (cross-process shared via flock).
+    Quota guard: <code>soft_limit=95,000</code>, <code>throttle@85%</code> → light scan, <code>abort@97%</code> → skip scan.</p>
+    <p>Billing (units): eod/news/splits/dividends/real_time/exch/calendar/sentiment = <b>1</b>;
+    intraday/technical/screener = <b>5</b>; fundamentals/options = <b>10</b>; <code>bulk_eod</code> = <b>100</b>.</p>
+  </div>
+  <div>
+    <h3>Schwab</h3>
+    <p>~100/min (<code>_MIN_GAP_S=0.55</code>), 429 backoff, <b>no daily cap</b>.
+    <code>get_pricehistory</code> = daily/weekly/monthly/minute. Used as failover
+    (EODHD → Schwab → archive) and sole intraday/4H source.</p>
+    <h3>Throughput</h3>
+    <p>All ~4,800 last-day OHLCV = 1 bulk call (~4s, 100u). Deep-enrich 1,000 ≈ 9.5 min EODHD / 15 min Schwab.</p>
+  </div>
+</div>
+
+<div class="foot">
+  SwingTrade · docs/data_loading_strategy.md ⟷ .html · generated 2026-06-09 ·
+  sources: data_fetcher.py · swing_trade.py · eodhd_client.py · schwab_client.py · target_engine.py · ~60 launchd agents
+</div>
+</div>
+</body>
+</html>

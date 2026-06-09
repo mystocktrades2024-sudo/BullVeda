@@ -47,8 +47,14 @@
   "universe": {
     "include_sp500": true,
     "include_russell1000": true,
+    "include_russell3000": false,
+    "_include_russell3000_note": "2026-06-09: Russell 3000 (RUA.INDX) authoritative completeness. R3000 ≈ R1000 ∪ R2000 — both already fetched — so this is largely redundant; default false. Set true to union the canonical R3000 roster (one cached EODHD call ≈10 credits).",
+    "track_record_from_audit_ledger": true,
+    "_track_record_from_audit_ledger_note": "2026-06-09: Track-record guarantee (Open Risk #1). Union distinct tickers from cache/audit_ledger.json (canonical 832+ superset = picks_history ∪ signal_log with resolved returns) into the always-include set so every name we've ever signaled or held stays in scan + bypasses the enrichment cap. signal_log is fully subsumed by the ledger. Delisted tombstones are still excluded downstream. Adds ~343 names over picks_history/portfolio alone. Set false to revert to picks_history+portfolio only.",
     "include_nasdaq_all": true,
     "_include_nasdaq_all_note": "2026-05-30: 'NASDAQ 1000' — top nasdaq_all_top_n NASDAQ-listed equities+ETFs by last-day dollar volume (>= nasdaq_all_min_dollar_vol), one bulk_eod(NASDAQ) call. Liquidity-gated (was the full ~4,805 exchange list) so the daily scan stays fast; net-new vs R1000/R2000/NDX100 is the off-index liquid small-caps + NASDAQ ETFs. Set include_nasdaq_all=false to revert; nasdaq_all_top_n<=0 for the full liquidity-gated list (no cap).",
+    "finviz_candidate_gen": false,
+    "_finviz_candidate_gen_note": "2026-06-09 · Phase 3b (Open Risk #7) · DEFAULT FALSE. When true, swing_trade.py runs scripts/finviz_candidates.py (one Finviz Elite screener export call per sleeve) and ADDS the per-sleeve candidate tickers to the scan universe tagged finviz_<sleeve>, also guaranteeing them an enrich slot so they get scored. CRITICAL: Finviz presets are a CURRENT snapshot (un-backtestable look-ahead) — they ONLY widen the candidate funnel; the signal is still confirmed on EODHD bars by the 5-pillar scoring + sleeve detectors. A finviz_<sleeve> tag NEVER gates or promotes a trade. Set false to leave the scan path completely unchanged.",
     "zacks_rank1_only": false,
     "custom_watchlist": [
       "XLE",
@@ -132,7 +138,11 @@
       }
     },
     "nasdaq_all_top_n": 1000,
-    "nasdaq_all_min_dollar_vol": 10000000
+    "nasdaq_all_min_dollar_vol": 10000000,
+    "tombstone_delisted": true,
+    "_tombstone_delisted_note": "Open Risk #9(a): after tombstone_fail_threshold consecutive all-tier OHLCV fetch failures, skip re-fetching a (likely delisted) ticker so it stops burning cycles. History (picks_history/signal_log/audit_ledger) is NEVER deleted. Auto-revives after tombstone_retry_after_days; manual revive: python3 delisted_registry.py revive TICKER. Set false to disable (no recording, no skipping). Registry: data/delisted_tickers.json.",
+    "tombstone_fail_threshold": 5,
+    "tombstone_retry_after_days": 7
   },
   "filters": {
     "min_price": 5,

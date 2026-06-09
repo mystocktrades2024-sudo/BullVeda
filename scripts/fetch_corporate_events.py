@@ -101,6 +101,16 @@ def main(argv: list[str]) -> int:
     OUT.write_text(json.dumps(out, indent=2))
     m = out["_meta"]
     print(f"[corporate_events] wrote {OUT} · {m['n_ipos']} IPOs · {m['n_splits']} splits · {days}d window")
+
+    # Open Risk #9(b): a split (ex-date <= today) makes cached bars + structural
+    # targets stale until re-fetched split-adjusted. Invalidate those caches now
+    # so the next scan re-fetches. Additive + safe (only removes regenerable
+    # cache files); never breaks the events refresh if it fails.
+    try:
+        from invalidate_split_caches import run as _invalidate_splits
+        _invalidate_splits(dry_run=False)
+    except Exception as e:
+        print(f"[corporate_events] split-cache invalidation skipped: {e}", file=sys.stderr)
     return 0
 
 

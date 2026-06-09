@@ -742,6 +742,18 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception as _r2e:
         log.debug(f"Russell 2000 fetch: {_r2e}")
 
+    # 2026-06-09 · Russell 3000 (RUA.INDX) — authoritative completeness only.
+    # R3000 ≈ R1000 ∪ R2000 (both already fetched above), so this is largely
+    # redundant; default OFF. Flag: universe.include_russell3000.
+    russell3000 = []
+    if universe_cfg.get("include_russell3000", False):
+        try:
+            from data_fetcher import get_russell3000
+            russell3000 = get_russell3000()
+            log.info(f"  Russell 3000: {len(russell3000)} tickers (authoritative; ≈R1000∪R2000)")
+        except Exception as _r3e:
+            log.debug(f"Russell 3000 fetch: {_r3e}")
+
     # 2026-05-21 · Tier-1 universe expansion · S&P MidCap 400 + S&P SmallCap 600 + NASDAQ-100
     sp_mid400, sp_small600, nasdaq100 = [], [], []
     try:
@@ -839,6 +851,52 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception as _t4_e:
         log.debug(f"Tier-4 thematic read: {_t4_e}")
 
+    # 2026-06-09 · Phase 3b · Finviz Elite per-sleeve CANDIDATE GENERATION
+    # ─────────────────────────────────────────────────────────────────────────
+    # The untapped lever from docs/data_loading_diagram.html Tab ⑤ section A:
+    # one Finviz Elite screener export call per sleeve hands us that sleeve's
+    # actual daily movers — INCLUDING off-index small-caps the index-member base
+    # misses — off EODHD's meter entirely.
+    #
+    # CRITICAL — Open Risk #7 (un-backtestable snapshot data):
+    #   These ONLY ADD candidate tickers to the scan universe. A Finviz preset
+    #   must NEVER gate or decide a trade by itself — it is a CURRENT snapshot
+    #   (look-ahead risk, no point-in-time history, can't be backtested). The
+    #   scan's existing 5-pillar scoring + the sleeve detectors still confirm
+    #   every signal on EODHD BARS. Finviz only widens the funnel; it never
+    #   closes it. Candidates feed the enrich-cap guaranteed set (so they get
+    #   SCORED, like other curated sources) — that is the entire extent of their
+    #   influence. No code path lets a `finviz_<sleeve>` source tag promote a
+    #   verdict.
+    #
+    # Gated by universe.finviz_candidate_gen (default FALSE → scan path unchanged).
+    finviz_candidate_map: dict[str, str] = {}   # ticker → finviz_<sleeve> source tag
+    if universe_cfg.get("finviz_candidate_gen", False):
+        try:
+            try:
+                import scripts.finviz_candidates as _fc
+            except ImportError:
+                # Fallback: ensure scripts/ is importable regardless of cwd
+                import sys as _sys
+                _scripts_dir = str(BASE_DIR / "scripts")
+                if _scripts_dir not in _sys.path:
+                    _sys.path.insert(0, _scripts_dir)
+                import finviz_candidates as _fc  # type: ignore
+            _fc_results = _fc.all_candidates()
+            for _sleeve, _tks in _fc_results.items():
+                _tag = f"finviz_{_sleeve}"
+                for _t in _tks:
+                    _tu = _t.upper().strip()
+                    # first-sleeve-wins for source tagging (informational only)
+                    finviz_candidate_map.setdefault(_tu, _tag)
+            log.info("  Finviz candidate gen (FLAG ON): "
+                     + ", ".join(f"{_s}={len(_t)}" for _s, _t in _fc_results.items())
+                     + f" → {len(finviz_candidate_map)} distinct candidate tickers "
+                     "(ADDED to scan only; signal still confirmed on EODHD bars)")
+        except Exception as _fc_e:
+            log.warning(f"  Finviz candidate gen failed (continuing without): {_fc_e}")
+    finviz_candidate_set = set(finviz_candidate_map.keys())
+
     creds_path = cfg.get("zacks_credentials", "")
     full_creds = str(BASE_DIR / creds_path) if not Path(creds_path).is_absolute() else creds_path
     zacks_data = fetch_all_zacks_data(full_creds, force_fresh=force_fresh)
@@ -931,6 +989,29 @@ def run_daily_scan(force_fresh: bool = False):
                             _t = (_p.get("ticker") or _p.get("symbol") or _p.get("sym") or "").upper()
                             if _t:
                                 pastpick_syms.add(_t)
+        # 2026-06-09 · Track-record guarantee (Open Risk #1): audit_ledger.json is
+        # the CANONICAL superset — picks_history ∪ signal_log with resolved returns
+        # (~842 distinct tickers vs ~500 from picks_history/portfolio alone). Many
+        # names were signaled only in signal_log (or only survive in the resolved
+        # ledger) and never landed in picks_history's trades/watch_triggers/runs.
+        # Union them so EVERY ticker we've ever signaled or held stays in scan +
+        # bypasses the enrichment cap forever. signal_log is fully subsumed by the
+        # ledger (verified delta = 0), so we don't read it separately. Delisted
+        # tombstones are still excluded downstream by the _skip prune, so dead
+        # names are NOT re-added. Flag: universe.track_record_from_audit_ledger.
+        if universe_cfg.get("track_record_from_audit_ledger", True):
+            _al = _Path("cache/audit_ledger.json")
+            if _al.exists():
+                _before_al = len(pastpick_syms)
+                _ald = _json.loads(_al.read_text())
+                for _r in (_ald.get("records") or []):
+                    if isinstance(_r, dict):
+                        _t = (_r.get("ticker") or "").upper().strip()
+                        if _t:
+                            pastpick_syms.add(_t)
+                log.info(f"  Track-record (audit_ledger): {len(_ald.get('records') or [])} records "
+                         f"→ +{len(pastpick_syms) - _before_al} new track-record tickers "
+                         f"(canonical superset; tombstoned dead names excluded downstream)")
     except Exception as _e:
         log.warning(f"  always-include set build failed (continuing): {_e}")
     # held names are never merely "past_pick"
@@ -959,11 +1040,14 @@ def run_daily_scan(force_fresh: bool = False):
     if zacks_rank1_only and zacks_r1:
         # Narrow/fast mode: Zacks Rank #1 + custom watchlist
         # Russell 1000 Rank #1 stocks are already inside zacks_r1_set (Zacks ranks all US stocks)
-        universe = list(zacks_r1_set | set(custom) | always_include)
+        universe = list(zacks_r1_set | set(custom) | always_include | finviz_candidate_set)
         for t in zacks_r1_set:
             ticker_sources[t] = "zacks_rank1"
         for t in custom:
             ticker_sources.setdefault(t, "custom")
+        # Finviz candidates (flag-gated) — provenance tag only, never gates a trade
+        for t, _ftag in finviz_candidate_map.items():
+            ticker_sources.setdefault(t, _ftag)
         for t in held_syms:
             ticker_sources.setdefault(t, "held")
         for t in pastpick_syms:
@@ -974,6 +1058,7 @@ def run_daily_scan(force_fresh: bool = False):
     else:
         # Full mode union of all sources (indices + extras + info-edge + thematic)
         r2000_set    = set(russell2000)
+        r3000_set    = set(russell3000)  # default empty unless include_russell3000
         mid400_set   = set(sp_mid400)
         sml600_set   = set(sp_small600)
         ndx_set      = set(nasdaq100)
@@ -987,10 +1072,10 @@ def run_daily_scan(force_fresh: bool = False):
         newhi_set    = set(t.upper() for t in new_highs_200d)
         newlo_set    = set(t.upper() for t in new_lows_200d)
         ndxall_set   = set(t.upper() for t in nasdaq_all)
-        base_set = (sp500_set | r1000_set | r2000_set | mid400_set | sml600_set
+        base_set = (sp500_set | r1000_set | r2000_set | r3000_set | mid400_set | sml600_set
                     | ndx_set | ndxall_set | ipo_set | pead_set | insider_set | congress_set
                     | etf_set | crypto_set | screen_set | newhi_set | newlo_set
-                    | zacks_r1_set | set(custom) | always_include)
+                    | zacks_r1_set | set(custom) | always_include | finviz_candidate_set)
         universe = list(base_set)
         # Source tagging — first-source-wins. Most curated → least curated.
         for t in sp500_set:    ticker_sources[t] = "sp500"
@@ -998,6 +1083,7 @@ def run_daily_scan(force_fresh: bool = False):
         for t in mid400_set:   ticker_sources.setdefault(t, "sp_midcap_400")
         for t in sml600_set:   ticker_sources.setdefault(t, "sp_smallcap_600")
         for t in r2000_set:    ticker_sources.setdefault(t, "russell2000")
+        for t in r3000_set:    ticker_sources.setdefault(t, "russell3000")
         for t in ndx_set:      ticker_sources.setdefault(t, "nasdaq_100")
         for t in ndxall_set:   ticker_sources.setdefault(t, "nasdaq_exchange")
         for t in ipo_set:      ticker_sources.setdefault(t, "recent_ipo")
@@ -1009,13 +1095,20 @@ def run_daily_scan(force_fresh: bool = False):
         for t in screen_set:   ticker_sources.setdefault(t, "screener_momentum")
         for t in newhi_set:    ticker_sources.setdefault(t, "signal_200d_new_hi")
         for t in newlo_set:    ticker_sources.setdefault(t, "signal_200d_new_lo")
+        # Finviz candidate tags (finviz_<sleeve>) — informational source label.
+        # Tagged AFTER curated/index sources so off-index Finviz-only names get
+        # the finviz_<sleeve> tag; names already in an index keep that tag. The
+        # tag NEVER influences scoring/verdict — it only marks provenance and
+        # routes the name into the curated guaranteed enrich set below.
+        for t, _ftag in finviz_candidate_map.items():
+            ticker_sources.setdefault(t, _ftag)
         for t in zacks_r1_set: ticker_sources.setdefault(t, "zacks_rank1")
         for t in custom:       ticker_sources.setdefault(t, "custom")
         for t in held_syms:    ticker_sources.setdefault(t, "held")
         for t in pastpick_syms: ticker_sources.setdefault(t, "past_pick")
         log.info(f"  Universe: {len(universe)} "
                  f"(S&P 500={len(sp500)}, R1000={len(russell1000)}, "
-                 f"R2000={len(russell2000)}, MID400={len(sp_mid400)}, "
+                 f"R2000={len(russell2000)}, R3000={len(russell3000)}, MID400={len(sp_mid400)}, "
                  f"SML600={len(sp_small600)}, NDX100={len(nasdaq100)}, NDXall={len(nasdaq_all)}, "
                  f"IPOs={len(recent_ipos)}, PEAD={len(pead_movers)}, "
                  f"insider={len(insider_cluster_tickers)}, "
@@ -1050,11 +1143,27 @@ def run_daily_scan(force_fresh: bool = False):
         "SPX", "BITF", "HYPE-USD", "WEBL",
         "TNA", "TECL", "SPXL", "BULZ", "UPRO", "UDOW",
     }
+    # Open Risk #9(a): merge the dynamic delisting tombstone registry into the
+    # static dead-ticker prune. A name the track-record guarantee force-includes
+    # (always_include) but which has failed every failover tier N cycles running
+    # is genuinely delisted — skip re-fetching it so it stops burning cycles. Its
+    # historical record (picks_history/signal_log/audit_ledger) is UNTOUCHED.
+    # Auto-revives after the retry window; manual revive via
+    # `python3 delisted_registry.py revive TICKER`.
+    _tombstoned: set[str] = set()
+    try:
+        import delisted_registry as _dr
+        _tombstoned = {t.upper() for t in _dr.tombstoned_set()}
+    except Exception as _e:
+        log.debug(f"  tombstone registry unavailable (continuing): {_e}")
+    _skip = _DEAD_TICKERS | _tombstoned
     _before = len(universe)
-    universe = [t for t in universe if t.upper() not in _DEAD_TICKERS]
+    universe = [t for t in universe if t.upper() not in _skip]
     _pruned = _before - len(universe)
     if _pruned:
-        log.info(f"  Universe pruned: {_pruned} known-dead/unsupported tickers removed")
+        log.info(f"  Universe pruned: {_pruned} known-dead/unsupported tickers removed"
+                 + (f" ({len(_tombstoned)} delisting-tombstoned, history retained)"
+                    if _tombstoned else ""))
 
     # Step 1.4 + 1.5 (optional): expand universe + Screener API pre-filter.
     # Both gated by config flags so default behavior is unchanged.
@@ -1752,6 +1861,15 @@ def run_daily_scan(force_fresh: bool = False):
         _curated_qualified = [t for t in qualified
                               if ticker_sources.get(t) in _curated_sources]
 
+        # Phase 3b — Finviz candidate guarantee (flag-gated, Open Risk #7).
+        # When finviz_candidate_gen is ON, guarantee the focused per-sleeve
+        # candidates a scoring slot (like other curated sources) so the sleeve
+        # detectors actually get to CONFIRM-or-reject them on EODHD bars. This
+        # only ADDS them to the scored pool; the verdict is still decided by
+        # scoring + detectors on bars, never by the Finviz preset alone.
+        _finviz_qualified = [t for t in qualified
+                             if str(ticker_sources.get(t, "")).startswith("finviz_")]
+
         # Always-include (held + past-pick) — never cut by the enrichment cap.
         # A held/previously-picked name MUST be deep-scored every scan so the
         # holder gets a current stop/target/exit read, not stale coverage.
@@ -1760,7 +1878,8 @@ def run_daily_scan(force_fresh: bool = False):
         _guaranteed = (set(_zr1_qualified) | set(_sp500_in_qualified)
                        | set(_ndx_in_qualified)
                        | set(_earnings_in_qualified) | set(_pead_in_qualified)
-                       | set(_curated_qualified) | set(_alwaysinc_qualified))
+                       | set(_curated_qualified) | set(_alwaysinc_qualified)
+                       | set(_finviz_qualified))
         _non_guaranteed_sorted = sorted(
             [(t, s) for t, s in _prescores.items() if t not in _guaranteed],
             key=lambda x: x[1], reverse=True
@@ -1775,6 +1894,7 @@ def run_daily_scan(force_fresh: bool = False):
                  f"{len(_earnings_in_qualified)} pre-earnings + "
                  f"{len(_pead_in_qualified)} PEAD post-report + "
                  f"{len(_curated_qualified)} curated-source guaranteed + "
+                 f"{len(_finviz_qualified)} finviz-candidate guaranteed + "
                  f"{len(_selected) - len(_guaranteed)} top-ranked OHLCV)")
     else:
         log.info(f"  Pre-screen: {len(qualified)} tickers (under {_max_enrich} threshold, no cut)")

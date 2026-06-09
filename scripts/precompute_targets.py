@@ -27,6 +27,17 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 
+def _load_emit_coverage():
+    """Load scripts/lib/coverage_report.emit_coverage by FILE PATH (avoids the
+    name collision with the top-level ROOT/lib package)."""
+    import importlib.util
+    p = Path(__file__).resolve().parent / "lib" / "coverage_report.py"
+    spec = importlib.util.spec_from_file_location("_scripts_coverage_report", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.emit_coverage
+
+
 def load_universe() -> list:
     """SP500 ∪ R1000 ∪ custom watchlist · de-duped, sorted."""
     import data_fetcher as df
@@ -161,6 +172,28 @@ def main():
             "tickers_total": len(tickers),
             "modes": args.modes,
         }) + "\n")
+
+    # ── Coverage observability (Open Risk #12) — additive, never affects warm logic ──
+    if not args.dry_run:
+        try:
+            emit_coverage = _load_emit_coverage()
+            # success = engine ran (BUY/WATCH/etc); reject is a valid engine verdict,
+            # so count both success+rejected as "warmed" (the warm produced an answer);
+            # only errors are true coverage gaps.
+            warmed = int(stats.get("success", 0)) + int(stats.get("rejected", 0))
+            emit_coverage(
+                job="precompute_targets",
+                stats={
+                    "total": int(stats.get("total", 0)),
+                    "warmed": warmed,
+                    "failed": int(stats.get("errors", 0)),
+                    "duration_s": stats.get("elapsed_sec", 0),
+                },
+                slack=True,
+                slack_always=False,
+            )
+        except Exception as e:
+            print(f"[coverage] emit failed (non-fatal): {e}")
 
     # Exit code 1 if too many failures
     if stats.get("errors", 0) > len(tickers) * 0.10:  # >10% failure rate

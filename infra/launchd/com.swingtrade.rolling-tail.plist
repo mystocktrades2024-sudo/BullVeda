@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.swingtrade.rolling-tail</string>
+
+    <!-- Pass 3 · rolling-tail warm (cheap layer only) · every 45 min in-session
+         (6:30 AM-12:30 PM PT, Mon-Fri = 9 slots/day).
+
+         Warms the TAIL (universe - hot-set - strategy-picks, ~2,100 names) in
+         batches of ~150, advancing through a 12h-TTL state file so successive
+         runs converge the whole tail by EOD. CHEAP layer only:
+           - Finviz bulk fundamentals (prefetched once/run, 4h-cached, reused
+             per name - never re-scraped per ticker)
+           - daily bars ARCHIVE-FIRST (local Parquet read, zero API; EODHD delta
+             only for names missing from the archive)
+         DEFERRED to on-click: 4H Schwab, EW weekly/monthly, full structural
+         targets, options - too expensive to compute for the tail; the FastAPI
+         endpoints warm those on first click.
+
+         Runs under /usr/bin/nice -n 15 (low CPU priority) AND is HEAVY-labeled
+         in launchd_wrapper.sh, so guard_heavy_job.sh skips the run cleanly if a
+         swing scan or another heavy job is active - it yields to scan/load.
+         Client rate-limiters handle the rare missing-archive EODHD delta. -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>1</integer></dict>
+        <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>15</integer><key>Weekday</key><integer>1</integer></dict>
+        <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>0</integer><key>Weekday</key><integer>1</integer></dict>
+        <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>45</integer><key>Weekday</key><integer>1</integer></dict>
+        <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>1</integer></dict>
+        <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>15</integer><key>Weekday</key><integer>1</integer></dict>
+        <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>0</integer><key>Weekday</key><integer>1</integer></dict>
+        <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>45</integer><key>Weekday</key><integer>1</integer></dict>
+        <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>1</integer></dict>
+        <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>2</integer></dict>
+        <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>15</integer><key>Weekday</key><integer>2</integer></dict>
+        <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>0</integer><key>Weekday</key><integer>2</integer></dict>
+        <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>45</integer><key>Weekday</key><integer>2</integer></dict>
+        <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>2</integer></dict>
+        <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>15</integer><key>Weekday</key><integer>2</integer></dict>
+        <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>0</integer><key>Weekday</key><integer>2</integer></dict>
+        <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>45</integer><key>Weekday</key><integer>2</integer></dict>
+        <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>2</integer></dict>
+        <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>3</integer></dict>
+        <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>15</integer><key>Weekday</key><integer>3</integer></dict>
+        <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>0</integer><key>Weekday</key><integer>3</integer></dict>
+        <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>45</integer><key>Weekday</key><integer>3</integer></dict>
+        <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>3</integer></dict>
+        <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>15</integer><key>Weekday</key><integer>3</integer></dict>
+        <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>0</integer><key>Weekday</key><integer>3</integer></dict>
+        <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>45</integer><key>Weekday</key><integer>3</integer></dict>
+        <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>3</integer></dict>
+        <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>4</integer></dict>
+        <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>15</integer><key>Weekday</key><integer>4</integer></dict>
+        <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>0</integer><key>Weekday</key><integer>4</integer></dict>
+        <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>45</integer><key>Weekday</key><integer>4</integer></dict>
+        <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>4</integer></dict>
+        <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>15</integer><key>Weekday</key><integer>4</integer></dict>
+        <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>0</integer><key>Weekday</key><integer>4</integer></dict>
+        <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>45</integer><key>Weekday</key><integer>4</integer></dict>
+        <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>4</integer></dict>
+        <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>15</integer><key>Weekday</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>0</integer><key>Weekday</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>45</integer><key>Weekday</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>15</integer><key>Weekday</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>0</integer><key>Weekday</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>45</integer><key>Weekday</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>30</integer><key>Weekday</key><integer>5</integer></dict>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Volumes/MyMacDisk/Claude Skills/SwingTrade</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Volumes/MyMacDisk/Claude Skills/SwingTrade/scripts/launchd_wrapper.sh</string>
+        <string>com.swingtrade.rolling-tail</string>
+        <string>/usr/bin/nice</string>
+        <string>-n</string>
+        <string>15</string>
+        <string>/usr/bin/python3</string>
+        <string>scripts/precompute_rolling_tail.py</string>
+        <string>--batch-size</string>
+        <string>150</string>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/rolling-tail.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/rolling-tail.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <!-- RunAtLoad=false: don't fire on install, only on schedule -->
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

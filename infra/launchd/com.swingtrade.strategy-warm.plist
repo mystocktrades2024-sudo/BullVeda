@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.swingtrade.strategy-warm</string>
+
+    <!-- Pass 2 · post-scan strategy warm + catalyst options/IV · 6:15 AM PT (Mon-Fri).
+
+         Fires AFTER the ~5:00-5:15 AM scan has written cache/last_bundle.json.
+         Reads the day's sleeve picks (top 20 per sleeve across the 7 sleeves,
+         ~140 names), then warms structural + SMC + fundamentals AND — the whole
+         point of Pass 2 — options/IV via Schwab (get_chains). The catalyst
+         sleeves (PEAD / ESP Play) need IV AT SIGNAL TIME, and the EOD (7:30 PM)
+         + morning (3 AM) precompute passes skip options because Schwab chains
+         are in-session only. 6:15 AM PT is pre-open but inside Schwab's data
+         window, so the chains return. (Open Risk #4.)
+
+         Most picks overlap the hot set already warmed by the EOD/morning passes,
+         so the NEW work is mostly options/IV + any off-hot-set sleeve names.
+
+         HEAVY-labeled in launchd_wrapper.sh → guard_heavy_job.sh defers it if a
+         swing scan or another heavy job is running (yields to the scan). Runs
+         without --force so 12h-fresh structural/SMC caches are skipped. EODHD +
+         Schwab pacing is client-enforced (token buckets + 429 backoff). -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>15</integer><key>Weekday</key><integer>1</integer></dict>
+        <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>15</integer><key>Weekday</key><integer>2</integer></dict>
+        <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>15</integer><key>Weekday</key><integer>3</integer></dict>
+        <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>15</integer><key>Weekday</key><integer>4</integer></dict>
+        <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>15</integer><key>Weekday</key><integer>5</integer></dict>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Volumes/MyMacDisk/Claude Skills/SwingTrade</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Volumes/MyMacDisk/Claude Skills/SwingTrade/scripts/launchd_wrapper.sh</string>
+        <string>com.swingtrade.strategy-warm</string>
+        <string>/usr/bin/python3</string>
+        <string>scripts/precompute_strategy_picks.py</string>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/strategy-warm.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/strategy-warm.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <!-- RunAtLoad=false: don't fire on install, only on schedule -->
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
