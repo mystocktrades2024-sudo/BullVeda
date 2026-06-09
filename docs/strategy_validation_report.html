@@ -147,11 +147,26 @@
 
   <!-- ============ PHASE 1 ============ -->
   <h2>Phase 1 — Candidate config deltas <span class="pill pill--wait">pending · re-prioritised</span></h2>
-  <p>All flag-gated in <code>config/config.json</code>, reversible via <code>config.json.bak</code>. <b>Re-ordered after the Phase 0 fix</b> — the dominant lever is making the alpha setups fire as BUYs, not killing BE. Final list locked once the baseline backtest lands; tested in Phase 2; <b>each shipped only with owner approval.</b></p>
+
+  <div class="callout callout--gn">
+    <b>ROOT CAUSE FOUND — why VCP / 52wk are stuck at WATCH.</b> The <code>entry_quality</code> gate (<code>decision_engine.py:630</code>) demotes any signal whose entry is <b>MISSED / EXTENDED / FRESH</b> to WATCH. In our breakout signals, <b>410 of ~462 WATCH demotions are EXTENDED (205) or MISSED (205)</b> — and a breakout buys strength, so it is EXTENDED/MISSED past its base <em>by construction</em>. The gate (built for pullback mechanics: buy near support) penalises the exact entry a breakout requires. Six catalyst sleeves (Momentum, Defensive, MeanRev, PEAD, Insider, ESP) already <b>bypass</b> this gate — but <b>VCP Breakout, 52wk Breakout, and 10-Week Pullback do not.</b> The gate's own code comments concede MISSED (PF 2.59) and EXTENDED (PF 1.33) are <em>more</em> profitable than the PULLBACK (PF 0.88) it prefers — i.e. it demotes the profitable entries. Mirrors <code>feedback_entry_quality_inverted</code> (MISSED PF 2.06 best, FRESH worst).
+  </div>
+  <table>
+    <thead><tr><th>Breakout entry_quality</th><th class="r">→ BUY</th><th class="r">→ WATCH</th><th>read</th></tr></thead>
+    <tbody>
+      <tr><td>PULLBACK</td><td class="r mono up">132</td><td class="r mono">14</td><td class="dim">passes (90%)</td></tr>
+      <tr><td>FRESH</td><td class="r mono up">30</td><td class="r mono">6</td><td class="dim">passes</td></tr>
+      <tr><td>VALID</td><td class="r mono up">41</td><td class="r mono">12</td><td class="dim">passes</td></tr>
+      <tr><td><b>EXTENDED</b></td><td class="r mono">393</td><td class="r mono dn"><b>205</b></td><td class="dn">34% demoted — breakout's natural state</td></tr>
+      <tr><td><b>MISSED</b></td><td class="r mono">268</td><td class="r mono dn"><b>205</b></td><td class="dn">43% demoted — breakout's natural state</td></tr>
+    </tbody>
+  </table>
+
+  <p>All flag-gated in <code>config/config.json</code>, reversible via <code>config.json.bak</code>. <b>Re-ordered after the Phase 0 fix + this root cause.</b> Final list locked once the baseline backtest lands; tested in Phase 2; <b>each shipped only with owner approval.</b></p>
   <table>
     <thead><tr><th>#</th><th>Delta</th><th>Rationale (corrected Phase 0)</th><th>Priority</th></tr></thead>
     <tbody>
-      <tr><td class="mono">1</td><td>Make VCP / 52wk / 10WP clear the BUY gate more often (lower their score floor / relax the gate that's demoting them to WATCH)</td><td class="dim">only setups with alpha, but n&lt;20–35 as BUYs — they're being gated out</td><td><span class="tag tag--keep">HIGH</span></td></tr>
+      <tr><td class="mono">1</td><td><b>entry_quality + decision_state bypass for breakout-alpha setups</b> (VCP / 52wk / Stage 2 / 10-Week Pullback) — mirror the 6 catalyst-sleeve bypasses, so EXTENDED/MISSED no longer demotes them to WATCH. Symmetric on both gates (per <code>feedback_decision_state_gate_symmetric</code>).</td><td class="dim">root cause: 410/462 WATCH demotions are EXTENDED/MISSED on the only setups with alpha</td><td><span class="tag tag--keep">HIGH</span></td></tr>
       <tr><td class="mono">2</td><td>Stop excluding 52-week Breakout from scoring/backtest</td><td class="dim">a working setup being discarded outright</td><td><span class="tag tag--keep">HIGH</span></td></tr>
       <tr><td class="mono">3</td><td>Strengthen <code>factor_alpha_overlay</code> tilt: VCP/52wk/10WP ↑; TC/BE modest ↓</td><td class="dim">aggregate BUY alpha is sig. negative — tilt away from no-edge volume</td><td><span class="tag tag--watch">MED</span></td></tr>
       <tr><td class="mono">4</td><td>Quarantine / raise bar on Breakout Expansion in momentum-negative regimes</td><td class="dim">mild neg on BUYs (−0.34%, n.s.) — <b>needs A/B proof, not a foregone kill</b></td><td><span class="tag tag--watch">TEST</span></td></tr>
@@ -177,6 +192,7 @@
   <div class="log-entry"><span class="ts">2026-06-09</span> · <b>Phase 0 FIX</b> — found the attribution included WATCH (non-traded) signals — 37% of picks_history, 84% of signal_log. Added BUY-only actionable filter (<code>--all</code> to include). Re-ran clean.</div>
   <div class="log-entry"><span class="ts">2026-06-09</span> · Phase 0a corrected (BUY-only, n=1,320) — aggregate selection alpha <b>−0.55% sig. negative</b> (real). BE only −0.34% (n.s.) on actual BUYs, not −1.17%. Alpha setups (VCP/52wk) rarely fire as BUYs (n&lt;20); 10WP +11.5% (n=35). <b>Lever re-prioritised: surface alpha setups as BUYs &gt; kill BE.</b></div>
   <div class="log-entry"><span class="ts">2026-06-09</span> · Phase 0b baseline 252d backtest — running.</div>
+  <div class="log-entry"><span class="ts">2026-06-09</span> · <b>ROOT CAUSE</b> — VCP/52wk stuck at WATCH because the <code>entry_quality</code> gate demotes EXTENDED/MISSED (410/462 WATCH breakouts), the breakout's natural entry state. 6 catalyst sleeves bypass this gate; the breakout-alpha setups don't. Phase-1 delta #1 = add a breakout-family bypass (symmetric on entry_quality + decision_state). Proposed for approval; NOT yet changed.</div>
 
   <div class="footer">
     SwingTrade strategy validation · generated 2026-06-09 · this file is updated in place as phases complete ·
