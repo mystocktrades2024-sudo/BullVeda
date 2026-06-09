@@ -225,9 +225,26 @@
   </div>
   <p class="dim">On completion: BUY count (esp. VCP/52wk/10WP), PF, Sharpe, win-rate, max-DD side by side. Gate to advance to Phase 3: B beats A on PF <em>and</em> Sharpe without worsening max-DD, and the added breakout BUYs don't drag aggregate PF below the haircut floor. <b>The definitive test is Phase 3 (4-fold walk-forward)</b> — this single-window A/B is directional evidence only.</p>
 
+  <!-- ============ WHAT NEEDS TO BE DONE ============ -->
+  <h2>What needs to be done <span class="pill pill--run">next</span></h2>
+  <p>The A/B proved the strategy <em>idea</em> is sound but the <b>validation infra is broken</b>. Fix that first (pure engineering, no strategy risk), then validate + ship the change.</p>
+  <table>
+    <thead><tr><th>#</th><th>Action</th><th>Why</th><th>Pri</th><th>Risk</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">1</td><td><b>Fix backtest verdict fidelity</b> — backtest issues <b>0 BUY</b> across 323 signals while live issued <b>12 BUY</b> today. Find why the backtest's <code>make_decision</code>/gate path diverges from live and align it.</td><td class="dim">until this matches live, NO verdict-level change can be validated — it's the blocker</td><td><span class="tag tag--kill">P0</span></td><td class="dim">infra only</td></tr>
+      <tr><td class="mono">2</td><td><b>Add <code>[day N/252]</code> progress log</b> to the backtest scoring loop</td><td class="dim">we ran 6h blind with no ETA — unacceptable; 1-line fix</td><td><span class="tag tag--kill">P0</span></td><td class="dim">none</td></tr>
+      <tr><td class="mono">3</td><td><b>Backtest speed lever</b> — a flag to use legacy ATR targets when targets aren't the variable (6h → ~15min)</td><td class="dim">structural-target path is unusable for iteration</td><td><span class="tag tag--watch">P1</span></td><td class="dim">none</td></tr>
+      <tr><td class="mono">4</td><td><b>Verdict-gated re-validation of the breakout-bypass</b> — take only BUY-verdict trades (or executor replay), on the now-fast+trustworthy backtest</td><td class="dim">the score-ranked backtest can't measure a verdict change</td><td><span class="tag tag--watch">P1</span></td><td class="dim">measurement</td></tr>
+      <tr><td class="mono">5</td><td><b>Ship breakout-bypass config flag</b> (default OFF → ON) if #4 clears the gates</td><td class="dim">converts alpha setups (VCP/52wk/10WP) from WATCH→BUY</td><td><span class="tag tag--watch">P2</span></td><td class="dim">needs approval</td></tr>
+    </tbody>
+  </table>
+  <div class="callout callout--gn">
+    <b>Already shipped this session (confidence wins, live now — no further action):</b> executor respects conviction (skips 0-size / scales by <code>size_mult</code>); scanner "Top Buys" ranks by conviction + shows the tier column so 0-size "BUY"s no longer masquerade. These directly address the original "no confidence in scanner picks" problem independent of the backtest.
+  </div>
+
   <!-- ============ PHASE 3 ============ -->
-  <h2>Phase 3 — Walk-forward validation <span class="pill pill--wait">pending</span></h2>
-  <p>4-fold walk-forward on the winning variant only (needs explicit owner go — ~2–3h). Per-fold + aggregate results vs the gates populate here.</p>
+  <h2>Phase 3 — Walk-forward validation <span class="pill pill--wait">blocked</span></h2>
+  <p><b>Blocked on actions #1–3 above.</b> A walk-forward at 6h/run on a verdict path that doesn't match live = 12h+ of more null. Do not run until the backtest is fixed + fast.</p>
 
   <!-- ============ PHASE 4 ============ -->
   <h2>Phase 4 — Outcome &amp; decisions <span class="pill pill--wait">pending</span></h2>
