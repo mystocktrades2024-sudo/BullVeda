@@ -218,6 +218,20 @@ def build_order_plan(picks: list[dict], equity: float, cash: float, cfg: dict,
             plan.append({"ticker": ticker, "action": "skip", "reason": "SHORT skipped (BUY-only paper window)"})
             skipped += 1
             continue
+        # Conviction gate (2026-06-09). A name can carry a BUY verdict while the
+        # conviction engine sizes it at ZERO — the regime-aware gate (e.g. the
+        # risk_on_choppy / correction floor) labels it AVOID with size_mult 0.0
+        # ("Pass — weak score"). Don't trade what the system itself won't size:
+        # skip 0-size / AVOID-conviction names instead of buying them at flat
+        # regime sizing. (Root cause of buying ARMK/PBI/WDC on 2026-06-09.)
+        _conv = pk.get("conviction") or {}
+        _conv_mult = _conv.get("size_mult")
+        _conv_label = str(_conv.get("label") or "").upper()
+        if _conv_mult is not None and (_conv_mult <= 0 or _conv_label == "AVOID"):
+            plan.append({"ticker": ticker, "action": "skip",
+                         "reason": f"conviction {_conv_label or 'AVOID'} · size×0 (regime-gated, not sized)"})
+            skipped += 1
+            continue
         if ticker in existing:
             plan.append({"ticker": ticker, "action": "skip", "reason": "already open"})
             skipped += 1
@@ -247,6 +261,17 @@ def build_order_plan(picks: list[dict], equity: float, cash: float, cfg: dict,
         if shares <= 0:
             plan.append({"ticker": ticker, "action": "skip", "reason": why})
             continue
+        # Scale the position by conviction tier — a T3 "quarter size" (size_mult
+        # ~0.25) takes a quarter position, not a full one. Position size now
+        # tracks conviction, per the tier's own recommendation.
+        if _conv_mult is not None and 0 < _conv_mult < 1:
+            _scaled = int(shares * _conv_mult)
+            if _scaled <= 0:
+                plan.append({"ticker": ticker, "action": "skip",
+                             "reason": f"0 shares after conviction×{_conv_mult:g} ({_conv_label or 'tier'})"})
+                continue
+            shares = _scaled
+            why = f"{why}×conv{_conv_mult:g}"
         # `why` is the sizing method ("kelly" or "flat") when shares > 0
         plan.append({
             "ticker":       ticker,

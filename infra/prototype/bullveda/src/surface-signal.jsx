@@ -191,7 +191,7 @@ const SS_COLS = [
   { id: "time",      label: "Time → T1 (ETA)",     nth: 46, grp: "Plan" },
 ];
 const SS_PRESETS = {
-  Essentials: ["sector","score","verdict","setup","edge","price","chg","rr","plan","time","rvol","mtf","wlb","er","signals"],
+  Essentials: ["sector","score","verdict","tier","setup","edge","price","chg","rr","plan","time","rvol","mtf","wlb","er","signals"],
   Momentum:   ["sector","score","verdict","setup","price","chg","off52","rvol","adx","mtf","rs","r1m","r3m","signals"],
   "Risk · liquidity": ["sector","score","verdict","price","rr","plan","atr","beta","dvol","si","spread","iv","signals"],
   Catalyst:   ["sector","score","verdict","price","chg","er","newsAge","insUsd","iv","sent","tgt","signals"],
@@ -395,12 +395,24 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
     if (setupF !== "all") r = r.filter(t => t.setup === setupF);
     if (q.trim()) { const s = q.trim().toLowerCase(); r = r.filter(t => (t.sym + " " + (t.name || "")).toLowerCase().includes(s)); }
     if (sort.col === "topbuy") {
-      // "Top Buys" — surface the strongest actionable longs first:
-      // BUY → WATCH → others/AVOID, then by EDGE composite, then score, then R:R.
-      const vRank = (t) => { const v = (t.verdict || "").toUpperCase(); return v === "BUY" ? 0 : v === "WATCH" ? 1 : (v === "AVOID" || v === "SHORT") ? 3 : 2; };
+      // "Top Buys" — surface what the system actually has CONVICTION in, not just
+      // the raw composite verdict. A name can be verdict=BUY while the conviction
+      // engine sizes it at ZERO (tier=AVOID) under the regime gate — those must NOT
+      // rank above genuinely-sized T1/T2/T3 buys. Rank: sized buys (T1>T2>T3) →
+      // 0-size "BUY" (AVOID conviction) → WATCH → AVOID; then EDGE, score, R:R.
+      const cRank = (t) => {
+        const v = (t.verdict || "").toUpperCase();
+        const tier = (t.tier || "").toUpperCase();
+        const sized = tier === "T1" || tier === "T2" || tier === "T3";
+        if (v === "BUY" && sized) return tier === "T1" ? 0 : tier === "T2" ? 1 : 2;
+        if (v === "BUY") return 3;                 // BUY verdict but conviction won't size it
+        if (v === "WATCH" || v === "WAIT") return 4;
+        if (v === "AVOID" || v === "SHORT" || v === "SELL") return 6;
+        return 5;
+      };
       const num = (x) => { const n = parseFloat(x); return isNaN(n) ? -Infinity : n; };
       r = [...r].sort((a, b) =>
-        (vRank(a) - vRank(b)) ||
+        (cRank(a) - cRank(b)) ||
         (num(b.edgePct) - num(a.edgePct)) ||
         (num(b.score) - num(a.score)) ||
         (num(b.rr) - num(a.rr)) ||
@@ -637,7 +649,7 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
                   const tn = n >= 6 ? "gn" : n >= 4 ? "amb" : "rd";
                   return <span className={`ss2-ready ss2-ready--${tn}`} title={`${n} of 6 entry criteria met`}>{n}/6</span>;
                 })()}</td>
-                <td><span className={`ss2-tier ss2-tier--${t.tier.toLowerCase()}`}>{t.tier}</span></td>
+                <td><span className={`ss2-tier ss2-tier--${String(t.tier||"—").toLowerCase()}`} title={(String(t.tier).toUpperCase()==="AVOID" && (t.verdict||"").toUpperCase()==="BUY") ? "Composite verdict is BUY but the conviction engine sizes this at 0 (regime-gated)" : "Conviction tier"}>{t.tier}</span></td>
                 <td className="mono dim">{t.setup}</td>
                 <td><span className={`ss2-eq ss2-eq--${t.eq === "EXTENDED" ? "amb" : t.eq === "MISSED" ? "rd" : "ink"}`}>{t.eq}</span></td>
                 <td><span className="ss2-cat mono">{t.cat}</span></td>
