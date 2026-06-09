@@ -754,8 +754,11 @@ function realEngineRows(id) {
     return r.length ? top5(r) : null;
   }
   if (id === "smc") {
+    // metric label is "conf" → show the SMC pillar confidence, NOT the overall
+    // EDGE grade (which made top-SMC names render D/F). Rank + display both = smc%.
     const r = rows.filter(x => x.pillarPct && x.pillarPct.smc != null)
-      .sort((a, b) => b.pillarPct.smc - a.pillarPct.smc).map(x => [x.sym, x.edge || ""]);
+      .sort((a, b) => b.pillarPct.smc - a.pillarPct.smc)
+      .map(x => [x.sym, Math.round(x.pillarPct.smc) + "%"]);
     return r.length ? top5(r) : null;
   }
   return null;
