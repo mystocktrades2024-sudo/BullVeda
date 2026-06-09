@@ -60,6 +60,7 @@ def load_trades():
                 "ticker": t.get("ticker"),
                 "setup": t.get("setup_family") or t.get("strategy") or "?",
                 "regime": t.get("regime_at_entry") or t.get("regime4") or t.get("regime"),
+                "verdict": str(t.get("verdict") or t.get("decision") or "?").upper(),
                 "entry": entry_d, "exit": exit_d,
                 "pnl": pnl, "hold": hold,
             })
@@ -76,11 +77,12 @@ def load_trades():
             if exit_d: exit_d = datetime.strptime(exit_d[:10], "%Y-%m-%d").date()
             else: exit_d = entry_d + pd.Timedelta(days=int(hold * 1.5)).to_pytimedelta()
         except (TypeError, ValueError): continue
-        if abs(pnl) > 1.0: continue
+        if pnl != pnl or abs(pnl) > 1.0: continue
         trades.append({
             "ticker": t.get("ticker"),
             "setup": t.get("setup_family") or t.get("setup_type") or "?",
             "regime": t.get("regime4") or t.get("regime"),
+            "verdict": str(t.get("verdict") or t.get("decision") or "?").upper(),
             "entry": entry_d, "exit": exit_d, "pnl": pnl, "hold": hold,
         })
     return trades
@@ -100,6 +102,18 @@ def main():
 
     trades = load_trades()
     print(f"Loaded {len(trades)} closed trades")
+    if not trades: return 1
+
+    # ACTIONABLE FILTER (2026-06-09). The logs record WATCH signals too — names the
+    # system surfaced but never traded. Including them biases every per-setup alpha
+    # (e.g. "Breakdown" was 100% WATCH). Default to BUY-only — the actionable cut
+    # that reflects what we'd actually trade. Pass --all to include WATCH/SHORT.
+    import sys as _sys
+    if "--all" not in _sys.argv:
+        before = len(trades)
+        trades = [t for t in trades if t.get("verdict") == "BUY"]
+        print(f"Actionable filter: BUY-only → {len(trades)} of {before} "
+              f"({before - len(trades)} WATCH/other dropped). Use --all to include them.")
     if not trades: return 1
 
     # For each trade: compute market return + tech-momentum return over hold window
