@@ -73,11 +73,23 @@ function ScanList({ activeSurface, activeTicker, onTicker, widthCat, collapsed }
     if (activeSurface === "buy")     return WATCHLIST.filter(w => w.verdict === "BUY");
     if (activeSurface === "elite")   return WATCHLIST.filter(w => w.score >= 70);
     if (activeSurface === "watchlist")return [...WATCHLIST].sort((a,b) => b.score - a.score);
-    // map mode shows top movers from heatmap
+    // map mode shows top movers from heatmap. HEATMAP tuples carry no price, so
+    // pull the real price from the live scan row when the name isn't in WATCHLIST
+    // (otherwise it would render $0.00). price stays null when genuinely absent.
     return HEATMAP
       .map(([sym, sector, mcap, chg]) => {
-        const w = WATCHLIST.find(x => x.sym === sym) || { sym, name: sector, price: 0, chg, score: 50 + Math.round(chg*5), verdict: chg > 1.5 ? "BUY" : chg > 0 ? "WATCH" : "WATCH", setup: sector };
-        return { ...w, chg, sector };
+        const w = WATCHLIST.find(x => x.sym === sym);
+        const live = (window.__BV && window.__BV.findRow) ? window.__BV.findRow(sym) : null;
+        // score: prefer the real scan-row score; never synthesize an impossible
+        // (>100) value. INTC showed "114" from the old `50 + chg*5` fallback.
+        const _liveScore = (live && isFinite(live.score)) ? live.score : null;
+        const base = w || { sym, name: (live && live.name) || sector, price: null,
+          chg, score: _liveScore,
+          verdict: (live ? live.verdict : chg > 1.5 ? "BUY" : "WATCH"),
+          setup: (live ? live.setup : sector) };
+        const price = (base.price != null && base.price > 0) ? base.price
+                    : (live && typeof live.price === "number" && live.price > 0 ? live.price : null);
+        return { ...base, price, chg, sector };
       })
       .sort((a, b) => Math.abs(b.chg) - Math.abs(a.chg))
       .slice(0, 28);
@@ -118,7 +130,7 @@ function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
       >
         <span className={`sc-row-sym mono ${active ? "copper" : ""}`}>{item.sym}</span>
         <span className={`sc-row-chg mono ${item.chg >= 0 ? "up" : "dn"}`}>
-          {item.chg >= 0 ? "+" : ""}{item.chg.toFixed(1)}
+          {item.chg == null || !isFinite(item.chg) ? "—" : (item.chg >= 0 ? "+" : "") + item.chg.toFixed(1)}
         </span>
       </button>
     );
@@ -132,21 +144,21 @@ function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
         <span className="sc-row-rank mono dim">{String(rank).padStart(2, "0")}</span>
         <span className={`sc-row-sym mono ${active ? "copper" : ""}`}><b>{item.sym}</b></span>
         <span className={`sc-row-chg mono ${item.chg >= 0 ? "up" : "dn"}`}>
-          {item.chg >= 0 ? "+" : ""}{item.chg.toFixed(2)}%
+          {item.chg == null || !isFinite(item.chg) ? "—" : (item.chg >= 0 ? "+" : "") + item.chg.toFixed(2) + "%"}
         </span>
-        <span className="sc-row-score mono"><b>{item.score}</b></span>
+        <span className="sc-row-score mono"><b>{item.score == null || !isFinite(item.score) ? "—" : item.score}</b></span>
       </div>
       {(widthCat === "L" || widthCat === "XL" || widthCat === "M") && (
         <div className="sc-row-meta">
           <span className="sc-row-name dim">{item.name}</span>
           {(widthCat === "L" || widthCat === "XL") && (
-            <span className="sc-row-px mono dim2">${item.price.toFixed(2)}</span>
+            <span className="sc-row-px mono dim2">{item.price != null && isFinite(item.price) && item.price > 0 ? "$" + item.price.toFixed(2) : "—"}</span>
           )}
         </div>
       )}
       {(widthCat === "M" || widthCat === "L" || widthCat === "XL") && (
-        <div className="sc-conv" title={`conviction ${item.score}/100`}>
-          <span className="sc-conv-fill" style={{ width: `${item.score}%`, background: `var(--${item.score >= 66 ? "gn" : item.score >= 50 ? "amb" : "rd"})` }} />
+        <div className="sc-conv" title={`conviction ${item.score == null ? "—" : item.score}/100`}>
+          <span className="sc-conv-fill" style={{ width: `${item.score == null || !isFinite(item.score) ? 0 : Math.max(0, Math.min(100, item.score))}%`, background: `var(--${(item.score || 0) >= 66 ? "gn" : (item.score || 0) >= 50 ? "amb" : "rd"})` }} />
         </div>
       )}
       {(widthCat === "L" || widthCat === "XL") && (
@@ -159,10 +171,10 @@ function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
         const s = scanSignals(item);
         return (
           <div className="sc-row-chips">
-            <span className="sc-chip" title="relative volume vs 20-day avg"><span className="sc-chip-k">RVOL</span><b className={s.rvol >= 1.5 ? "up" : "dim2"}>{s.rvol.toFixed(1)}×</b></span>
-            <span className="sc-chip" title="ML model P(up) over swing horizon"><span className="sc-chip-k">P↑</span><b className={`kpi-tone--${s.pUp >= 60 ? "gn" : s.pUp >= 45 ? "amb" : "rd"}`}>{s.pUp}%</b></span>
-            <span className="sc-chip" title="reward:risk to T1"><span className="sc-chip-k">R:R</span><b className={s.rr >= 2 ? "up" : "dim2"}>{s.rr.toFixed(1)}</b></span>
-            <span className="sc-chip" title="distance to breakout pivot"><span className="sc-chip-k">PIV</span><b className={Math.abs(s.toPivot) <= 1 ? "up" : "dim2"}>{s.toPivot >= 0 ? "+" : ""}{s.toPivot}%</b></span>
+            <span className="sc-chip" title="relative volume vs 20-day avg"><span className="sc-chip-k">RVOL</span><b className={isFinite(s.rvol) && s.rvol >= 1.5 ? "up" : "dim2"}>{isFinite(s.rvol) ? s.rvol.toFixed(1) + "×" : "—"}</b></span>
+            <span className="sc-chip" title="ML model P(up) over swing horizon"><span className="sc-chip-k">P↑</span><b className={s.pUp == null ? "dim2" : `kpi-tone--${s.pUp >= 60 ? "gn" : s.pUp >= 45 ? "amb" : "rd"}`}>{s.pUp == null ? "—" : s.pUp + "%"}</b></span>
+            <span className="sc-chip" title="reward:risk to T1"><span className="sc-chip-k">R:R</span><b className={isFinite(s.rr) && s.rr >= 2 ? "up" : "dim2"}>{isFinite(s.rr) ? s.rr.toFixed(1) : "—"}</b></span>
+            <span className="sc-chip" title="distance to breakout pivot"><span className="sc-chip-k">PIV</span><b className={isFinite(s.toPivot) && Math.abs(s.toPivot) <= 1 ? "up" : "dim2"}>{isFinite(s.toPivot) ? (s.toPivot >= 0 ? "+" : "") + s.toPivot + "%" : "—"}</b></span>
             {s.insider !== 0 && <span className={`sc-flowdot sc-flowdot--${s.insider > 0 ? "buy" : "sell"}`} title={`insider net ${s.insider > 0 ? "buying" : "selling"} (90d)`}>{s.insider > 0 ? "▲" : "▼"}</span>}
             {s.erDays <= 7 && <span className="sc-chip sc-chip--er" title={`earnings in ${s.erDays} sessions`}>⚡ ER {s.erDays}d</span>}
           </div>
@@ -183,14 +195,40 @@ function scanSignals(item) {
   const sym = item.sym;
   if (scanSigCache[sym]) return scanSigCache[sym];
   let h = 0; for (let i = 0; i < sym.length; i++) h = (h * 31 + sym.charCodeAt(i)) >>> 0;
-  const rvol = +(0.7 + (h % 240) / 100).toFixed(2);
-  let pUp;
-  try { pUp = window.AIPredict ? Math.round(window.AIPredict.predict(sym).pUp * 100) : null; } catch (e) { pUp = null; }
-  if (pUp == null) pUp = Math.round(38 + (h % 50));
-  const rr = +(1.1 + ((h >> 3) % 220) / 100).toFixed(2);
-  const erDays = (h >> 5) % 45;
-  const toPivot = +(((h >> 7) % 90) / 10 - 4.5).toFixed(1);   // % distance to pivot (−4.5..+4.5)
-  const insider = ((h >> 9) % 3) - 1;                         // -1 sell / 0 none / +1 buy
+  // real row (live /api/universe) when available — drives price + RVOL + R:R fallbacks
+  const row = (window.__BV && window.__BV.findRow) ? window.__BV.findRow(sym) : null;
+  let rvol = row && row.rvol != null && row.rvol !== "—" ? parseFloat(row.rvol) : NaN;
+  if (!isFinite(rvol)) rvol = +(0.7 + (h % 240) / 100).toFixed(2);
+  let pUp = null;
+  try {
+    const pr = window.AIPredict ? window.AIPredict.predict(sym) : null;
+    // predict() returns {error,...} (no pUp) for symbols outside the ML set →
+    // pUp is undefined; Math.round(undefined*100) === NaN, so guard for finite.
+    if (pr && typeof pr.pUp === "number" && isFinite(pr.pUp)) pUp = Math.round(pr.pUp * 100);
+  } catch (e) { pUp = null; }
+  // last real fallback: live p_up on the scan row (0..1) → percent
+  if (pUp == null && row && row._raw && typeof row._raw.p_up === "number" && isFinite(row._raw.p_up)) {
+    pUp = Math.round(row._raw.p_up * 100);
+  }
+  // pUp stays null when no ML forecast exists → render honest "—" (never NaN%)
+  let rr = row && row.rr != null && row.rr !== "—" ? parseFloat(row.rr) : NaN;
+  if (!isFinite(rr)) rr = +(1.1 + ((h >> 3) % 220) / 100).toFixed(2);
+  const erDays = (row && row.er != null) ? row.er : (h >> 5) % 45;
+  // distance-to-pivot: real (price→pivot, or price→entry/T1 when pivot absent),
+  // else deterministic synthetic. Guard against null/0-denominator → NaN.
+  let toPivot = NaN;
+  if (row) {
+    const px = row.price;
+    const pivRaw = row._raw && row._raw.pivot;
+    const entRaw = row.entry != null && row.entry !== "—" ? parseFloat(row.entry) : NaN;
+    const ref = (typeof pivRaw === "number" && isFinite(pivRaw) && pivRaw > 0) ? pivRaw
+              : (isFinite(entRaw) && entRaw > 0) ? entRaw : NaN;
+    if (typeof px === "number" && isFinite(px) && px > 0 && isFinite(ref)) {
+      toPivot = +(((px - ref) / ref) * 100).toFixed(1);
+    }
+  }
+  if (!isFinite(toPivot)) toPivot = +(((h >> 7) % 90) / 10 - 4.5).toFixed(1);
+  const insider = (row && typeof row.insNet === "number") ? Math.sign(row.insNet) : ((h >> 9) % 3) - 1; // -1/0/+1
   const s = { rvol, pUp, rr, erDays, toPivot, insider };
   scanSigCache[sym] = s;
   return s;

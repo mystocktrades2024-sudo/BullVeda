@@ -641,8 +641,8 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
                     </span>
                   </span>
                 </td>
-                <td className="r mono tabular">${(t.price || 0).toFixed(2)}</td>
-                <td className={`r mono tabular ${t.chg >= 0 ? "up" : "dn"}`}>{t.chg >= 0 ? "+" : ""}{(t.chg || 0).toFixed(2)}%</td>
+                <td className="r mono tabular">{t.price != null && isFinite(t.price) && t.price > 0 ? "$" + t.price.toFixed(2) : "—"}</td>
+                <td className={`r mono tabular ${t.chg >= 0 ? "up" : "dn"}`}>{t.chg == null || !isFinite(t.chg) ? "—" : (t.chg >= 0 ? "+" : "") + t.chg.toFixed(2) + "%"}</td>
                 <td className={`r mono tabular ${t.off52 >= -5 ? "up" : t.off52 >= -15 ? "" : "dim"}`} title="distance from 52-week high">{t.off52 == null ? "—" : t.off52 + "%"}</td>
                 <td className={`r mono tabular ${t.vwap >= 0 ? "up" : "dn"}`} title="price vs session VWAP">{t.vwap == null ? "—" : (t.vwap >= 0 ? "+" : "") + t.vwap + "%"}</td>
                 <td className="r mono tabular"><b className={parseFloat(t.rr) >= 2 ? "up" : ""}>{t.rr}</b></td>
@@ -776,7 +776,7 @@ function ScannerDetailPane({ sym, onTicker }) {
       <div className="sdp-hdr">
         <div>
           <div className="sdp-sym mono"><b>{t.sym}</b> <span className="dim2">{t.sector}</span></div>
-          <div className="sdp-px mono">${(t.price||0).toFixed(2)} <span className={t.chg>=0?"up":"dn"}>{t.chg>=0?"+":""}{(t.chg||0).toFixed(2)}%</span></div>
+          <div className="sdp-px mono">{t.price != null && isFinite(t.price) && t.price > 0 ? "$" + t.price.toFixed(2) : "—"} <span className={t.chg>=0?"up":"dn"}>{t.chg == null || !isFinite(t.chg) ? "—" : (t.chg>=0?"+":"") + t.chg.toFixed(2) + "%"}</span></div>
         </div>
         <div className="sdp-hdr-r">
           <span className={`ss2-score ss2-score--${t.score>=75?"gn":t.score>=60?"amb":"rd"}`}>{t.score}</span>

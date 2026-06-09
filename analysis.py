@@ -8115,6 +8115,44 @@ def _make_mode_config(mode: str, base_config: dict) -> dict:
     return cfg
 
 
+# decisions_by_mode uses analysis-side mode keys (swing/position/investment);
+# the structural engine uses swing/position/invest. Map for reach-cap lookup.
+_DBM_MODE_TO_TE = {"swing": "swing", "position": "position", "investment": "invest"}
+
+
+def _mode_soft_reach_cap(mode: str, entry: float, atr: float,
+                         base_config: dict) -> float | None:
+    """Return the SAME soft reach ceiling the structural target engine uses for
+    this mode, so the legacy ATR 3R/5R fallback can be clamped to it (never wider
+    than a real structural target would have been).
+
+        cap = entry + min( max(ATR×max_reach_atr, entry×min_reach_pct),
+                           entry×hard_reach_pct )
+
+    Reads target_engine.MODES (single source of truth for the 3-tier vars).
+    Returns None if the mode/config is unavailable so the caller skips clamping.
+    """
+    if entry is None or atr is None or entry <= 0 or atr <= 0:
+        return None
+    te_mode = _DBM_MODE_TO_TE.get(mode)
+    if te_mode is None:
+        return None
+    try:
+        from target_engine import MODES as _TE_MODES
+    except Exception:
+        return None
+    cfg = _TE_MODES.get(te_mode)
+    if not cfg:
+        return None
+    max_reach_atr = cfg.get("max_reach_atr")
+    min_reach_pct = cfg.get("min_reach_pct")
+    hard_reach_pct = cfg.get("hard_reach_pct")
+    if max_reach_atr is None or hard_reach_pct is None:
+        return None
+    vol_floor = max(atr * max_reach_atr, entry * (min_reach_pct or 0.0))
+    return entry + min(vol_floor, entry * hard_reach_pct)
+
+
 def compute_decisions_by_mode(*, price: float, atr: float,
                               base_plan: dict, normalized_score: float,
                               base_config: dict, regime_name: str = "neutral",
@@ -8201,6 +8239,7 @@ def compute_decisions_by_mode(*, price: float, atr: float,
         risk = max(0.01, base_entry_mid - stop)
 
         # Per-mode T1/T2/T3 resolution (Phase 2 cutover):
+        _fallback_reach_capped = False
         if _struct_applied and t1_struct > 0 and t2_struct > 0:
             # Path A — engine-capped structural levels (shared across modes;
             # they are S/R + HVN + Fib based, not mode-specific). T3 only when
@@ -8215,6 +8254,21 @@ def compute_decisions_by_mode(*, price: float, atr: float,
             mode_t1 = round(base_entry_mid + 3.0 * risk, 2)
             mode_t2 = round(base_entry_mid + 5.0 * risk, 2)
             mode_t3 = None  # no structural stretch anchor on fallback path
+            # 2026-06-08 — CAP the synthetic 3R/5R at the SAME soft reach ceiling
+            # the structural engine uses for this mode, so the fallback can never
+            # be WIDER than a real structural target would have been (the old
+            # backwards bug: ALAB T1 +32% off a -10.9% stop). Clamp to ceiling.
+            _reach_cap = _mode_soft_reach_cap(mode, base_entry_mid, atr, base_config)
+            if _reach_cap is not None and _reach_cap > base_entry_mid:
+                if mode_t1 > _reach_cap:
+                    mode_t1 = round(_reach_cap, 2)
+                    _fallback_reach_capped = True
+                if mode_t2 > _reach_cap:
+                    mode_t2 = round(_reach_cap, 2)
+                    _fallback_reach_capped = True
+                # keep T2 strictly above T1 when both clamp to the same ceiling
+                if mode_t2 <= mode_t1:
+                    mode_t2 = round(mode_t1 + max(0.01, 0.5 * risk), 2)
 
         # Recompute R:R against the resolved mode T1
         rr = round((mode_t1 - base_entry_mid) / risk, 2) if mode_t1 > 0 else 0.0
@@ -8310,7 +8364,11 @@ def compute_decisions_by_mode(*, price: float, atr: float,
             "t2": mode_t2,
             "t3": mode_t3,
             "rr_ratio": rr,
-            "target_basis": "structural" if _struct_applied else "atr_capped_3R5R",
+            "target_basis": (
+                "structural" if _struct_applied
+                else ("atr_3R5R_reach_capped" if _fallback_reach_capped
+                      else "atr_capped_3R5R")
+            ),
             "entry_mid": round(base_entry_mid, 2),
             "size_mult": rules["size_mult"],
             "final_alloc_pct": mode_alloc_pct,

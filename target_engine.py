@@ -78,7 +78,15 @@ MODES = {
         # only ~2.3 ATR over a 5-bar hold — reachable. The legacy bug was +169%.
         "max_reach_atr": 3.0,    # ~3 daily ATR over a 2-5d hold
         "min_reach_pct": 0.06,   # always allow at least 6%
-        "hard_reach_pct": 0.20,  # absolute ceiling — swing never reaches >20%
+        "hard_reach_pct": 0.20,  # SOFT reach cap — swing rarely reaches >20%
+        # POISON ceiling (two-tier guard, 2026-06-08): a TRUE outlier is a stale
+        # high-spike far above the soft cap (NFLX +1115%, INTC +281%). Sources
+        # above the poison ceiling are dropped unconditionally; sources between
+        # the soft cap and the poison ceiling are KEPT-NEAREST only when nothing
+        # survives the soft cap (so real structure still anchors a T1 on a
+        # high-vol/extended name). Ceiling = max(entry×poison_mult, entry+poison_atr×ATR).
+        "poison_mult": 1.60,     # +60% — anything beyond is a stale spike
+        "poison_atr": 6.0,       # or 6 ATR, whichever is farther
     },
     "position": {
         "lookback_days": 120,
@@ -95,7 +103,9 @@ MODES = {
         "ew_mode": "POSITION",
         "max_reach_atr": 10.0,    # 1-6mo hold has room to run
         "min_reach_pct": 0.15,
-        "hard_reach_pct": 0.60,   # 60% absolute ceiling for position
+        "hard_reach_pct": 0.60,   # 60% SOFT reach cap for position
+        "poison_mult": 2.20,      # +120% — beyond is a stale spike for a 1-6mo hold
+        "poison_atr": 18.0,
     },
     "invest": {
         "lookback_days": 504,
@@ -115,7 +125,12 @@ MODES = {
         # floor, finite hard ceiling to drop those poisoned levels.
         "max_reach_atr": 35.0,
         "min_reach_pct": 0.40,
-        "hard_reach_pct": 1.20,   # 120% absolute ceiling — long-horizon, not absurd
+        "hard_reach_pct": 1.20,   # 120% SOFT reach cap — long-horizon, not absurd
+        # invest poison ceiling: 504-bar lookback can catch a pre-split / pre-era
+        # high (NFLX $998) → +1000% nonsense. 4× entry is generous for a 1y+ hold
+        # yet still kills the stale-spike poison.
+        "poison_mult": 4.00,      # +300% absolute outlier ceiling for invest
+        "poison_atr": 60.0,
     },
 }
 
@@ -715,11 +730,23 @@ def compute_volume_profile(df: pd.DataFrame, n_bins: int = 100,
 # ════════════════════════════════════════════════════════════════════════
 # SUB-MODULE 5 · Anchored VWAP
 # ════════════════════════════════════════════════════════════════════════
+def _align_ts_to_index(ts: "pd.Timestamp", index) -> "pd.Timestamp":
+    """Localize/strip a Timestamp so it can be compared against `index` without
+    raising "Invalid comparison between dtype=datetime64[ns, UTC] and Timestamp"
+    when the DataFrame index is tz-aware (EODHD frames arrive UTC-aware)."""
+    idx_tz = getattr(index, "tz", None)
+    if idx_tz is not None and ts.tzinfo is None:
+        return ts.tz_localize(idx_tz)
+    if idx_tz is None and ts.tzinfo is not None:
+        return ts.tz_localize(None)
+    return ts
+
+
 def compute_anchored_vwap(df: pd.DataFrame, anchor_date: str) -> Optional[float]:
     """Volume-weighted typical price from anchor_date through end."""
     if df.empty:
         return None
-    anchor_ts = pd.to_datetime(anchor_date)
+    anchor_ts = _align_ts_to_index(pd.to_datetime(anchor_date), df.index)
     sub = df.loc[df.index >= anchor_ts]
     if sub.empty:
         return None
@@ -743,7 +770,7 @@ def find_anchor_dates(df: pd.DataFrame, earnings_dates: Optional[list] = None) -
     out["52w_low"] = low_idx.strftime("%Y-%m-%d") if hasattr(low_idx, "strftime") else str(low_idx)[:10]
     # YTD-open
     year = df.index[-1].year if hasattr(df.index[-1], "year") else int(str(df.index[-1])[:4])
-    ytd_start = pd.Timestamp(f"{year}-01-01")
+    ytd_start = _align_ts_to_index(pd.Timestamp(f"{year}-01-01"), df.index)
     ytd_sub = df.loc[df.index >= ytd_start]
     if not ytd_sub.empty:
         out["ytd_open"] = ytd_sub.index[0].strftime("%Y-%m-%d")
@@ -1356,22 +1383,67 @@ def analyze_trade(ticker: str, direction: str = "long", mode: str = "position",
     # engine (cluster + weight) as the base structural sources.
     raw_sources.extend(horizon_sources)
 
-    # 9c. Horizon reach cap (3-tier) — drop sources beyond the mode's plausible
-    # distance. cap = min( max(ATR×max_reach_atr, entry×min_reach_pct),
-    #                      entry×hard_reach_pct ).
-    # The inner max() is a volatility-aware floor (low-ATR names still reach a
-    # level); the outer min() is an ABSOLUTE ceiling so a high-ATR name (INTC,
-    # 8.6%/day) can't anchor a 20%+ swing target. Kills the +169%/+1115% bug.
+    # 9c. Horizon reach cap (TWO-TIER guard, 2026-06-08) — replaces the old
+    # blanket "drop everything beyond reach_cap" which threw away legitimate
+    # structural levels on high-vol/extended names, leaving the UI to fall back
+    # to a synthetic 3R/5R that was often WIDER than the dropped level (backwards).
+    #
+    #   reach_cap (SOFT)     = entry + min( max(ATR×max_reach_atr, entry×min_reach_pct),
+    #                                       entry×hard_reach_pct )
+    #   poison_ceiling (HARD)= entry + max( entry×poison_mult, poison_atr×ATR )
+    #
+    # Filter logic (longs — upside targets):
+    #   • s.price > poison_ceiling  → TRUE outlier (stale spike). DROP always.
+    #     This IS the NFLX +1115% / INTC +281% poison guard — preserved.
+    #   • s.price <= reach_cap      → in-budget. KEEP (behaves as before).
+    #   • reach_cap < s.price <= poison_ceiling → "extended". Only KEEP the
+    #     single NEAREST one (smallest price>entry) AND only if NOTHING survived
+    #     the soft cap above entry — so a real structural T1 still anchors instead
+    #     of falling to the synthetic fallback. If the soft cap already left a
+    #     candidate above entry, the extended ones stay dropped (old behavior).
     max_reach_atr = cfg.get("max_reach_atr")
     min_reach_pct = cfg.get("min_reach_pct")
     hard_reach_pct = cfg.get("hard_reach_pct")
+    poison_mult = cfg.get("poison_mult")
+    poison_atr = cfg.get("poison_atr")
     warnings_capped = 0
+    warnings_kept_nearest = 0
     if max_reach_atr is not None and hard_reach_pct is not None:
         vol_floor = max(atr * max_reach_atr, entry * (min_reach_pct or 0.0))
         reach_cap = entry + min(vol_floor, entry * hard_reach_pct)
+        # Poison ceiling — generous floor so real structure on a high-vol name is
+        # not poison; falls back to the soft cap if no poison config present.
+        if poison_mult is not None or poison_atr is not None:
+            poison_ceiling = entry + max(entry * (poison_mult or 0.0),
+                                         atr * (poison_atr or 0.0))
+            # never let the poison ceiling fall below the soft cap
+            poison_ceiling = max(poison_ceiling, reach_cap)
+        else:
+            poison_ceiling = reach_cap
+
         n_before = len(raw_sources)
-        raw_sources = [s for s in raw_sources if s.price <= reach_cap]
-        warnings_capped = n_before - len(raw_sources)
+        # Drop true outliers (poison) unconditionally.
+        outliers = [s for s in raw_sources if s.price > poison_ceiling]
+        survivors = [s for s in raw_sources if s.price <= poison_ceiling]
+        # Partition survivors into in-budget (<=soft cap) vs extended (soft<..<=poison)
+        in_budget = [s for s in survivors if s.price <= reach_cap]
+        extended = [s for s in survivors if s.price > reach_cap]
+        # Does the in-budget set already give us an upside anchor?
+        has_upside_in_budget = any(s.price > entry for s in in_budget)
+        if has_upside_in_budget or not extended:
+            # Old behavior: use the in-budget set; extended ones stay dropped.
+            raw_sources = in_budget
+            warnings_capped = len(extended) + len(outliers)
+        else:
+            # Relaxed: nothing in-budget anchors upside — keep the NEAREST single
+            # extended structural source so a real T1 exists instead of a wider
+            # synthetic fallback. Drop the rest of the extended ones + all poison.
+            extended_up = sorted((s for s in extended if s.price > entry),
+                                 key=lambda s: s.price)
+            keep_one = extended_up[:1]
+            raw_sources = in_budget + keep_one
+            warnings_kept_nearest = len(keep_one)
+            warnings_capped = (len(extended) - len(keep_one)) + len(outliers)
 
     # 10. Cluster into candidates
     candidates = cluster_levels_and_score(raw_sources, atr)
@@ -1447,9 +1519,15 @@ def analyze_trade(ticker: str, direction: str = "long", mode: str = "position",
     decision = "trade" if t1 else ("reject" if mode != "invest" else "wait")
     warnings = list(pre_warnings)  # carry ETF/etc. warnings forward
     warnings.extend(horizon_warnings)  # surface sub-engine degradation
+    if warnings_kept_nearest:
+        warnings.append(
+            f"extended_kept_nearest — nothing within the {mode} soft reach cap; "
+            f"kept the nearest structural source between the soft cap and the "
+            f"poison ceiling so a real T1 anchors")
     if warnings_capped:
-        warnings.append(f"reach_cap_applied — dropped {warnings_capped} far-out "
-                        f"source(s) beyond the {mode} horizon distance cap")
+        warnings.append(
+            f"outlier_dropped — dropped {warnings_capped} far-out source(s) "
+            f"beyond the {mode} poison ceiling (stale-spike guard)")
     if t3 is None and t3_c is not None:
         warnings.append("t3_stretch_unarmed — reachability/momentum did not confirm bull-stretch")
     if t1 is None and mode != "invest":
