@@ -283,11 +283,11 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
       window.__scanFilter = null;
     }
   }, []);
-  const [sort, setSort] = useStateSS({ col: "topbuy", dir: -1 });
+  const [sort, setSort] = useStateSS({ col: "score", dir: -1 });
   const [selected, setSelected] = useStateSS(() => new Set());
   const [secF, setSecF] = useStateSS("all");
   const [setupF, setSetupF] = useStateSS("all");
-  const [sortSel, setSortSel] = useStateSS("Top Buys");
+  const [sortSel, setSortSel] = useStateSS("Score ↓");
   const [q, setQ] = useStateSS("");
   const [wlTick, setWlTick] = useStateSS(0);
   React.useEffect(() => {
