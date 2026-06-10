@@ -68,12 +68,17 @@ function ScanColumn({
 
 // ─── List body ─────────────────────────────────────────────────────
 function ScanList({ activeSurface, activeTicker, onTicker, widthCat, collapsed }) {
-  // Use same WATCHLIST as data — filter / re-rank by surface
+  // Use same WATCHLIST as data — filter / re-rank by surface.
+  // Every surface ranks by score DESCENDING (aligned with the signal scanner).
+  // Null / non-finite scores sink to the bottom so they never out-rank real ones.
+  const _sc = x => (x.score == null || !isFinite(x.score)) ? -1 : x.score;
+  const _byScoreDesc = (a, b) => _sc(b) - _sc(a);
   const items = useMemoSC(() => {
-    if (activeSurface === "buy")     return WATCHLIST.filter(w => w.verdict === "BUY");
-    if (activeSurface === "elite")   return WATCHLIST.filter(w => w.score >= 70);
-    if (activeSurface === "watchlist")return [...WATCHLIST].sort((a,b) => b.score - a.score);
-    // map mode shows top movers from heatmap. HEATMAP tuples carry no price, so
+    if (activeSurface === "buy")     return WATCHLIST.filter(w => w.verdict === "BUY").sort(_byScoreDesc);
+    if (activeSurface === "elite")   return WATCHLIST.filter(w => w.score >= 70).sort(_byScoreDesc);
+    if (activeSurface === "watchlist")return [...WATCHLIST].sort(_byScoreDesc);
+    // map mode pulls the top-mover universe from heatmap, but ranks by score
+    // (descending) like every other surface. HEATMAP tuples carry no price, so
     // pull the real price from the live scan row when the name isn't in WATCHLIST
     // (otherwise it would render $0.00). price stays null when genuinely absent.
     return HEATMAP
@@ -91,7 +96,7 @@ function ScanList({ activeSurface, activeTicker, onTicker, widthCat, collapsed }
                     : (live && typeof live.price === "number" && live.price > 0 ? live.price : null);
         return { ...base, price, chg, sector };
       })
-      .sort((a, b) => Math.abs(b.chg) - Math.abs(a.chg))
+      .sort(_byScoreDesc)
       .slice(0, 28);
   }, [activeSurface]);
 
