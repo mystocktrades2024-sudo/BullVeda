@@ -6970,15 +6970,23 @@ def get_premarket_volume(ticker: str) -> dict:
 
     _empty = {"premarket_vol": 0, "avg_premarket_vol": 0, "vol_ratio": 1.0,
               "unusual": False, "price_chg_pct": 0.0}
+    # Hang-guard 2026-06-09: short-circuit once the yfinance circuit has tripped
+    # (mass slow/failed yf calls) — this is a no-timeout-prone yf path.
+    if yf_circuit_open():
+        return _empty
+    _t0 = time.time()
     try:
         import pytz
         eastern = pytz.timezone("America/New_York")
         now_et = datetime.now(eastern)
 
-        # Fetch 5-day 1-minute data (covers pre-market today + prior sessions)
+        # Fetch 5-day 1-minute data (covers pre-market today + prior sessions).
+        # timeout= bounds the underlying yfinance request so a stalled socket
+        # cannot freeze the enrichment pool (2026-06-09 hang fix).
         raw = yf.download(ticker, period="5d", interval="1m", progress=False,
-                          auto_adjust=True, prepost=True)
+                          auto_adjust=True, prepost=True, timeout=15)
         if raw.empty:
+            yf_record_call(time.time() - _t0, failed=False)
             return _empty
 
         close = raw["Close"].squeeze() if isinstance(raw["Close"], pd.DataFrame) else raw["Close"]
@@ -7033,9 +7041,11 @@ def get_premarket_volume(ticker: str) -> dict:
             "price_chg_pct":     pm_price_chg,
         }
         _cache_write(cache_key, result)
+        yf_record_call(time.time() - _t0, failed=False)
         return result
     except Exception as e:
         log.debug(f"Pre-market volume {ticker}: {e}")
+        yf_record_call(time.time() - _t0, failed=True)
         return _empty
 
 
@@ -7059,6 +7069,11 @@ def get_institutional_trend(ticker: str) -> dict:
 
     _empty = {"inst_pct": None, "inst_trend": "unknown", "top_holders": [],
               "net_change_pct": 0, "total_holders": 0}
+    # Hang-guard 2026-06-09: t.info / t.institutional_holders are no-timeout yf
+    # property fetches — short-circuit when the yf circuit is already open.
+    if yf_circuit_open():
+        return _empty
+    _t0 = time.time()
     try:
         t = yf.Ticker(ticker)
         info = t.fast_info if hasattr(t, "fast_info") else {}
@@ -7110,9 +7125,11 @@ def get_institutional_trend(ticker: str) -> dict:
             "total_holders":   total_holders,
         }
         _cache_write(cache_key, result)
+        yf_record_call(time.time() - _t0, failed=False)
         return result
     except Exception as e:
         log.debug(f"Institutional trend {ticker}: {e}")
+        yf_record_call(time.time() - _t0, failed=True)
         return _empty
 
 
@@ -7997,7 +8014,10 @@ def get_news_articles(ticker: str, limit: int = 10) -> list[dict]:
         log.debug(f"EODHD news({ticker}) failed{' [RATE LIMIT]' if is_rate_limit else ''}: {e}")
 
     # ── FALLBACK: yfinance ── (when EODHD failed OR returned no articles)
-    if not articles and _YF_AVAILABLE:
+    # Hang-guard 2026-06-09: .news is an unbounded yf property fetch; skip the
+    # fallback once the yf circuit has tripped so it can't freeze the pool.
+    if not articles and _YF_AVAILABLE and not yf_circuit_open():
+        _yf_t0 = time.time()
         try:
             yf_news = yf.Ticker(ticker).news or []
             from datetime import datetime as _dtt, timezone as _tzz
@@ -8026,8 +8046,10 @@ def get_news_articles(ticker: str, limit: int = 10) -> list[dict]:
                 })
             if articles:
                 log.info(f"  Yahoo fallback used for {ticker}: {len(articles)} articles (EODHD {'rate-limited' if eodhd_failed else 'returned 0'})")
+            yf_record_call(time.time() - _yf_t0, failed=False)
         except Exception as ye:
             log.debug(f"Yahoo news fallback failed for {ticker}: {ye}")
+            yf_record_call(time.time() - _yf_t0, failed=True)
 
     _cache_write(cache_key, articles)
     return articles

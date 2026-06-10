@@ -16,6 +16,7 @@ import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as _FutureTimeout
 from datetime import datetime, date
 from pathlib import Path
 
@@ -2087,8 +2088,15 @@ def run_daily_scan(force_fresh: bool = False):
     pool_workers   = int(enr_cfg.get("pool_workers", 14))
     skip_low_signal = bool(enr_cfg.get("skip_low_signal", True))  # drop social + decommissioned calls
     skip_options    = bool(enr_cfg.get("skip_options",    True))  # options data removed in EODHD migration
+    # Hang guards (2026-06-09): a single worker blocked on a no-timeout social/web
+    # scrape froze the whole scan for ~11min. per_ticker_timeout_s abandons any
+    # single future that won't return; phase_max_seconds is the overall Step-4
+    # wall-clock kill-switch so the scan ALWAYS reaches scoring.
+    per_ticker_timeout_s = float(enr_cfg.get("per_ticker_timeout_s", 90))
+    phase_max_seconds    = float(enr_cfg.get("phase_max_seconds", 900))
 
     log.info(f"  Enrichment pool: workers={pool_workers}, skip_low_signal={skip_low_signal}, skip_options={skip_options}")
+    log.info(f"  Enrichment hang guards: per_ticker_timeout={per_ticker_timeout_s:.0f}s, phase_deadline={phase_max_seconds:.0f}s")
     log.info(f"  Tickers: {len(tickers_to_analyze)} × ~14 endpoints ≈ {len(tickers_to_analyze)*14} EODHD calls (cache hits skip the network)")
 
     # Heartbeat helper — surfaces enrichment progress so log doesn't go silent
@@ -2171,134 +2179,130 @@ def run_daily_scan(force_fresh: bool = False):
             _nearest_expiry = (_today + _td(days=_days_ahead)).isoformat()
             schwab_opts_futures = {pool.submit(get_schwab_options, t, _nearest_expiry): t for t in tickers_to_analyze}
 
-        for fut in as_completed(earn_futures):
-            t = earn_futures[fut]
-            try:    earnings_data[t] = fut.result()
-            except: earnings_data[t] = {"earnings_date": None, "days_to_earnings": None, "earnings_risk": False}
+        # ── Hang-guard drainer (2026-06-09) ──────────────────────────────────
+        # Replaces the bare `for fut in as_completed(futures)` pattern. Three
+        # layers of protection so one hung worker can never freeze the scan:
+        #   1. per-future timeout — fut.result(timeout=per_ticker_timeout_s);
+        #      a single stuck call is abandoned (default filled), pool continues.
+        #   2. wall-clock deadline — as_completed(timeout=remaining_budget);
+        #      once phase_max_seconds elapses we stop waiting on the rest.
+        #   3. graceful fill — every un-drained ticker gets `default` so
+        #      downstream .get(t, {}) consumers see a complete map and scoring
+        #      always proceeds.
+        _phase_deadline = time.time() + phase_max_seconds
+        _drain_stats = {"timed_out_futures": 0, "deadline_hit_loops": 0}
 
-        for fut in as_completed(news_futures):
-            t = news_futures[fut]
-            try:    news_data[t] = fut.result()
-            except: news_data[t] = {"score": 0, "bias": "neutral"}
+        def _drain(futures, sink, default, label, on_item=None):
+            """Drain a {future: ticker} map into `sink` with hang guards."""
+            if not futures:
+                return
+            pending = dict(futures)  # future -> ticker still to collect
+            try:
+                remaining = max(1.0, _phase_deadline - time.time())
+                for fut in as_completed(futures, timeout=remaining):
+                    t = pending.pop(fut, None)
+                    if t is None:
+                        continue
+                    try:
+                        sink[t] = fut.result(timeout=per_ticker_timeout_s)
+                    except _FutureTimeout:
+                        _drain_stats["timed_out_futures"] += 1
+                        log.warning(f"  [enrich] {label}: per-ticker timeout "
+                                    f"({per_ticker_timeout_s:.0f}s) on {t} — abandoning, using default")
+                        fut.cancel()
+                        sink[t] = default() if callable(default) else default
+                    except Exception:
+                        sink[t] = default() if callable(default) else default
+                    if on_item is not None:
+                        on_item(t)
+            except _FutureTimeout:
+                # Wall-clock deadline reached — stop waiting on the remainder.
+                _drain_stats["deadline_hit_loops"] += 1
+                log.warning(f"  [enrich] {label}: phase deadline ({phase_max_seconds:.0f}s) "
+                            f"hit — proceeding with {len(futures) - len(pending)}/{len(futures)} "
+                            f"enriched, {len(pending)} defaulted")
+            # Fill defaults for anything still pending (deadline or stray).
+            for fut, t in pending.items():
+                if t not in sink:
+                    fut.cancel()
+                    sink[t] = default() if callable(default) else default
 
-        for fut in as_completed(insider_futures):
-            t = insider_futures[fut]
-            try:    insider_data[t] = fut.result()
-            except: insider_data[t] = {"buys": 0, "sells": 0, "sentiment": "neutral"}
+        _drain(earn_futures, earnings_data,
+               lambda: {"earnings_date": None, "days_to_earnings": None, "earnings_risk": False},
+               "earnings_date")
 
-        for fut in as_completed(analyst_futures):
-            t = analyst_futures[fut]
-            try:    analyst_data[t] = fut.result()
-            except: analyst_data[t] = {}
-
-        for fut in as_completed(stocktwits_futures):
-            t = stocktwits_futures[fut]
-            try:    stocktwits_data[t] = fut.result()
-            except: stocktwits_data[t] = {}
-
-        for fut in as_completed(options_futures):
-            t = options_futures[fut]
-            try:    options_iv_data[t] = fut.result()
-            except: options_iv_data[t] = {}
-
-        for fut in as_completed(beat_futures):
-            t = beat_futures[fut]
-            try:    beat_rate_data[t] = fut.result()
-            except: beat_rate_data[t] = {}
+        _drain(news_futures, news_data,
+               lambda: {"score": 0, "bias": "neutral"}, "news_sentiment")
+        _drain(insider_futures, insider_data,
+               lambda: {"buys": 0, "sells": 0, "sentiment": "neutral"}, "insider")
+        _drain(analyst_futures, analyst_data, dict, "analyst")
+        _drain(stocktwits_futures, stocktwits_data, dict, "stocktwits")
+        _drain(options_futures, options_iv_data, dict, "options_iv")
+        _drain(beat_futures, beat_rate_data, dict, "beat_rate")
 
         _n_extra = 0
-        for fut in as_completed(extra_fund_futures):
-            t = extra_fund_futures[fut]
-            try:    extra_fund_data[t] = fut.result()
-            except: extra_fund_data[t] = {}
+        def _on_extra(_t):
+            nonlocal _n_extra
             _n_extra += 1
             _heartbeat("extra_fund", _n_extra)
+        _drain(extra_fund_futures, extra_fund_data, dict, "extra_fund", on_item=_on_extra)
 
         # 2026-05-27 · Rich fundamentals (holders + insider tx + 5y fins +
         # earnings history + analyst revision trend). Cached 24h via the
         # underlying eodhd_client.fundamentals call, so most hit cache here.
         _n_rich = 0
-        for fut in as_completed(rich_fund_futures):
-            t = rich_fund_futures[fut]
-            try:    rich_fund_data[t] = fut.result()
-            except: rich_fund_data[t] = {}
+        def _on_rich(_t):
+            nonlocal _n_rich
             _n_rich += 1
             _heartbeat("rich_fund", _n_rich)
+        _drain(rich_fund_futures, rich_fund_data, dict, "rich_fund", on_item=_on_rich)
 
-        for fut in as_completed(cong_futures):
-            t = cong_futures[fut]
-            try:    congressional_data[t] = fut.result()
-            except: congressional_data[t] = {}
-
-        for fut in as_completed(wsb_futures):
-            t = wsb_futures[fut]
-            try:    reddit_wsb_data[t] = fut.result()
-            except: reddit_wsb_data[t] = {}
-
-        for fut in as_completed(uoa_futures):
-            t = uoa_futures[fut]
-            try:    uoa_data[t] = fut.result()
-            except: uoa_data[t] = {}
-
-        for fut in as_completed(borrow_futures):
-            t = borrow_futures[fut]
-            try:    borrow_data[t] = fut.result()
-            except: borrow_data[t] = {}
-
+        _drain(cong_futures, congressional_data, dict, "congressional")
+        _drain(wsb_futures, reddit_wsb_data, dict, "reddit_wsb")
+        _drain(uoa_futures, uoa_data, dict, "unusual_options")
+        _drain(borrow_futures, borrow_data, dict, "borrow_rate")
 
         # Drain Schwab fundamentals (populates the shared memcache). After this
         # loop, both get_finnhub_data() and get_fmp_data() below are O(1).
+        # Sink is a throwaway dict — we only care about the cache side effect.
         _n_schwab = 0
-        for fut in as_completed(schwab_fund_futures):
-            _ = schwab_fund_futures[fut]
-            try:    fut.result()
-            except Exception: pass
+        def _on_schwab(_t):
+            nonlocal _n_schwab
             _n_schwab += 1
             _heartbeat("schwab_fund", _n_schwab)
+        _drain(schwab_fund_futures, {}, dict, "schwab_fund", on_item=_on_schwab)
         for t in tickers_to_analyze:
             finnhub_data[t] = get_finnhub_data(t)   # shim — reads Schwab memcache
             fmp_data[t]     = get_fmp_data(t)       # shim — reads Schwab memcache
 
-        for fut in as_completed(sec_futures):
-            t = sec_futures[fut]
-            try:    sec_data[t] = fut.result()
-            except: sec_data[t] = {}
-
-        for fut in as_completed(premarket_futures):
-            t = premarket_futures[fut]
-            try:    premarket_data[t] = fut.result()
-            except: premarket_data[t] = {}
-
-        for fut in as_completed(inst_trend_futures):
-            t = inst_trend_futures[fut]
-            try:    inst_trend_data[t] = fut.result()
-            except: inst_trend_data[t] = {}
-
-        for fut in as_completed(gamma_futures):
-            t = gamma_futures[fut]
-            try:    gamma_data[t] = fut.result()
-            except: gamma_data[t] = {}
+        _drain(sec_futures, sec_data, dict, "sec_filings")
+        _drain(premarket_futures, premarket_data, dict, "premarket")
+        _drain(inst_trend_futures, inst_trend_data, dict, "inst_trend")
+        _drain(gamma_futures, gamma_data, dict, "gamma")
 
         _n_eps = 0
-        for fut in as_completed(eps_trend_futures):
-            t = eps_trend_futures[fut]
-            try:    eps_trend_data[t] = fut.result()
-            except: eps_trend_data[t] = {}
+        def _on_eps(_t):
+            nonlocal _n_eps
             _n_eps += 1
             _heartbeat("eps_trend", _n_eps)
+        _drain(eps_trend_futures, eps_trend_data, dict, "eps_trend", on_item=_on_eps)
 
         _n_news = 0
-        for fut in as_completed(news_articles_futures):
-            t = news_articles_futures[fut]
-            try:    news_articles_data[t] = fut.result()
-            except: news_articles_data[t] = []
+        def _on_news(_t):
+            nonlocal _n_news
             _n_news += 1
             _heartbeat("news_articles", _n_news)
+        _drain(news_articles_futures, news_articles_data, list, "news_articles", on_item=_on_news)
 
-        for fut in as_completed(schwab_opts_futures):
-            t = schwab_opts_futures[fut]
-            try:    options_chain_data[t] = fut.result()
-            except: options_chain_data[t] = {}
+        _drain(schwab_opts_futures, options_chain_data, dict, "schwab_options")
+
+        if _drain_stats["timed_out_futures"] or _drain_stats["deadline_hit_loops"]:
+            log.warning(
+                f"  [enrich] hang guards engaged: "
+                f"{_drain_stats['timed_out_futures']} per-ticker timeout(s), "
+                f"{_drain_stats['deadline_hit_loops']} phase-deadline hit(s) — "
+                f"scan continued to scoring with partial enrichment"
+            )
 
     log.info(f"  Enriched {len(infos)} tickers (EODHD + Schwab + SEC EDGAR + FINVIZ scrape + congressional + WSB + UOA + borrow + pre-mkt + gamma)")
     # Surface yfinance circuit-breaker stats so a tripped breaker is visible.

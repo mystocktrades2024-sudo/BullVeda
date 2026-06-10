@@ -398,13 +398,14 @@
 
     <div class="section-h">E · Plan of action (execution order)</div>
     <table>
-      <thead><tr><th>Step</th><th>Work</th><th>Risk</th></tr></thead>
+      <thead><tr><th>Step</th><th>Work</th><th>Status (as-built 2026-06-09)</th></tr></thead>
       <tbody>
-        <tr><td><b>P0</b></td><td>Quick wins: <code>get_russell3000()</code>, track-record guarantee (audit_ledger ∪ portfolio), Finviz health-check alert, move ML retrain → Sat, register all heavy jobs under load&gt;8 guard</td><td><span style="color:var(--lead)">low</span></td></tr>
-        <tr><td><b>P1</b></td><td>Pass 1 hot pre-warm (built) + Pass 2 post-scan strategy warm (7 sleeves) + ML cap → 1,380</td><td><span style="color:var(--amber)">med</span></td></tr>
-        <tr><td><b>P2</b></td><td>Pass 3 rolling-tail warm (niced, 45m batches) → full-universe coverage by EOD</td><td><span style="color:var(--amber)">med</span></td></tr>
-        <tr><td><b>P3</b></td><td>Fleet consolidation: ≈60 jobs → 9 pipelines; budget-owner sequences the pre-market chain; retire redundant plists</td><td><span style="color:var(--amber)">med</span></td></tr>
-        <tr><td><b>P4</b></td><td>Slack taxonomy: add the 3 NEW alerts; merge duplicate AM reporting jobs</td><td><span style="color:var(--lead)">low</span></td></tr>
+        <tr><td><b>P0</b></td><td>Quick wins: <code>get_russell3000()</code>, track-record guarantee, health-check alert, ML retrain → Sat, heavy jobs under load&gt;8 guard</td><td><span style="color:var(--lead)">✅ SHIPPED</span></td></tr>
+        <tr><td><b>P1</b></td><td>Pass 1 hot pre-warm + Pass 2 post-scan strategy warm (7 sleeves) + ML cap → 1,380</td><td><span style="color:var(--lead)">✅ SHIPPED</span></td></tr>
+        <tr><td><b>P2</b></td><td>Pass 3 rolling-tail warm (niced, 45m batches) → full coverage by EOD</td><td><span style="color:var(--lead)">✅ SHIPPED</span> (loaded)</td></tr>
+        <tr><td><b>P3</b></td><td>Fleet consolidation: retire redundant plists (precompute-patterns + enrich-nightly); evening sequencer</td><td><span style="color:var(--amber)">◑ PARTIAL</span> — 2 dups retired + sequencer; full 60→9 deferred</td></tr>
+        <tr><td><b>P4</b></td><td>Slack taxonomy: 3 NEW alerts (data-source-down, missed-job built; new-sleeve-signal pending)</td><td><span style="color:var(--amber)">◑ PARTIAL</span></td></tr>
+        <tr><td><b>P5</b></td><td>Validation: flip <code>include_russell3000</code> + <code>finviz_candidate_gen</code> ON after weekend backtest</td><td><span style="color:var(--red)">○ PENDING</span> (flags OFF)</td></tr>
       </tbody>
     </table>
 
@@ -730,13 +731,15 @@ Sizing overlay  ◄── Pre-FOMC calendar + regime / VIX / drawdown multiplier
 
   <!-- ================= TAB 7 · OPEN RISKS ================= -->
   <div class="page" id="prisk">
-    <div class="gov" style="margin-top:6px;margin-bottom:8px">🔎 <b>Adversarial re-audit of the baseline.</b> What the 7-tab plan does <em>not</em> yet solve, ranked by how badly it bites — each with its fix. Fix the two flagged ⭐ before anything else.</div>
+    <div class="gov" style="margin-top:6px;margin-bottom:8px">🔎 <b>Adversarial re-audit — now annotated AS-BUILT (2026-06-09).</b> Phases 0–5 shipped + 2 duplicate jobs retired; rows marked <span style="color:var(--lead)">✅ FIXED</span> / <span style="color:var(--amber)">◑ partial</span> / <span style="color:var(--red)">○ open</span>. A live scan-test validated the rebuild and surfaced one new item (the enrichment hang, now fixed).</div>
+    <div class="fix" style="margin-top:0"><b>Shipped:</b> P0 safety (health alert · coverage · tombstone · split-invalidation) · P1 track-record guarantee (+344 names) · P2 EOD-targets 19:30 + light morning + evening sequencer · P3 Pass-2/3 warm + Finviz candidate-gen (flag OFF) · P4 ML cap→1,380 (+ fixed a zero-predictions bug) · P5 caffeinate + missed-job alert · retired precompute-patterns + enrich-nightly · added enrichment hang-guards (per-future 90s + phase deadline 900s).</div>
 
     <div class="section-h">🔴 Critical — will break or silently fail</div>
     <table>
       <thead><tr><th>#</th><th>Gap</th><th>Why it bites</th><th>Fix</th></tr></thead>
       <tbody>
-        <tr><td><b>1</b> ⭐</td><td><b>Universe expansion not wired into the scan</b></td><td>We <em>warm</em> ~3,547 but the live scan only <em>scores</em> ~1,003 (SP500+R1000). The tail gets warmed caches nobody scores — "pull all tickers" is half-plumbed.</td><td>Wire R2000 + NASDAQ-liquid + R3000 into <code>swing_trade</code> universe assembly behind a config flag; align scan universe = warm universe; A/B for signal quality first.</td></tr>
+        <tr><td><b>1</b> <span style="color:var(--lead)">✅</span></td><td><b>Universe / track-record coverage</b></td><td><b>Corrected:</b> the scan was <em>already broad</em> — it assembles ~3,686 (SP500∪R1000∪R2000∪Mid∪Small∪NDX∪nasdaq_all+curated) and scores ~1,800, not 1,003. The real gap was the track-record guarantee.</td><td><b>FIXED (P1):</b> <code>always_include</code> now unions <code>audit_ledger</code> (842) → <b>+344 names</b> force-scanned (verified live in the scan log). get_russell3000 added (flag OFF). Residual: precompute warms ~1,000 vs scan-scores ~1,800 (tail on-demand).</td></tr>
+        <tr><td><b>13</b> <span style="color:var(--lead)">✅</span></td><td><b>Deep-enrichment hang</b> <span class="sev sv-new">NEW · found in test</span></td><td>The live scan-test froze ~11 min at ~2% CPU on a social/web scrape (no hard timeout) after the external sources went flaky (yfinance circuit tripped). One pool worker blocked → whole scan hung. Pre-existing, not from the rebuild.</td><td><b>FIXED:</b> per-request timeouts on the scrape calls + per-future timeout (<code>per_ticker_timeout_s=90</code>, abandons a hung worker) + Step-4 wall-clock deadline (<code>phase_max_seconds=900</code>, always proceeds to scoring). Config-flagged.</td></tr>
         <tr><td><b>2</b></td><td><b>New evening collision</b></td><td>Moving structural to 19:30 stacks it with 19:00 ML close-loop + audit-ledger — all EODHD in the 19:00–20:00 window, with no sequencer. We traded the 2 AM crunch for a 7 PM one.</td><td>Build the <b>budget-owner</b> that sequences evening jobs (ML → targets → audit) so they don't co-spend EODHD/min.</td></tr>
         <tr><td><b>3</b></td><td><b>19:30 assumes EODHD posted the EOD bar</b></td><td>If EODHD posts US EOD later than 19:30 PT, targets compute on an incomplete/stale bar → wrong T1/T2.</td><td>Replace the fixed clock with a <b>"wait-for-fresh-bar" guard</b> — poll until today's bar is posted, then run; retry/backoff.</td></tr>
         <tr><td><b>4</b></td><td><b>Catalyst sleeves' options/IV not warmed</b></td><td>PEAD &amp; ESP fire on IV/options, but we only warm <em>structural</em> + defer options to on-click → cold options fetch exactly when they signal.</td><td>Pass 2 also warms <b>Schwab options/IV</b> for the PEAD/ESP picks (small set, post-scan).</td></tr>
