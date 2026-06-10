@@ -503,10 +503,41 @@ def reset_call_stats() -> None:
     _ENDPOINT_COUNTER.clear()
 
 
+# Per-job attribution for quota telemetry. The source identifies WHICH entry
+# point consumed the calls (morning scan vs ml_predict vs options vs server …).
+_QUOTA_SOURCE_OVERRIDE: str | None = None
+
+
+def set_quota_source(name: str | None) -> None:
+    """Explicitly tag this process's EODHD usage (e.g. a launchd job sets its
+    own label). Overrides the basename(sys.argv[0]) default."""
+    global _QUOTA_SOURCE_OVERRIDE
+    _QUOTA_SOURCE_OVERRIDE = (str(name)[:64] if name else None)
+
+
+def _quota_source() -> str:
+    """Job/source label for quota attribution: explicit override → env
+    EODHD_QUOTA_SOURCE → basename(sys.argv[0]) → 'unknown'."""
+    if _QUOTA_SOURCE_OVERRIDE:
+        return _QUOTA_SOURCE_OVERRIDE
+    import os as _os
+    s = _os.environ.get("EODHD_QUOTA_SOURCE")
+    if s:
+        return s[:64]
+    try:
+        import sys as _sys
+        base = _os.path.basename(_sys.argv[0] or "")
+        if base.endswith(".py"):
+            base = base[:-3]
+        return (base or "unknown")[:64]
+    except Exception:
+        return "unknown"
+
+
 def flush_quota_to_supabase() -> dict:
-    """Best-effort write of today's per-endpoint counts to eodhd_quota_usage.
-    Safe to call anytime — wraps all Supabase work in try/except.
-    Returns a summary dict {pushed, failed, endpoints_seen}."""
+    """Best-effort write of today's per-endpoint, PER-SOURCE counts to
+    eodhd_quota_usage. Safe to call anytime — wraps all Supabase work in
+    try/except. Returns a summary dict {pushed, failed, endpoints_seen}."""
     import os
     from datetime import date
     summary = {"pushed": 0, "failed": 0, "endpoints_seen": len(_ENDPOINT_COUNTER)}
@@ -517,18 +548,23 @@ def flush_quota_to_supabase() -> dict:
         if sb is None:
             return summary
         today = date.today().isoformat()
+        src = _quota_source()
         rows = []
         for cls, counts in _ENDPOINT_COUNTER.items():
+            net = counts.get("network", 0)
             rows.append({
                 "bucket_date": today,
                 "endpoint": cls,
-                "request_count": counts.get("network", 0),
-                "cost_units": counts.get("network", 0),  # 1 unit per request baseline
+                "source": src,
+                "request_count": net,
+                # WEIGHTED billed units — fundamentals/options ×10, bulk ×100,
+                # etc. (was raw net = under-count of weighted endpoints).
+                "cost_units": net * _ENDPOINT_COST.get(cls, 1),
                 "rate_limit_hits": counts.get("rate_limit", 0),
             })
         if rows:
             sb.table("eodhd_quota_usage").upsert(
-                rows, on_conflict="bucket_date,endpoint"
+                rows, on_conflict="bucket_date,endpoint,source"
             ).execute()
             summary["pushed"] = len(rows)
     except Exception:
