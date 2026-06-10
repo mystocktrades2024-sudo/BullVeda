@@ -270,11 +270,42 @@ function exportScanLedger() {
   } catch (e) {}
 }
 
+// ── Per-field filters + auto-save (persist across refresh / next run) ─────────
+const SS_FILTERS_KEY = "kairos.ss2.filters.v1";
+function ssLoadFilters() {
+  try { const v = JSON.parse(localStorage.getItem(SS_FILTERS_KEY)); if (v && typeof v === "object") return v; } catch (e) {}
+  return {};
+}
+function ssSaveFilters(obj) {
+  if (window.UserPrefs) { try { window.UserPrefs.set("ss2.filters", obj); } catch (e) {} }
+  try { localStorage.setItem(SS_FILTERS_KEY, JSON.stringify(obj)); } catch (e) {}
+}
+// Sort presets (module-level so a persisted sort restores at init).
+const SS_SORT_MAP = { "Top Buys": { col: "topbuy", dir: -1 }, "Ticker A→Z": { col: "sym", dir: 1 }, "EDGE ↓": { col: "edgePct", dir: -1 }, "Score ↓": { col: "score", dir: -1 }, "R:R ↓": { col: "rr", dir: -1 }, "RVOL ↓": { col: "rvol", dir: -1 } };
+// Which columns get a numeric range filter vs a categorical select.
+const SS_NUMERIC_COLS = new Set(["score","ready","off52","vwap","rr","atr","rvol","adx","beta","dvol","si","spread","regWR","rs","r1m","r3m","wlb","n","pf","iv","sent","tgt","newsAge","insUsd","er","price","chg","edge","aiEdge"]);
+const SS_CATEG_COLS = new Set(["sector","verdict","tier","setup","eq","cat","sq"]);
+// Comparable value for a column id on a scan row (some are stored as strings).
+function ssColVal(t, id) {
+  switch (id) {
+    case "edge": return t.edgePct;
+    case "sq":   return t.squeeze;
+    case "rr":   return parseFloat(t.rr);
+    case "atr":  return parseFloat(t.atr);
+    case "rvol": return parseFloat(t.rvol);
+    case "rs":   return parseFloat(t.rs);
+    case "wlb":  return parseFloat(t.wlb);
+    case "pf":   return parseFloat(t.pf);
+    default:     return t[id];
+  }
+}
+
 function SurfaceSignalScanner({ onTicker, onSurface }) {
+  const _sf = useMemoSS(() => ssLoadFilters(), []);
   const [tab, setTab] = useStateSS("scanner");
-  const [pills, setPills] = useStateSS({});
+  const [pills, setPills] = useStateSS(() => _sf.pills || {});
   const [sel, setSel] = useStateSS("ARCM");
-  const [side, setSide] = useStateSS(() => window.__scanFilter || "ALL");
+  const [side, setSide] = useStateSS(() => window.__scanFilter || _sf.side || "ALL");
   React.useEffect(() => {
     if (window.__scanFilter) {
       setSide(window.__scanFilter);
@@ -283,12 +314,40 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
       window.__scanFilter = null;
     }
   }, []);
-  const [sort, setSort] = useStateSS({ col: "score", dir: -1 });
+  const [sort, setSort] = useStateSS(() => SS_SORT_MAP[_sf.sortSel] || { col: "score", dir: -1 });
   const [selected, setSelected] = useStateSS(() => new Set());
-  const [secF, setSecF] = useStateSS("all");
-  const [setupF, setSetupF] = useStateSS("all");
-  const [sortSel, setSortSel] = useStateSS("Score ↓");
-  const [q, setQ] = useStateSS("");
+  const [secF, setSecF] = useStateSS(() => _sf.secF || "all");
+  const [setupF, setSetupF] = useStateSS(() => _sf.setupF || "all");
+  const [sortSel, setSortSel] = useStateSS(() => _sf.sortSel || "Score ↓");
+  const [q, setQ] = useStateSS(() => _sf.q || "");
+  // per-field filters: { colId: {min,max} | {sel:[...]} } — auto-saved
+  const [colFilters, setColFilters] = useStateSS(() => _sf.colFilters || {});
+  const [filtersOpen, setFiltersOpen] = useStateSS(false);
+  const filtersRef = React.useRef(null);
+  React.useEffect(() => {
+    const h = e => { if (filtersRef.current && !filtersRef.current.contains(e.target)) setFiltersOpen(false); };
+    document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h);
+  }, []);
+  // AUTO-SAVE the full filter state on any change (persists across refresh / next run)
+  React.useEffect(() => {
+    ssSaveFilters({ side, pills, secF, setupF, sortSel, q, colFilters });
+  }, [side, pills, secF, setupF, sortSel, q, colFilters]);
+  // categorical filter options per field (unique values in the live universe)
+  const catOpts = useMemoSS(() => {
+    const o = {};
+    SS_CATEG_COLS.forEach(id => {
+      o[id] = Array.from(new Set(SS_UNIVERSE.map(t => ssColVal(t, id)).filter(v => v != null && v !== ""))).map(String).sort();
+    });
+    return o;
+  }, []);
+  const activeFilterCount = Object.keys(colFilters).length;
+  const setColF = (id, patch) => setColFilters(s => {
+    const next = { ...s, [id]: { ...(s[id] || {}), ...patch } };
+    const f = next[id];
+    const empty = (f.min == null || f.min === "") && (f.max == null || f.max === "") && (!f.sel || !f.sel.length);
+    if (empty) delete next[id];
+    return next;
+  });
   const [wlTick, setWlTick] = useStateSS(0);
   React.useEffect(() => {
     const h = () => setWlTick(x => x + 1);
@@ -338,7 +397,7 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
     const g = {}; SS_COLS.forEach(c => { (g[c.grp] = g[c.grp] || []).push(c); }); return g;
   }, []);
   // wire the Sort dropdown → sort state
-  const SORT_MAP = { "Top Buys": { col: "topbuy", dir: -1 }, "Ticker A→Z": { col: "sym", dir: 1 }, "EDGE ↓": { col: "edgePct", dir: -1 }, "Score ↓": { col: "score", dir: -1 }, "R:R ↓": { col: "rr", dir: -1 }, "RVOL ↓": { col: "rvol", dir: -1 } };
+  const SORT_MAP = SS_SORT_MAP;
   const onSortSel = (label) => { setSortSel(label); if (SORT_MAP[label]) setSort(SORT_MAP[label]); };
   const sectorOpts = useMemoSS(() => ["all", ...Array.from(new Set(SS_UNIVERSE.map(r => r.sector))).sort()], []);
   const setupOpts = useMemoSS(() => ["all", ...Array.from(new Set(SS_UNIVERSE.map(r => r.setup).filter(Boolean))).sort()], []);
@@ -394,6 +453,19 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
     if (secF !== "all") r = r.filter(t => t.sector === secF);
     if (setupF !== "all") r = r.filter(t => t.setup === setupF);
     if (q.trim()) { const s = q.trim().toLowerCase(); r = r.filter(t => (t.sym + " " + (t.name || "")).toLowerCase().includes(s)); }
+    // per-field filters (numeric range + categorical select) — auto-saved
+    const _cfKeys = Object.keys(colFilters);
+    if (_cfKeys.length) {
+      r = r.filter(t => _cfKeys.every(id => {
+        const f = colFilters[id]; if (!f) return true;
+        const v = ssColVal(t, id);
+        if (f.sel && f.sel.length) return f.sel.includes(String(v == null ? "" : v));
+        const nn = parseFloat(v);
+        if (f.min != null && f.min !== "" && (isNaN(nn) || nn < +f.min)) return false;
+        if (f.max != null && f.max !== "" && (isNaN(nn) || nn > +f.max)) return false;
+        return true;
+      }));
+    }
     if (sort.col === "topbuy") {
       // "Top Buys" — surface what the system actually has CONVICTION in, not just
       // the raw composite verdict. A name can be verdict=BUY while the conviction
@@ -427,7 +499,7 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
     }
     if (tab === "ai-edge") r = [...r].sort((a, b) => b.aiEdge - a.aiEdge); // rank by ML edge
     return r;
-  }, [tab, pills, side, sort, secF, setupF, q, wlTick]);
+  }, [tab, pills, side, sort, secF, setupF, q, colFilters, wlTick]);
 
   const consensusCount = useMemoSS(() => {
     const c = window.buildConsensus ? window.buildConsensus() : { rows: [] };
@@ -462,7 +534,7 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
           </button>
         ))}
         <button className="ss2-reset mono"
-                onClick={() => { setPills({}); setTab("scanner"); setSide("ALL"); }}
+                onClick={() => { setPills({}); setTab("scanner"); setSide("ALL"); setSecF("all"); setSetupF("all"); setQ(""); setColFilters({}); }}
                 title="Clear all filters">↺ RESET</button>
       </div>
 
@@ -508,6 +580,52 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
           <span className="ss2-tdiv" />
           <span className="ss2-ledger mono dim2" title="Append-only scan ledger (localStorage) — every name snapshotted daily for backtest + audit">⛁ {ledgerN.toLocaleString()}</span>
           <button className="ss2-clear mono" onClick={exportScanLedger} title="Export the full scan ledger as CSV">⤓ CSV</button>
+          <div className="ss2-colmgr" ref={filtersRef}>
+            <button className={`ss2-clear ss2-colbtn mono ${filtersOpen ? "is-on" : ""} ${activeFilterCount ? "ss2-filt-active" : ""}`} onClick={() => setFiltersOpen(o => !o)} title="Filter any field — auto-saved across refreshes">⚲ Filters{activeFilterCount ? ` · ${activeFilterCount}` : ""}</button>
+            {filtersOpen && (
+            <div className="ss2-colpanel ss2-filterpanel">
+              <div className="ss2-colpanel-h">
+                <span className="mono dim2">FILTER ANY FIELD · auto-saved</span>
+                {activeFilterCount > 0 && <button className="ss2-preset mono" onClick={() => setColFilters({})}>✕ clear all ({activeFilterCount})</button>}
+              </div>
+              <div className="ss2-colgroups">
+                {Object.entries(colGroups).map(([grp, items]) => {
+                  const filterable = items.filter(c => SS_NUMERIC_COLS.has(c.id) || SS_CATEG_COLS.has(c.id));
+                  if (!filterable.length) return null;
+                  return (
+                    <div key={grp} className="ss2-colgroup">
+                      <div className="ss2-colgroup-h mono dim2">{grp}</div>
+                      {filterable.map(c => {
+                        const f = colFilters[c.id] || {};
+                        const on = !!colFilters[c.id];
+                        return (
+                          <div key={c.id} className={`ss2-filterrow mono ${on ? "is-on" : ""}`}>
+                            <span className="ss2-filterrow-l">{c.label}</span>
+                            {SS_NUMERIC_COLS.has(c.id) ? (
+                              <span className="ss2-filterrow-c">
+                                <input className="ss2-filt-num" type="number" placeholder="min" value={f.min ?? ""}
+                                       onChange={e => setColF(c.id, { min: e.target.value })} />
+                                <span className="dim2">–</span>
+                                <input className="ss2-filt-num" type="number" placeholder="max" value={f.max ?? ""}
+                                       onChange={e => setColF(c.id, { max: e.target.value })} />
+                              </span>
+                            ) : (
+                              <select className="ss2-filt-sel" value={(f.sel && f.sel[0]) || ""}
+                                      onChange={e => setColF(c.id, { sel: e.target.value ? [e.target.value] : [] })}>
+                                <option value="">any</option>
+                                {(catOpts[c.id] || []).map((o, i) => <option key={i} value={o}>{o}</option>)}
+                              </select>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            )}
+          </div>
           <div className="ss2-colmgr" ref={colsRef}>
             <button className={`ss2-clear ss2-colbtn mono ${colsOpen ? "is-on" : ""}`} onClick={() => setColsOpen(o => !o)} title="Show / hide columns">⚙ Columns · {cols.length}</button>
             {colsOpen && (
