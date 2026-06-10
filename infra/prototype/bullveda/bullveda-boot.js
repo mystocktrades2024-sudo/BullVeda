@@ -191,7 +191,7 @@
       sector: BV.normSector(r.sector), industry: r.industry || "",
       mcap: (num(r.market_cap, 0) || 0) / 1e9,
       price: price, chg: num(r.pct_chg, 0),
-      score: Math.round(score), verdict: verdict, setup: r.setup || "",
+      score: Math.round(score), verdict: verdict, setup: r.setup_type || r.setup || "",
       tfsn: tfsn, tfsnScore: tfsn.reduce(function (a, b) { return a + b; }, 0),
       mtf: mtf, mtfUp: mtf.filter(function (m) { return m === "up"; }).length,
       sigCount: signals.length, signals: signals,

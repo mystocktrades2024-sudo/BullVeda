@@ -3655,6 +3655,13 @@ async def universe_api(limit: int = 0):
             "sector": r.get("sector"), "industry": r.get("industry"),
             "score": r.get("score"), "stage": dec.get("verdict"),
             "setup": r.get("setup_family"), "conviction_tier": conv.get("label"),
+            # Granular setup type (2026-06-09): the alpha distinction (VCP / 52wk /
+            # 10-Week Pullback / Pocket Pivot / Near-VCP) is computed and stored on
+            # the row but was being collapsed to the 4 broad families before the
+            # scanner saw it — so the user couldn't tell an alpha setup from beta.
+            # Surface it so the scanner shows the REAL setup (display prefers it).
+            "setup_type": ((ctp.get("setup") or {}).get("setup_type")
+                           or (r.get("trade_plan") or {}).get("setup_type")),
             "catalyst_tier": r.get("catalyst_tier"), "entry_quality": r.get("entry_quality"),
             "price": r.get("price"), "pct_chg": r.get("perf_1d"),
             "rr": rr, "stop": stop, "entry_lo": elo, "t1": t1, "t2": t2, "t3": t3,
