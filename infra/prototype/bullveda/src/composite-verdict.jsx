@@ -56,7 +56,16 @@ const _cvImpl = function (ticker, mode) {
   const _engVerdict = _engRaw ? (typeof _engRaw === "string" ? _engRaw : _engRaw.verdict) : null;
   const _engScore = (_engRaw && typeof _engRaw === "object" && typeof _engRaw.composite_score === "number") ? _engRaw.composite_score : null;
   const lensNet = Math.round(lenses.reduce((a, l) => a + l.w * l.v, 0));
-  const net = _engScore != null ? Math.round(_engScore) : lensNet;
+  // SSOT (2026-06-09): the headline NUMBER binds the canonical 5-pillar score
+  // (ticker.score — the SAME number as Scanner / Home / Overview). The
+  // lens-weighted recompute (lensNet) is the AVT-case anti-pattern and survives
+  // ONLY as the "why" breakdown below, never as a competing headline. Path B
+  // (engine-computed per-mode score via decisions_by_mode.composite_score) is
+  // tracked under OVERVIEW-VERDICT-RECON; until then _engScore is a fallback
+  // ahead of the lens recompute.
+  const net = (typeof ticker.score === "number" && isFinite(ticker.score))
+    ? Math.round(ticker.score)
+    : (_engScore != null ? Math.round(_engScore) : lensNet);
   const tone = v => v >= 62 ? "gn" : v >= 46 ? "amb" : "rd";
   lenses.forEach(l => { l.tone = tone(l.v); });
   const _vt = v => v === "BUY" ? "gn" : v === "WATCH" ? "amb" : "rd";
@@ -101,7 +110,7 @@ function CompositeVerdict({ ticker, mode, onLens }) {
   const maxW = Math.max(...cv.lenses.map(l => l.w));
   const biasWord = cv.biasLabel || (window.secBias ? window.secBias(cv.verdict) : cv.verdict);
   const cvPrompt = () => `In plain English, explain to a beginner why ${ticker.symbol} has an overall ${biasWord} read (score ${cv.net} out of 100, ${mode} timeframe). 3-4 short sentences. Name the 2-3 strongest supporting areas and anything that disagrees, in everyday words.
-Overall: ${biasWord}, ${cv.net}/100, confidence ${cv.conf}.
+Overall: ${biasWord}, score ${cv.net}/100 (canonical 5-pillar), lens agreement ${cv.disagree === "low" ? "high" : cv.disagree === "high" ? "low" : "moderate"}.
 Strongest areas: ${cv.lenses.slice().sort((a, b) => b.v - a.v).slice(0, 3).map(l => `${l.k} ${l.v}/100 (${l.why})`).join("; ")}.
 Weakest or disagreeing: ${cv.dissenters.length ? cv.dissenters.slice(0, 3).map(d => `${d.k} ${d.v}/100`).join("; ") : "none"}.`;
   return (
@@ -110,11 +119,11 @@ Weakest or disagreeing: ${cv.dissenters.length ? cv.dissenters.slice(0, 3).map(d
         <div className="cv-eyebrow mono">COMPOSITE BIAS · {cv.lenses.length} LENSES · <b className="copper">{mode}</b></div>
         <div className="cv-headline">
           <span className={`cv-verdict cv-verdict--${cv.vtone}`}>{cv.biasLabel || (window.secBias ? window.secBias(cv.verdict) : cv.verdict)}</span>
-          <span className="cv-net mono" title="This stock graded for your active horizon (per-mode composite — reweights catalyst &amp; entry-quality for the timeframe). This is the number that drives the verdict.">{cv.net}<span className="cv-net-of">/100</span></span>
+          <span className="cv-net mono" title="Canonical 5-pillar composite score — the SAME number shown on the Scanner / Home / Overview. The lens bars below explain how each area contributes; they do not override this number.">{cv.net}<span className="cv-net-of">/100</span></span>
           {typeof ticker.score === "number" && Math.round(ticker.score) !== cv.net && (
             <span className="cv-net-alt mono dim2" style={{ fontSize: 12, alignSelf: "flex-end", marginBottom: 5 }} title="Generic, horizon-agnostic 5-pillar score (the number shown on the Scanner). It does NOT reweight catalyst / entry-quality for your timeframe, so it usually reads higher than the per-mode number.">· overall {Math.round(ticker.score)}</span>
           )}
-          <span className="cv-conf mono dim2">conf {cv.conf} · disagreement <b className={cv.disagree === "low" ? "gn-c" : cv.disagree === "high" ? "rd-c" : "amb-c"}>{cv.disagree}</b></span>
+          <span className="cv-conf mono dim2" title="How much the lenses agree with each other — NOT a confidence in the signal. High disagreement = the areas are split, which is why a high pillar score can still read WATCH/Neutral.">lens agreement <b className={cv.disagree === "low" ? "gn-c" : cv.disagree === "high" ? "rd-c" : "amb-c"}>{cv.disagree === "low" ? "high" : cv.disagree === "high" ? "low" : "moderate"}</b></span>
         </div>
         <div className="cv-counts mono">
           <span className="cv-cnt gn">{cv.agree} agree</span>
