@@ -484,6 +484,25 @@ def _score_as_of(ticker: str, df_full: pd.DataFrame, as_of_date: pd.Timestamp,
     _bt_cfg["regime_thresholds"]["neutral"] = {"buy_min_score": 60, "watch_min_score": 55, "rs_min": 65, "weekly_bull_required": False, "rr_min": 3.0}
     _bt_cfg["regime_thresholds"]["bear"]    = {"buy_min_score": 65, "watch_min_score": 60, "rs_min": 70, "weekly_bull_required": False, "rr_min": 4.0}
 
+    # BACKTEST VERDICT FIDELITY (2026-06-09): feed make_decision the SAME signal
+    # context live passes — else the reported verdict is starved (rvol defaults to
+    # 1.0 → fails the "needs RVOL≥1.2" gate; catalyst_tier defaults to T3 → "T3 →
+    # WATCH per profile"), demoting EVERY signal to WATCH (0 BUY in backtest vs 12
+    # live). All no-look-ahead (bars + indicators as-of bt_date):
+    #   rvol = latest bar volume / 20-bar avg; catalyst_tier from tag_catalysts on
+    #   the as-of indicators (VCP/52w=T1, squeeze/pullback=T2). vix left at 20 (below
+    #   the 22 high-vix gate, so it doesn't demote).
+    try:
+        _vol = df["Volume"] if "Volume" in df.columns else (df["volume"] if "volume" in df.columns else None)
+        _rvol_bt = float(_vol.iloc[-1] / max(_vol.iloc[-20:].mean(), 1e-9)) if (_vol is not None and len(_vol) >= 20) else 1.5
+    except Exception:
+        _rvol_bt = 1.5
+    try:
+        from analysis import tag_catalysts as _tag_cat
+        _, _cat_tier_bt, _ = _tag_cat(ind, {}, {}, bool(ind.get("vcp", False)), bool(ind.get("squeeze_on", False)))
+    except Exception:
+        _cat_tier_bt = 3
+
     decision = make_decision(
         normalized, plan["rr_ratio"], _bt_cfg,
         weak_regime=(regime_name == "bear"),
@@ -491,7 +510,9 @@ def _score_as_of(ticker: str, df_full: pd.DataFrame, as_of_date: pd.Timestamp,
         bear_score=bear_setup["score"],
         rs_rank=int(ind.get("rs_rank", 50)),
         vix=20.0,
-        has_catalyst=False,
+        has_catalyst=(_cat_tier_bt <= 2),
+        catalyst_tier=_cat_tier_bt,
+        rvol=_rvol_bt,
         rsi=float(ind.get("rsi", 50.0) or 50.0),
         weekly_bull=bool(ind.get("weekly_ema_bullish", False)),
         adx=float(ind.get("adx", 20.0) or 20.0),
@@ -1095,7 +1116,17 @@ def run_backtest(days: int = 252, hold_days: int = 5,
     except Exception as _kl_err:
         log.warning(f"  Backtest kill list unavailable: {_kl_err}")
 
-    for bt_date in backtest_dates:
+    import time as _time
+    _n_bt_days = len(backtest_dates)
+    _bt_t0 = _time.time()
+    for _bt_i, bt_date in enumerate(backtest_dates):
+        # Progress visibility (2026-06-09): emit [day N/total · elapsed · ETA] so a
+        # long run is never blind again. Every 10 days + first/last.
+        if _bt_i == 0 or _bt_i == _n_bt_days - 1 or _bt_i % 10 == 0:
+            _el = _time.time() - _bt_t0
+            _eta = (_el / max(_bt_i, 1)) * (_n_bt_days - _bt_i) if _bt_i else 0
+            log.info(f"  [backtest] day {_bt_i + 1}/{_n_bt_days} ({bt_date.date() if hasattr(bt_date,'date') else bt_date}) "
+                     f"· elapsed {_el/60:.1f}m · ETA {_eta/60:.0f}m")
         day_scored = []
 
         def _score_one(ticker: str):
