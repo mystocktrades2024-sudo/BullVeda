@@ -3108,14 +3108,60 @@ async def indicators_api(ticker: str, days: int = 420):
 
 @app.get("/api/ml/{ticker}")
 async def ml_api(ticker: str, mode: str = "swing"):
-    """ML edge heads (direction · hit-net · magnitude · SHAP · verdict)."""
+    """ML edge heads (direction · hit-net · magnitude · SHAP · verdict).
+
+    Source priority (2026-06-09 fix): the CACHED batch predictions
+    (cache/ml_edge_predictions.json) FIRST. The live predict_one path is
+    currently degenerate — the model was retrained on 29 features but the live
+    feature extractor (ml.feature_extractor.FEATURE_COLS) still emits 17, so the
+    model receives a mismatched vector and returns ~0 p_up for EVERY ticker (the
+    "AI Edge 0%" bug). The batch job extracts the full 29-feature row and is
+    correct, so prefer it; fall back to live predict_one only when a ticker isn't
+    cached, and reject a degenerate (p_up==0 with up-class collapsed) live result.
+    """
+    import datetime as _dt2
     ticker = ticker.upper().strip()
+
+    def _degenerate(pred) -> bool:
+        d = ((pred or {}).get("direction") or {})
+        pu = d.get("p_up")
+        return pu is None or (float(pu) == 0.0 and float(d.get("p_chop", 0) or 0) + float(d.get("p_dn", 0) or 0) > 0.99)
+
+    # 1) cached batch prediction (correct 29-feature output)
+    try:
+        _mlf = BASE_DIR / "cache" / "ml_edge_predictions.json"
+        if _mlf.exists():
+            _doc = json.loads(_mlf.read_text())
+            _cached = ((_doc.get("predictions") or {}).get(mode) or {}).get(ticker)
+            if _cached and not _degenerate(_cached):
+                _age_h = None
+                try:
+                    _gen = (_doc.get("_meta") or {}).get("generated_at")
+                    if _gen:
+                        _age_h = (_dt2.datetime.now(_dt2.timezone.utc) -
+                                  _dt2.datetime.fromisoformat(_gen.replace("Z", "+00:00"))).total_seconds() / 3600.0
+                except Exception:
+                    pass
+                return {"ticker": ticker, "mode": mode, "source": "batch_cache",
+                        "stale_hours": round(_age_h, 1) if _age_h is not None else None,
+                        "stale": bool(_age_h and _age_h > 36), **_cached}
+    except Exception:
+        pass
+
+    # 2) live predict_one fallback — but reject the degenerate (feature-mismatch) result
     try:
         from ml.predict import predict_one
         p = predict_one({"ticker": ticker}, mode=mode)
         if not p:
             raise HTTPException(404, f"No ML prediction for {ticker}")
-        return {"ticker": ticker, "mode": mode, **p}
+        if _degenerate(p):
+            # don't surface a fake 0% — signal "unavailable" so the UI shows "—"
+            return {"ticker": ticker, "mode": mode, "source": "unavailable",
+                    "ml_unavailable": True,
+                    "reason": "live model degenerate (29-feature model vs 17-feature live extractor); no fresh batch cache",
+                    **{k: v for k, v in p.items() if k not in ("direction",)},
+                    "direction": {"p_up": None, "p_chop": None, "p_dn": None, "edge": None}}
+        return {"ticker": ticker, "mode": mode, "source": "live", **p}
     except HTTPException:
         raise
     except Exception as e:
