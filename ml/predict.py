@@ -186,7 +186,18 @@ def predict_with_features(features: dict, mode: str = "swing", ticker: dict | No
         return None
     report = _load_report()
     cols = FEATURE_COLS
-    row = np.array([features.get(c, 0.0) for c in cols], dtype=float)
+    # 2026-06-09 FIX: the model expects 29 features (17 base + 12 cross-sectional
+    # pctranks) but a single-ticker live call only has the 17 base ones — the
+    # pctranks require the whole universe (computed by the batch run_ml_edge.py).
+    # Defaulting a MISSING pctrank to 0.0 told the model "this stock ranks dead-last
+    # in the universe on every relative metric" → p_up collapsed to ~0 for EVERY
+    # ticker (the AI Edge 0% bug). Default missing pctranks to 0.5 (neutral median
+    # rank) so the prediction is driven by the real base features under a neutral
+    # cross-sectional assumption. (The batch cache, with REAL pctranks, remains the
+    # accurate source — served first by /api/ml; this only de-degenerates the live
+    # fallback for uncached names.)
+    _pctrank_set = set(PCTRANK_COLS)
+    row = np.array([features.get(c, (0.5 if c in _pctrank_set else 0.0)) for c in cols], dtype=float)
     X = pd.DataFrame([row], columns=cols)
 
     # Direction head — 3-class
