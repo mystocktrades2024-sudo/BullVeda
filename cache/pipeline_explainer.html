@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SwingTrade — Signal Generation Pipeline</title>
+<style>
+  :root{
+    --bg-0:#0a0d0c; --bg-1:#101614; --bg-2:#161e1b; --bg-3:#1d2622;
+    --line:#26312c; --line-2:#324039;
+    --txt-0:#e8efe9; --txt-1:#9fb3a7; --txt-2:#6d7f74;
+    --acc:#37d6a0; --acc-dim:#1f7a5c; --warn:#e2b341; --bad:#e2685f; --info:#5aa9e6;
+    --buy:#37d6a0; --watch:#e2b341; --wait:#7e8a83; --avoid:#e2685f;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:radial-gradient(1200px 700px at 70% -10%,#13201b 0%,var(--bg-0) 55%);
+       color:var(--txt-0);font-family:var(--sans);line-height:1.55;
+       -webkit-font-smoothing:antialiased;padding:0 0 120px}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 26px}
+
+  header{padding:64px 0 30px;border-bottom:1px solid var(--line)}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.22em;
+          text-transform:uppercase;color:var(--acc);margin-bottom:14px}
+  h1{font-size:40px;font-weight:680;letter-spacing:-.02em;line-height:1.08}
+  h1 .sub{color:var(--txt-1);font-weight:400}
+  .lede{color:var(--txt-1);font-size:17px;max-width:760px;margin-top:16px}
+  .meta{font-family:var(--mono);font-size:12px;color:var(--txt-2);margin-top:20px;
+        display:flex;gap:18px;flex-wrap:wrap}
+  .meta b{color:var(--txt-1);font-weight:500}
+
+  .stage{margin-top:54px}
+  .stage-head{display:flex;align-items:baseline;gap:14px;margin-bottom:8px}
+  .stage-num{font-family:var(--mono);font-size:13px;color:var(--bg-0);
+             background:var(--acc);border-radius:6px;padding:3px 9px;font-weight:700;
+             flex:none}
+  .stage h2{font-size:23px;font-weight:640;letter-spacing:-.01em}
+  .stage .src{font-family:var(--mono);font-size:11.5px;color:var(--acc-dim);margin-left:auto;flex:none}
+  .stage > p{color:var(--txt-1);margin:10px 0 18px;max-width:820px}
+
+  /* ── regime cards ── */
+  .grid{display:grid;gap:14px}
+  .g4{grid-template-columns:repeat(2,1fr)}
+  .card{background:linear-gradient(180deg,var(--bg-2),var(--bg-1));
+        border:1px solid var(--line);border-radius:14px;padding:18px 20px;position:relative;overflow:hidden}
+  .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--c,var(--acc))}
+  .card h3{font-size:15.5px;font-weight:620;display:flex;align-items:center;gap:9px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--c,var(--acc));flex:none}
+  .card .cond{font-family:var(--mono);font-size:12px;color:var(--txt-1);margin-top:9px;line-height:1.6}
+  .card .foot{font-family:var(--mono);font-size:11px;color:var(--txt-2);margin-top:11px;
+              display:flex;gap:14px;border-top:1px dashed var(--line);padding-top:9px}
+  .card .foot b{color:var(--acc);font-weight:600}
+
+  .inputs{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+  .chip{font-family:var(--mono);font-size:12px;background:var(--bg-3);border:1px solid var(--line-2);
+        border-radius:8px;padding:7px 12px;color:var(--txt-1)}
+  .chip b{color:var(--txt-0);font-weight:600}
+
+  /* ── funnel ── */
+  .funnel{display:flex;flex-direction:column;gap:0;margin-top:6px}
+  .frow{display:flex;align-items:stretch;gap:0;position:relative}
+  .fbar{background:linear-gradient(90deg,var(--acc-dim),var(--bg-3));
+        border:1px solid var(--line-2);border-radius:10px;padding:14px 18px;
+        display:flex;align-items:center;justify-content:space-between;flex:1;
+        transition:width .2s}
+  .fbar .lbl{font-weight:600;font-size:14.5px}
+  .fbar .lbl small{display:block;color:var(--txt-1);font-weight:400;font-size:12px;
+                   font-family:var(--mono);margin-top:3px}
+  .fbar .cnt{font-family:var(--mono);font-size:15px;color:var(--acc);font-weight:700;flex:none;margin-left:18px}
+  .farrow{text-align:center;color:var(--txt-2);font-size:14px;padding:7px 0;font-family:var(--mono)}
+  .findent{padding-left:0}
+
+  /* widths to visually taper the funnel */
+  .w0{width:100%} .w1{width:92%} .w2{width:78%} .w3{width:62%} .w4{width:48%} .w5{width:36%}
+  .fline{display:flex;justify-content:center}
+
+  /* ── pillars ── */
+  .pillars{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:6px}
+  .pillar{background:var(--bg-2);border:1px solid var(--line);border-radius:12px;padding:15px 14px;text-align:center}
+  .pillar .max{font-family:var(--mono);font-size:26px;font-weight:700;color:var(--acc)}
+  .pillar .max span{font-size:13px;color:var(--txt-2)}
+  .pillar h4{font-size:13.5px;margin:6px 0 7px;font-weight:600}
+  .pillar p{font-size:11.5px;color:var(--txt-2);line-height:1.5}
+  .pbar{height:5px;border-radius:3px;background:var(--bg-3);margin-top:10px;overflow:hidden}
+  .pbar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc),var(--acc-dim))}
+
+  .note{background:var(--bg-1);border:1px solid var(--line);border-left:3px solid var(--info);
+        border-radius:10px;padding:13px 16px;font-size:13.5px;color:var(--txt-1);margin-top:16px}
+  .note b{color:var(--txt-0)}
+
+  /* ── cascade ── */
+  .cascade{margin-top:6px;border-left:2px solid var(--line-2);padding-left:0;margin-left:8px}
+  .gate{position:relative;padding:13px 0 13px 30px;border-bottom:1px solid var(--line)}
+  .gate::before{content:"";position:absolute;left:-7px;top:19px;width:12px;height:12px;border-radius:50%;
+                background:var(--bg-0);border:2px solid var(--c,var(--acc))}
+  .gate .gtop{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .gate .gname{font-weight:620;font-size:15px}
+  .gate .gfn{font-family:var(--mono);font-size:11px;color:var(--txt-2);margin-left:auto}
+  .gate .gdesc{color:var(--txt-1);font-size:13px;margin-top:5px;max-width:780px}
+  .verdict-pill{font-family:var(--mono);font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px;letter-spacing:.04em}
+  .v-wait{background:rgba(126,138,131,.18);color:var(--wait);border:1px solid var(--wait)}
+  .v-watch{background:rgba(226,179,65,.14);color:var(--watch);border:1px solid var(--warn)}
+  .v-avoid{background:rgba(226,104,95,.14);color:var(--avoid);border:1px solid var(--bad)}
+  .v-buy{background:rgba(55,214,160,.14);color:var(--buy);border:1px solid var(--acc)}
+  .bypass{font-family:var(--mono);font-size:10.5px;color:var(--acc-dim);background:rgba(31,122,92,.12);
+          border:1px solid var(--acc-dim);border-radius:5px;padding:1px 7px}
+
+  .terminal{margin-top:26px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .tcard{border:1px solid var(--c);border-radius:12px;padding:16px;background:var(--bg-1)}
+  .tcard .tv{font-family:var(--mono);font-size:18px;font-weight:700;color:var(--c)}
+  .tcard p{font-size:12px;color:var(--txt-1);margin-top:7px}
+
+  footer{margin-top:64px;padding-top:24px;border-top:1px solid var(--line);
+          font-family:var(--mono);font-size:11.5px;color:var(--txt-2);line-height:1.8}
+  footer b{color:var(--txt-1)}
+  code{font-family:var(--mono);font-size:.92em;background:var(--bg-3);padding:1px 5px;border-radius:4px;color:var(--acc)}
+  @media(max-width:760px){
+    .g4{grid-template-columns:1fr} .pillars{grid-template-columns:repeat(2,1fr)}
+    .terminal{grid-template-columns:repeat(2,1fr)} h1{font-size:30px}
+    .fbar{width:100%!important}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="kicker">SwingTrade · System Reference</div>
+    <h1>Signal Generation Pipeline<br><span class="sub">how a ticker becomes a BUY</span></h1>
+    <p class="lede">The full path from market-wide regime classification, through universe construction
+      and liquidity filtering, into 5-pillar scoring, and finally the single-source-of-truth verdict
+      cascade. Every threshold and function reference below is drawn directly from the live codebase.</p>
+    <div class="meta">
+      <span><b>regime</b> data_fetcher.py:2988</span>
+      <span><b>universe + scoring</b> swing_trade.py · analysis.py</span>
+      <span><b>verdict</b> decision_engine.py:962</span>
+    </div>
+  </header>
+
+  <!-- ───────────────────────── STAGE 0 — REGIME ───────────────────────── -->
+  <section class="stage">
+    <div class="stage-head">
+      <span class="stage-num">0</span>
+      <h2>Regime classification</h2>
+      <span class="src">get_market_regime()</span>
+    </div>
+    <p>The market-wide context computed first — it sets the BUY-score floor and size cap for every
+      ticker downstream. Principle 18: <i>regime detection IS the strategy.</i></p>
+
+    <div class="inputs">
+      <span class="chip"><b>SPY</b> vs EMA50 / SMA200</span>
+      <span class="chip"><b>QQQ</b> vs EMA50</span>
+      <span class="chip"><b>VIX</b> level · slope · term structure</span>
+      <span class="chip"><b>Breadth</b> % above 50DMA</span>
+    </div>
+
+    <div class="grid g4">
+      <div class="card" style="--c:var(--acc)">
+        <h3><span class="dot"></span>risk_on_trending <span class="verdict-pill v-buy">BULL</span></h3>
+        <div class="cond">SPY &gt; EMA50 &amp; SMA200<br>QQQ &gt; EMA50 · VIX &lt; 20 · breadth &gt; 60%</div>
+        <div class="foot"><span>BUY floor <b>65</b></span><span>max size <b>100%</b></span></div>
+      </div>
+      <div class="card" style="--c:var(--warn)">
+        <h3><span class="dot"></span>risk_on_choppy <span class="verdict-pill v-watch">NEUTRAL</span></h3>
+        <div class="cond">SPY &gt; EMA50 but not all criteria met<br>the default / fall-through regime</div>
+        <div class="foot"><span>BUY floor <b>72</b></span><span>max size <b>70%</b></span></div>
+      </div>
+      <div class="card" style="--c:var(--bad)">
+        <h3><span class="dot"></span>risk_off_trending <span class="verdict-pill v-avoid">BEAR</span></h3>
+        <div class="cond">SPY closed below EMA50 for <b>2 consecutive</b> sessions<br>(risk_off_consecutive_closes)</div>
+        <div class="foot"><span>BUY floor <b>78</b></span><span>max size <b>35%</b></span></div>
+      </div>
+      <div class="card" style="--c:#b0413a">
+        <h3><span class="dot"></span>panic <span class="verdict-pill v-avoid">BEAR</span></h3>
+        <div class="cond">VIX &gt; 35 <b>OR</b> breadth &lt; 20%</div>
+        <div class="foot"><span>BUY floor <b>—</b></span><span>max size <b>0% (no longs)</b></span></div>
+      </div>
+    </div>
+
+    <div class="note"><b>Hysteresis + downgrades:</b> a 2-bar buffer (VIX enter 22 / exit 18, breadth 53/47)
+      prevents whipsaw, then three post-classification gates only ever de-risk — VIX-dynamics
+      (backwardation/slope), distribution-days (IBD 5+), and an HMM return-shape blend. Regime is anchored
+      to the last completed daily bar and never flipped intraday.</div>
+  </section>
+
+  <!-- ───────────────────────── STAGE 1 — UNIVERSE FUNNEL ───────────────────────── -->
+  <section class="stage">
+    <div class="stage-head">
+      <span class="stage-num">1</span>
+      <h2>Universe funnel — what gets analyzed</h2>
+      <span class="src">swing_trade.py:1058 → 1556</span>
+    </div>
+    <p>A wide candidate union narrowed by liquidity gates and an enrichment cap. Picking ≠ scoring —
+      this only decides which names enter the scoring engine. <code>always_include</code> (held +
+      recent past-picks) bypasses every filter for track-record continuity.</p>
+
+    <div class="funnel">
+      <div class="fline"><div class="fbar w0"><span class="lbl">Candidate union <small>~17 sources</small></span><span class="cnt">~6,000</span></div></div>
+      <div class="farrow">│ S&P 500 · R1000 · MidCap400 · SmallCap600 · NASDAQ-100 · full NASDAQ exchange</div>
+      <div class="farrow">│ + IPOs · PEAD movers · insider clusters · congressional · ETF holdings · crypto-adjacent · 200d hi/lo</div>
+      <div class="farrow">│ + Zacks Rank #1 · custom watchlist (43) · Zacks premium · leveraged ETFs</div>
+      <div class="fline"><div class="fbar w1"><span class="lbl">Dedupe + dead-ticker prune <small>_DEAD_TICKERS + tombstone registry</small></span><span class="cnt">~3,000</span></div></div>
+      <div class="farrow">↓</div>
+      <div class="fline"><div class="fbar w2"><span class="lbl">Phase-2 bulk prefilter <small>$5 ≤ close ≤ $1000 · close×vol ≥ $5M · one bulk_eod call</small></span><span class="cnt">~1,800</span></div></div>
+      <div class="farrow">↓ &nbsp;saves ~40% EODHD quota</div>
+      <div class="fline"><div class="fbar w3"><span class="lbl">Fetch 1y history + fill-rate guard <small>&lt; 50% fill → ABORT scan · &lt; 70% → warn</small></span><span class="cnt">fetched</span></div></div>
+      <div class="farrow">↓</div>
+      <div class="fline"><div class="fbar w4"><span class="lbl">Qualify gate <small>$5 ≤ price ≤ $1000 · daily $ vol ≥ $10M</small></span><span class="cnt">qualified</span></div></div>
+      <div class="farrow">↓</div>
+      <div class="fline"><div class="fbar w5"><span class="lbl">Enrichment cap <small>fundamentals · options · insider · news</small></span><span class="cnt">≤ 1,000</span></div></div>
+    </div>
+
+    <div class="note"><b>Portfolio-blind:</b> per the <code>signal_layer_portfolio_blind</code> design the candidate
+      set is universe-wide — it is never filtered by the owner's own holdings or signal_log, because signals
+      serve a 500+ user base.</div>
+  </section>
+
+  <!-- ───────────────────────── STAGE 2 — SCORING ───────────────────────── -->
+  <section class="stage">
+    <div class="stage-head">
+      <span class="stage-num">2</span>
+      <h2>5-pillar scoring</h2>
+      <span class="src">analyze_ticker() · analysis.py:9497</span>
+    </div>
+    <p>Each qualified ticker runs four scorers producing raw points, normalized to 100. Weights are set by
+      <code>SCORING_MODE</code> (currently <b>swing_optimized</b>): catalyst boosted, fundamentals cut, because
+      quarterly metrics don't predict weekly price action.</p>
+
+    <div class="pillars">
+      <div class="pillar"><div class="max">35<span>/100</span></div><h4>Tech Structure</h4><p>EMA stack · RVOL/OBV · RSI/MACD/StochRSI · S/R · RS-vs-SPY · squeeze</p><div class="pbar"><i style="width:100%"></i></div></div>
+      <div class="pillar"><div class="max">20<span>/100</span></div><h4>Catalyst</h4><p>R:R ratio · UOA · IV rank · catalyst presence · scenarios</p><div class="pbar"><i style="width:57%"></i></div></div>
+      <div class="pillar"><div class="max">20<span>/100</span></div><h4>RS + Sector</h4><p>RS rank (63d) · sector outperformance percentile</p><div class="pbar"><i style="width:57%"></i></div></div>
+      <div class="pillar"><div class="max">15<span>/100</span></div><h4>Smart Money</h4><p>News sentiment · insider activity · short interest / squeeze</p><div class="pbar"><i style="width:43%"></i></div></div>
+      <div class="pillar"><div class="max">10<span>/100</span></div><h4>Quality Gate</h4><p>Growth · margins · balance sheet · analyst consensus</p><div class="pbar"><i style="width:29%"></i></div></div>
+    </div>
+
+    <div class="note"><b>Then classification (no verdict yet):</b> <code>tag_catalysts()</code> → T1/T2/T3 tier ·
+      <code>classify_setup_family()</code> → setup / sleeve · <code>classify_entry_quality()</code> →
+      FRESH/PULLBACK/VALID/EXTENDED/MISSED · <code>assign_conviction_tier()</code> → T1–T3/WATCH ·
+      <code>compute_trade_plan()</code> → entry, stop (1.25× ATR), T1/T2, R:R. The verdict is deliberately
+      left to the engine.</div>
+  </section>
+
+  <!-- ───────────────────────── STAGE 3 — VERDICT CASCADE ───────────────────────── -->
+  <section class="stage">
+    <div class="stage-head">
+      <span class="stage-num">3</span>
+      <h2>Verdict cascade — single source of truth</h2>
+      <span class="src">compute_final_verdict() · decision_engine.py:962</span>
+    </div>
+    <p>A strict ordered cascade. First failure wins. Replaced the old "whichever engine wrote last"
+      behavior — no tab ever recomputes a verdict. Every output ships with a full
+      <code>gates_evaluated</code> audit trail.</p>
+
+    <div class="cascade">
+      <div class="gate" style="--c:var(--bad)">
+        <div class="gtop"><span class="gname">System kill switches</span><span class="verdict-pill v-wait">→ WAIT</span><span class="gfn">:1003</span></div>
+        <div class="gdesc">Circuit breaker · forced-cash mode · macro blackout (FOMC/CPI). Bear setup or <code>direction=short</code> → AVOID.</div>
+      </div>
+      <div class="gate" style="--c:var(--warn)">
+        <div class="gtop"><span class="gname">Repeat-entry cooldown</span><span class="verdict-pill v-watch">→ WATCH</span><span class="bypass">portfolio-blind: skipped</span><span class="gfn">:1041</span></div>
+        <div class="gdesc">Same ticker stopped out &lt; 5d ago — no chasing (principle 8). Reads owner's signal_log, so skipped when the signal layer is portfolio-blind.</div>
+      </div>
+      <div class="gate" style="--c:var(--bad)">
+        <div class="gtop"><span class="gname">Regime gate (A3)</span><span class="verdict-pill v-watch">→ WATCH</span><span class="bypass">bypass: Defensive · PEAD · Insider · ESP</span><span class="gfn">:1094</span></div>
+        <div class="gdesc">No new longs in risk_off_trending / panic — bull-only strategy per 750d backtest. Catalyst sleeves bypass (alpha is regime-independent).</div>
+      </div>
+      <div class="gate" style="--c:var(--warn)">
+        <div class="gtop"><span class="gname">Momentum-condition gate</span><span class="verdict-pill v-watch">→ WATCH</span><span class="gfn">:1129</span></div>
+        <div class="gdesc">Trend Continuation + Breakout demoted when QQQ−SPY 21d spread &lt; 0 — pure-momentum factor plays with zero alpha (P2 attribution).</div>
+      </div>
+      <div class="gate" style="--c:var(--warn)">
+        <div class="gtop"><span class="gname">Rolling-Sharpe kill</span><span class="verdict-pill v-watch">→ WATCH</span><span class="bypass">catalyst sleeves bypass</span><span class="gfn">:1149</span></div>
+        <div class="gdesc">Pause new BUYs when rolling Sharpe of recent closed BUYs &lt; floor. Capital-preservation gate.</div>
+      </div>
+      <div class="gate" style="--c:var(--info)">
+        <div class="gtop"><span class="gname">Hard gates ×6</span><span class="verdict-pill v-watch">WATCH</span> <span class="verdict-pill v-wait">/ WAIT</span><span class="gfn">_eval_hard_gates :1226</span></div>
+        <div class="gdesc">liquidity_price · multi_timeframe · entry_quality · decision_state · tail_loss_filter · fundamental_adequacy (≥50%) · sector blocklist · Wilson-gated setup_kill_list.
+          Failures in {entry_quality, decision_state, multi_timeframe} → <b>WATCH</b>; others → <b>WAIT</b>. Catalyst sleeves bypass entry_quality / decision_state / tail-loss / fund.</div>
+      </div>
+      <div class="gate" style="--c:var(--acc)">
+        <div class="gtop"><span class="gname">Ranking threshold</span><span class="verdict-pill v-buy">→ BUY</span><span class="gfn">:1251</span></div>
+        <div class="gdesc"><code>score ≥ regime BUY floor</code> (65 / 72 / 78) → BUY, after a final signal_filter whitelist check (OFF by default). Gates pass but score below floor → WATCH.</div>
+      </div>
+    </div>
+
+    <div class="terminal">
+      <div class="tcard" style="--c:var(--buy)"><div class="tv">BUY</div><p>All gates passed and score clears the regime floor. Sized by conviction tier.</p></div>
+      <div class="tcard" style="--c:var(--warn)"><div class="tv">WATCH</div><p>Strong but waiting — entry extended, score below floor, or a soft demotion. Monitor.</p></div>
+      <div class="tcard" style="--c:var(--wait)"><div class="tv">WAIT</div><p>Structural reject — liquidity, fundamentals, or a system kill switch.</p></div>
+      <div class="tcard" style="--c:var(--avoid)"><div class="tv">AVOID</div><p>Bear setup / short direction. Not a long candidate.</p></div>
+    </div>
+  </section>
+
+  <footer>
+    <div><b>Flow:</b> regime → universe funnel → 5-pillar scoring + classification → verdict cascade → BUY / WATCH / WAIT / AVOID</div>
+    <div><b>Sources:</b> data_fetcher.get_market_regime() · swing_trade.py run_scan() · analysis.analyze_ticker() · decision_engine.compute_final_verdict()</div>
+    <div><b>Note:</b> thresholds reflect config/config.json at generation time (SCORING_MODE=swing_optimized, max_price=$1000, enrichment cap=1000). Tune via config, never hardcode.</div>
+    <div style="margin-top:10px;color:var(--acc-dim)">Generated for SwingTrade · bullveda-real-data</div>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.swingtrade.audit-ledger-intraday</string>
+
+    <!-- 2026-05-18 · Every-2-hours intraday rebuild during market hours.
+         Catches market-close prices the moment EODHD posts them (~30 min
+         after the bell) without waiting for the next scheduled run.
+
+         Note: D1 is by definition close-to-close. Today's pick D1 = TOMORROW's
+         close. Running every 2 hours TODAY does not fill today's D1 — that
+         only happens after tomorrow's market closes (~1:30 PM PT tomorrow).
+         What this job DOES catch:
+         - Yesterday's D1 (today's close, available after 1 PM PT)
+         - Day-before D2/D3 refreshes
+         - Any horizon that newly matured since the 6:30 AM run
+         - MAE/MFE updates that include today's intraday low/high
+    -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <!-- 9:00 AM PT — captures yesterday's late-tape adjustments -->
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+        <!-- 11:00 AM PT — mid-day refresh -->
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>11</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>11</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>11</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>11</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>11</integer><key>Minute</key><integer>0</integer></dict>
+        <!-- 1:30 PM PT — already covered by audit-ledger-eod, skip to avoid dupe -->
+        <!-- 3:00 PM PT — late-day refresh after EODHD posts close (~1:30-2pm PT) -->
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Volumes/MyMacDisk/Claude Skills/SwingTrade</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Volumes/MyMacDisk/Claude Skills/SwingTrade/scripts/launchd_wrapper.sh</string>
+        <string>com.swingtrade.audit-ledger-intraday</string>
+        <string>/usr/bin/python3</string>
+        <string>infra/prototype/build_audit_ledger.py</string>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/audit-ledger-intraday.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/audit-ledger-intraday.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

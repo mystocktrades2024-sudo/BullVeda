@@ -157,6 +157,7 @@
     <div class="tab" onclick="showTab(6,this)">⑦ Daily Clock</div>
     <div class="tab" onclick="showTab(7,this)">⑧ Open Risks</div>
     <div class="tab" onclick="showTab(8,this)">⑨ Regime</div>
+    <div class="tab" onclick="showTab(9,this)">⑩ Targets T1/T2</div>
   </div>
 
   <!-- ================= TAB 0 · BIG PICTURE ================= -->
@@ -823,6 +824,68 @@ Sizing overlay  ◄── Pre-FOMC calendar + regime / VIX / drawdown multiplier
 
     <div class="section-h">E · Data discipline</div>
     <div class="note"><b>Anchored to the daily bar.</b> The official regime is computed on the <b>last completed daily bar</b> (EODHD) — it does <b>not</b> move intraday. The <code>/api/regime/live</code> overlay (Schwab SPY/QQQ/$VIX) is <b>display-only</b>: it shows the live tape under the regime tile but never recomputes or flips the official regime. Why: intraday flips would whipsaw sizing, and <b>breadth (% above 50DMA) can't be computed live</b> — so a "live regime" would be half-blind. Regime is the one thing we compute slowly and deliberately, by design.</div>
+  </div>
+
+  <!-- ================= TAB 9 · TARGETS ================= -->
+  <div class="page" id="ptgt">
+    <div class="gov" style="margin-top:6px;margin-bottom:8px">🎯 <b>T1/T2/T3 are confluence-scored STRUCTURE — not a fixed % or ATR multiple.</b> <code>target_engine.py</code> finds real price levels (supply zones, swing highs, volume nodes, Fib/Elliott projections), clusters them, scores each by how many sources agree, and picks targets in an R-multiple band. Different horizons read different timeframes &amp; anchors. Computed <b>once per daily bar at EOD</b> — never intraday.</div>
+
+    <div class="section-h">A · The pipeline (one engine, same 6 steps for every mode)</div>
+    <table>
+      <thead><tr><th>#</th><th>Step</th><th>What happens</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>Fetch bars</td><td>mode-specific timeframe (see B)</td></tr>
+        <tr><td>2</td><td>Detect anchors</td><td>fractal swing highs · <b>order blocks</b> (SMC supply/demand) · <b>Elliott wave</b> projections (W3/W5) · <b>HVN/VAH</b> (volume profile) · <b>BSL</b> (equal-highs liquidity) · AVWAP · <b>Fib extensions</b> (1.618/2.618) · round numbers</td></tr>
+        <tr><td>3</td><td><b>Cluster + score</b></td><td>levels within <b>±0.25 ATR</b> merge into one candidate; its <b>confluence = Σ source weights</b> (order blocks weighted by their Wilson win-rate) — the more sources stacked at a price, the stronger the target</td></tr>
+        <tr><td>4</td><td><b>Select T1 / T2</b></td><td><b>T1</b> = highest-confluence candidate in the ≥<code>min_r_t1</code> R-band; <b>T2</b> = the next high-confluence candidate beyond T1 in the ≥<code>min_r_t2</code> band</td></tr>
+        <tr><td>5</td><td><b>T3 stretch</b></td><td>a Fib/EW extension beyond T2 — <b>armed only when momentum confirms</b> (reachability ≥ 0.45 AND MACD histogram &gt; 0); otherwise T3 is hidden</td></tr>
+        <tr><td>6</td><td>Reachability + cap</td><td>each target's <b>P(reach)</b> = vol-budget × MACD × RSI (§D); the <b>reach cap</b> drops stale 52-wk-high outliers so they can't poison the target</td></tr>
+      </tbody>
+    </table>
+
+    <div class="section-h">B · How the 3 modes differ</div>
+    <table>
+      <thead><tr><th>Mode</th><th>Horizon</th><th>Bars / TF</th><th>Elliott degree</th><th>Anchors emphasized</th><th>R-bands T1 / T2</th><th>Reach cap</th></tr></thead>
+      <tbody>
+        <tr><td><b style="color:var(--lead)">Swing</b></td><td>2–15 d</td><td>Daily (40d) <b>+ 4H</b></td><td>Intermediate (daily)</td><td>order blocks + fractal highs + 4H Fib + HVN/BSL</td><td class="freq">1.5R / 2.0R</td><td class="freq">~20% · poison 1.6×</td></tr>
+        <tr><td><b style="color:var(--blue)">Position</b></td><td>1–6 mo</td><td>Weekly (120d) + Daily</td><td>Primary (weekly)</td><td>multi-TF Fib (4H+Daily) + OB + EW + VAH/AVWAP</td><td class="freq">2.0R / 3.0R</td><td class="freq">poison 2.2×</td></tr>
+        <tr><td><b style="color:var(--violet)">Invest</b></td><td>1–5 yr</td><td>Monthly (504d) + Weekly</td><td>Primary (major)</td><td>EW Intermediate + <b>EW Major</b> + Fib ext + AVWAP-52</td><td class="freq">IV-based*</td><td class="freq">poison 4.0×</td></tr>
+      </tbody>
+    </table>
+    <div class="note">*<b>Invest</b> uses IV/structure-based selection rather than a strict R-band; if no clean structural target exists it falls back to <b>analyst consensus PT</b> (flagged as an interim stub). The longer the horizon, the <b>higher-degree</b> the wave (intermediate→primary) and the <b>wider</b> the cap — a 5-year target legitimately sits much further than a 5-day one.</div>
+
+    <div class="section-h">C · Source weights — the confluence "currency"</div>
+    <table>
+      <thead><tr><th>Source</th><th>Weight</th><th>What it is</th></tr></thead>
+      <tbody>
+        <tr><td><b>BSL</b></td><td class="freq">3.0</td><td>buy-side liquidity (equal-highs pool) — price hunts it</td></tr>
+        <tr><td><b>HVN</b></td><td class="freq">2.5</td><td>high-volume node — a magnet / shelf</td></tr>
+        <tr><td><b>Swing high</b></td><td class="freq">2.5</td><td>prior fractal high (BOS anchor)</td></tr>
+        <tr><td><b>Order block</b></td><td class="freq">2.5 ×WilsonLB</td><td>institutional supply zone — scaled by its historical hit-rate</td></tr>
+        <tr><td><b>EW Major</b></td><td class="freq">2.5</td><td>primary-degree wave objective (position/invest)</td></tr>
+        <tr><td><b>VAH · AVWAP-52 · EW Intermediate</b></td><td class="freq">2.0</td><td>value-area high · anchored VWAP · intermediate wave target</td></tr>
+        <tr><td><b>Fib ext · 4H Fib</b></td><td class="freq">1.5</td><td>1.618/2.618 extensions (the bull-case stretch)</td></tr>
+        <tr><td><b>Round #</b></td><td class="freq">1.0</td><td>psychological round-number cluster</td></tr>
+      </tbody>
+    </table>
+    <div class="fix"><b>Why confluence, not a formula:</b> a level where a bear order-block + a swing high + a Fib extension all stack is a far stronger target than a mechanical "entry + 3×risk." That's the fix for the old poison (INTC swing was +281% off an uncapped 3R/5R; now it's +19% at a real HVN+Swing cluster).</div>
+
+    <div class="section-h">D · Reachability — does momentum support the target?</div>
+    <div class="note" style="margin-top:0"><b>P(reach) = vol_factor × macd_factor × rsi_factor</b> — modulates each target's probability (never its price):
+      <br>· <b>vol_factor</b> = is there ATR budget to get there? <code>(ATR × expected_bars) / distance</code>, expected_bars = swing 5 / position 20 / invest 120
+      <br>· <b>macd_factor</b> = MACD histogram rising/positive boosts; falling/negative penalizes
+      <br>· <b>rsi_factor</b> = RSI 45–65 ideal; &gt;75 or bearish divergence penalizes far targets
+      <br>This is why <b>T3 only arms when momentum + volatility confirm</b> — the conservative T1/T2 stay honest, and the bull-stretch shows only when the move can actually reach it.</div>
+
+    <div class="section-h">E · The non-negotiables</div>
+    <table>
+      <tbody>
+        <tr><td><b>Structure, not formulas</b></td><td>a real supply/Fib/wave level beats a fixed multiple</td></tr>
+        <tr><td><b>Once per daily bar (EOD 19:30)</b></td><td>targets are a daily-bar object; never recomputed intraday (would chase noise)</td></tr>
+        <tr><td><b>Capped vs poison</b></td><td>stale 52-wk highs beyond the poison ceiling are dropped; nearest real level kept</td></tr>
+        <tr><td><b>R:R ≥ 3 to trade</b></td><td>the trade plan still requires the structural T1 to clear the regime's R:R floor</td></tr>
+      </tbody>
+    </table>
   </div>
 
   <div class="foot">SwingTrade · docs/data_loading_diagram.html · baseline for execution · 2026-06-09</div>
