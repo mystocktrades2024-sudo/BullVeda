@@ -7,6 +7,11 @@ const { useState: usePL, useMemo: useMemoPL } = React;
 
 // Re-rank stops/targets/hold per mode toggle.
 function modeAdjust(ticker, mode) {
+  // SSOT (2026-06-09): per-mode verdict binds the canonical engine call
+  // (decisionsByMode), never a score-threshold recompute. NOTE: the stop/target
+  // SCALING below is legacy synthesis — per-mode T1/T2/stop should come from
+  // /api/trade_engine?mode= (tracked under OVERVIEW-VERDICT-RECON / per-mode
+  // targets). Left as-is here to keep this change scoped to the verdict.
   if (mode === "POSITION") {
     return {
       ...ticker,
@@ -16,6 +21,7 @@ function modeAdjust(ticker, mode) {
       holdDays: 38,
       rMultiple: 2.21,
       score: Math.max(0, ticker.score - 3),
+      verdict: (ticker.decisionsByMode && ticker.decisionsByMode.position && ticker.decisionsByMode.position.verdict) || ticker.verdict,
     };
   }
   if (mode === "INVESTMENT") {
@@ -26,7 +32,7 @@ function modeAdjust(ticker, mode) {
       t2:   ticker.t2   * 1.58,
       holdDays: 180,
       rMultiple: 2.94,
-      verdict: ticker.score >= 70 ? "BUY" : "WATCH",
+      verdict: (ticker.decisionsByMode && ticker.decisionsByMode.investment && ticker.decisionsByMode.investment.verdict) || ticker.verdict,
     };
   }
   return ticker;

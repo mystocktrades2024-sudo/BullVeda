@@ -69,7 +69,11 @@ const _cvImpl = function (ticker, mode) {
   const tone = v => v >= 62 ? "gn" : v >= 46 ? "amb" : "rd";
   lenses.forEach(l => { l.tone = tone(l.v); });
   const _vt = v => v === "BUY" ? "gn" : v === "WATCH" ? "amb" : "rd";
-  const verdict = _engVerdict || (net >= 66 ? "BUY" : net >= 50 ? "WATCH" : net >= 40 ? "AVOID" : "PASS");
+  // Prefer engine per-mode verdict, then the canonical swing verdict (stage),
+  // and only recompute from the net as a last resort (kept consistent now that
+  // net binds the canonical score).
+  const _canonV = (ticker.verdict || ticker.stage || "").toString().toUpperCase() || null;
+  const verdict = _engVerdict || _canonV || (net >= 66 ? "BUY" : net >= 50 ? "WATCH" : net >= 40 ? "AVOID" : "PASS");
   const verdictSource = _engVerdict ? "engine" : "derived";
   const vtone = _engVerdict ? _vt(_engVerdict) : (net >= 66 ? "gn" : net >= 50 ? "amb" : "rd");
   // ── market-gate awareness (fix b/c) ── a market-wide entry block isn't a
