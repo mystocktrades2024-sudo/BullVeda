@@ -4,7 +4,19 @@
 const { useState: useStateP2, useMemo: useMemoP2 } = React;
 
 function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
-  const ticker = useMemoP2(() => modeAdjustP2(t0, mode), [t0, mode]);
+  // Populate the rich per-mode trade_engine cache for THIS mode so modeAdjustP2's
+  // precedence (trade_engine → decisions_by_mode → swing) can prefer it. Falls back
+  // cleanly when the structural engine has no plan — never blocks render.
+  const [teTick, setTeTick] = useStateP2(0);
+  React.useEffect(() => {
+    const sym = t0 && t0.symbol;
+    if (!sym || !window.__BV || !window.__BV.fetchTradeEngine) return;
+    if (window.__BV.tradeEngineCached(sym, mode) !== undefined) return;  // already obj/null
+    let live = true;
+    window.__BV.fetchTradeEngine(sym, mode).then(() => { if (live) setTeTick(n => n + 1); });
+    return () => { live = false; };
+  }, [t0 && t0.symbol, mode]);
+  const ticker = useMemoP2(() => modeAdjustP2(t0, mode), [t0, mode, teTick]);
   const [sizeMult, setSizeMult] = useStateP2(1.0);
   const [kellyFrac, setKellyFrac] = useStateP2(0.5);
   const s1 = useStateToggle("plv2-1"); const s2 = useStateToggle("plv2-2");
@@ -177,25 +189,41 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
 // change the plotted horizon. (Targets aren't horizon-scaled until the structural-
 // target engine ships — see _modeReal note in §1.)
 function modeAdjustP2(ticker, mode) {
-  if (mode !== "POSITION" && mode !== "INVESTMENT") return ticker;
   const nz = (v, f) => (typeof v === "number" && isFinite(v)) ? v : f;
-  const holdPlot = mode === "POSITION" ? 45 : 120;     // plottable horizon for the §5 ribbon
+  const m = (mode || "SWING").toUpperCase();
+  const holdPlot = m === "POSITION" ? 45 : m === "INVESTMENT" ? 120 : (ticker.holdDays || 10);
+  // ── Per-mode target precedence (2026-06-09, LENS-PLAN-PERMODE-TARGETS):
+  //    rich /api/trade_engine (structural target engine) → decisions_by_mode →
+  //    swing base. Matches Overview's precedence (lens-overview teLevels) so the
+  //    Plan tab never disagrees with the hero/ladder. trade_engine is null for
+  //    swing/position when targets are gated (cache only stores plans with t1+stop),
+  //    so each field falls through cleanly — this never fabricates or regresses.
+  const _px = o => (o && typeof o === "object" && typeof o.price === "number" && isFinite(o.price)) ? o.price
+              : (typeof o === "number" && isFinite(o) ? o : null);
+  const te = (window.__BV && window.__BV.tradeEngineCached) ? window.__BV.tradeEngineCached(ticker.symbol, m) : undefined;
+  const teStop = te ? _px(te.stop) : null, teT1 = te ? _px(te.t1) : null,
+        teT2 = te ? _px(te.t2) : null, teT3 = te ? _px(te.t3) : null,
+        teEntry = te ? _px(te.entry) : null;
   const dm = ticker.decisionsByMode || null;
-  const md = dm ? (dm[mode.toLowerCase()] || dm[mode]) : null;
-  if (md && typeof md === "object") {
-    return { ...ticker,
-      stop: nz(md.stop, ticker.stop),
-      t1: nz(md.t1, ticker.t1),
-      t2: nz(md.t2, ticker.t2),
-      t3: nz(md.t3, null),                 // bull-stretch (null when unarmed)
-      pivot: nz(md.entry_mid, ticker.pivot),
-      holdDays: holdPlot,
-      holdLabel: ((md.rulebook || "").split("·")[1] || "").trim() || null,
-      stopBasis: md.stop_basis || null,
-      _modeReal: true,
-    };
-  }
-  return { ...ticker, holdDays: holdPlot, _modeReal: false };   // no per-mode decision → no fabricated targets
+  const md = dm ? (dm[m.toLowerCase()] || dm[m]) : null;
+  const mdo = (md && typeof md === "object") ? md : {};
+  const pick = (a, b, c) => nz(a, nz(b, c));
+  const src = te ? "trade_engine" : (mdo.t1 != null ? "decisions_by_mode" : "swing");
+  // SWING base already carries the swing decisions_by_mode levels on the row;
+  // only override when trade_engine actually has a structural plan for it.
+  if (m === "SWING" && !te) return { ...ticker, holdDays: holdPlot, _targetSrc: src };
+  return { ...ticker,
+    stop:  pick(teStop,  mdo.stop,      ticker.stop),
+    t1:    pick(teT1,    mdo.t1,        ticker.t1),
+    t2:    pick(teT2,    mdo.t2,        ticker.t2),
+    t3:    nz(teT3, nz(mdo.t3, null)),                 // bull-stretch (null when unarmed)
+    pivot: pick(teEntry, mdo.entry_mid, ticker.pivot),
+    holdDays: holdPlot,
+    holdLabel: ((mdo.rulebook || "").split("·")[1] || "").trim() || null,
+    stopBasis: (te && te.stop && te.stop.basis) || mdo.stop_basis || ticker.stopBasis || null,
+    _modeReal: !!(te || mdo.t1 != null),
+    _targetSrc: src,
+  };
 }
 window.modeAdjust = modeAdjustP2;
 

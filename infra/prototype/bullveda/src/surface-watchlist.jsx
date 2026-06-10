@@ -4,26 +4,37 @@
 
 const { useState: useWL, useMemo: useWLm } = React;
 
+// Join each watchlist row to its REAL /api/universe scan row (via BV.findRow →
+// BV.scanRow). All fields are real or feed-honest null — NO charCodeAt fabrication
+// (SURFACE-WATCHLIST-MOCK, 2026-06-09). Ledger-derived stats (wlb/n/pf) are null
+// when absent. Renders below are null-safe.
 function enrichWL(w, i) {
-  const code = w.sym.charCodeAt(0) + w.sym.charCodeAt(1);
+  const sr = (window.__BV && window.__BV.findRow) ? window.__BV.findRow(w.sym) : null;
+  const pf = v => { const n = parseFloat(v); return isFinite(n) ? n : null; };
+  const num = v => (typeof v === "number" && isFinite(v)) ? v : null;
   return {
     ...w,
     held: i < 3,
-    tier: w.score >= 75 ? "T1" : w.score >= 60 ? "T2" : w.score >= 45 ? "T3" : "WATCH",
-    modeTag: code % 2 === 0 ? "swing" : "position",
-    rs: Math.max(20, Math.min(98, 40 + Math.round((w.score - 55) * 1.3))),
-    rvol: (0.6 + (code % 14) / 10),
-    rr: (1 + (w.score - 50) / 30),
-    earn: 3 + (code % 40),
-    tfsn: [0,1,2,3].map(k => (code + k * 5) % 3),
-    iv: 30 + code % 28,
-    wlb: Math.max(30, Math.min(70, 45 + Math.round(w.score - 58))),
-    n: 160 + (code % 9) * 40,
-    pf: (1 + (code % 16) / 10),
-    insider: (code % 9) - 4,
-    sent: ((code % 7) - 3) / 3,
-    mech: w.verdict === "AVOID" ? "Distribution · failing breakout"
-      : ["Supply absorbed · vol-dry base","Demand reclaim · institutional bid","VCP contraction · 5th squeeze","Pullback to EMA21 · trend re-add"][code % 4],
+    tier: (sr && sr.tier && sr.tier !== "—") ? sr.tier
+        : (w.score >= 75 ? "T1" : w.score >= 60 ? "T2" : w.score >= 45 ? "T3" : "WATCH"),
+    modeTag: w.modeTag || (sr && sr.eq ? "swing" : "swing"),
+    rs:      sr ? pf(sr.rs)      : null,
+    rvol:    sr ? pf(sr.rvol)    : null,
+    rr:      sr ? pf(sr.rr)      : null,
+    earn:    sr ? num(sr.er)     : null,
+    tfsn:    (sr && Array.isArray(sr.tfsn)) ? sr.tfsn : null,
+    iv:      sr ? num(sr.iv)     : null,
+    wlb:     sr ? num(sr.wlb)    : null,   // ledger-derived → null (feed-honest)
+    n:       sr ? num(sr.n)      : null,
+    pf:      sr ? num(sr.pf)     : null,
+    insider: sr ? num(sr.insNet) : null,
+    sent:    sr ? num(sr.sent)   : null,
+    pillarPct: (sr && sr.pillarPct) ? sr.pillarPct : null,
+    entryReal: sr ? pf(sr.entry)   : null,
+    stopReal:  sr ? pf(sr.stop)    : null,
+    t1Real:    sr ? pf(sr.t1plan)  : null,
+    mech:    (sr && sr.mechanism) ? sr.mechanism : (w.setup || "—"),
+    _real:   !!sr,
   };
 }
 const WL_ROWS = WATCHLIST.map((w, i) => enrichWL(w, i));
@@ -136,13 +147,13 @@ function SurfaceWatchlist({ onTicker }) {
                   <td><Pill tone={secBiasTone(t.verdict)} small>{secBias(t.verdict)}</Pill></td>
                   <td><span className={`ss2-tier ss2-tier--${t.tier.toLowerCase().replace("watch","t3")}`}>{t.tier}</span></td>
                   <td className="r"><span className="wl-scorebar"><span style={{ width: `${t.score}%`, background: t.score>=75?"var(--gn)":t.score>=60?"var(--amb)":"var(--rd)" }} /></span><b className="mono">{t.score}</b></td>
-                  <td><span className="ss2-tfsn">{t.tfsn.map((v,k)=><span key={k} className={`ss2-tfsn-dot ss2-tfsn--${v===2?"pass":v===1?"neut":"fail"}`} />)}</span></td>
+                  <td><span className="ss2-tfsn">{(t.tfsn||[]).map((v,k)=><span key={k} className={`ss2-tfsn-dot ss2-tfsn--${v===2?"pass":v===1?"neut":"fail"}`} />)}{!t.tfsn&&<span className="dim2">—</span>}</span></td>
                   <td className="r mono tabular">${t.price.toFixed(2)}</td>
                   <td className={`r mono tabular ${t.chg>=0?"up":"dn"}`}>{t.chg>=0?"+":""}{t.chg.toFixed(2)}%</td>
-                  <td className="r mono tabular">{t.rs}</td>
-                  <td className={`r mono tabular ${t.rvol>=1.5?"up":"dim"}`}>{t.rvol.toFixed(2)}×</td>
-                  <td className="r mono tabular">{t.rr.toFixed(2)}</td>
-                  <td className={`r mono tabular ${t.earn<=10?"warn":"dim"}`}>{t.earn}d</td>
+                  <td className="r mono tabular">{t.rs!=null?Math.round(t.rs):"—"}</td>
+                  <td className={`r mono tabular ${t.rvol>=1.5?"up":"dim"}`}>{t.rvol!=null?t.rvol.toFixed(2)+"×":"—"}</td>
+                  <td className="r mono tabular">{t.rr!=null?t.rr.toFixed(2):"—"}</td>
+                  <td className={`r mono tabular ${t.earn!=null&&t.earn<=10?"warn":"dim"}`}>{t.earn!=null?t.earn+"d":"—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -178,13 +189,13 @@ function WLDetailPane({ sym, rows, onTicker }) {
       <button className="sdp-open mono" onClick={() => onTicker(t.sym)}>OPEN 14-LENS DETAIL →</button>
       <div className="sdp-body">
         <Sec n="01" title="CONVICTION"><div className="sdp-arc"><div className="sdp-arc-fill" style={{ width: `${t.score}%` }} /></div><KV k="tier" v={t.tier} /><KV k="conviction" v={`${t.score}%`} tone="copper" /></Sec>
-        <Sec n="02" title="T·F·S·N PILLARS">{[["Tech",t.score-2,"cy"],["Fund",t.score-12,"blue"],["SMC",t.score-6,"gn"],["News",t.score-18,"violet"]].map(([l,v,c],i)=>(
-          <div key={i} className="sdp-bar"><span className="mono dim2">{l}</span><div className="sdp-bar-t"><div className="sdp-bar-f" style={{width:`${Math.max(8,Math.min(100,v))}%`,background:`var(--${c})`}}/></div><span className="mono">{Math.max(8,Math.min(100,v))}</span></div>))}</Sec>
+        <Sec n="02" title="T·F·S·N PILLARS">{(t.pillarPct?[["Tech",t.pillarPct.technical,"cy"],["Fund",t.pillarPct.fundamental,"blue"],["SMC",t.pillarPct.smc,"gn"],["News",t.pillarPct.sentiment,"violet"]]:[["Tech",null,"cy"],["Fund",null,"blue"],["SMC",null,"gn"],["News",null,"violet"]]).map(([l,v,c],i)=>(
+          <div key={i} className="sdp-bar"><span className="mono dim2">{l}</span><div className="sdp-bar-t"><div className="sdp-bar-f" style={{width:`${v!=null?Math.max(4,Math.min(100,v)):0}%`,background:`var(--${c})`}}/></div><span className="mono">{v!=null?Math.round(v):"—"}</span></div>))}</Sec>
         <Sec n="03" title="MECHANISM"><div className="sdp-mech mono">{t.mech}</div></Sec>
-        <Sec n="04" title="ENTRY · PLAN"><KV k="entry" v={`$${(t.price*0.995).toFixed(2)}`} tone="copper" /><KV k="stop" v={`$${(t.price*0.94).toFixed(2)}`} tone="rd" /><KV k="T1" v={`$${(t.price*1.12).toFixed(2)}`} tone="gn" /><KV k="R:R" v={t.rr.toFixed(2)} tone="copper" /></Sec>
+        <Sec n="04" title="ENTRY · PLAN"><KV k="entry" v={t.entryReal!=null?`$${t.entryReal.toFixed(2)}`:"—"} tone="copper" /><KV k="stop" v={t.stopReal!=null?`$${t.stopReal.toFixed(2)}`:"—"} tone="rd" /><KV k="T1" v={t.t1Real!=null?`$${t.t1Real.toFixed(2)}`:"—"} tone="gn" /><KV k="R:R" v={t.rr!=null?t.rr.toFixed(2):"—"} tone="copper" /></Sec>
         <Sec n="05" title="MODE · HOLD"><KV k="mode" v={t.modeTag} /><KV k="hold" v={t.modeTag==="swing"?"7d":"30d"} /><KV k="held" v={t.held?"yes · in book":"no"} tone={t.held?"gn":"ink"} /></Sec>
-        <Sec n="06" title="SETUP STATS"><KV k="family" v={t.setup} /><KV k="Wilson LB" v={`${t.wlb}%`} tone={t.wlb>=50?"gn":"amb"} /><KV k="n · PF" v={`${t.n} · ${t.pf.toFixed(2)}`} /></Sec>
-        <Sec n="07" title="MOMENTUM"><KV k="RS rank" v={t.rs} tone={t.rs>=70?"gn":"ink"} /><KV k="RVOL" v={`${t.rvol.toFixed(2)}×`} tone={t.rvol>=1.5?"gn":"ink"} /><KV k="1D" v={`${t.chg>=0?"+":""}${t.chg.toFixed(2)}%`} tone={t.chg>=0?"gn":"rd"} /></Sec>
+        <Sec n="06" title="SETUP STATS"><KV k="family" v={t.setup} /><KV k="Wilson LB" v={t.wlb!=null?`${t.wlb}%`:"—"} tone={t.wlb!=null&&t.wlb>=50?"gn":"amb"} /><KV k="n · PF" v={(t.n!=null&&t.pf!=null)?`${t.n} · ${t.pf.toFixed(2)}`:"—"} /></Sec>
+        <Sec n="07" title="MOMENTUM"><KV k="RS rank" v={t.rs!=null?Math.round(t.rs):"—"} tone={t.rs!=null&&t.rs>=70?"gn":"ink"} /><KV k="RVOL" v={t.rvol!=null?`${t.rvol.toFixed(2)}×`:"—"} tone={t.rvol!=null&&t.rvol>=1.5?"gn":"ink"} /><KV k="1D" v={`${t.chg>=0?"+":""}${t.chg.toFixed(2)}%`} tone={t.chg>=0?"gn":"rd"} /></Sec>
         <Sec n="08" title="DECISION"><KV k="gates" v={`${t.verdict==="AVOID"?"6":"9"} / 10`} tone={t.verdict==="AVOID"?"rd":"gn"} /><KV k="bias" v={secBias(t.verdict)} tone={toneV} /></Sec>
       </div>
     </div>
