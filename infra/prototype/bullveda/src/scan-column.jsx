@@ -131,7 +131,7 @@ function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
       <button
         className={`sc-row sc-row--mini ${active ? "is-active" : ""}`}
         onClick={onClick}
-        title={`${item.name} · ${window.secBias ? window.secBias(item.verdict) : item.verdict} · score ${item.score}`}
+        title={`${item.name} · ${window.biasRead ? window.biasRead(item).label : (window.secBias ? window.secBias(item.verdict) : item.verdict)} · score ${item.score}`}
       >
         <span className={`sc-row-sym mono ${active ? "copper" : ""}`}>{item.sym}</span>
         <span className={`sc-row-chg mono ${item.chg >= 0 ? "up" : "dn"}`}>
@@ -168,7 +168,7 @@ function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
       )}
       {(widthCat === "L" || widthCat === "XL") && (
         <div className="sc-row-foot">
-          <Pill tone={verdictTone} small>{window.secBias ? window.secBias(item.verdict) : item.verdict}</Pill>
+          <Pill tone={verdictTone} small>{window.biasRead ? window.biasRead(item).label : (window.secBias ? window.secBias(item.verdict) : item.verdict)}</Pill>
           <span className="sc-row-setup mono dim">{item.setup}</span>
         </div>
       )}

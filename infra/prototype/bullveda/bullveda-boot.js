@@ -192,6 +192,8 @@
       mcap: (num(r.market_cap, 0) || 0) / 1e9,
       price: price, chg: num(r.pct_chg, 0),
       score: Math.round(score), verdict: verdict, setup: r.setup_type || r.setup || "",
+      // two-axis verdict (2026-06-10): orthogonal direction vs action
+      bias: r.bias || null, action: r.action || null, reasonClass: r.reason_class || null,
       tfsn: tfsn, tfsnScore: tfsn.reduce(function (a, b) { return a + b; }, 0),
       mtf: mtf, mtfUp: mtf.filter(function (m) { return m === "up"; }).length,
       sigCount: signals.length, signals: signals,
@@ -302,6 +304,8 @@
         edge: sr.edgePct,
       },
       verdict: sr.verdict, score: sr.score,
+      bias: sr.bias || (r || {}).bias || null, action: sr.action || (r || {}).action || null,
+      reasonClass: sr.reasonClass || (r || {}).reason_class || null,
       ml: {
         direction: pUp != null ? pUp : 0.5,
         hitNet: hit ? +((num(hit.p_t1_first, 0)) - (num(hit.p_stop_first, 0))).toFixed(2)

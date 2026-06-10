@@ -753,6 +753,52 @@ const SEC_BIAS = {
 };
 function secBias(v) { return (SEC_BIAS[v] && SEC_BIAS[v].label) || v; }
 function secBiasTone(v) { return (SEC_BIAS[v] && SEC_BIAS[v].tone) || "amb"; }
+
+// ── Two-axis verdict (2026-06-10) ───────────────────────────────────
+// The single verdict enum overloaded direction and action — an AVOID (an
+// action: "don't take this long", e.g. too extended) was mapped to "Bearish"
+// (a direction), so strong uptrends read as shorts. Render the bias WORD from
+// row.bias (bullish/neutral/bearish); render the ACTION (buy/wait/avoid/short)
+// and reason separately. Legacy rows (no .bias) fall back to secBias(verdict).
+const BIAS_LABEL = {
+  bullish: { label: "Bullish", tone: "gn"  },
+  neutral: { label: "Neutral", tone: "amb" },
+  bearish: { label: "Bearish", tone: "rd"  },
+};
+const ACTION_LABEL = {
+  buy:   { label: "Buy zone", tone: "gn"  },
+  wait:  { label: "Wait",     tone: "amb" },
+  avoid: { label: "Avoid",    tone: "amb" },
+  short: { label: "Short",    tone: "rd"  },
+};
+const REASON_CLASS_NOTE = {
+  extended:       "Extended — strong but past the entry zone; wait for a pullback",
+  gate_value:     "Fails the long-term quality gate",
+  gate_liquidity: "Below the liquidity / price floor",
+  bear_setup:     "Bearish structure — short candidate",
+  kill:           "Setup paused (edge erosion / cooldown)",
+  regime:         "Regime blocks new longs",
+  system:         "System-level halt (breaker / blackout)",
+  clear:          "All gates clear",
+};
+function biasRead(row) {
+  const b = row && row.bias;
+  if (b && BIAS_LABEL[b]) return BIAS_LABEL[b];
+  const v = row && (row.verdict || row.stage);
+  return { label: secBias(v), tone: secBiasTone(v) };   // legacy fallback
+}
+function actionRead(row) {
+  const a = row && row.action;
+  return (a && ACTION_LABEL[a]) ? ACTION_LABEL[a] : null;
+}
+function reasonNote(row) {
+  const rc = row && row.reasonClass;
+  return (rc && REASON_CLASS_NOTE[rc]) || null;
+}
+if (typeof window !== "undefined") {
+  window.biasRead = biasRead; window.actionRead = actionRead;
+  window.reasonNote = reasonNote; window.BIAS_LABEL = BIAS_LABEL;
+}
 // A market-WIDE entry block (crash / distribution day, breadth collapse, regime
 // flat / risk-off, panic) stops NEW longs without making the underlying stock
 // bearish. Detect it so a timing block renders as a neutral "hold" instead of a

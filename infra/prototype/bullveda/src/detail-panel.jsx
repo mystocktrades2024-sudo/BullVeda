@@ -212,7 +212,7 @@ function DetailHeader({ ticker, mode, sizeCat, focusMode, onToggleFocus }) {
         <div className="dp-hdr-spacer" />
         <Pill tone="gn" small dot>LIVE · <LiveClock /></Pill>
         {ticker.score != null
-          ? <Pill tone="copper" small>{secBias(ticker.verdict)} · {ticker.score}</Pill>
+          ? <Pill tone="copper" small>{(window.biasRead ? window.biasRead(ticker).label : secBias(ticker.verdict))} · {ticker.score}</Pill>
           : ticker._offUniverse ? <Pill tone="slate" small>off-universe · not scanned</Pill> : null}
       </div>
     </div>);
@@ -403,7 +403,7 @@ function VerdictHero({ ticker, mode, heroStyle, sizeCat }) {
         <div className="hero-verdict-block">
           <div className="label-cap">Composite bias · {mode}</div>
           <div className="hero-verdict">
-            <span className="hero-verdict-tag">{secBias(ticker.verdict)}</span>
+            <span className="hero-verdict-tag">{(window.biasRead ? window.biasRead(ticker).label : secBias(ticker.verdict))}</span>
             <span className="hero-verdict-score mono">{ticker.score}<span className="hero-score-unit">/100</span></span>
           </div>
           <div className="hero-verdict-line mono dim2">

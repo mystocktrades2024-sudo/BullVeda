@@ -34,6 +34,10 @@ function enrichWL(w, i) {
     stopReal:  sr ? pf(sr.stop)    : null,
     t1Real:    sr ? pf(sr.t1plan)  : null,
     mech:    (sr && sr.mechanism) ? sr.mechanism : (w.setup || "—"),
+    // two-axis verdict (2026-06-10) — directional bias separate from action
+    bias:    sr ? (sr.bias || null) : null,
+    action:  sr ? (sr.action || null) : null,
+    reasonClass: sr ? (sr.reasonClass || null) : null,
     _real:   !!sr,
   };
 }
@@ -144,7 +148,7 @@ function SurfaceWatchlist({ onTicker }) {
                   <td className="mono"><span className="wl-held" style={{ opacity: t.held ? 1 : 0 }}>●</span><b>{t.sym}</b></td>
                   <td className="dim">{t.name}</td>
                   <td className="mono dim">{t.setup}</td>
-                  <td><Pill tone={secBiasTone(t.verdict)} small>{secBias(t.verdict)}</Pill></td>
+                  <td><Pill tone={window.biasRead ? window.biasRead(t).tone : secBiasTone(t.verdict)} small>{window.biasRead ? window.biasRead(t).label : secBias(t.verdict)}</Pill></td>
                   <td><span className={`ss2-tier ss2-tier--${t.tier.toLowerCase().replace("watch","t3")}`}>{t.tier}</span></td>
                   <td className="r"><span className="wl-scorebar"><span style={{ width: `${t.score}%`, background: t.score>=75?"var(--gn)":t.score>=60?"var(--amb)":"var(--rd)" }} /></span><b className="mono">{t.score}</b></td>
                   <td><span className="ss2-tfsn">{(t.tfsn||[]).map((v,k)=><span key={k} className={`ss2-tfsn-dot ss2-tfsn--${v===2?"pass":v===1?"neut":"fail"}`} />)}{!t.tfsn&&<span className="dim2">—</span>}</span></td>
@@ -183,7 +187,7 @@ function WLDetailPane({ sym, rows, onTicker }) {
         </div>
         <div className="sdp-hdr-r">
           <span className={`ss2-score ss2-score--${t.score>=75?"gn":t.score>=60?"amb":"rd"}`}>{t.score}</span>
-          <Pill tone={toneV} small>{secBias(t.verdict)}</Pill>
+          <Pill tone={toneV} small>{window.biasRead ? window.biasRead(t).label : secBias(t.verdict)}</Pill>
         </div>
       </div>
       <button className="sdp-open mono" onClick={() => onTicker(t.sym)}>OPEN 14-LENS DETAIL →</button>
@@ -196,7 +200,7 @@ function WLDetailPane({ sym, rows, onTicker }) {
         <Sec n="05" title="MODE · HOLD"><KV k="mode" v={t.modeTag} /><KV k="hold" v={t.modeTag==="swing"?"7d":"30d"} /><KV k="held" v={t.held?"yes · in book":"no"} tone={t.held?"gn":"ink"} /></Sec>
         <Sec n="06" title="SETUP STATS"><KV k="family" v={t.setup} /><KV k="Wilson LB" v={t.wlb!=null?`${t.wlb}%`:"—"} tone={t.wlb!=null&&t.wlb>=50?"gn":"amb"} /><KV k="n · PF" v={(t.n!=null&&t.pf!=null)?`${t.n} · ${t.pf.toFixed(2)}`:"—"} /></Sec>
         <Sec n="07" title="MOMENTUM"><KV k="RS rank" v={t.rs!=null?Math.round(t.rs):"—"} tone={t.rs!=null&&t.rs>=70?"gn":"ink"} /><KV k="RVOL" v={t.rvol!=null?`${t.rvol.toFixed(2)}×`:"—"} tone={t.rvol!=null&&t.rvol>=1.5?"gn":"ink"} /><KV k="1D" v={`${t.chg>=0?"+":""}${t.chg.toFixed(2)}%`} tone={t.chg>=0?"gn":"rd"} /></Sec>
-        <Sec n="08" title="DECISION"><KV k="gates" v={`${t.verdict==="AVOID"?"6":"9"} / 10`} tone={t.verdict==="AVOID"?"rd":"gn"} /><KV k="bias" v={secBias(t.verdict)} tone={toneV} /></Sec>
+        <Sec n="08" title="DECISION"><KV k="gates" v={`${t.verdict==="AVOID"?"6":"9"} / 10`} tone={t.verdict==="AVOID"?"rd":"gn"} /><KV k="bias" v={window.biasRead ? window.biasRead(t).label : secBias(t.verdict)} tone={toneV} /></Sec>
       </div>
     </div>
   );

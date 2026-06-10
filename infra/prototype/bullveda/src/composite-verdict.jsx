@@ -81,8 +81,19 @@ const _cvImpl = function (ticker, mode) {
   // and the tone agree, and surface the engine reason for downstream notes.
   const _engReason = (_engRaw && typeof _engRaw === "object") ? (_engRaw.reason || null) : null;
   const _gated = window.isMarketGateBlock ? window.isMarketGateBlock(verdict, _engReason, net) : false;
-  const biasLabel = _gated ? "Neutral" : (window.secBias ? window.secBias(verdict) : verdict);
-  const vtoneFinal = _gated ? "amb" : vtone;
+  // Two-axis verdict (2026-06-10): the WORD is the DIRECTIONAL bias, NOT
+  // secBias(verdict). An AVOID-by-extended-gate long is "Bullish · Wait", never
+  // "Bearish". This card is PER-MODE, so prefer the per-mode bias/action/reason
+  // from decisions_by_mode[mode] (_engRaw); fall back to the top-level row.
+  const _perMode = (_engRaw && typeof _engRaw === "object")
+    ? { bias: _engRaw.bias, action: _engRaw.action, reasonClass: _engRaw.reason_class } : {};
+  const _biasSrc = _perMode.bias ? _perMode : ticker;
+  const _br = (window.biasRead ? window.biasRead(_biasSrc) : null) || { label: (window.secBias ? window.secBias(verdict) : verdict), tone: vtone };
+  const _act = window.actionRead ? window.actionRead(_perMode.action ? _perMode : ticker) : null;
+  const biasLabel = _gated ? "Neutral" : _br.label;
+  const vtoneFinal = _gated ? "amb" : (_br.tone || vtone);
+  const actionLabel = _gated ? null : (_act ? _act.label : null);
+  const reasonNoteTxt = window.reasonNote ? window.reasonNote(_perMode.reasonClass ? _perMode : ticker) : null;
   const agree   = lenses.filter(l => l.tone === "gn").length;
   const caution = lenses.filter(l => l.tone === "amb").length;
   const fail    = lenses.filter(l => l.tone === "rd").length;
@@ -96,7 +107,7 @@ const _cvImpl = function (ticker, mode) {
   const sd = Math.sqrt(lenses.reduce((a, l) => a + (l.v - mean) ** 2, 0) / lenses.length);
   const conf = sd < 12 ? "HIGH" : sd < 20 ? "MED" : "LOW";
   const disagree = sd < 12 ? "low" : sd < 20 ? "moderate" : "high";
-  return { net, lensNet, verdict, verdictSource, vtone: vtoneFinal, biasLabel, gated: _gated, reason: _engReason, conf, disagree, lenses, agree, caution, fail, dissenters, mode };
+  return { net, lensNet, verdict, verdictSource, vtone: vtoneFinal, biasLabel, actionLabel, reasonNote: reasonNoteTxt, gated: _gated, reason: _engReason, conf, disagree, lenses, agree, caution, fail, dissenters, mode };
 };
 function compositeVerdict(ticker, mode) {
   const key = (ticker && ticker.symbol || "") + "|" + mode + "|" + (ticker && ticker.score) + "|" + (ticker && ticker.ml && ticker.ml.direction) + "|" + (ticker && ticker._fund ? 1 : 0);
@@ -123,12 +134,14 @@ Weakest or disagreeing: ${cv.dissenters.length ? cv.dissenters.slice(0, 3).map(d
         <div className="cv-eyebrow mono">COMPOSITE BIAS · {cv.lenses.length} LENSES · <b className="copper">{mode}</b></div>
         <div className="cv-headline">
           <span className={`cv-verdict cv-verdict--${cv.vtone}`}>{cv.biasLabel || (window.secBias ? window.secBias(cv.verdict) : cv.verdict)}</span>
+          {cv.actionLabel && <span className="cv-action mono" title="What to do — the ACTION axis, separate from the directional bias. 'Wait' = the thesis is intact but the entry is extended/blocked here.">· {cv.actionLabel}</span>}
           <span className="cv-net mono" title="Canonical 5-pillar composite score — the SAME number shown on the Scanner / Home / Overview. The lens bars below explain how each area contributes; they do not override this number.">{cv.net}<span className="cv-net-of">/100</span></span>
           {typeof ticker.score === "number" && Math.round(ticker.score) !== cv.net && (
             <span className="cv-net-alt mono dim2" style={{ fontSize: 12, alignSelf: "flex-end", marginBottom: 5 }} title="Generic, horizon-agnostic 5-pillar score (the number shown on the Scanner). It does NOT reweight catalyst / entry-quality for your timeframe, so it usually reads higher than the per-mode number.">· overall {Math.round(ticker.score)}</span>
           )}
           <span className="cv-conf mono dim2" title="How much the lenses agree with each other — NOT a confidence in the signal. High disagreement = the areas are split, which is why a high pillar score can still read WATCH/Neutral.">lens agreement <b className={cv.disagree === "low" ? "gn-c" : cv.disagree === "high" ? "rd-c" : "amb-c"}>{cv.disagree === "low" ? "high" : cv.disagree === "high" ? "low" : "moderate"}</b></span>
         </div>
+        {cv.reasonNote && <div className="cv-reason-note mono dim2" style={{ marginTop: 4, fontSize: 12 }}>⚠ {cv.reasonNote}</div>}
         <div className="cv-counts mono">
           <span className="cv-cnt gn">{cv.agree} agree</span>
           <span className="cv-cnt amb">{cv.caution} caution</span>

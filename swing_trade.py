@@ -4439,10 +4439,18 @@ def run_daily_scan(force_fresh: bool = False):
                 _row["reject_reason"] = _r["reason"] if _r["verdict"] != "BUY" else ""
                 _row["caveats"] = _r["caveats"]
                 _row["gates_evaluated"] = _r["gates_evaluated"]
+                # Two-axis verdict (2026-06-10): orthogonal bias × action × reason_class
+                # so the UI never renders an action (AVOID) as a direction (Bearish).
+                _row["bias"] = _r.get("bias")
+                _row["action"] = _r.get("action")
+                _row["reason_class"] = _r.get("reason_class")
                 _dec = _row.setdefault("decision", {})
                 if isinstance(_dec, dict):
                     _dec["verdict"] = _r["verdict"]
                     _dec["reason"]  = _r["reason"]
+                    _dec["bias"]    = _r.get("bias")
+                    _dec["action"]  = _r.get("action")
+                    _dec["reason_class"] = _r.get("reason_class")
                 _row["audit_trail"] = {
                     "ticker": _row.get("ticker"),
                     "verdict": _r["verdict"],

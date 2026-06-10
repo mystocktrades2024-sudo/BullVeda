@@ -291,7 +291,7 @@ function ValueHero({ ticker, mode, d, fv }) {
         <div>
           <div className="label-cap">Master verdict · {(mode || "INVEST").toUpperCase()} mode</div>
           <div className="vh-verdict">
-            <span className={`vh-tag kpi-tone--${vtone}`}>{window.secBias ? window.secBias(verdict) : verdict}</span>
+            <span className={`vh-tag kpi-tone--${vtone}`}>{cv ? cv.biasLabel : (window.biasRead ? window.biasRead(ticker).label : (window.secBias ? window.secBias(verdict) : verdict))}</span>
             {net != null && <span className="vh-score mono">{Math.round(net)}<span className="th-score-unit">/100</span></span>}
             {mos != null && <Pill tone={tone} small>{mos >= 0 ? "margin" : "premium"} {Math.abs(mos).toFixed(0)}%</Pill>}
           </div>

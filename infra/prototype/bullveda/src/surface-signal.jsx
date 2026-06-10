@@ -923,7 +923,7 @@ function ScannerDetailPane({ sym, onTicker }) {
         </div>
         <div className="sdp-hdr-r">
           <span className={`ss2-score ss2-score--${t.score>=75?"gn":t.score>=60?"amb":"rd"}`}>{t.score}</span>
-          <Pill tone={toneV} small>{secBias(t.verdict)}</Pill>
+          <Pill tone={toneV} small>{window.biasRead ? window.biasRead(t).label : secBias(t.verdict)}</Pill>
         </div>
       </div>
       <button className="sdp-open mono" onClick={() => onTicker(t.sym)}>OPEN 14-LENS DETAIL →</button>

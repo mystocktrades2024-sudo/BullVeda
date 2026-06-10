@@ -902,7 +902,7 @@ function TopSetups({ onTicker }) {
             <span className="tset-name dim">{r.name}</span>
             <span className="tset-stats mono dim2">{stat(r)}</span>
           </span>
-          <span className={`tset-v mono ${r.v === "BUY" ? "up" : r.v === "SHORT" ? "dn" : "warn"}`}>{secBias(r.v)}</span>
+          <span className={`tset-v mono ${r.v === "BUY" ? "up" : r.v === "SHORT" ? "dn" : "warn"}`}>{window.biasRead ? window.biasRead({ bias: r.bias, verdict: r.v }).label : secBias(r.v)}</span>
         </button>
       ))}
     </div>

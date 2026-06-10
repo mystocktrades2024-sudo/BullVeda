@@ -959,7 +959,99 @@ def _resolve_buy_threshold(regime: str | None, thresholds: dict | None) -> int:
     return int((thresholds.get(key) or {}).get("buy_min_score") or DEFAULT_BUY_THRESHOLD)
 
 
+def derive_bias_action(verdict, reason: str = "", bear_type: str = "",
+                       direction: str = "long", score: float = 0.0) -> dict:
+    """Decompose an overloaded verdict into three ORTHOGONAL axes.
+
+    The single verdict enum (BUY/WATCH/AVOID/SHORT) conflates DIRECTION and
+    ACTION, so a strong uptrend that's merely too-extended-to-chase (AVOID by
+    the entry-quality gate) was rendered "Bearish · short it". These axes keep
+    direction and action independent so the UI can say "bullish, but wait":
+
+      bias         : bullish / neutral / bearish   (directional read)
+      action       : buy / wait / avoid / short    (what to do)
+      reason_class : extended / gate_value / gate_liquidity / bear_setup /
+                     kill / regime / system / clear / other   (why the action)
+
+    Pure function — no I/O. Used by compute_final_verdict (wrapper below) AND
+    analysis.compute_decisions_by_mode so per-ticker and per-mode agree.
+    """
+    v = (verdict or "").upper()
+    r = (reason or "").lower()
+    is_short = (direction or "").lower() == "short" or v in ("SHORT", "SELL") or bool(bear_type)
+
+    # reason_class — WHY the action fired (priority order; first match wins)
+    if is_short or "bear setup" in r:
+        rc = "bear_setup"
+    elif "circuit breaker" in r or "forced cash" in r or "blackout" in r:
+        rc = "system"
+    elif "regime gate" in r or "no new longs" in r:
+        rc = "regime"
+    elif ("extended" in r or "entry_quality" in r or "value zone" in r
+          or "decision_state" in r or "missed" in r or "pullback" in r):
+        rc = "extended"          # timing only — the long thesis is intact
+    elif "kill" in r or "cooldown" in r or "sharpe" in r:
+        rc = "kill"
+    elif "fund" in r or "quality gate" in r or "margin" in r or "adequacy" in r:
+        rc = "gate_value"
+    elif "liquidity" in r or "drawdown" in r or "price" in r:
+        rc = "gate_liquidity"
+    elif v == "BUY":
+        rc = "clear"
+    else:
+        rc = "other"
+
+    # bias — directional read. A short/bear is bearish; otherwise the composite
+    # score (0-100, 50 = midpoint) decides bullish vs neutral. An AVOID/WATCH
+    # long is NOT bearish — that was the whole bug.
+    if is_short:
+        bias = "bearish"
+    elif (score or 0) >= 50:
+        bias = "bullish"
+    else:
+        bias = "neutral"
+
+    # action — what to do. Wait-worthy reasons (extended/regime) keep the long
+    # thesis but block the entry here; hard rejects are avoid.
+    if is_short:
+        action = "short"
+    elif v == "BUY":
+        action = "buy"
+    elif rc in ("extended", "regime") or v == "WATCH":
+        action = "wait"
+    else:
+        action = "avoid"
+
+    return {"bias": bias, "action": action, "reason_class": rc}
+
+
 def compute_final_verdict(t: dict, regime: str | None = None,
+                          thresholds: dict | None = None,
+                          setup_kill_list: dict | None = None,
+                          system_status: dict | None = None,
+                          setup_band_kill_list: dict | None = None,
+                          config: dict | None = None) -> dict:
+    """Wrapper: run the verdict cascade, then attach the orthogonal
+    bias × action × reason_class axes (additive — `verdict` is unchanged for
+    back-compat with filters / buckets / signal_log)."""
+    res = _compute_final_verdict_impl(
+        t, regime=regime, thresholds=thresholds, setup_kill_list=setup_kill_list,
+        system_status=system_status, setup_band_kill_list=setup_band_kill_list, config=config)
+    try:
+        _t = t if isinstance(t, dict) else {}
+        _bs = _t.get("bear_setup") if isinstance(_t.get("bear_setup"), dict) else {}
+        ba = derive_bias_action(
+            verdict=res.get("verdict"), reason=res.get("reason", ""),
+            bear_type=(_bs or {}).get("bear_type", ""),
+            direction=_t.get("direction", "long"),
+            score=_t.get("score", 0) or 0)
+        res["bias"], res["action"], res["reason_class"] = ba["bias"], ba["action"], ba["reason_class"]
+    except Exception:
+        res.setdefault("bias", "neutral"); res.setdefault("action", "wait"); res.setdefault("reason_class", "other")
+    return res
+
+
+def _compute_final_verdict_impl(t: dict, regime: str | None = None,
                           thresholds: dict | None = None,
                           setup_kill_list: dict | None = None,
                           system_status: dict | None = None,

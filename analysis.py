@@ -8353,9 +8353,23 @@ def compute_decisions_by_mode(*, price: float, atr: float,
                 for k in mode_weights
             }
 
+        # Two-axis verdict (2026-06-10): decompose this mode's verdict into
+        # orthogonal bias × action × reason_class so the per-mode card never
+        # renders an action (AVOID) as a direction (Bearish). Uses the mode's
+        # own composite_score for the bias cut.
+        try:
+            from decision_engine import derive_bias_action as _dba
+            _ba = _dba(verdict=verdict_pkg.get("verdict"), reason=verdict_pkg.get("reason", ""),
+                       bear_type=verdict_pkg.get("bear_type", ""), direction=direction,
+                       score=float(mode_score))
+        except Exception:
+            _ba = {"bias": "neutral", "action": "wait", "reason_class": "other"}
         out[mode] = {
             "verdict": verdict_pkg.get("verdict"),
             "reason": verdict_pkg.get("reason"),
+            "bias": _ba["bias"],
+            "action": _ba["action"],
+            "reason_class": _ba["reason_class"],
             "color": verdict_pkg.get("color"),
             "emoji": verdict_pkg.get("emoji"),
             "bear_type": verdict_pkg.get("bear_type", ""),

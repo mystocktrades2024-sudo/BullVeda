@@ -3700,6 +3700,11 @@ async def universe_api(limit: int = 0):
             "ticker": r.get("ticker"), "name": r.get("name") or r.get("ticker"),
             "sector": r.get("sector"), "industry": r.get("industry"),
             "score": r.get("score"), "stage": dec.get("verdict"),
+            # Two-axis verdict (2026-06-10): orthogonal direction vs action so the
+            # client never maps an action (AVOID) to a direction (Bearish).
+            "bias": dec.get("bias") or r.get("bias"),
+            "action": dec.get("action") or r.get("action"),
+            "reason_class": dec.get("reason_class") or r.get("reason_class"),
             "setup": r.get("setup_family"), "conviction_tier": conv.get("label"),
             # Granular setup type (2026-06-09): the alpha distinction (VCP / 52wk /
             # 10-Week Pullback / Pocket Pivot / Near-VCP) is computed and stored on

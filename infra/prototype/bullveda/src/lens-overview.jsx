@@ -981,7 +981,7 @@ window.NewsCatalysts = NewsCatalysts;
 function BuyChecklist({ ticker, mode }) {
   const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
   const net = cv ? cv.net : (ticker.score || 60);
-  const bias = window.secBias ? window.secBias(cv ? cv.verdict : ticker.verdict) : "—";
+  const bias = cv ? cv.biasLabel : (window.biasRead ? window.biasRead(ticker).label : (window.secBias ? window.secBias(ticker.verdict) : "—"));
   const moKey = mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "invest" : "swing";
   const proj = (window.AIPredict && ticker.symbol) ? window.AIPredict.projection(ticker.symbol, moKey) : null;
   const lensV = n => cv ? (cv.lenses.find(l => l.k === n || l.k.startsWith(n)) || {}).v : null;
