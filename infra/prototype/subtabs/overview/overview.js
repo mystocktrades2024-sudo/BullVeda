@@ -657,16 +657,31 @@ function _computeExecBrief(strategy) {
   const sw = payloads.SWING, ps = payloads.POSITION, iv = payloads.INVESTMENT;
   const score = num(T.score, 0);
   const rr = num(T.rr, 0);
+  // SSOT (2026-06-09): canonical verdict→class map + per-mode canonical lookup.
+  // Never re-derive a verdict from score in JS — bind the engine's verdict
+  // (server `stage` / `decisions_by_mode`). Re-deriving reintroduced the AVT-case
+  // drift: scanner bound stage=BUY/67 while this brief recomputed WATCH (67<75).
+  const _ovVCls = v => ({ BUY:'gn', WATCH:'am', WAIT:'am', AVOID:'rd', SHORT:'rd', SELL:'rd' }[String(v||'').toUpperCase()] || 'am');
+  const _dbm = m => (T.decisionsByMode && (T.decisionsByMode[m] || T.decisionsByMode[m.toUpperCase()])) || null;
 
   if (strategy === 'SWING') {
     const p = sw;
     const p1 = p?.t1?.p_reach ?? 0;
-    let verdict, vCls;
-    if (score >= 75 && p1 >= 0.45) { verdict = 'BUY'; vCls = 'gn'; }
-    else if (score < 50) { verdict = 'AVOID'; vCls = 'rd'; }
-    else { verdict = 'WATCH'; vCls = 'am'; }
+    // Canonical swing verdict = decision_engine `stage` (compute_final_verdict),
+    // matching what the scanner binds. Prefer stage over decisions_by_mode.swing:
+    // the two engines can disagree (catalyst-sleeve relaxes EXTENDED entries), and
+    // per the funnel/distribution rule stage is authoritative. The structural
+    // engine's "wait" is surfaced as a caveat below, not as a competing verdict.
+    const verdict = String(T.verdict || T.stage || 'WATCH').toUpperCase();
+    const vCls = _ovVCls(verdict);
 
     const thesisParts = [];
+    const _swDbm = _dbm('swing');
+    if (_swDbm && String(_swDbm.verdict || '').toUpperCase() !== verdict && _swDbm.reason) {
+      thesisParts.push('⚠ Structural: ' + _swDbm.reason);
+    } else if ((T.entry_quality === 'EXTENDED' || T.entry_quality === 'MISSED')) {
+      thesisParts.push(`⚠ Entry ${T.entry_quality} — verdict held by catalyst-sleeve relaxation; size with care`);
+    }
     if (T.above_50ema) thesisParts.push('Price is above EMA-50 (short-term trend bullish)');
     else thesisParts.push('Price is below EMA-50 (trend headwind)');
     if (T.macd_bullish) thesisParts.push('MACD is bullish');
@@ -725,9 +740,13 @@ function _computeExecBrief(strategy) {
     const p = ps;
     const conf = p?.t1?.confluence ?? 0;
     const p1 = p?.t1?.p_reach ?? 0;
-    let verdict, vCls;
-    if (conf >= 4 && p1 >= 0.3) { verdict = 'BUY'; vCls = 'gn'; }
-    else { verdict = 'WATCH'; vCls = 'am'; }
+    // Canonical POSITION verdict from decisions_by_mode.position (medium_term engine).
+    // Fall back to the confluence heuristic only when the engine verdict is absent.
+    const _posDbm = _dbm('position');
+    const verdict = _posDbm && _posDbm.verdict
+      ? String(_posDbm.verdict).toUpperCase()
+      : (conf >= 4 && p1 >= 0.3 ? 'BUY' : 'WATCH');
+    const vCls = _ovVCls(verdict);
 
     const earnDays = T.earn_days;
     const esp = T.zacks_earnings_esp;
@@ -770,10 +789,13 @@ function _computeExecBrief(strategy) {
   {
     const p = iv;
     const upside = T.analyst_upside ?? 0;
-    let verdict, vCls;
-    if (upside >= 0.15) { verdict = 'BUY'; vCls = 'gn'; }
-    else if (upside >= 0.05) { verdict = 'WATCH'; vCls = 'am'; }
-    else { verdict = 'AVOID'; vCls = 'rd'; }
+    // Canonical INVEST verdict from decisions_by_mode.invest (long_term gate engine).
+    // Fall back to the analyst-upside heuristic only when the engine verdict is absent.
+    const _ivDbm = _dbm('invest') || _dbm('investment');
+    const verdict = _ivDbm && _ivDbm.verdict
+      ? String(_ivDbm.verdict).toUpperCase()
+      : (upside >= 0.15 ? 'BUY' : upside >= 0.05 ? 'WATCH' : 'AVOID');
+    const vCls = _ovVCls(verdict);
 
     const fundScore = num(T.fund_score, 0);
     const thesisParts = [];
@@ -999,11 +1021,14 @@ function renderVerdictStrip() {
   setHTML('qovPrice', !isNaN(price) ? `$${price.toFixed(2)}` : '—');
   setHTML('qovChg', `<span class="qov-chg" style="color:${chg>=0?'var(--gn)':'var(--rd)'}">${(chg>=0?'+':'') + chg.toFixed(2)}%</span>`);
 
-  const dec = String(T.decision?.verdict || T.verdict || '').toLowerCase();
+  // SSOT (2026-06-09): bind the canonical swing verdict (stage / decision.verdict)
+  // verbatim — do NOT OR-in score>=75 / score<55, which let a high/low score
+  // override the engine and reproduced the scanner-vs-overview divergence.
   const score = num(T.score, 0);
-  let vLabel = 'WATCH', vCls = 'watch';
-  if (/buy/.test(dec) || score >= 75) { vLabel = 'BUY'; vCls = 'buy'; }
-  else if (/avoid|kill|reject|short|exit/.test(dec) || score < 55) { vLabel = 'AVOID'; vCls = 'avoid'; }
+  const vRaw = String((T.decision && T.decision.verdict) || T.verdict || T.stage || 'WATCH').toUpperCase();
+  const vMap = { BUY:['BUY','buy'], WATCH:['WATCH','watch'], WAIT:['WAIT','watch'],
+                 AVOID:['AVOID','avoid'], SHORT:['SHORT','avoid'], SELL:['SELL','avoid'] };
+  const [vLabel, vCls] = vMap[vRaw] || ['WATCH','watch'];
   $('qovSysVerdict').className = 'qov-vd ' + vCls;
   setText('qovSysVerdict', vLabel);
   const conv = safeStr(T.conviction_tier ?? T.conviction?.label) || '—';
