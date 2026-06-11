@@ -6,6 +6,16 @@ const { useMemo: useMemoCV } = React;
 // memo cache — compositeVerdict is called ~6× per detail render (hero, horizon×3,
 // thesis, checklist). Cache by identity so it computes once per (ticker, mode, data).
 const _CV_CACHE = new Map();
+// Insider "why" — prefer the real cluster-buy count from the feed; never print
+// "undefined buyers" (2026-06-10). Falls through count → net → generic flow.
+function _insiderWhy(ticker, ie) {
+  const idd = ticker && (ticker.insider_data || (ticker._raw && ticker._raw.insider_data));
+  let b = (idd && idd.buys != null) ? idd.buys : ((ie && ie.buyers != null) ? ie.buyers : null);
+  if (b != null && isFinite(b)) return `${b} buyer${b === 1 ? "" : "s"}`;
+  const net = ticker && (ticker.insNet != null ? ticker.insNet : null);
+  if (net != null && isFinite(net)) return net > 0 ? `net +${net} insider` : net < 0 ? `net ${net} insider` : "balanced flow";
+  return "insider flow";
+}
 const _cvImpl = function (ticker, mode) {
   const P = ticker.pillars || {};
   const moKey = mode === "POSITION" ? "position" : mode === "INVESTMENT" ? "invest" : "swing";
@@ -31,9 +41,13 @@ const _cvImpl = function (ticker, mode) {
     { k: "Risk",       w: 0.09, v: cl(risk),                why: "VaR / sizing headroom" },
     { k: "Track Rec.", w: 0.08, v: cl(wilson),              why: `Wilson LB ${Math.round(wilson)}%` },
     { k: "Plan",       w: 0.07, v: cl(rrScore),             why: `R:R ${(adj.rMultiple || 1.7).toFixed(2)}` },
-    { k: "Earnings",   w: 0.04, v: cl(erDays <= 5 ? 34 : erDays <= 12 ? 48 : 70), why: `ER in ${erDays}d` },
-    { k: "Options",    w: 0.04, v: cl(erDays <= 10 ? 42 : 58), why: "IV richness" },
-    { k: "Insider",    w: 0.04, v: cl(ie ? ie.score : 58),  why: ie ? `${ie.buyers} buyer${ie.buyers === 1 ? "" : "s"}` : "flow" },
+    // erDays == null means NO earnings date — score NEUTRAL (60), never the
+    // imminent-earnings penalty (34), and never render "ER in nulld" (2026-06-10).
+    { k: "Earnings",   w: 0.04, v: cl(erDays == null ? 60 : erDays <= 5 ? 34 : erDays <= 12 ? 48 : 70), why: (erDays == null ? "no ER date" : `ER in ${erDays}d`) },
+    { k: "Options",    w: 0.04, v: cl(erDays == null ? 55 : erDays <= 10 ? 42 : 58), why: "IV richness" },
+    // prefer the real insider buyer count (ticker.insider_data / insNet); guard
+    // ie.buyers so the cell never prints "undefined buyers" (2026-06-10).
+    { k: "Insider",    w: 0.04, v: cl(ie ? ie.score : 58),  why: _insiderWhy(ticker, ie) },
   ];
   // ── mode-conditional reweight (whitepaper P1): swing = technical-led,
   // investment = quality/insider-led, position = balanced. Normalized to 1.0. ──
