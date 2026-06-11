@@ -3192,6 +3192,29 @@ def _candle_patterns(df: pd.DataFrame) -> dict:
         return {"patterns": [], "bias": 0}
 
 
+_MOMDIV_CFG_CACHE = {"v": None}
+def _momentum_divergence_cfg() -> dict:
+    """Cached read of scoring.momentum_divergence_penalty (default DISABLED).
+    The "leader rolling over" penalty — see score_technicals. Staged OFF until
+    the swing-WR/PF A/B validates it (principle 7)."""
+    if _MOMDIV_CFG_CACHE["v"] is not None:
+        return _MOMDIV_CFG_CACHE["v"]
+    out = {"_enabled": False, "penalty": 3, "max_mom_pts": 2,
+           "max_rvol": 1.0, "require_death_cross": True}
+    try:
+        import json as _j
+        from pathlib import Path as _P
+        _p = _P(__file__).resolve().parent / "config" / "config.json"
+        blk = (_j.loads(_p.read_text()).get("scoring") or {}).get("momentum_divergence_penalty") or {}
+        for k in out:
+            if k in blk:
+                out[k] = blk[k]
+    except Exception:
+        pass
+    _MOMDIV_CFG_CACHE["v"] = out
+    return out
+
+
 def score_technicals(df: pd.DataFrame, regime: dict,
                      spy_close: "pd.Series | None" = None,
                      weekly_df: "pd.DataFrame | None" = None,
@@ -3849,6 +3872,24 @@ def score_technicals(df: pd.DataFrame, regime: dict,
 
     # VWAP will be injected into indicators by analyze_ticker after this call
     score = min(score, 30)
+
+    # ── Momentum-divergence penalty (2026-06-11, STAGED — default OFF) ─────────
+    # The "leader rolling over" case: a strong-RS/trend name whose FAST momentum
+    # has rolled over (MACD death cross) on LIGHT volume — RS + trend-structure
+    # prop the pillar high while the momentum sub-score (≤2/5) is masked. When
+    # flagged on, dock the pillar so it reflects the fast signal for a swing entry.
+    # Default DISABLED pending the swing-WR/PF A/B (principle 7 — no weight change
+    # without backtest evidence). CTS example: 63% → 55%.
+    _mdiv = _momentum_divergence_cfg()
+    if _mdiv.get("_enabled", False):
+        _trig = (mom_pts <= _mdiv.get("max_mom_pts", 2)
+                 and rvol < _mdiv.get("max_rvol", 1.0)
+                 and ((not _mdiv.get("require_death_cross", True)) or _dc))
+        if _trig:
+            _pen = int(_mdiv.get("penalty", 3))
+            score = max(0, score - _pen)
+            details["momentum_divergence_penalty"] = (
+                f"-{_pen} momentum rolling over (MACD death cross, mom {mom_pts}/5, RVOL {rvol:.2f})")
 
     # ── Weekly alignment bonus: ±2 (applied unconditionally, capped at 30) ────
     if weekly_bull:
@@ -5081,16 +5122,21 @@ def classify_setup_family(setup_type: str, catalyst_tags: list, indicators: dict
 
 # ── Entry Quality Classifier ─────────────────────────────────────────────────
 
-def classify_entry_quality(price: float, indicators: dict, sr: dict) -> str:
+def classify_entry_quality_detail(price: float, indicators: dict, sr: dict) -> tuple:
     """
     ATR-relative entry quality classification with EMA21 + EMA50 dual-distance.
+
+    Returns (label, reason) where `reason` names the ACTUAL trigger that fired,
+    using live distances — never a hardcoded narrative. `classify_entry_quality`
+    is the back-compat label-only wrapper. Both share one threshold block so the
+    surfaced reason can never drift from the classification.
 
     Tightened per user feedback: "GOOD setup + BAD location = WAIT" — the prior
     1.25-ATR-above-EMA21 threshold let stocks like SLB (0.96 ATR above, 3+ ATR
     above EMA50) pass as PULLBACK when they're really LATE-stage breakouts.
 
     New evaluation (first match wins):
-      MISSED   — >2.0 ATR above EMA21 OR price > resistance × 1.02
+      MISSED   — >2.0 ATR above EMA21 OR price > resistance × 1.02 OR >4.0 ATR above EMA50
       EXTENDED — >1.0 ATR above EMA21 OR >3.0 ATR above EMA50 (LATE location)
       FRESH    — within 0.5 ATR of EMA21 AND within 0.5 ATR of support (textbook value)
       PULLBACK — within 1.0 ATR of EMA21 AND within 2.0 ATR of EMA50 (orderly retrace)
@@ -5103,7 +5149,7 @@ def classify_entry_quality(price: float, indicators: dict, sr: dict) -> str:
     atr        = indicators.get("atr", price * 0.02)
 
     if price <= 0 or ema21 <= 0:
-        return "VALID"
+        return "VALID", ""
     if atr <= 0:
         atr = price * 0.02
 
@@ -5111,20 +5157,46 @@ def classify_entry_quality(price: float, indicators: dict, sr: dict) -> str:
     dist_ema50    = ((price - ema50) / atr) if ema50 > 0 else 0  # signed
     dist_support  = abs(price - support) / atr     # unsigned
 
+    # Honest qualifier: is price actually above recent resistance, or below it?
+    # (BFH 2026-06-11: MISSED via >2 ATR above EMA21 but still 2.1% BELOW the 20d
+    #  high — the old hardcoded "broke through resistance" string was false here.)
+    def _vs_resistance() -> str:
+        if resistance <= 0:
+            return ""
+        gap = (price / resistance - 1.0) * 100.0
+        if gap < -0.2:
+            return f"; still {abs(gap):.1f}% below {resistance:.2f} resistance (not a breakout)"
+        return ""
+
     # MISSED: beyond resistance or >2.0 ATR above EMA21 OR >4.0 ATR above EMA50
     if price > resistance * 1.02 or dist_ema21 > 2.0 or dist_ema50 > 4.0:
-        return "MISSED"
+        if price > resistance * 1.02:
+            reason = (f"broke above resistance {resistance:.2f} "
+                      f"(+{(price / resistance - 1.0) * 100.0:.1f}%) — wait for a new base")
+        elif dist_ema21 > 2.0:
+            reason = (f"{dist_ema21:.1f} ATR above EMA21 ({ema21:.2f}) — "
+                      f"wait for pullback to value zone{_vs_resistance()}")
+        else:
+            reason = (f"{dist_ema50:.1f} ATR above EMA50 ({ema50:.2f}) — "
+                      f"late-stage; wait for pullback{_vs_resistance()}")
+        return "MISSED", reason
 
     # EXTENDED: LATE location — either EMA21 >1.0 ATR or EMA50 >3.0 ATR
     # This catches the SLB case: 0.96 ATR above EMA21 but 3+ ATR above EMA50.
     if dist_ema21 > 1.0 or dist_ema50 > 3.0:
-        return "EXTENDED"
+        if dist_ema21 > 1.0:
+            reason = (f"{dist_ema21:.1f} ATR above EMA21 ({ema21:.2f}) — "
+                      f"late entry; prefer pullback to value zone{_vs_resistance()}")
+        else:
+            reason = (f"{dist_ema50:.1f} ATR above EMA50 ({ema50:.2f}) — "
+                      f"extended from base; prefer pullback{_vs_resistance()}")
+        return "EXTENDED", reason
 
     # FRESH: tight to EMA21 AND tight to support — textbook swing entry
     near_ema21_fresh   = abs(dist_ema21) <= 0.5
     near_support_fresh = dist_support <= 0.5
     if near_ema21_fresh and near_support_fresh:
-        return "FRESH"
+        return "FRESH", ""
 
     # PULLBACK: within 1.0 ATR of EMA21 AND within 2.0 ATR of EMA50
     # Both conditions required — prevents "at EMA21 but miles from EMA50" (still extended)
@@ -5132,9 +5204,14 @@ def classify_entry_quality(price: float, indicators: dict, sr: dict) -> str:
     near_ema50  = (abs(dist_ema50) <= 2.0) if ema50 > 0 else True
     near_sup    = dist_support <= 1.0
     if (near_ema21 and near_ema50) or near_sup:
-        return "PULLBACK"
+        return "PULLBACK", ""
 
-    return "VALID"
+    return "VALID", ""
+
+
+def classify_entry_quality(price: float, indicators: dict, sr: dict) -> str:
+    """Back-compat label-only wrapper around classify_entry_quality_detail()."""
+    return classify_entry_quality_detail(price, indicators, sr)[0]
 
 
 def _adjust_plan_by_entry_quality(plan: dict, entry_quality: str, indicators: dict,
@@ -8160,6 +8237,7 @@ def compute_decisions_by_mode(*, price: float, atr: float,
                               direction: str = "long", bear_score: int = 0,
                               rs_rank: int = 50, vix: float = 20.0,
                               entry_quality: str = "VALID",
+                              entry_quality_reason: str = "",
                               has_catalyst: bool = False,
                               rsi: float = 50.0, weekly_bull: bool = False,
                               adx: float = 20.0, breadth: dict | None = None,
@@ -8294,7 +8372,8 @@ def compute_decisions_by_mode(*, price: float, atr: float,
             rs_rank=rs_rank, vix=vix, sector_outperforming=sector_outperforming,
             sector_etf=sector_etf, has_catalyst=has_catalyst, rsi=rsi,
             weekly_bull=weekly_bull, adx=adx, regime_name=regime_name,
-            breadth=breadth, entry_quality=entry_quality, regime4=regime4,
+            breadth=breadth, entry_quality=entry_quality,
+            entry_quality_reason=entry_quality_reason, regime4=regime4,
             setup_type=setup_type, short_float=short_float,
             days_to_cover=days_to_cover,
             days_to_earnings=days_to_earnings if rules["earnings_blackout_days"] > 0 else None,
@@ -8422,6 +8501,12 @@ def make_decision(total_score: float, rr_ratio: float, config: dict,
                   regime_name: str = "neutral",
                   breadth: dict | None = None,
                   entry_quality: str = "VALID",
+                  # Accurate, live-distance reason from classify_entry_quality_detail()
+                  # (e.g. "2.3 ATR above EMA21 … still 2.1% below resistance"). When
+                  # absent, EXTENDED/MISSED branches fall back to a definitional string
+                  # that lists the trigger thresholds — never the false "broke through
+                  # resistance" narrative that was hardcoded before 2026-06-11.
+                  entry_quality_reason: str = "",
                   regime4: str = "",
                   setup_type: str = "",
                   # Short-specific correctness filters (Vinod expert review):
@@ -8607,13 +8692,17 @@ def make_decision(total_score: float, rr_ratio: float, config: dict,
     _is_breakout_alpha = _eq_bo_on and any(s in _setup_l for s in _eq_bo_setups)
     _eq_bypass = _eq_override_active or _is_breakout_alpha
     if direction == "long" and entry_quality == "EXTENDED" and not _eq_bypass:
+        _ext_detail = (entry_quality_reason or
+                       ">1 ATR above EMA21 or >3 ATR above EMA50")
         return {"verdict": "WATCH", "emoji": "eye", "color": "#d97706",
                 "bear_type": "",
-                "reason": f"Price extended — wait for value zone (>1.25 ATR above EMA21, score {total_score:.0f})"}
+                "reason": f"Late entry — {_ext_detail} (score {total_score:.0f})"}
     if direction == "long" and entry_quality == "MISSED" and not _eq_bypass:
+        _missed_detail = (entry_quality_reason or
+                          ">2 ATR above EMA21, past resistance, or >4 ATR above EMA50")
         return {"verdict": "WATCH", "emoji": "eye", "color": "#d97706",
                 "bear_type": "",
-                "reason": f"Price extended — wait for value zone (broke through resistance, wait for next base)"}
+                "reason": f"Entry extended — {_missed_detail} (score {total_score:.0f})"}
 
     # Profile-driven entry quality enforcement (e.g. trending_leaders: VALID → WATCH)
     # QUANT-6 (2026-05-10): per-regime entry_quality_rules. When the active
@@ -10434,7 +10523,7 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
     )
 
     # Entry quality classification (ATR-relative)
-    entry_quality = classify_entry_quality(price, tech["indicators"], sr)
+    entry_quality, entry_quality_reason = classify_entry_quality_detail(price, tech["indicators"], sr)
 
     # Decision state, market phase, expected pullback (Vinod Review)
     decision_state = classify_decision_state(price, plan, tech["indicators"])
@@ -11384,6 +11473,7 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         regime_name=regime_name,
         breadth=breadth,
         entry_quality=entry_quality,
+        entry_quality_reason=entry_quality_reason,
         regime4=regime4,
         setup_type=plan.get("setup_type", ""),
         short_float=float(info.get("shortPercentOfFloat", 0.0) or 0.0) * 100.0 if info and isinstance(info.get("shortPercentOfFloat"), (int, float)) else float(tech["indicators"].get("short_float_pct", 0.0) or 0.0),
@@ -11425,7 +11515,8 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
             has_catalyst=len(opt.get("catalysts", [])) > 0 or len(catalyst_tags) > 1 or catalyst_tags[0] not in ("CONTINUATION", "MOMENTUM"),
             rsi=float(tech["indicators"].get("rsi", 50.0) or 50.0),
             weekly_bull=_weekly_bull, adx=_adx_val, breadth=breadth,
-            entry_quality=entry_quality, setup_type=plan.get("setup_type", ""),
+            entry_quality=entry_quality, entry_quality_reason=entry_quality_reason,
+            setup_type=plan.get("setup_type", ""),
             ticker=ticker, catalyst_tier=catalyst_tier,
             days_to_earnings=(int((earnings or {}).get("days_to_earnings")) if (earnings and (earnings or {}).get("days_to_earnings") is not None) else None),
             squeeze_on=bool(tech["indicators"].get("squeeze_on", False)),
