@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<!--
+  Smart Money Concepts — LuxAlgo algorithm ported to JS / BullVeda chart
+  ---------------------------------------------------------------------
+  Faithful port of the LuxAlgo "Smart Money Concepts" Pine v5 indicator
+  (CC BY-NC-SA 4.0, © LuxAlgo) into a standalone canvas/SVG candlestick
+  chart for the BullVeda dashboard.
+
+  Ported pieces:
+    leg() / getCurrentStructure()          -> swing + internal pivots
+    displayStructure()                     -> BOS / CHoCH (swing solid, internal dashed)
+    storeOrderBlock() / deleteOrderBlocks()-> volatility-parsed OB boxes + mitigation
+    drawFairValueGaps() / deleteFairValueGaps()
+    EQH / EQL detection
+    trailing extremes -> Strong/Weak High-Low
+    premium / discount / equilibrium zones
+    swing point labels (HH/HL/LH/LL)
+    color-candles by internal trend
+
+  Data: served from the dashboard origin it pulls /api/pattern/smc/{T}?mode=
+        (the engine's `ohlc` field). Opened as a file:// it uses demo bars so
+        the visual always renders. This is a PROTOTYPE for visual sign-off
+        before wiring into infra/prototype/bullveda/src/.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>SMC · LuxAlgo port — BullVeda prototype</title>
+<style>
+  :root{
+    --bg-0:#0a0d0c; --bg-1:#101614; --bg-2:#161d1a; --line:#1f2a26;
+    --txt-0:#e7ecea; --txt-1:#9aa6a1; --txt-2:#5f6b66;
+    --green:#089981; --red:#f23645; --blue:#2157f3; --gray:#878b94;
+    --bull:#3179f5; --bear:#f77c80; --fvg-bull:#00ff68; --fvg-bear:#ff0008;
+    --accent:#2bd9a8;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg-0);color:var(--txt-0);
+    font:13px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+  .wrap{display:flex;flex-direction:column;height:100vh}
+  header{display:flex;align-items:center;gap:14px;padding:10px 16px;
+    background:linear-gradient(180deg,var(--bg-1),var(--bg-0));border-bottom:1px solid var(--line)}
+  header h1{font-size:14px;font-weight:600;margin:0;letter-spacing:.3px}
+  header h1 .tag{color:var(--accent)}
+  header .lic{font-size:10px;color:var(--txt-2)}
+  .controls{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;
+    padding:8px 16px;background:var(--bg-1);border-bottom:1px solid var(--line)}
+  .controls input[type=text],.controls select,.controls input[type=number]{
+    background:var(--bg-2);border:1px solid var(--line);color:var(--txt-0);
+    border-radius:6px;padding:5px 8px;font-size:12px;outline:none}
+  .controls input[type=text]{width:74px;text-transform:uppercase;font-weight:600}
+  .controls input[type=number]{width:54px}
+  .controls button{background:var(--accent);color:#04130e;border:0;border-radius:6px;
+    padding:6px 12px;font-weight:600;cursor:pointer;font-size:12px}
+  .controls button.ghost{background:var(--bg-2);color:var(--txt-0);border:1px solid var(--line)}
+  .controls label{display:inline-flex;align-items:center;gap:5px;color:var(--txt-1);
+    font-size:11px;cursor:pointer;user-select:none}
+  .controls .sep{width:1px;height:20px;background:var(--line)}
+  .controls .grp{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  #status{font-size:11px;color:var(--txt-1)}
+  #status .dot{display:inline-block;width:7px;height:7px;border-radius:50%;
+    background:var(--gray);margin-right:5px;vertical-align:middle}
+  #status.live .dot{background:var(--green)} #status.demo .dot{background:var(--blue)}
+  #status.err .dot{background:var(--red)}
+  .chartbox{flex:1;position:relative;overflow:hidden;background:var(--bg-0)}
+  svg{display:block;width:100%;height:100%}
+  .legend{position:absolute;left:14px;top:12px;background:rgba(10,13,12,.72);
+    border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:10px;
+    color:var(--txt-1);pointer-events:none;backdrop-filter:blur(4px)}
+  .legend b{color:var(--txt-0)} .legend .row{display:flex;align-items:center;gap:6px;margin:2px 0}
+  .legend .sw{width:14px;height:9px;border-radius:2px;display:inline-block}
+  text{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Smart Money Concepts <span class="tag">· LuxAlgo port</span></h1>
+    <span class="lic">CC BY-NC-SA 4.0 · © LuxAlgo (algorithm) · BullVeda prototype</span>
+    <span id="status" style="margin-left:auto"><span class="dot"></span><span class="msg">idle</span></span>
+  </header>
+
+  <div class="controls">
+    <div class="grp">
+      <input type="text" id="ticker" value="NVDA" maxlength="6"/>
+      <select id="mode">
+        <option value="SWING">SWING · daily</option>
+        <option value="POSITION">POSITION · weekly</option>
+        <option value="INVESTMENT">INVEST · monthly</option>
+      </select>
+      <button id="loadLive">Load live</button>
+      <button id="loadDemo" class="ghost">Demo data</button>
+    </div>
+    <div class="sep"></div>
+    <div class="grp">
+      <label title="Swing leg lookback">Swing <input type="number" id="swingLen" value="20" min="5" max="80"/></label>
+      <label title="Internal leg lookback">Internal <input type="number" id="intLen" value="5" min="3" max="20"/></label>
+    </div>
+    <div class="sep"></div>
+    <div class="grp" id="toggles">
+      <label><input type="checkbox" data-k="swing" checked/> Swing structure</label>
+      <label><input type="checkbox" data-k="internal" checked/> Internal structure</label>
+      <label><input type="checkbox" data-k="swingOB"/> Swing OB</label>
+      <label><input type="checkbox" data-k="intOB" checked/> Internal OB</label>
+      <label><input type="checkbox" data-k="fvg"/> Fair value gaps</label>
+      <label><input type="checkbox" data-k="eq" checked/> EQH / EQL</label>
+      <label><input type="checkbox" data-k="hl" checked/> Strong/Weak H-L</label>
+      <label><input type="checkbox" data-k="zones"/> Premium/Discount</label>
+      <label><input type="checkbox" data-k="swings"/> Swing points</label>
+      <label><input type="checkbox" data-k="colorCandles"/> Color candles</label>
+    </div>
+  </div>
+
+  <div class="chartbox">
+    <svg id="chart" preserveAspectRatio="none"></svg>
+    <div class="legend" id="legend"></div>
+  </div>
+</div>
+
+<script>
+//====================================================================
+// CONSTANTS (mirror LuxAlgo)
+//====================================================================
+const BULLISH_LEG=1, BEARISH_LEG=0, BULLISH=1, BEARISH=-1;
+const BOS='BOS', CHOCH='CHoCH';
+const COL = {
+  green:'#089981', red:'#f23645', bull:'#3179f5', bear:'#f77c80',
+  fvgBull:'rgba(0,255,104,.16)', fvgBear:'rgba(255,0,8,.16)',
+  swingBull:'#089981', swingBear:'#f23645',
+  intBull:'#089981', intBear:'#f23645',
+  obSwBull:'rgba(24,72,204,.22)', obSwBear:'rgba(178,40,51,.22)',
+  obInBull:'rgba(49,121,245,.20)', obInBear:'rgba(247,124,128,.22)',
+  premium:'rgba(242,54,69,.10)', equil:'rgba(135,139,148,.10)', discount:'rgba(8,153,129,.10)',
+  premLine:'#f23645', equilLine:'#878b94', discLine:'#089981',
+  eqBull:'#089981', eqBear:'#f23645', gridText:'#5f6b66'
+};
+
+//====================================================================
+// SMC ENGINE — single forward pass over bars (Pine bar-by-bar emulation)
+//====================================================================
+function computeSMC(bars, opt){
+  const n = bars.length;
+  const O=bars.map(b=>b.open), H=bars.map(b=>b.high), L=bars.map(b=>b.low), C=bars.map(b=>b.close);
+  const swingLen = opt.swingLen, intLen = opt.intLen;
+
+  // --- volatility measure: ATR(min(200,n)) (simple TR mean) ---
+  const atrWin = Math.min(200, n);
+  const TR = new Array(n);
+  for(let i=0;i<n;i++){
+    TR[i] = i===0 ? H[i]-L[i]
+      : Math.max(H[i]-L[i], Math.abs(H[i]-C[i-1]), Math.abs(L[i]-C[i-1]));
+  }
+  const atr = new Array(n).fill(0);
+  { let run=0; for(let i=0;i<n;i++){ run+=TR[i]; if(i>=atrWin) run-=TR[i-atrWin];
+      atr[i]= run/Math.min(i+1,atrWin); } }
+
+  // --- volatility-parsed highs/lows (LuxAlgo invert on high-vol bars) ---
+  const pHigh=new Array(n), pLow=new Array(n);
+  for(let i=0;i<n;i++){
+    const hv = (H[i]-L[i]) >= 2*atr[i];
+    pHigh[i] = hv ? L[i] : H[i];
+    pLow[i]  = hv ? H[i] : L[i];
+  }
+
+  // --- leg series for a given lookback ---
+  function legSeries(size){
+    const leg=new Array(n).fill(0); let cur=0;
+    for(let i=0;i<n;i++){
+      if(i>=size){
+        let hh=-Infinity, ll=Infinity;
+        for(let j=i-size+1;j<=i;j++){ if(H[j]>hh)hh=H[j]; if(L[j]<ll)ll=L[j]; }
+        if(H[i-size] > hh) cur=BEARISH_LEG;
+        else if(L[i-size] < ll) cur=BULLISH_LEG;
+      }
+      leg[i]=cur;
+    }
+    return leg;
+  }
+  const swingLeg = legSeries(swingLen);
+  const intLeg   = legSeries(intLen);
+  const eqLeg    = legSeries(opt.eqLen);
+
+  // --- pivot state ---
+  const mk=()=>({level:NaN, last:NaN, crossed:false, idx:-1, prevLevel:NaN});
+  const swH=mk(), swL=mk(), inH=mk(), inL=mk(), eqH=mk(), eqL=mk();
+  let swTrend=0, inTrend=0;
+  const trailing={top:H[0], bottom:L[0], idx:0, topIdx:0, botIdx:0};
+
+  // --- outputs ---
+  const out={ swingStruct:[], intStruct:[], swingPts:[], equal:[],
+    swingOB:[], intOB:[], fvg:[], candTrend:new Array(n).fill(0),
+    trailingSeries:new Array(n) };
+
+  // running OB lists (newest first), filtered on mitigation
+  function pushOB(list, ob){ list.unshift(ob); if(list.length>120) list.pop(); }
+
+  function storeOB(list, pivotIdx, bias, internal){
+    if(pivotIdx<0 || pivotIdx>=n) return;
+    let chosen=pivotIdx, best = bias===BEARISH ? -Infinity : Infinity;
+    for(let j=pivotIdx;j<n;j++){
+      if(bias===BEARISH){ if(pHigh[j]>best){best=pHigh[j];chosen=j;} }
+      else { if(pLow[j]<best){best=pLow[j];chosen=j;} }
+    }
+    pushOB(list, {high:pHigh[chosen], low:pLow[chosen], idx:chosen, bias,
+      internal, mitIdx:-1});
+  }
+
+  // --- main bar loop ---
+  for(let i=0;i<n;i++){
+    // ====== getCurrentStructure for swing, internal, equal ======
+    structureUpdate(i, swingLeg, swH, swL, false, false);
+    structureUpdate(i, intLeg,   inH, inL, true,  false);
+    if(opt.eq) structureUpdate(i, eqLeg, eqH, eqL, false, true);
+
+    // ====== displayStructure (crossovers) ======
+    // swing
+    detectBreak(i, swH, swL, false);
+    // internal (extraCondition: internal level != swing level)
+    detectBreak(i, inH, inL, true);
+
+    // ====== trailing extremes (updateTrailingExtremes) ======
+    if(H[i]>=trailing.top){ trailing.top=H[i]; trailing.topIdx=i; }
+    if(L[i]<=trailing.bottom){ trailing.bottom=L[i]; trailing.botIdx=i; }
+    out.trailingSeries[i]={top:trailing.top, bottom:trailing.bottom,
+      topIdx:trailing.topIdx, botIdx:trailing.botIdx, idx:trailing.idx,
+      swTrend, inTrend};
+
+    // ====== mitigation: OB + FVG ======
+    mitigateOB(out.swingOB, i);
+    mitigateOB(out.intOB, i);
+
+    // ====== FVG (current TF) ======
+    if(opt.fvg && i>=2){
+      detectFVG(i);
+    }
+
+    out.candTrend[i]=inTrend;
+  }
+
+  // helper: record pivot + (for swing) labels & trailing reset
+  function structureUpdate(i, leg, pHi, pLo, internal, equalMode){
+    if(i===0) return;
+    const change = leg[i]-leg[i-1];
+    if(change===0) return;
+    const size = equalMode ? opt.eqLen : (internal ? intLen : swingLen);
+    const pIdx = i-size; if(pIdx<0) return;
+    if(change===+1){ // start of bullish leg -> pivot LOW
+      const lvl = L[pIdx];
+      if(equalMode){
+        if(!isNaN(pLo.level) && Math.abs(pLo.level - lvl) < opt.eqThresh*atr[i]){
+          out.equal.push({fromIdx:pLo.idx, toIdx:pIdx, level:lvl, tag:'EQL'});
+        }
+      }
+      pLo.last=pLo.level; pLo.level=lvl; pLo.crossed=false; pLo.idx=pIdx;
+      if(!internal && !equalMode){
+        trailing.bottom=lvl; trailing.botIdx=pIdx; trailing.idx=pIdx;
+        if(opt.swings) out.swingPts.push({idx:pIdx, level:lvl,
+          tag: lvl<pLo.last?'LL':'HL', up:true});
+      }
+    } else if(change===-1){ // start of bearish leg -> pivot HIGH
+      const lvl = H[pIdx];
+      if(equalMode){
+        if(!isNaN(pHi.level) && Math.abs(pHi.level - lvl) < opt.eqThresh*atr[i]){
+          out.equal.push({fromIdx:pHi.idx, toIdx:pIdx, level:lvl, tag:'EQH'});
+        }
+      }
+      pHi.last=pHi.level; pHi.level=lvl; pHi.crossed=false; pHi.idx=pIdx;
+      if(!internal && !equalMode){
+        trailing.top=lvl; trailing.topIdx=pIdx; trailing.idx=pIdx;
+        if(opt.swings) out.swingPts.push({idx:pIdx, level:lvl,
+          tag: lvl>pHi.last?'HH':'LH', up:false});
+      }
+    }
+  }
+
+  // helper: crossover/under detection -> BOS/CHoCH + OB
+  function detectBreak(i, pHi, pLo, internal){
+    if(i===0) return;
+    // bullish: close crosses OVER pivot high
+    if(!isNaN(pHi.level) && !pHi.crossed){
+      const crossed = C[i] > pHi.level && C[i-1] <= pHi.prevLevel;
+      const extra = internal ? (inH.level !== swH.level) : true;
+      if(crossed && extra){
+        const tag = (internal?inTrend:swTrend)===BEARISH ? CHOCH : BOS;
+        pHi.crossed=true;
+        if(internal) inTrend=BULLISH; else swTrend=BULLISH;
+        (internal?out.intStruct:out.swingStruct).push(
+          {fromIdx:pHi.idx, level:pHi.level, toIdx:i, tag, dir:'up', internal});
+        storeOB(internal?out.intOB:out.swingOB, pHi.idx, BULLISH, internal);
+      }
+    }
+    // bearish: close crosses UNDER pivot low
+    if(!isNaN(pLo.level) && !pLo.crossed){
+      const crossed = C[i] < pLo.level && C[i-1] >= pLo.prevLevel;
+      const extra = internal ? (inL.level !== swL.level) : true;
+      if(crossed && extra){
+        const tag = (internal?inTrend:swTrend)===BULLISH ? CHOCH : BOS;
+        pLo.crossed=true;
+        if(internal) inTrend=BEARISH; else swTrend=BEARISH;
+        (internal?out.intStruct:out.swingStruct).push(
+          {fromIdx:pLo.idx, level:pLo.level, toIdx:i, tag, dir:'down', internal});
+        storeOB(internal?out.intOB:out.swingOB, pLo.idx, BEARISH, internal);
+      }
+    }
+    // advance prevLevel (ta.crossover memory)
+    pHi.prevLevel=pHi.level; pLo.prevLevel=pLo.level;
+  }
+
+  function mitigateOB(list, i){
+    const srcHi = opt.obMitClose ? C[i] : H[i];
+    const srcLo = opt.obMitClose ? C[i] : L[i];
+    for(let k=list.length-1;k>=0;k--){
+      const ob=list[k]; if(ob.mitIdx>=0) continue;
+      if(ob.bias===BEARISH && srcHi>ob.high){ ob.mitIdx=i; }
+      else if(ob.bias===BULLISH && srcLo<ob.low){ ob.mitIdx=i; }
+    }
+  }
+
+  function detectFVG(i){
+    const barDelta = (C[i-1]-O[i-1])/(O[i-1]||1);
+    const bull = L[i] > H[i-2] && C[i-1] > H[i-2];
+    const bear = H[i] < L[i-2] && C[i-1] < L[i-2];
+    if(bull) out.fvg.push({top:L[i], bottom:H[i-2], bias:BULLISH, idx:i, mitIdx:-1});
+    if(bear) out.fvg.push({top:H[i-2], bottom:L[i], bias:BEARISH, idx:i, mitIdx:-1});
+    // mitigation pass for FVGs
+    for(const g of out.fvg){
+      if(g.mitIdx>=0) continue;
+      if(g.bias===BULLISH && L[i]<g.bottom) g.mitIdx=i;
+      else if(g.bias===BEARISH && H[i]>g.top) g.mitIdx=i;
+    }
+  }
+
+  out.swTrend=swTrend; out.inTrend=inTrend;
+  out.trailing=trailing;
+  out.atr=atr;
+  return out;
+}
+
+//====================================================================
+// RENDER
+//====================================================================
+function render(bars, smc, opt){
+  const svg = document.getElementById('chart');
+  const box = svg.parentElement.getBoundingClientRect();
+  const W = box.width, Hgt = box.height;
+  const padL=8, padR=120, padT=18, padB=22;
+  const n=bars.length;
+  const plotW=W-padL-padR, plotH=Hgt-padT-padB;
+  const xStep=plotW/Math.max(n,1);
+  const cw=Math.max(1.2, Math.min(9, xStep*0.62));
+
+  // price range incl. drawn objects
+  let lo=Infinity, hi=-Infinity;
+  for(const b of bars){ if(b.low<lo)lo=b.low; if(b.high>hi)hi=b.high; }
+  if(opt.zones && smc.trailing){ lo=Math.min(lo,smc.trailing.bottom); hi=Math.max(hi,smc.trailing.top); }
+  const pad=(hi-lo)*0.06||1; lo-=pad; hi+=pad;
+  const xOf=i=>padL+i*xStep+xStep/2;
+  const yOf=v=>padT+plotH-((v-lo)/(hi-lo))*plotH;
+  const rightX=padL+plotW;
+
+  const P=[]; // svg parts
+  P.push(`<svg style="display:none"></svg>`);
+
+  // ---- grid (price ticks) ----
+  const ticks=5;
+  for(let t=0;t<=ticks;t++){
+    const v=lo+(hi-lo)*t/ticks, y=yOf(v);
+    P.push(`<line x1="${padL}" y1="${y.toFixed(1)}" x2="${rightX}" y2="${y.toFixed(1)}" stroke="#141b18" stroke-width="1"/>`);
+    P.push(`<text x="${(rightX+4).toFixed(1)}" y="${(y+3).toFixed(1)}" fill="${COL.gridText}" font-size="10">${v.toFixed(2)}</text>`);
+  }
+
+  // ---- premium / discount zones ----
+  if(opt.zones && smc.trailing){
+    const tp=smc.trailing.top, bt=smc.trailing.bottom, x0=xOf(smc.trailing.idx);
+    const span=(t0,t1,fill)=>`<rect x="${x0.toFixed(1)}" y="${yOf(t0).toFixed(1)}" width="${(rightX-x0).toFixed(1)}" height="${Math.abs(yOf(t1)-yOf(t0)).toFixed(1)}" fill="${fill}"/>`;
+    const prT=tp, prB=0.95*tp+0.05*bt;
+    const eqT=0.525*tp+0.475*bt, eqB=0.525*bt+0.475*tp;
+    const dsT=0.95*bt+0.05*tp, dsB=bt;
+    P.push(span(prT,prB,COL.premium));
+    P.push(span(eqT,eqB,COL.equil));
+    P.push(span(dsT,dsB,COL.discount));
+    const zlabel=(y,txt,c)=>`<text x="${(rightX-4).toFixed(1)}" y="${(yOf(y)).toFixed(1)}" fill="${c}" font-size="9" text-anchor="end">${txt}</text>`;
+    P.push(zlabel((prT+prB)/2,'Premium',COL.premLine));
+    P.push(zlabel((eqT+eqB)/2,'Equilibrium',COL.equilLine));
+    P.push(zlabel((dsT+dsB)/2,'Discount',COL.discLine));
+  }
+
+  // ---- order blocks (draw oldest-first so newest on top), limited ----
+  function drawOBs(list, max, bullC, bearC){
+    const live=list.filter(o=>o.mitIdx<0).slice(0,max).reverse();
+    for(const ob of live){
+      const x0=xOf(ob.idx)-cw/2, yT=yOf(ob.high), yB=yOf(ob.low);
+      const c=ob.bias===BULLISH?bullC:bearC;
+      P.push(`<rect x="${x0.toFixed(1)}" y="${yT.toFixed(1)}" width="${(rightX-x0).toFixed(1)}" height="${Math.max(1,yB-yT).toFixed(1)}" fill="${c}" stroke="${ob.internal?'none':c.replace(/[\d.]+\)$/,'.5)')}"/>`);
+    }
+  }
+  if(opt.swingOB) drawOBs(smc.swingOB, opt.swingOBmax, COL.obSwBull, COL.obSwBear);
+  if(opt.intOB)   drawOBs(smc.intOB,   opt.intOBmax,   COL.obInBull, COL.obInBear);
+
+  // ---- fair value gaps ----
+  if(opt.fvg){
+    for(const g of smc.fvg){
+      if(g.mitIdx>=0 && !opt.fvgKeep) continue;
+      const x0=xOf(g.idx-1), x1=xOf(g.mitIdx>=0?g.mitIdx:n-1)+ (g.mitIdx>=0?0:xStep);
+      const yT=yOf(g.top), yB=yOf(g.bottom);
+      const c=g.bias===BULLISH?COL.fvgBull:COL.fvgBear;
+      P.push(`<rect x="${x0.toFixed(1)}" y="${yT.toFixed(1)}" width="${Math.max(2,x1-x0).toFixed(1)}" height="${Math.max(1,yB-yT).toFixed(1)}" fill="${c}"/>`);
+    }
+  }
+
+  // ---- equal highs/lows ----
+  if(opt.eq){
+    for(const e of smc.equal){
+      const x0=xOf(e.fromIdx), x1=xOf(e.toIdx), y=yOf(e.level);
+      const c=e.tag==='EQH'?COL.eqBear:COL.eqBull;
+      P.push(`<line x1="${x0.toFixed(1)}" y1="${y.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${c}" stroke-width="1" stroke-dasharray="2 2"/>`);
+      const mx=(x0+x1)/2;
+      P.push(`<text x="${mx.toFixed(1)}" y="${(y+(e.tag==='EQH'?-3:10)).toFixed(1)}" fill="${c}" font-size="9" text-anchor="middle">${e.tag}</text>`);
+    }
+  }
+
+  // ---- candles ----
+  for(let i=0;i<n;i++){
+    const b=bars[i], x=xOf(i);
+    let up=b.close>=b.open;
+    let c = up?COL.green:COL.red;
+    if(opt.colorCandles){
+      const tr=smc.candTrend[i];
+      c = tr===BULLISH?COL.green : tr===BEARISH?COL.red : COL.gray;
+    }
+    P.push(`<line x1="${x.toFixed(1)}" y1="${yOf(b.high).toFixed(1)}" x2="${x.toFixed(1)}" y2="${yOf(b.low).toFixed(1)}" stroke="${c}" stroke-width="1"/>`);
+    const yo=yOf(b.open), yc=yOf(b.close);
+    const yT=Math.min(yo,yc), hh=Math.max(1,Math.abs(yc-yo));
+    P.push(`<rect x="${(x-cw/2).toFixed(1)}" y="${yT.toFixed(1)}" width="${cw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${c}"/>`);
+  }
+
+  // ---- structure lines (swing solid, internal dashed) + labels ----
+  function drawStruct(list, dashed){
+    for(const s of list){
+      const x0=xOf(s.fromIdx), x1=xOf(s.toIdx), y=yOf(s.level);
+      const c = s.dir==='up' ? (s.internal?COL.intBull:COL.swingBull)
+                             : (s.internal?COL.intBear:COL.swingBear);
+      P.push(`<line x1="${x0.toFixed(1)}" y1="${y.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${c}" stroke-width="${dashed?1:1.3}" ${dashed?'stroke-dasharray="4 3"':''} opacity="${dashed?.75:1}"/>`);
+      const mx=(x0+x1)/2;
+      P.push(`<text x="${mx.toFixed(1)}" y="${(y+(s.dir==='up'?-4:11)).toFixed(1)}" fill="${c}" font-size="${dashed?9:10}" font-weight="600" text-anchor="middle">${s.tag}</text>`);
+    }
+  }
+  if(opt.internal) drawStruct(smc.intStruct, true);
+  if(opt.swing)    drawStruct(smc.swingStruct, false);
+
+  // ---- swing point labels ----
+  if(opt.swings){
+    for(const p of smc.swingPts){
+      const x=xOf(p.idx), y=yOf(p.level);
+      const c=p.up?COL.swingBull:COL.swingBear;
+      P.push(`<text x="${x.toFixed(1)}" y="${(y+(p.up?12:-5)).toFixed(1)}" fill="${c}" font-size="9" text-anchor="middle">${p.tag}</text>`);
+    }
+  }
+
+  // ---- strong/weak high & low ----
+  if(opt.hl && smc.trailing){
+    const tr=smc.trailing;
+    const topTxt = smc.swTrend===BEARISH ? 'Strong High':'Weak High';
+    const botTxt = smc.swTrend===BULLISH ? 'Strong Low':'Weak Low';
+    const yT=yOf(tr.top), yB=yOf(tr.bottom);
+    P.push(`<line x1="${xOf(tr.topIdx).toFixed(1)}" y1="${yT.toFixed(1)}" x2="${rightX.toFixed(1)}" y2="${yT.toFixed(1)}" stroke="${COL.swingBear}" stroke-width="1" opacity=".8"/>`);
+    P.push(`<text x="${(rightX-4).toFixed(1)}" y="${(yT-4).toFixed(1)}" fill="${COL.swingBear}" font-size="9" text-anchor="end">${topTxt}</text>`);
+    P.push(`<line x1="${xOf(tr.botIdx).toFixed(1)}" y1="${yB.toFixed(1)}" x2="${rightX.toFixed(1)}" y2="${yB.toFixed(1)}" stroke="${COL.swingBull}" stroke-width="1" opacity=".8"/>`);
+    P.push(`<text x="${(rightX-4).toFixed(1)}" y="${(yB+11).toFixed(1)}" fill="${COL.swingBull}" font-size="9" text-anchor="end">${botTxt}</text>`);
+  }
+
+  svg.setAttribute('viewBox',`0 0 ${W} ${Hgt}`);
+  svg.innerHTML=P.join('');
+  buildLegend(smc, opt);
+}
+
+function buildLegend(smc, opt){
+  const items=[];
+  items.push(`<div class="row"><b>SMC · LuxAlgo</b></div>`);
+  const sw = smc.swTrend===BULLISH?'Bullish':smc.swTrend===BEARISH?'Bearish':'—';
+  const it = smc.inTrend===BULLISH?'Bullish':smc.inTrend===BEARISH?'Bearish':'—';
+  items.push(`<div class="row">Swing trend: <b style="color:${smc.swTrend===BULLISH?COL.green:smc.swTrend===BEARISH?COL.red:COL.gray}">${sw}</b></div>`);
+  items.push(`<div class="row">Internal: <b style="color:${smc.inTrend===BULLISH?COL.green:smc.inTrend===BEARISH?COL.red:COL.gray}">${it}</b></div>`);
+  if(opt.swing) items.push(`<div class="row"><span class="sw" style="background:${COL.swingBull}"></span> Swing BOS/CHoCH</div>`);
+  if(opt.internal) items.push(`<div class="row"><span class="sw" style="background:${COL.intBull};opacity:.7"></span> Internal (dashed)</div>`);
+  if(opt.intOB||opt.swingOB){
+    const live=(opt.intOB?smc.intOB:smc.swingOB).filter(o=>o.mitIdx<0).length;
+    items.push(`<div class="row"><span class="sw" style="background:${COL.obInBull}"></span> Order blocks · ${live} live</div>`);
+  }
+  if(opt.fvg) items.push(`<div class="row"><span class="sw" style="background:${COL.fvgBull}"></span> Fair value gaps</div>`);
+  if(opt.eq && smc.equal.length) items.push(`<div class="row">EQH/EQL · ${smc.equal.length}</div>`);
+  document.getElementById('legend').innerHTML=items.join('');
+}
+
+//====================================================================
+// DATA
+//====================================================================
+function readOpts(){
+  const t={};
+  document.querySelectorAll('#toggles input[type=checkbox]').forEach(c=>t[c.dataset.k]=c.checked);
+  return {
+    swing:t.swing, internal:t.internal, swingOB:t.swingOB, intOB:t.intOB,
+    fvg:t.fvg, eq:t.eq, hl:t.hl, zones:t.zones, swings:t.swings, colorCandles:t.colorCandles,
+    swingLen:+document.getElementById('swingLen').value,
+    intLen:+document.getElementById('intLen').value,
+    eqLen:3, eqThresh:0.1, obMitClose:false,
+    swingOBmax:5, intOBmax:8, fvgKeep:false
+  };
+}
+
+function setStatus(cls,msg){
+  const s=document.getElementById('status');
+  s.className=cls; s.querySelector('.msg').textContent=msg;
+}
+
+let CURRENT_BARS=null;
+function redraw(){
+  if(!CURRENT_BARS) return;
+  const opt=readOpts();
+  const smc=computeSMC(CURRENT_BARS, opt);
+  render(CURRENT_BARS, smc, opt);
+}
+
+async function loadLive(){
+  const t=document.getElementById('ticker').value.trim().toUpperCase()||'NVDA';
+  const mode=document.getElementById('mode').value;
+  setStatus('','loading '+t+'…');
+  try{
+    const r=await fetch(`/api/pattern/smc/${t}?mode=${mode}`,{cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const m=await r.json();
+    const raw = m.ohlc||m.bars_daily||m.bars||[];
+    if(!raw.length) throw new Error('no bars in payload');
+    CURRENT_BARS = raw.map((b,i)=>({
+      open:+(b.o??b.open), high:+(b.h??b.high), low:+(b.l??b.low), close:+(b.c??b.close), i
+    }));
+    setStatus('live',`${t} · ${mode} · ${CURRENT_BARS.length} bars · ${m.headline||m.bias||''}`);
+    redraw();
+  }catch(e){
+    setStatus('err',`live failed (${e.message}) — showing demo`);
+    loadDemo(true);
+  }
+}
+
+function loadDemo(silent){
+  // synthetic bars engineered to exhibit trend, range, gaps, equal highs
+  const n=300; const bars=[]; let p=80, seed=42;
+  const rnd=()=>{ seed=(seed*9301+49297)%233280; return seed/233280; };
+  let regime=0, rlen=0;
+  for(let i=0;i<n;i++){
+    if(rlen<=0){ regime=[1,1,-1,0,0,1,-1][Math.floor(rnd()*7)]; rlen=15+Math.floor(rnd()*35); }
+    rlen--;
+    const drift=regime*0.45, vol=0.9+rnd()*1.6;
+    const o=p;
+    let c=o+drift+(rnd()-0.5)*2*vol;
+    // occasional gap (creates FVG)
+    if(rnd()<0.05) c+=regime*2.4;
+    const hi=Math.max(o,c)+rnd()*vol*1.2;
+    const lo=Math.min(o,c)-rnd()*vol*1.2;
+    // nudge toward equal-highs in ranges
+    bars.push({open:+o.toFixed(2),high:+hi.toFixed(2),low:+lo.toFixed(2),close:+c.toFixed(2),i});
+    p=c;
+    if(p<15) p=15;
+  }
+  CURRENT_BARS=bars;
+  if(!silent) setStatus('demo',`demo · ${n} synthetic bars`);
+  redraw();
+}
+
+//====================================================================
+// WIRE-UP
+//====================================================================
+document.getElementById('loadLive').onclick=loadLive;
+document.getElementById('loadDemo').onclick=()=>loadDemo(false);
+document.getElementById('ticker').addEventListener('keydown',e=>{ if(e.key==='Enter') loadLive(); });
+document.getElementById('mode').onchange=loadLive;
+document.querySelectorAll('#toggles input, #swingLen, #intLen').forEach(el=>el.addEventListener('change',redraw));
+window.addEventListener('resize',()=>{ clearTimeout(window.__rz); window.__rz=setTimeout(redraw,120); });
+
+// boot: try live if served from http(s), else demo
+if(location.protocol.startsWith('http')) loadLive(); else loadDemo(false);
+</script>
+</body>
+</html>

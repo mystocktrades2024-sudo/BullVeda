@@ -2669,15 +2669,21 @@ async def ohlcv_api(ticker: str, days: int = 120, tf: str = "1D"):
         # no intraday; the legacy get_polygon_ohlcv path returns DAILY bars mislabeled as
         # hourly — never use it for intraday). If Schwab + EODHD-intraday both fail we
         # return 404 rather than serving daily-as-intraday.
-        if tf in ("1H", "4H"):
+        # Intraday: Schwab pricehistory is the intraday provider. Native sub-hour
+        # frequencies (5/15/30m) need no resample; 1H/4H aggregate from 30-min.
+        # (Schwab minute freqs are 1/5/10/15/30 — no native 60m, hence the resample.)
+        _intra_map = {"5m": (5, None), "15m": (15, None), "30m": (30, None),
+                      "1H": (30, "1h"), "4H": (30, "4h")}
+        if tf in _intra_map:
+            _freq, _resample = _intra_map[tf]
             try:
                 import schwab_client as _sch, time as _t
-                # explicit startDate → Schwab serves minute history back ~250d+ (free),
-                # not the 10-day period cap. Honor the requested `days` (capped at 300).
+                # explicit startDate → Schwab serves minute history back well past the
+                # 10-day period cap. Honor the requested `days` (capped at 300).
                 _now = int(_t.time() * 1000)
-                _start = _now - min(max(days, 10), 300) * 86400 * 1000
+                _start = _now - min(max(days, 5), 300) * 86400 * 1000
                 ph = _sch.get_pricehistory(ticker, period_type="day",
-                                           frequency_type="minute", frequency=30,
+                                           frequency_type="minute", frequency=_freq,
                                            start_date=_start, end_date=_now)
                 cdl = (ph or {}).get("candles") or []
                 if cdl:
@@ -2685,11 +2691,14 @@ async def ohlcv_api(ticker: str, days: int = 120, tf: str = "1D"):
                     df["datetime"] = pd.to_datetime(df["datetime"], unit="ms")
                     df = df.set_index("datetime").sort_index()
                     df = df.rename(columns={"open":"Open","high":"High","low":"Low","close":"Close","volume":"Volume"})
-                    df = df.resample("1h" if tf == "1H" else "4h").agg(
-                        {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna()
+                    if _resample:
+                        df = df.resample(_resample).agg(
+                            {"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna()
             except Exception:
                 df = None
-            if df is None or (hasattr(df, 'empty') and df.empty):
+            # EODHD intraday fallback only makes sense for ≥1h targets (EODHD is 1h native;
+            # you can't synthesize 5/15/30m from 1h). Sub-hour failures → honest 404.
+            if (df is None or (hasattr(df, 'empty') and df.empty)) and tf in ("1H", "4H"):
                 try:
                     import eodhd_client as _eod_intra
                     rows = _eod_intra.intraday(ticker, interval="1h")
