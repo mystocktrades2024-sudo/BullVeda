@@ -15301,6 +15301,225 @@ function TheRead({ d, fv }) {
 }
 window.LensInvestment = LensInvestment;
 </script>
+<script>/* src/smc-engine.jsx */
+const SMC_BULLISH_LEG = 1, SMC_BEARISH_LEG = 0;
+const SMC_BULLISH = 1, SMC_BEARISH = -1;
+const SMC_BOS = "BOS", SMC_CHOCH = "CHoCH";
+function computeSMC(bars, opt) {
+  opt = opt || {};
+  const swingLen = opt.swingLen || 20;
+  const intLen = opt.intLen || 5;
+  const eqLen = opt.eqLen || 3;
+  const eqThresh = opt.eqThresh != null ? opt.eqThresh : 0.1;
+  const obMitClose = !!opt.obMitClose;
+  const wantEq = opt.eq !== false;
+  const wantSwings = !!opt.swings;
+  const n = bars.length;
+  const out = {
+    swingStruct: [],
+    intStruct: [],
+    swingPts: [],
+    equal: [],
+    swingOB: [],
+    intOB: [],
+    fvg: [],
+    candTrend: new Array(n).fill(0),
+    trailing: null,
+    swTrend: 0,
+    inTrend: 0,
+    atr: [],
+    ok: false
+  };
+  if (n < swingLen + 3) return out;
+  const O = bars.map((b) => +(b.o != null ? b.o : b.open));
+  const H = bars.map((b) => +(b.hi != null ? b.hi : b.high));
+  const L = bars.map((b) => +(b.lo != null ? b.lo : b.low));
+  const C = bars.map((b) => +(b.c != null ? b.c : b.close));
+  const atrWin = Math.min(200, n);
+  const TR = new Array(n);
+  for (let i = 0; i < n; i++) {
+    TR[i] = i === 0 ? H[i] - L[i] : Math.max(H[i] - L[i], Math.abs(H[i] - C[i - 1]), Math.abs(L[i] - C[i - 1]));
+  }
+  const atr = new Array(n).fill(0);
+  {
+    let run = 0;
+    for (let i = 0; i < n; i++) {
+      run += TR[i];
+      if (i >= atrWin) run -= TR[i - atrWin];
+      atr[i] = run / Math.min(i + 1, atrWin);
+    }
+  }
+  out.atr = atr;
+  const pHigh = new Array(n), pLow = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const hv = H[i] - L[i] >= 2 * atr[i];
+    pHigh[i] = hv ? L[i] : H[i];
+    pLow[i] = hv ? H[i] : L[i];
+  }
+  function legSeries(size) {
+    const leg = new Array(n).fill(0);
+    let cur = 0;
+    for (let i = 0; i < n; i++) {
+      if (i >= size) {
+        let hh = -Infinity, ll = Infinity;
+        for (let j = i - size + 1; j <= i; j++) {
+          if (H[j] > hh) hh = H[j];
+          if (L[j] < ll) ll = L[j];
+        }
+        if (H[i - size] > hh) cur = SMC_BEARISH_LEG;
+        else if (L[i - size] < ll) cur = SMC_BULLISH_LEG;
+      }
+      leg[i] = cur;
+    }
+    return leg;
+  }
+  const swingLeg = legSeries(swingLen);
+  const intLeg = legSeries(intLen);
+  const eqLeg = wantEq ? legSeries(eqLen) : null;
+  const mk = () => ({ level: NaN, last: NaN, crossed: false, idx: -1, prevLevel: NaN });
+  const swH = mk(), swL = mk(), inH = mk(), inL = mk(), eqH = mk(), eqL = mk();
+  let swTrend = 0, inTrend = 0;
+  const trailing = { top: H[0], bottom: L[0], idx: 0, topIdx: 0, botIdx: 0 };
+  function pushOB(list, ob) {
+    list.unshift(ob);
+    if (list.length > 120) list.pop();
+  }
+  function storeOB(list, pivotIdx, bias, internal) {
+    if (pivotIdx < 0 || pivotIdx >= n) return;
+    let chosen = pivotIdx, best = bias === SMC_BEARISH ? -Infinity : Infinity;
+    for (let j = pivotIdx; j < n; j++) {
+      if (bias === SMC_BEARISH) {
+        if (pHigh[j] > best) {
+          best = pHigh[j];
+          chosen = j;
+        }
+      } else {
+        if (pLow[j] < best) {
+          best = pLow[j];
+          chosen = j;
+        }
+      }
+    }
+    pushOB(list, { high: pHigh[chosen], low: pLow[chosen], idx: chosen, bias, internal, mitIdx: -1 });
+  }
+  function structureUpdate(i, leg, pHi, pLo, internal, equalMode) {
+    if (i === 0) return;
+    const change = leg[i] - leg[i - 1];
+    if (change === 0) return;
+    const size = equalMode ? eqLen : internal ? intLen : swingLen;
+    const pIdx = i - size;
+    if (pIdx < 0) return;
+    if (change === 1) {
+      const lvl = L[pIdx];
+      if (equalMode) {
+        if (!isNaN(pLo.level) && Math.abs(pLo.level - lvl) < eqThresh * atr[i])
+          out.equal.push({ fromIdx: pLo.idx, toIdx: pIdx, level: lvl, tag: "EQL" });
+      }
+      pLo.last = pLo.level;
+      pLo.level = lvl;
+      pLo.crossed = false;
+      pLo.idx = pIdx;
+      if (!internal && !equalMode) {
+        trailing.bottom = lvl;
+        trailing.botIdx = pIdx;
+        trailing.idx = pIdx;
+        if (wantSwings) out.swingPts.push({ idx: pIdx, level: lvl, tag: lvl < pLo.last ? "LL" : "HL", up: true });
+      }
+    } else if (change === -1) {
+      const lvl = H[pIdx];
+      if (equalMode) {
+        if (!isNaN(pHi.level) && Math.abs(pHi.level - lvl) < eqThresh * atr[i])
+          out.equal.push({ fromIdx: pHi.idx, toIdx: pIdx, level: lvl, tag: "EQH" });
+      }
+      pHi.last = pHi.level;
+      pHi.level = lvl;
+      pHi.crossed = false;
+      pHi.idx = pIdx;
+      if (!internal && !equalMode) {
+        trailing.top = lvl;
+        trailing.topIdx = pIdx;
+        trailing.idx = pIdx;
+        if (wantSwings) out.swingPts.push({ idx: pIdx, level: lvl, tag: lvl > pHi.last ? "HH" : "LH", up: false });
+      }
+    }
+  }
+  function detectBreak(i, pHi, pLo, internal) {
+    if (i === 0) return;
+    if (!isNaN(pHi.level) && !pHi.crossed) {
+      const crossed = C[i] > pHi.level && C[i - 1] <= pHi.prevLevel;
+      const extra = internal ? inH.level !== swH.level : true;
+      if (crossed && extra) {
+        const tag = (internal ? inTrend : swTrend) === SMC_BEARISH ? SMC_CHOCH : SMC_BOS;
+        pHi.crossed = true;
+        if (internal) inTrend = SMC_BULLISH;
+        else swTrend = SMC_BULLISH;
+        (internal ? out.intStruct : out.swingStruct).push({ fromIdx: pHi.idx, level: pHi.level, toIdx: i, tag, dir: "up", internal });
+        storeOB(internal ? out.intOB : out.swingOB, pHi.idx, SMC_BULLISH, internal);
+      }
+    }
+    if (!isNaN(pLo.level) && !pLo.crossed) {
+      const crossed = C[i] < pLo.level && C[i - 1] >= pLo.prevLevel;
+      const extra = internal ? inL.level !== swL.level : true;
+      if (crossed && extra) {
+        const tag = (internal ? inTrend : swTrend) === SMC_BULLISH ? SMC_CHOCH : SMC_BOS;
+        pLo.crossed = true;
+        if (internal) inTrend = SMC_BEARISH;
+        else swTrend = SMC_BEARISH;
+        (internal ? out.intStruct : out.swingStruct).push({ fromIdx: pLo.idx, level: pLo.level, toIdx: i, tag, dir: "down", internal });
+        storeOB(internal ? out.intOB : out.swingOB, pLo.idx, SMC_BEARISH, internal);
+      }
+    }
+    pHi.prevLevel = pHi.level;
+    pLo.prevLevel = pLo.level;
+  }
+  function mitigateOB(list, i) {
+    const srcHi = obMitClose ? C[i] : H[i];
+    const srcLo = obMitClose ? C[i] : L[i];
+    for (let k = list.length - 1; k >= 0; k--) {
+      const ob = list[k];
+      if (ob.mitIdx >= 0) continue;
+      if (ob.bias === SMC_BEARISH && srcHi > ob.high) ob.mitIdx = i;
+      else if (ob.bias === SMC_BULLISH && srcLo < ob.low) ob.mitIdx = i;
+    }
+  }
+  function detectFVG(i) {
+    const bull = L[i] > H[i - 2] && C[i - 1] > H[i - 2];
+    const bear = H[i] < L[i - 2] && C[i - 1] < L[i - 2];
+    if (bull) out.fvg.push({ top: L[i], bottom: H[i - 2], bias: SMC_BULLISH, idx: i, mitIdx: -1 });
+    if (bear) out.fvg.push({ top: H[i - 2], bottom: L[i], bias: SMC_BEARISH, idx: i, mitIdx: -1 });
+    for (const g of out.fvg) {
+      if (g.mitIdx >= 0) continue;
+      if (g.bias === SMC_BULLISH && L[i] < g.bottom) g.mitIdx = i;
+      else if (g.bias === SMC_BEARISH && H[i] > g.top) g.mitIdx = i;
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    structureUpdate(i, swingLeg, swH, swL, false, false);
+    structureUpdate(i, intLeg, inH, inL, true, false);
+    if (wantEq) structureUpdate(i, eqLeg, eqH, eqL, false, true);
+    detectBreak(i, swH, swL, false);
+    detectBreak(i, inH, inL, true);
+    if (H[i] >= trailing.top) {
+      trailing.top = H[i];
+      trailing.topIdx = i;
+    }
+    if (L[i] <= trailing.bottom) {
+      trailing.bottom = L[i];
+      trailing.botIdx = i;
+    }
+    mitigateOB(out.swingOB, i);
+    mitigateOB(out.intOB, i);
+    if (opt.fvg !== false && i >= 2) detectFVG(i);
+    out.candTrend[i] = inTrend;
+  }
+  out.swTrend = swTrend;
+  out.inTrend = inTrend;
+  out.trailing = trailing;
+  out.ok = true;
+  return out;
+}
+window.computeSMC = computeSMC;
+</script>
 <script>/* src/lens-chart-patterns.jsx */
 const { useMemo: useMemoCh } = React;
 function chartScaler(ticker) {
@@ -20778,14 +20997,28 @@ function computeIndicators(bars, lv) {
   });
   const hh = (per, i) => Math.max(...bars.slice(Math.max(0, i - per + 1), i + 1).map((b) => b.high));
   const ll = (per, i) => Math.min(...bars.slice(Math.max(0, i - per + 1), i + 1).map((b) => b.low));
-  const tenkan = [], kijun = [], spanA = [], spanB = [];
+  const ICH_DISP = 26 - 1;
+  const n = bars.length;
+  const tenkan = [], kijun = [], spanARaw = [], spanBRaw = [];
   bars.forEach((b, i) => {
     const t = (hh(9, i) + ll(9, i)) / 2, k = (hh(26, i) + ll(26, i)) / 2;
     tenkan.push({ time: b.time, value: +t.toFixed(2) });
     kijun.push({ time: b.time, value: +k.toFixed(2) });
-    spanA.push({ time: b.time, value: +((t + k) / 2).toFixed(2) });
-    spanB.push({ time: b.time, value: +((hh(52, i) + ll(52, i)) / 2).toFixed(2) });
+    spanARaw.push(+((t + k) / 2).toFixed(2));
+    spanBRaw.push(+((hh(52, i) + ll(52, i)) / 2).toFixed(2));
   });
+  const _diffs = [];
+  for (let i = Math.max(1, n - 10); i < n; i++) _diffs.push(bars[i].time - bars[i - 1].time);
+  _diffs.sort((a, b) => a - b);
+  const _step = _diffs.length ? _diffs[Math.floor(_diffs.length / 2)] || 86400 : 86400;
+  const dispTime = (i) => {
+    const j = i + ICH_DISP;
+    return j < n ? bars[j].time : bars[n - 1].time + (j - (n - 1)) * _step;
+  };
+  const spanA = bars.map((b, i) => ({ time: dispTime(i), value: spanARaw[i] }));
+  const spanB = bars.map((b, i) => ({ time: dispTime(i), value: spanBRaw[i] }));
+  const chikou = [];
+  for (let i = ICH_DISP; i < n; i++) chikou.push({ time: bars[i - ICH_DISP].time, value: bars[i].close });
   const L = 5, piv = [];
   for (let i = L; i < bars.length - L; i++) {
     const isH = bars.slice(i - L, i + L + 1).every((b, j) => j === L || bars[i].high >= b.high);
@@ -20847,6 +21080,28 @@ function computeIndicators(bars, lv) {
     }
   }
   const last = bars[bars.length - 1].close;
+  let smc = null;
+  if (window.computeSMC) {
+    const lux = window.computeSMC(
+      bars.map((b) => ({ o: b.open, hi: b.high, lo: b.low, c: b.close })),
+      { swingLen: 20, intLen: 5, eq: true, swings: true, fvg: true }
+    );
+    if (lux && lux.ok) {
+      const T = (i) => bars[i] ? bars[i].time : null;
+      const ev = (s) => ({ time: T(s.toIdx), fromTime: T(s.fromIdx), level: s.level, tag: s.tag, dir: s.dir, internal: s.internal });
+      smc = {
+        struct: lux.swingStruct.map(ev).filter((e) => e.time),
+        intStruct: lux.intStruct.map(ev).filter((e) => e.time),
+        swingOB: lux.swingOB.filter((o) => o.mitIdx < 0).slice(0, 5).map((o) => ({ time: T(o.idx), high: o.high, low: o.low, bias: o.bias, internal: false })).filter((o) => o.time),
+        intOB: lux.intOB.filter((o) => o.mitIdx < 0).slice(0, 8).map((o) => ({ time: T(o.idx), high: o.high, low: o.low, bias: o.bias, internal: true })).filter((o) => o.time),
+        fvg: lux.fvg.filter((g) => g.mitIdx < 0).slice(0, 12).map((g) => ({ time: T(Math.max(0, g.idx - 1)), top: g.top, bottom: g.bottom, bias: g.bias })).filter((g) => g.time),
+        equal: lux.equal.slice(-6).map((e) => ({ fromTime: T(e.fromIdx), toTime: T(e.toIdx), level: e.level, tag: e.tag })).filter((e) => e.fromTime && e.toTime),
+        swingPts: (lux.swingPts || []).map((p) => ({ time: T(p.idx), level: p.level, tag: p.tag, up: p.up })).filter((p) => p.time),
+        candTrend: lux.candTrend || null,
+        trailing: lux.trailing ? { top: lux.trailing.top, bottom: lux.trailing.bottom, topTime: T(lux.trailing.topIdx), botTime: T(lux.trailing.botIdx), startTime: T(lux.trailing.idx), swTrend: lux.swTrend, inTrend: lux.inTrend } : null
+      };
+    }
+  }
   return {
     spot: last,
     entry: +(lv.pivot || last).toFixed(2),
@@ -20866,13 +21121,15 @@ function computeIndicators(bars, lv) {
     kijun,
     spanA,
     spanB,
+    chikou,
     breaks: breaks.slice(-6),
     obs,
     vpb,
     vpMax,
     poc: vpb[pocI].mid,
     vah: vpb[vhiI].hi,
-    val: vpb[vloI].lo
+    val: vpb[vloI].lo,
+    smc
   };
 }
 function tfThesis(d) {
@@ -20900,8 +21157,10 @@ function NewsFlags({ news, bars }) {
   for (let i = 1; i < flags.length; i++) if (flags[i].x - flags[i - 1].x < 2.5) flags[i].x = Math.min(99, flags[i - 1].x + 2.5);
   return /* @__PURE__ */ React.createElement("div", { className: "tc-news" }, /* @__PURE__ */ React.createElement("span", { className: "tc-news-lbl mono dim2" }, "NEWS"), /* @__PURE__ */ React.createElement("div", { className: "tc-news-track" }, flags.length ? flags.map((e, i) => /* @__PURE__ */ React.createElement("a", { key: i, className: `tc-news-flag tc-news-flag--${e.tone}`, style: { left: `${e.x}%` }, href: e.url, target: "_blank", rel: "noopener noreferrer", title: `${e.d} \xB7 sentiment ${e.s}` }, /* @__PURE__ */ React.createElement("span", { className: "tc-news-dot" }))) : /* @__PURE__ */ React.createElement("span", { className: "mono dim2", style: { fontSize: 10, paddingLeft: 8 } }, "no headlines within this window")));
 }
+const SMC_SUB = [["swing", "Swing"], ["internal", "Internal"], ["swingOB", "Swing OB"], ["intOB", "Int OB"], ["fvg", "FVG"], ["eq", "EQH/EQL"], ["hl", "Strong/Weak"], ["zones", "Prem/Disc"], ["swings", "Swings"], ["color", "Color"]];
+const SMC_SUB_DEFAULT = { swing: true, internal: true, swingOB: false, intOB: true, fvg: false, eq: true, hl: true, zones: false, swings: false, color: false };
 function LensChart({ ticker, mode }) {
-  const modeTf = mode === "POSITION" ? "1D" : mode === "INVESTMENT" ? "1W" : "4H";
+  const modeTf = mode === "POSITION" ? "1D" : mode === "INVESTMENT" ? "1W" : "1D";
   const [tf, setTf] = useTCs(modeTf);
   const [tfTouched, setTfTouched] = useTCs(false);
   React.useEffect(() => {
@@ -20909,8 +21168,10 @@ function LensChart({ ticker, mode }) {
   }, [modeTf]);
   const [full, setFull] = useTCs(false);
   const [indMenu, setIndMenu] = useTCs(false);
-  const [ind, setInd] = useTCs({ ema: false, bb: false, avwap: false, ichi: false, smc: false, vp: false });
+  const [ind, setInd] = useTCs({ ema: false, bb: false, avwap: false, ichi: false, smc: false, smcLux: false, vp: false });
   const togInd = (k) => setInd((s) => ({ ...s, [k]: !s[k] }));
+  const [smcSub, setSmcSub] = useTCs(SMC_SUB_DEFAULT);
+  const togSub = (k) => setSmcSub((s) => ({ ...s, [k]: !s[k] }));
   const barsRaw = useCandles(ticker.symbol, tf);
   const loading = barsRaw === null, failed = barsRaw === false;
   const lv = window.coherentLevels ? window.coherentLevels(ticker) : { price: ticker.price, pivot: ticker.price, stop: ticker.price * 0.94, t1: ticker.price * 1.06, t2: ticker.price * 1.12, valid: false };
@@ -20920,12 +21181,30 @@ function LensChart({ ticker, mode }) {
   const tfx = tfThesis(d);
   const tone3 = (t) => t === "up" ? "gn" : t === "dn" ? "rd" : "amb";
   const biasTone = (b) => b === "BULL" ? "gn" : b === "BEAR" ? "rd" : "amb";
-  return /* @__PURE__ */ React.createElement("div", { className: `lens lens--tc ${full ? "tc-full" : ""}` }, /* @__PURE__ */ React.createElement("div", { className: "tc-head" }, /* @__PURE__ */ React.createElement("div", { className: "tc-head-l" }, /* @__PURE__ */ React.createElement("span", { className: "tc-eyebrow mono" }, "THESIS CHART"), /* @__PURE__ */ React.createElement("span", { className: "tc-sub mono dim2" }, "interactive \xB7 crosshair \xB7 zoom \xB7 plan levels + indicators")), /* @__PURE__ */ React.createElement("div", { className: "tc-toggles" }, /* @__PURE__ */ React.createElement("div", { className: "tc-ind-wrap" }, /* @__PURE__ */ React.createElement("button", { className: `tc-tog tc-ind-btn ${indMenu ? "is-open" : ""}`, onClick: () => setIndMenu((v) => !v) }, "+ Indicators \u25BE"), indMenu && /* @__PURE__ */ React.createElement("div", { className: "tc-ind-menu" }, [["ema", "EMA 9/21/50"], ["bb", "Bollinger 20\xB72"], ["avwap", "Anchored VWAP"], ["ichi", "Ichimoku Cloud"], ["vp", "Volume Profile"], ["smc", "Smart Money Concepts"]].map(([k, l]) => /* @__PURE__ */ React.createElement("button", { key: k, className: `tc-ind-item ${ind[k] ? "is-on" : ""}`, onClick: () => togInd(k) }, /* @__PURE__ */ React.createElement("span", { className: "tc-ind-chk" }, ind[k] ? "\u2713" : ""), l)))), /* @__PURE__ */ React.createElement("button", { className: "tc-tog tc-full-btn", onClick: () => setFull((f) => !f) }, full ? "\u2922 Exit" : "\u2922 Full"))), /* @__PURE__ */ React.createElement("div", { className: "tc-mtf" }, ["1H", "4H", "1D", "1W"].map((k) => /* @__PURE__ */ React.createElement("button", { key: k, className: `tc-tf ${tf === k ? "is-on" : ""}`, onClick: () => {
+  return /* @__PURE__ */ React.createElement("div", { className: `lens lens--tc ${full ? "tc-full" : ""}` }, /* @__PURE__ */ React.createElement("div", { className: "tc-head" }, /* @__PURE__ */ React.createElement("div", { className: "tc-head-l" }, /* @__PURE__ */ React.createElement("span", { className: "tc-eyebrow mono" }, "THESIS CHART"), /* @__PURE__ */ React.createElement("span", { className: "tc-sub mono dim2" }, "interactive \xB7 crosshair \xB7 zoom \xB7 plan levels + indicators")), /* @__PURE__ */ React.createElement("div", { className: "tc-toggles" }, /* @__PURE__ */ React.createElement("div", { className: "tc-ind-wrap" }, /* @__PURE__ */ React.createElement("button", { className: `tc-tog tc-ind-btn ${indMenu ? "is-open" : ""}`, onClick: () => setIndMenu((v) => !v) }, "+ Indicators \u25BE"), indMenu && /* @__PURE__ */ React.createElement("div", { className: "tc-ind-menu" }, [["ema", "EMA 9/21/50"], ["bb", "Bollinger 20\xB72"], ["avwap", "Anchored VWAP"], ["ichi", "Ichimoku Cloud"], ["vp", "Volume Profile"], ["smc", "Smart Money Concepts"], ["smcLux", "Smart Money Concepts \xB7 LuxAlgo"]].map(([k, l]) => /* @__PURE__ */ React.createElement("button", { key: k, className: `tc-ind-item ${ind[k] ? "is-on" : ""}`, onClick: () => togInd(k) }, /* @__PURE__ */ React.createElement("span", { className: "tc-ind-chk" }, ind[k] ? "\u2713" : ""), l)))), /* @__PURE__ */ React.createElement("button", { className: "tc-tog tc-full-btn", onClick: () => setFull((f) => !f) }, full ? "\u2922 Exit" : "\u2922 Full"))), /* @__PURE__ */ React.createElement("div", { className: "tc-mtf" }, ["1H", "4H", "1D", "1W"].map((k) => /* @__PURE__ */ React.createElement("button", { key: k, className: `tc-tf ${tf === k ? "is-on" : ""}`, onClick: () => {
     setTfTouched(true);
     setTf(k);
-  } }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, k), /* @__PURE__ */ React.createElement("span", { className: `mono kpi-tone--${biasTone(mtf[k])}` }, mtf[k] || "\u2026"))), /* @__PURE__ */ React.createElement("div", { className: "tc-tf-read" }, /* @__PURE__ */ React.createElement("span", { className: `tc-tf-tag mono kpi-tone--${tone3(tfx.tone)}` }, tf, " \xB7 ", tfx.bias), /* @__PURE__ */ React.createElement("span", { className: "mono tc-tf-txt" }, tfx.read), /* @__PURE__ */ React.createElement("span", { className: "mono dim2 tc-tf-struct" }, tfx.struct, " \xB7 ", /* @__PURE__ */ React.createElement("i", null, TF_NOTE[tf])))), /* @__PURE__ */ React.createElement("div", { className: "tc-chart-card" }, loading ? /* @__PURE__ */ React.createElement("div", { className: "tc-lw", style: { display: "flex", alignItems: "center", justifyContent: "center" } }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "loading real ", tf, " candles\u2026")) : failed || !d ? /* @__PURE__ */ React.createElement("div", { className: "tc-lw", style: { display: "flex", alignItems: "center", justifyContent: "center" } }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "No ", tf, " candles available for ", ticker.symbol, ".")) : /* @__PURE__ */ React.createElement(LWChart, { d, ind, full }), d && /* @__PURE__ */ React.createElement("div", { className: "tc-legend mono" }, /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw tc-sw--cop" }), d.validPlan ? "entry" : "~entry", " $", d.entry), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw tc-sw--rd" }), "stop $", d.stop), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw tc-sw--gn" }), "T1 $", d.t1, " \xB7 T2 $", d.t2), ind.ema && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--cy)" } }), "EMA 9/21/50"), ind.bb && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--blue)" } }), "Bollinger"), ind.avwap && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--amb)" } }), "aVWAP"), ind.ichi && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--gn)" } }), "Ichimoku"), ind.smc && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--blue)" } }), "SMC \xB7 BOS/CHoCH/OB"), ind.vp && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw tc-sw--cop" }), "POC ", /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--cy)" } }), "value area \xB7 volume profile"), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "drag to pan \xB7 scroll to zoom \xB7 hover for OHLC")), /* @__PURE__ */ React.createElement(NewsFlags, { news, bars: d ? d.bars : null })), !full && /* @__PURE__ */ React.createElement(ReplayPractice, { ticker }), !full && d && /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 Chart \xB7 ", tf), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", { className: `kpi-tone--${tone3(tfx.tone)}` }, tfx.bias), " on ", tf, " \u2014 ", tfx.read, " ", d.validPlan ? /* @__PURE__ */ React.createElement(React.Fragment, null, "Plan: entry ", /* @__PURE__ */ React.createElement("b", { className: "cy" }, "$", d.entry), ", stop ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "$", d.stop), ", targets ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "$", d.t1, "/$", d.t2), ".") : /* @__PURE__ */ React.createElement(React.Fragment, null, "No active scan trade-plan \u2014 levels shown are price-estimates."))));
+  } }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, k), /* @__PURE__ */ React.createElement("span", { className: `mono kpi-tone--${biasTone(mtf[k])}` }, mtf[k] || "\u2026"))), /* @__PURE__ */ React.createElement("div", { className: "tc-tf-read" }, /* @__PURE__ */ React.createElement("span", { className: `tc-tf-tag mono kpi-tone--${tone3(tfx.tone)}` }, tf, " \xB7 ", tfx.bias), /* @__PURE__ */ React.createElement("span", { className: "mono tc-tf-txt" }, tfx.read), /* @__PURE__ */ React.createElement("span", { className: "mono dim2 tc-tf-struct" }, tfx.struct, " \xB7 ", /* @__PURE__ */ React.createElement("i", null, TF_NOTE[tf])))), ind.smcLux && /* @__PURE__ */ React.createElement("div", { className: "tc-smc-sub", style: { display: "flex", flexWrap: "wrap", gap: "5px 7px", alignItems: "center", padding: "2px 2px 0" } }, /* @__PURE__ */ React.createElement("span", { className: "label-cap mono", style: { fontSize: 9.5, color: "var(--ink-3)", letterSpacing: ".1em", marginRight: 2 } }, "SMC \xB7 LUXALGO"), SMC_SUB.map(([k, l]) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: k,
+      onClick: () => togSub(k),
+      className: "mono",
+      style: {
+        fontSize: 10.5,
+        padding: "3px 8px",
+        borderRadius: 6,
+        cursor: "pointer",
+        background: smcSub[k] ? "color-mix(in oklab, var(--blue) 22%, var(--bg-2))" : "var(--bg-2)",
+        border: "1px solid " + (smcSub[k] ? "color-mix(in oklab, var(--blue) 45%, transparent)" : "var(--ink-2)"),
+        color: smcSub[k] ? "var(--ink-0)" : "var(--ink-3)"
+      }
+    },
+    l
+  ))), /* @__PURE__ */ React.createElement("div", { className: "tc-chart-card" }, loading ? /* @__PURE__ */ React.createElement("div", { className: "tc-lw", style: { display: "flex", alignItems: "center", justifyContent: "center" } }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "loading real ", tf, " candles\u2026")) : failed || !d ? /* @__PURE__ */ React.createElement("div", { className: "tc-lw", style: { display: "flex", alignItems: "center", justifyContent: "center" } }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "No ", tf, " candles available for ", ticker.symbol, ".")) : /* @__PURE__ */ React.createElement(LWChart, { d, ind, smcSub, full }), d && /* @__PURE__ */ React.createElement("div", { className: "tc-legend mono" }, /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw tc-sw--cop" }), d.validPlan ? "entry" : "~entry", " $", d.entry), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw tc-sw--rd" }), "stop $", d.stop), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw tc-sw--gn" }), "T1 $", d.t1, " \xB7 T2 $", d.t2), ind.ema && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--cy)" } }), "EMA 9/21/50"), ind.bb && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--blue)" } }), "Bollinger"), ind.avwap && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--amb)" } }), "aVWAP"), ind.ichi && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "#43A047" } }), "Ichimoku \xB7 cloud + lagging span"), ind.smc && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--blue)" } }), "SMC \xB7 BOS/CHoCH/OB"), ind.smcLux && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--blue)" } }), "SMC \xB7 LuxAlgo \xB7 BOS/CHoCH \xB7 OB \xB7 FVG \xB7 EQH/EQL"), ind.vp && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw tc-sw--cop" }), "POC ", /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--cy)" } }), "value area \xB7 volume profile"), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "drag to pan \xB7 scroll to zoom \xB7 hover for OHLC")), /* @__PURE__ */ React.createElement(NewsFlags, { news, bars: d ? d.bars : null })), !full && /* @__PURE__ */ React.createElement(ReplayPractice, { ticker }), !full && d && /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 Chart \xB7 ", tf), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", { className: `kpi-tone--${tone3(tfx.tone)}` }, tfx.bias), " on ", tf, " \u2014 ", tfx.read, " ", d.validPlan ? /* @__PURE__ */ React.createElement(React.Fragment, null, "Plan: entry ", /* @__PURE__ */ React.createElement("b", { className: "cy" }, "$", d.entry), ", stop ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "$", d.stop), ", targets ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "$", d.t1, "/$", d.t2), ".") : /* @__PURE__ */ React.createElement(React.Fragment, null, "No active scan trade-plan \u2014 levels shown are price-estimates."))));
 }
-function LWChart({ d, ind, full }) {
+function LWChart({ d, ind, smcSub, full }) {
+  const ss = smcSub || {};
   const wrap = useTCr(null);
   const chartRef = useTCr(null);
   const seriesRef = useTCr({});
@@ -20961,7 +21240,12 @@ function LWChart({ d, ind, full }) {
   useTCe(() => {
     const s = seriesRef.current;
     if (!s.chart) return;
-    s.candle.setData(d.bars);
+    const colorCandles = ind.smcLux && ss.color && d.smc && d.smc.candTrend;
+    s.candle.setData(colorCandles ? d.bars.map((b, i) => {
+      const tr = d.smc.candTrend[i];
+      const c = tr > 0 ? "#4ade80" : tr < 0 ? "#f87171" : "#8590a3";
+      return { ...b, color: c, borderColor: c, wickColor: c };
+    }) : d.bars);
     s.vol.setData(d.bars.map((b) => ({ time: b.time, value: b.value, color: b.close >= b.open ? "rgba(74,222,128,0.4)" : "rgba(248,113,113,0.4)" })));
     s.priceLines.forEach((pl) => s.candle.removePriceLine(pl));
     const mk = (price, color, title) => s.candle.createPriceLine({ price, color, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title });
@@ -20972,6 +21256,14 @@ function LWChart({ d, ind, full }) {
       mk(d.t2, "#4ade80", "T2")
     ];
     if (ind.smc) d.obs.forEach((o) => s.priceLines.push(mk(o.price, o.bias === "bull" ? "#5b9bf2" : "#d97757", o.bias === "bull" ? "+OB" : "\u2212OB")));
+    if (ind.smcLux && d.smc) {
+      const sm = d.smc;
+      if (ss.hl && sm.trailing) {
+        s.priceLines.push(mk(sm.trailing.top, "#f87171", sm.trailing.swTrend < 0 ? "Strong High" : "Weak High"));
+        s.priceLines.push(mk(sm.trailing.bottom, "#4ade80", sm.trailing.swTrend > 0 ? "Strong Low" : "Weak Low"));
+      }
+      if (ss.eq) sm.equal.slice(-3).forEach((e) => s.priceLines.push(mk(e.level, e.tag === "EQH" ? "#f87171" : "#4ade80", e.tag)));
+    }
     s.overlays.forEach((o) => s.chart.removeSeries(o));
     s.overlays = [];
     const addLine = (data, color, width = 1, style = 0) => {
@@ -20991,20 +21283,55 @@ function LWChart({ d, ind, full }) {
     }
     if (ind.avwap) addLine(d.avwap, "#fbbf24", 2, 2);
     if (ind.ichi) {
-      addLine(d.spanA, "#4ade80");
-      addLine(d.spanB, "#f87171");
-      addLine(d.tenkan, "#5b9bf2", 1);
-      addLine(d.kijun, "#f87171", 1);
+      addLine(d.tenkan, "#2962FF", 1);
+      addLine(d.kijun, "#B71C1C", 1);
+      addLine(d.spanA, "#A5D6A7", 1);
+      addLine(d.spanB, "#EF9A9A", 1);
+      addLine(d.chikou, "#43A047", 1);
     }
-    s.candle.setMarkers(ind.smc ? d.breaks.map((b) => ({
+    const m = [];
+    if (ind.smc) d.breaks.forEach((b) => m.push({
       time: b.time,
       position: b.dir === "bull" ? "belowBar" : "aboveBar",
       color: b.dir === "bull" ? "#4ade80" : "#f87171",
       shape: b.dir === "bull" ? "arrowUp" : "arrowDown",
       text: b.tag
-    })) : []);
+    }));
+    if (ind.smcLux && d.smc) {
+      if (ss.swing) d.smc.struct.forEach((b) => m.push({
+        time: b.time,
+        position: b.dir === "up" ? "belowBar" : "aboveBar",
+        color: b.dir === "up" ? "#4ade80" : "#f87171",
+        shape: b.dir === "up" ? "arrowUp" : "arrowDown",
+        text: b.tag
+      }));
+      if (ss.internal) d.smc.intStruct.slice(-8).forEach((b) => m.push({
+        time: b.time,
+        position: b.dir === "up" ? "belowBar" : "aboveBar",
+        color: b.dir === "up" ? "#86efac" : "#fca5a5",
+        shape: "circle",
+        text: b.tag.toLowerCase()
+      }));
+      if (ss.swings && d.smc.swingPts) d.smc.swingPts.forEach((p) => m.push({
+        time: p.time,
+        position: p.up ? "belowBar" : "aboveBar",
+        color: "#8590a3",
+        shape: "circle",
+        text: p.tag
+      }));
+    }
+    const seen = {};
+    const mm = [];
+    m.sort((a, b) => a.time - b.time).forEach((x) => {
+      const k = x.time + x.position;
+      if (!seen[k]) {
+        seen[k] = 1;
+        mm.push(x);
+      }
+    });
+    s.candle.setMarkers(mm);
     s.chart.timeScale().fitContent();
-  }, [d, ind]);
+  }, [d, ind, smcSub]);
   useTCe(() => {
     const s = seriesRef.current;
     if (s.chart) setTimeout(() => s.chart.timeScale().fitContent(), 60);
@@ -21040,14 +21367,154 @@ function LWChart({ d, ind, full }) {
       host.appendChild(svg);
     };
     draw();
-    const ts = s.chart.timeScale();
-    const onRange = () => draw();
-    ts.subscribeVisibleLogicalRangeChange(onRange);
+    let _raf = 0, _sig = "", _pMin = Infinity, _pMax = -Infinity;
+    for (const bb of d.bars) {
+      if (bb.low < _pMin) _pMin = bb.low;
+      if (bb.high > _pMax) _pMax = bb.high;
+    }
+    const _ts = s.chart.timeScale();
+    const _sigOf = () => `${host.clientWidth}x${host.clientHeight}|${s.candle.priceToCoordinate(_pMin)}|${s.candle.priceToCoordinate(_pMax)}|${_ts.timeToCoordinate(d.bars[0].time)}|${_ts.timeToCoordinate(d.bars[d.bars.length - 1].time)}`;
+    const _loop = () => {
+      const ns = _sigOf();
+      if (ns !== _sig) {
+        _sig = ns;
+        draw();
+      }
+      _raf = requestAnimationFrame(_loop);
+    };
+    if (ind.vp && d.vpb) _loop();
     return () => {
-      ts.unsubscribeVisibleLogicalRangeChange(onRange);
+      if (_raf) cancelAnimationFrame(_raf);
       if (svg) svg.remove();
     };
   }, [d, ind.vp, full]);
+  useTCe(() => {
+    const s = seriesRef.current;
+    if (!s.chart) return;
+    const host = wrap.current;
+    if (!host) return;
+    let svg = host.querySelector(".tc-smc-ov");
+    const draw = () => {
+      if (svg) {
+        svg.remove();
+        svg = null;
+      }
+      if (!ind.smcLux || !d.smc) return;
+      const sm = d.smc, W = host.clientWidth, H = host.clientHeight;
+      const ts = s.chart.timeScale();
+      const xOf = (t) => ts.timeToCoordinate(t);
+      const yOf = (p) => s.candle.priceToCoordinate(p);
+      svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", "tc-smc-ov");
+      svg.style.cssText = `position:absolute;left:0;top:0;width:${W}px;height:${H}px;pointer-events:none;z-index:2;`;
+      const box = (x0, yT, yB, fill, op, stroke) => {
+        if (x0 == null || yT == null || yB == null) return;
+        const x = Math.max(0, x0), r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        r.setAttribute("x", x);
+        r.setAttribute("y", Math.min(yT, yB));
+        r.setAttribute("width", Math.max(2, W - x));
+        r.setAttribute("height", Math.max(1, Math.abs(yB - yT)));
+        r.setAttribute("fill", fill);
+        r.setAttribute("opacity", op);
+        if (stroke) {
+          r.setAttribute("stroke", stroke);
+          r.setAttribute("stroke-opacity", "0.5");
+          r.setAttribute("stroke-width", "1");
+        }
+        svg.appendChild(r);
+      };
+      if (ss.zones && sm.trailing && sm.trailing.startTime != null) {
+        const x0 = xOf(sm.trailing.startTime), tp = sm.trailing.top, bt = sm.trailing.bottom;
+        if (x0 != null) {
+          box(x0, yOf(tp), yOf(0.95 * tp + 0.05 * bt), "#f87171", 0.07);
+          box(x0, yOf(0.525 * tp + 0.475 * bt), yOf(0.525 * bt + 0.475 * tp), "#8590a3", 0.07);
+          box(x0, yOf(0.95 * bt + 0.05 * tp), yOf(bt), "#4ade80", 0.07);
+        }
+      }
+      const obs = [...ss.swingOB ? sm.swingOB : [], ...ss.intOB ? sm.intOB : []];
+      obs.forEach(
+        (o) => box(xOf(o.time), yOf(o.high), yOf(o.low), o.bias > 0 ? "#5b9bf2" : "#f87171", o.internal ? 0.1 : 0.16, o.internal ? null : o.bias > 0 ? "#5b9bf2" : "#f87171")
+      );
+      if (ss.fvg) sm.fvg.forEach((g) => box(xOf(g.time), yOf(g.top), yOf(g.bottom), g.bias > 0 ? "#4ade80" : "#f87171", 0.09));
+      host.appendChild(svg);
+    };
+    draw();
+    let _raf = 0, _sig = "", _pMin = Infinity, _pMax = -Infinity;
+    for (const bb of d.bars) {
+      if (bb.low < _pMin) _pMin = bb.low;
+      if (bb.high > _pMax) _pMax = bb.high;
+    }
+    const _ts = s.chart.timeScale();
+    const _sigOf = () => `${host.clientWidth}x${host.clientHeight}|${s.candle.priceToCoordinate(_pMin)}|${s.candle.priceToCoordinate(_pMax)}|${_ts.timeToCoordinate(d.bars[0].time)}|${_ts.timeToCoordinate(d.bars[d.bars.length - 1].time)}`;
+    const _loop = () => {
+      const ns = _sigOf();
+      if (ns !== _sig) {
+        _sig = ns;
+        draw();
+      }
+      _raf = requestAnimationFrame(_loop);
+    };
+    if (ind.smcLux && d.smc) _loop();
+    return () => {
+      if (_raf) cancelAnimationFrame(_raf);
+      if (svg) svg.remove();
+    };
+  }, [d, ind.smcLux, smcSub, full]);
+  useTCe(() => {
+    const s = seriesRef.current;
+    if (!s.chart) return;
+    const host = wrap.current;
+    if (!host) return;
+    const NS = "http://www.w3.org/2000/svg";
+    let svg = host.querySelector(".tc-kumo-ov");
+    const draw = () => {
+      if (svg) {
+        svg.remove();
+        svg = null;
+      }
+      if (!ind.ichi || !d.spanA || !d.spanB) return;
+      const A = d.spanA, B = d.spanB, W = host.clientWidth, H = host.clientHeight;
+      const ts = s.chart.timeScale();
+      const xOf = (t) => ts.timeToCoordinate(t);
+      const yOf = (p) => s.candle.priceToCoordinate(p);
+      svg = document.createElementNS(NS, "svg");
+      svg.setAttribute("class", "tc-kumo-ov");
+      svg.style.cssText = `position:absolute;left:0;top:0;width:${W}px;height:${H}px;pointer-events:none;z-index:1;`;
+      for (let i = 1; i < A.length; i++) {
+        const x0 = xOf(A[i - 1].time), x1 = xOf(A[i].time);
+        if (x0 == null || x1 == null) continue;
+        const a0 = yOf(A[i - 1].value), a1 = yOf(A[i].value), b0 = yOf(B[i - 1].value), b1 = yOf(B[i].value);
+        if (a0 == null || a1 == null || b0 == null || b1 == null) continue;
+        const bull = A[i - 1].value + A[i].value >= B[i - 1].value + B[i].value;
+        const poly = document.createElementNS(NS, "polygon");
+        poly.setAttribute("points", `${x0},${a0} ${x1},${a1} ${x1},${b1} ${x0},${b0}`);
+        poly.setAttribute("fill", bull ? "rgba(67,160,71,0.16)" : "rgba(244,67,54,0.16)");
+        svg.appendChild(poly);
+      }
+      host.appendChild(svg);
+    };
+    draw();
+    let _raf = 0, _sig = "", _pMin = Infinity, _pMax = -Infinity;
+    for (const bb of d.bars) {
+      if (bb.low < _pMin) _pMin = bb.low;
+      if (bb.high > _pMax) _pMax = bb.high;
+    }
+    const _ts = s.chart.timeScale();
+    const _sigOf = () => `${host.clientWidth}x${host.clientHeight}|${s.candle.priceToCoordinate(_pMin)}|${s.candle.priceToCoordinate(_pMax)}|${_ts.timeToCoordinate(d.bars[0].time)}|${_ts.timeToCoordinate(d.bars[d.bars.length - 1].time)}`;
+    const _loop = () => {
+      const ns = _sigOf();
+      if (ns !== _sig) {
+        _sig = ns;
+        draw();
+      }
+      _raf = requestAnimationFrame(_loop);
+    };
+    if (ind.ichi && d.spanA && d.spanB) _loop();
+    return () => {
+      if (_raf) cancelAnimationFrame(_raf);
+      if (svg) svg.remove();
+    };
+  }, [d, ind.ichi, full]);
   return /* @__PURE__ */ React.createElement("div", { ref: wrap, className: "tc-lw" });
 }
 function ReplayPractice({ ticker }) {
@@ -35150,6 +35617,8 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
           return r.dir;
         case "refPrice":
           return r.refPrice;
+        case "score":
+          return r.score != null ? r.score : PUSH;
         case "last":
           return r.last ? r.last.v : PUSH;
         case "maturedN":
@@ -35181,11 +35650,12 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
   const Sh = ({ col, label, r, cls }) => /* @__PURE__ */ React.createElement("th", { className: `${cls || ""} ${r ? "r" : ""} ${srt.col === col ? "is-active" : ""}`.trim(), style: { cursor: "pointer" }, onClick: () => sortBy(col) }, label, srt.col === col ? /* @__PURE__ */ React.createElement("span", { className: "wsx-arr mono" }, srt.dir > 0 ? "\u25B2" : "\u25BC") : null);
   const NH = SL.HZ.length;
   const exportCSV = () => {
-    const head = ["Logged date", "Days ago", "Symbol", "Source", "Direction", "Ref price", "Status", "Matured", ...SL.HZ.map((h) => h.id)];
+    const head = ["Logged date", "Days ago", "Symbol", "Source", "Direction", "Ref price", "Score@pick", "Score latest", "Status", "Matured", ...SL.HZ.map((h) => h.id)];
     const lines = [head.join(",")];
     rows.forEach((r) => {
       const d = new Date(Date.now() - r.age * 864e5).toISOString().slice(0, 10);
-      const cells = [d, r.age, r.sym, r.label, r.dir, r.refPrice, r.status, `${r.maturedN}/${NH}`];
+      const _sn = scoreNow(r);
+      const cells = [d, r.age, r.sym, r.label, r.dir, r.refPrice, r.score != null ? r.score : "", _sn ? _sn.last : "", r.status, `${r.maturedN}/${NH}`];
       SL.HZ.forEach((h, i) => {
         const p = r.path[i];
         cells.push(p && p.mature ? p.v : "");
@@ -35209,6 +35679,19 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
     const x = (i) => i / (mat.length - 1) * w, y = (v) => h - (v - mn) / (mx - mn || 1) * (h - 4) - 2;
     const up = mat[mat.length - 1].v >= 0;
     return /* @__PURE__ */ React.createElement("svg", { width: w, height: h, className: "trk-spark" }, /* @__PURE__ */ React.createElement("line", { x1: "0", y1: y(0), x2: w, y2: y(0), stroke: "var(--line)", strokeDasharray: "1 3" }), /* @__PURE__ */ React.createElement("polyline", { points: mat.map((p, i) => `${x(i)},${y(p.v)}`).join(" "), fill: "none", stroke: `var(--${up ? "gn" : "rd"})`, strokeWidth: "1.5" }));
+  };
+  const scoreSpark = (series) => {
+    const pts = (series || []).filter((p) => p && p.score != null);
+    if (pts.length < 2) return null;
+    const w = 70, h = 22, vs = pts.map((p) => p.score), mn = Math.min(...vs), mx = Math.max(...vs);
+    const x = (i) => i / (pts.length - 1) * w, y = (v) => h - (v - mn) / (mx - mn || 1) * (h - 4) - 2;
+    const up = vs[vs.length - 1] >= vs[0];
+    return /* @__PURE__ */ React.createElement("svg", { width: w, height: h, className: "trk-spark", title: pts.map((p) => `${p.date.slice(5)} ${p.score}`).join(" \xB7 ") }, /* @__PURE__ */ React.createElement("polyline", { points: pts.map((p, i) => `${x(i)},${y(p.score)}`).join(" "), fill: "none", stroke: `var(--${up ? "gn" : "rd"})`, strokeWidth: "1.5" }));
+  };
+  const scoreNow = (r) => {
+    const pts = (r.scoreSeries || []).filter((p) => p && p.score != null);
+    if (!pts.length) return null;
+    return { first: r.score != null ? r.score : pts[0].score, last: pts[pts.length - 1].score };
   };
   return /* @__PURE__ */ React.createElement("div", { className: "wsx-body" }, /* @__PURE__ */ React.createElement("div", { className: "trk-ledger-bar" }, /* @__PURE__ */ React.createElement("div", { className: "trk-chips" }, /* @__PURE__ */ React.createElement("button", { className: `trk-chip ${!srcFilter ? "is-on" : ""}`, onClick: () => setSrcFilter(null) }, "All sources"), SL.SOURCES.map((s) => /* @__PURE__ */ React.createElement("button", { key: s.id, className: `trk-chip ${srcFilter === s.id ? "is-on" : ""}`, onClick: () => setSrcFilter(s.id) }, s.label))), /* @__PURE__ */ React.createElement("div", { className: "trk-led-acts" }, /* @__PURE__ */ React.createElement("div", { className: "trk-ticker-filter" }, /* @__PURE__ */ React.createElement(
     "input",
@@ -35245,10 +35728,11 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
   ), dateFrom || dateTo ? /* @__PURE__ */ React.createElement("button", { className: "trk-ticker-clear trk-date-clear", onClick: () => {
     setDateFrom("");
     setDateTo("");
-  }, title: "Clear date range" }, "\u2715") : null), /* @__PURE__ */ React.createElement("div", { className: "trk-toggle trk-toggle--sm" }, PERIODS.map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: period === id ? "is-on" : "", onClick: () => pickPeriod(id), title: `Show calls from the last ${l}` }, l))), /* @__PURE__ */ React.createElement("div", { className: "trk-toggle trk-toggle--sm" }, ["all", "long", "short"].map((d) => /* @__PURE__ */ React.createElement("button", { key: d, className: dir === d ? "is-on" : "", onClick: () => setDir(d) }, d))), /* @__PURE__ */ React.createElement("div", { className: "trk-toggle trk-toggle--sm" }, /* @__PURE__ */ React.createElement("button", { className: view === "path" ? "is-on" : "", onClick: () => setView("path") }, "Path"), /* @__PURE__ */ React.createElement("button", { className: view === "full" ? "is-on" : "", onClick: () => setView("full") }, "All horizons")), /* @__PURE__ */ React.createElement("button", { className: "trk-export", onClick: exportCSV, title: "Download every call \xD7 every horizon as CSV (opens in Excel)" }, "\u2913 Export CSV"))), view === "path" ? /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl trk-led" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement(Sh, { col: "age", label: "Logged" }), /* @__PURE__ */ React.createElement(Sh, { col: "age", label: "Date" }), /* @__PURE__ */ React.createElement(Sh, { col: "sym", label: "Symbol" }), /* @__PURE__ */ React.createElement(Sh, { col: "label", label: "Source" }), /* @__PURE__ */ React.createElement(Sh, { col: "dir", label: "Dir" }), /* @__PURE__ */ React.createElement(Sh, { col: "refPrice", label: "Ref px", r: true }), /* @__PURE__ */ React.createElement("th", null, "Forward path"), /* @__PURE__ */ React.createElement(Sh, { col: "last", label: "Latest", r: true }), /* @__PURE__ */ React.createElement(Sh, { col: "maturedN", label: "Matured", r: true }), /* @__PURE__ */ React.createElement(Sh, { col: "status", label: "Status" }))), /* @__PURE__ */ React.createElement("tbody", null, pageRows.map((r) => {
+  }, title: "Clear date range" }, "\u2715") : null), /* @__PURE__ */ React.createElement("div", { className: "trk-toggle trk-toggle--sm" }, PERIODS.map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: period === id ? "is-on" : "", onClick: () => pickPeriod(id), title: `Show calls from the last ${l}` }, l))), /* @__PURE__ */ React.createElement("div", { className: "trk-toggle trk-toggle--sm" }, ["all", "long", "short"].map((d) => /* @__PURE__ */ React.createElement("button", { key: d, className: dir === d ? "is-on" : "", onClick: () => setDir(d) }, d))), /* @__PURE__ */ React.createElement("div", { className: "trk-toggle trk-toggle--sm" }, /* @__PURE__ */ React.createElement("button", { className: view === "path" ? "is-on" : "", onClick: () => setView("path") }, "Path"), /* @__PURE__ */ React.createElement("button", { className: view === "full" ? "is-on" : "", onClick: () => setView("full") }, "All horizons")), /* @__PURE__ */ React.createElement("button", { className: "trk-export", onClick: exportCSV, title: "Download every call \xD7 every horizon as CSV (opens in Excel)" }, "\u2913 Export CSV"))), view === "path" ? /* @__PURE__ */ React.createElement("table", { className: "dtable wsx-tbl trk-led" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement(Sh, { col: "age", label: "Logged" }), /* @__PURE__ */ React.createElement(Sh, { col: "age", label: "Date" }), /* @__PURE__ */ React.createElement(Sh, { col: "sym", label: "Symbol" }), /* @__PURE__ */ React.createElement(Sh, { col: "label", label: "Source" }), /* @__PURE__ */ React.createElement(Sh, { col: "dir", label: "Dir" }), /* @__PURE__ */ React.createElement(Sh, { col: "refPrice", label: "Ref px", r: true }), /* @__PURE__ */ React.createElement(Sh, { col: "score", label: "Score", r: true }), /* @__PURE__ */ React.createElement("th", null, "Score trend"), /* @__PURE__ */ React.createElement("th", null, "Forward path"), /* @__PURE__ */ React.createElement(Sh, { col: "last", label: "Latest", r: true }), /* @__PURE__ */ React.createElement(Sh, { col: "maturedN", label: "Matured", r: true }), /* @__PURE__ */ React.createElement(Sh, { col: "status", label: "Status" }))), /* @__PURE__ */ React.createElement("tbody", null, pageRows.map((r) => {
     const d = new Date(Date.now() - r.age * 864e5);
     const dStr = d.toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "2-digit" });
-    return /* @__PURE__ */ React.createElement("tr", { key: r.id, onClick: () => onTicker && onTicker(r.sym) }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, r.age, "d ago"), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, dStr), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("b", null, r.sym)), /* @__PURE__ */ React.createElement("td", { className: "dim2" }, r.label), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: r.dir === "long" ? "up" : "dn" }, r.dir === "long" ? "LONG" : "SHORT")), /* @__PURE__ */ React.createElement("td", { className: "r tabular dim" }, "$", r.refPrice.toFixed(2)), /* @__PURE__ */ React.createElement("td", null, spark(r.path) || /* @__PURE__ */ React.createElement("span", { className: "trk-mat-lbl mono dim2" }, "maturing\u2026")), /* @__PURE__ */ React.createElement("td", { className: `r tabular ${r.last && r.last.v >= 0 ? "up" : "dn"}` }, r.last ? /* @__PURE__ */ React.createElement("b", null, trPct(r.last.v)) : "\u2014", /* @__PURE__ */ React.createElement("span", { className: "dim2 mono", style: { fontSize: 9 } }, " ", r.last ? r.last.hz || "" : "")), /* @__PURE__ */ React.createElement("td", { className: "r tabular dim2" }, r.maturedN, "/", NH), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `trk-status trk-status--${r.status}`, title: `${r.maturedN}/${NH} horizons matured` }, r.statusLabel || r.status)));
+    const sn = scoreNow(r);
+    return /* @__PURE__ */ React.createElement("tr", { key: r.id, onClick: () => onTicker && onTicker(r.sym) }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, r.age, "d ago"), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, dStr), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("b", null, r.sym)), /* @__PURE__ */ React.createElement("td", { className: "dim2" }, r.label), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: r.dir === "long" ? "up" : "dn" }, r.dir === "long" ? "LONG" : "SHORT")), /* @__PURE__ */ React.createElement("td", { className: "r tabular dim" }, "$", r.refPrice.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: "r tabular" }, /* @__PURE__ */ React.createElement("b", null, r.score != null ? r.score : "\u2014")), /* @__PURE__ */ React.createElement("td", null, scoreSpark(r.scoreSeries) || (sn ? /* @__PURE__ */ React.createElement("span", { className: "mono dim2", title: "single reading" }, sn.last) : /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "\u2014")), sn && sn.last !== sn.first ? /* @__PURE__ */ React.createElement("span", { className: `mono ${sn.last >= sn.first ? "up" : "dn"}`, style: { fontSize: 9, marginLeft: 4 } }, sn.last >= sn.first ? "+" : "", sn.last - sn.first) : null), /* @__PURE__ */ React.createElement("td", null, spark(r.path) || /* @__PURE__ */ React.createElement("span", { className: "trk-mat-lbl mono dim2" }, "maturing\u2026")), /* @__PURE__ */ React.createElement("td", { className: `r tabular ${r.last && r.last.v >= 0 ? "up" : "dn"}` }, r.last ? /* @__PURE__ */ React.createElement("b", null, trPct(r.last.v)) : "\u2014", /* @__PURE__ */ React.createElement("span", { className: "dim2 mono", style: { fontSize: 9 } }, " ", r.last ? r.last.hz || "" : "")), /* @__PURE__ */ React.createElement("td", { className: "r tabular dim2" }, r.maturedN, "/", NH), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `trk-status trk-status--${r.status}`, title: `${r.maturedN}/${NH} horizons matured` }, r.statusLabel || r.status)));
   }))) : /* @__PURE__ */ React.createElement("div", { className: "trk-full-wrap" }, /* @__PURE__ */ React.createElement("table", { className: "trk-full" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement(Sh, { col: "age", label: "Date", cls: "trk-full-sticky" }), /* @__PURE__ */ React.createElement(Sh, { col: "sym", label: "Sym", cls: "trk-full-sticky2" }), /* @__PURE__ */ React.createElement(Sh, { col: "label", label: "Src" }), /* @__PURE__ */ React.createElement(Sh, { col: "dir", label: "Dir" }), SL.HZ.map((h) => /* @__PURE__ */ React.createElement(Sh, { key: h.id, col: h.id, label: h.label, cls: "trk-full-hz" })))), /* @__PURE__ */ React.createElement("tbody", null, pageRows.map((r) => {
     const dStr = new Date(Date.now() - r.age * 864e5).toLocaleDateString("en-US", { day: "2-digit", month: "short" });
     return /* @__PURE__ */ React.createElement("tr", { key: r.id, onClick: () => onTicker && onTicker(r.sym) }, /* @__PURE__ */ React.createElement("td", { className: "trk-full-sticky mono dim2" }, dStr), /* @__PURE__ */ React.createElement("td", { className: "trk-full-sticky2" }, /* @__PURE__ */ React.createElement("b", null, r.sym)), /* @__PURE__ */ React.createElement("td", { className: "dim2", style: { fontSize: 10 } }, r.label), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `mono ${r.dir === "long" ? "up" : "dn"}`, style: { fontSize: 10 } }, r.dir === "long" ? "L" : "S")), r.path.map((p, i) => /* @__PURE__ */ React.createElement("td", { key: i, className: "trk-full-cell", style: { background: p.mature ? heatColor(p.v, 6) : "var(--bg-2)" }, title: p.mature ? `${SL.HZ[i].label}: ${trPct(p.v)}` : "maturing" }, p.mature ? (p.v >= 0 ? "+" : "\u2212") + Math.abs(p.v).toFixed(1) : "\xB7")));

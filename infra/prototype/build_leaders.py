@@ -33,6 +33,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]          # SwingTrade/
 AUDIT_LEDGER = ROOT / "cache" / "audit_ledger.json"
 SIGNAL_LOG   = ROOT / "data"  / "signal_log.json"
+SCORE_HIST   = ROOT / "cache" / "score_history.json"
 OUT          = Path(__file__).resolve().parent / "data_leaders.json"
 
 # ── horizons: the REAL grid audit_ledger carries (D1-D7 / W1-W8 / M1-M12) ──────
@@ -133,6 +134,49 @@ def _grid(r: dict) -> dict:
     return out
 
 
+# ── score history (per-ticker daily composite score) ─────────────────────────
+# cache/score_history.json: { "TICKER": [{date, score, verdict}, ...] }. The scan
+# appends on every re-run, so COALESCE to one score per day (last write = end-of-
+# day state) for a clean "today 80 → tomorrow 90" series. Joined onto each signal
+# as score@pick + scoreSeries (pick date onward).
+def _load_score_history() -> dict:
+    try:
+        return json.loads(SCORE_HIST.read_text()) or {}
+    except Exception:
+        return {}
+
+_SCORE_HIST = _load_score_history()
+_SCORE_COALESCED: dict = {}
+
+def _score_series(sym: str) -> list:
+    if sym in _SCORE_COALESCED:
+        return _SCORE_COALESCED[sym]
+    by_date: dict = {}
+    for e in (_SCORE_HIST.get(sym) or []):
+        d, s = (e or {}).get("date"), (e or {}).get("score")
+        if d and s is not None:
+            try:
+                by_date[d[:10]] = int(round(float(s)))   # last write wins = EOD
+            except (TypeError, ValueError):
+                pass
+    series = [{"date": d, "score": by_date[d]} for d in sorted(by_date)]
+    _SCORE_COALESCED[sym] = series
+    return series
+
+def _score_at_and_series(sym: str, since: str):
+    """(score_at_pick, series_from_pick). score@pick = coalesced score on the pick
+    date (or the first on/after it); series = that date onward. ([] / None when no
+    score history exists for the ticker)."""
+    series = _score_series(sym or "")
+    if not series:
+        return None, []
+    cut = (since or "")[:10]
+    fwd = [e for e in series if e["date"] >= cut] if cut else series
+    if not fwd:
+        fwd = series          # pick predates the recorded history → show full series
+    return fwd[0]["score"], fwd
+
+
 def build(today: _dt.date | None = None) -> dict:
     today = today or _dt.date.today()
     signals: list[dict] = []
@@ -151,6 +195,7 @@ def build(today: _dt.date | None = None) -> dict:
                 continue
             src = _setup_to_source(r.get("setup"), r.get("setup_family"))
             grid = _grid(r)
+            _score_pick, _score_fwd = _score_at_and_series(r.get("ticker"), ds)
             sig = {
                 "id":        f"s{sid}",
                 "source":    src,
@@ -163,6 +208,8 @@ def build(today: _dt.date | None = None) -> dict:
                 "predProb":  None,
                 "verdict":   r.get("verdict"),
                 "setup":     r.get("setup"),
+                "score":     _score_pick,          # composite score at pick (None if no history)
+                "scoreSeries": _score_fwd,         # [{date, score}] one-per-day from pick onward
                 "ret":       grid,                 # REAL grid; null entry = maturing
             }
             signals.append(sig)

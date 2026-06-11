@@ -220,6 +220,7 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
         case "label": return r.label;
         case "dir": return r.dir;
         case "refPrice": return r.refPrice;
+        case "score": return r.score != null ? r.score : PUSH;
         case "last": return r.last ? r.last.v : PUSH;
         case "maturedN": return r.maturedN;
         case "status": return r.status;
@@ -245,11 +246,12 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
   );
   const NH = SL.HZ.length;
   const exportCSV = () => {
-    const head = ["Logged date", "Days ago", "Symbol", "Source", "Direction", "Ref price", "Status", "Matured", ...SL.HZ.map(h => h.id)];
+    const head = ["Logged date", "Days ago", "Symbol", "Source", "Direction", "Ref price", "Score@pick", "Score latest", "Status", "Matured", ...SL.HZ.map(h => h.id)];
     const lines = [head.join(",")];
     rows.forEach(r => {
       const d = new Date(Date.now() - r.age * 86400000).toISOString().slice(0, 10);
-      const cells = [d, r.age, r.sym, r.label, r.dir, r.refPrice, r.status, `${r.maturedN}/${NH}`];
+      const _sn = scoreNow(r);
+      const cells = [d, r.age, r.sym, r.label, r.dir, r.refPrice, (r.score != null ? r.score : ""), (_sn ? _sn.last : ""), r.status, `${r.maturedN}/${NH}`];
       SL.HZ.forEach((h, i) => { const p = r.path[i]; cells.push(p && p.mature ? p.v : ""); });
       lines.push(cells.map(c => typeof c === "string" && c.indexOf(",") >= 0 ? `"${c}"` : c).join(","));
     });
@@ -264,6 +266,21 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
     const x = i => (i / (mat.length - 1)) * w, y = v => h - ((v - mn) / ((mx - mn) || 1)) * (h - 4) - 2;
     const up = mat[mat.length - 1].v >= 0;
     return <svg width={w} height={h} className="trk-spark"><line x1="0" y1={y(0)} x2={w} y2={y(0)} stroke="var(--line)" strokeDasharray="1 3" /><polyline points={mat.map((p, i) => `${x(i)},${y(p.v)}`).join(" ")} fill="none" stroke={`var(--${up ? "gn" : "rd"})`} strokeWidth="1.5" /></svg>;
+  };
+  // composite-SCORE trend since the pick (one point per day) — 80→90 progression.
+  const scoreSpark = (series) => {
+    const pts = (series || []).filter(p => p && p.score != null);
+    if (pts.length < 2) return null;
+    const w = 70, h = 22, vs = pts.map(p => p.score), mn = Math.min(...vs), mx = Math.max(...vs);
+    const x = i => (i / (pts.length - 1)) * w, y = v => h - ((v - mn) / ((mx - mn) || 1)) * (h - 4) - 2;
+    const up = vs[vs.length - 1] >= vs[0];
+    return <svg width={w} height={h} className="trk-spark" title={pts.map(p => `${p.date.slice(5)} ${p.score}`).join(" · ")}><polyline points={pts.map((p, i) => `${x(i)},${y(p.score)}`).join(" ")} fill="none" stroke={`var(--${up ? "gn" : "rd"})`} strokeWidth="1.5" /></svg>;
+  };
+  // score@pick → latest, with delta (for the trend cell text).
+  const scoreNow = (r) => {
+    const pts = (r.scoreSeries || []).filter(p => p && p.score != null);
+    if (!pts.length) return null;
+    return { first: r.score != null ? r.score : pts[0].score, last: pts[pts.length - 1].score };
   };
   return (
     <div className="wsx-body">
@@ -303,10 +320,11 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
       </div>
       {view === "path" ? (
         <table className="dtable wsx-tbl trk-led">
-          <thead><tr><Sh col="age" label="Logged" /><Sh col="age" label="Date" /><Sh col="sym" label="Symbol" /><Sh col="label" label="Source" /><Sh col="dir" label="Dir" /><Sh col="refPrice" label="Ref px" r /><th>Forward path</th><Sh col="last" label="Latest" r /><Sh col="maturedN" label="Matured" r /><Sh col="status" label="Status" /></tr></thead>
+          <thead><tr><Sh col="age" label="Logged" /><Sh col="age" label="Date" /><Sh col="sym" label="Symbol" /><Sh col="label" label="Source" /><Sh col="dir" label="Dir" /><Sh col="refPrice" label="Ref px" r /><Sh col="score" label="Score" r /><th>Score trend</th><th>Forward path</th><Sh col="last" label="Latest" r /><Sh col="maturedN" label="Matured" r /><Sh col="status" label="Status" /></tr></thead>
           <tbody>{pageRows.map(r => {
             const d = new Date(Date.now() - r.age * 86400000);
             const dStr = d.toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "2-digit" });
+            const sn = scoreNow(r);
             return (
             <tr key={r.id} onClick={() => onTicker && onTicker(r.sym)}>
               <td className="mono dim2">{r.age}d ago</td>
@@ -315,6 +333,8 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
               <td className="dim2">{r.label}</td>
               <td><span className={r.dir === "long" ? "up" : "dn"}>{r.dir === "long" ? "LONG" : "SHORT"}</span></td>
               <td className="r tabular dim">${r.refPrice.toFixed(2)}</td>
+              <td className="r tabular"><b>{r.score != null ? r.score : "—"}</b></td>
+              <td>{scoreSpark(r.scoreSeries) || (sn ? <span className="mono dim2" title="single reading">{sn.last}</span> : <span className="mono dim2">—</span>)}{sn && sn.last !== sn.first ? <span className={`mono ${sn.last >= sn.first ? "up" : "dn"}`} style={{ fontSize: 9, marginLeft: 4 }}>{sn.last >= sn.first ? "+" : ""}{sn.last - sn.first}</span> : null}</td>
               <td>{spark(r.path) || <span className="trk-mat-lbl mono dim2">maturing…</span>}</td>
               <td className={`r tabular ${r.last && r.last.v >= 0 ? "up" : "dn"}`}>{r.last ? <b>{trPct(r.last.v)}</b> : "—"}<span className="dim2 mono" style={{ fontSize: 9 }}> {r.last ? r.last.hz || "" : ""}</span></td>
               <td className="r tabular dim2">{r.maturedN}/{NH}</td>
