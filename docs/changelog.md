@@ -6,6 +6,19 @@ of what shipped and when, so root CLAUDE.md can stay lean.
 
 ---
 
+## 2026-06-11 — Thesis Chart RSI/MACD sub-panes: un-truncate in full mode + on by default
+
+**Bug:** In the Thesis Chart full-screen mode (`.tc-full`), the RSI(14) and MACD(12,26,9) oscillator sub-panes were truncated at the bottom of the viewport — only a sliver of MACD showed. Root cause: `.tc-full .tc-chart-card` was `flex:1` without `min-height:0`, so the card grew to fit its *content* instead of staying bounded by the viewport height. The main price pane (`.tc-lw { flex:1 }`) then absorbed nearly all that height and pushed the fixed-height sub-panes below the fold. The panes also carried the default `flex-shrink:1`, so they got squeezed when room was tight.
+
+**Fix** (`infra/prototype/bullveda/`, files `lens-thesis-chart.css` + `src/lens-thesis-chart.jsx`, bundle rebuilt into `BullVeda.html` via `node build_bullveda.cjs`):
+- `.tc-full .tc-chart-card` → added `min-height:0` so the card honors its viewport-bounded `flex:1` height.
+- Added `.tc-full .tc-osc { flex:0 0 auto }` so each oscillator pane reserves its 120px and the main chart yields room instead of shoving them off-screen.
+- `LensChart` indicator defaults flipped `rsi:false → rsi:true` and `macd:false → macd:true` so both panes render on chart open alongside the Traders Trend Dashboard.
+
+**Commit note:** these changes landed inside commit `edc17ebeb` ("FEAT: remove PRACTICE · REPLAY section from Chart tab") — a concurrent automated process committed the entire working tree at the same moment, bundling this fix under that unrelated message rather than its own. Code is correct and verified in HEAD; only the commit message doesn't reflect it. Logged here for the audit trail.
+
+---
+
 ## 2026-05-19 — Per-mode decisions (Option A) · user-agency action bar · backtest guard rail
 
 Multiple shipments in one session. Major theme: dashboard becomes a **trader's cockpit, not a gatekeeper**. The SWING / POSITION / INVEST mode toggle does real work end-to-end, and the user can BUY / SHORT / + WATCH regardless of system verdict.
