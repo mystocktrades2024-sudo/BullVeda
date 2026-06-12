@@ -72,7 +72,20 @@ function ScanList({ activeSurface, activeTicker, onTicker, widthCat, collapsed }
   // Every surface ranks by score DESCENDING (aligned with the signal scanner).
   // Null / non-finite scores sink to the bottom so they never out-rank real ones.
   const _sc = x => (x.score == null || !isFinite(x.score)) ? -1 : x.score;
-  const _byScoreDesc = (a, b) => _sc(b) - _sc(a);
+  // KILL->LABEL (2026-06-11): WEAK-edge names (realized track-record PF<1.0 in this
+  // regime) sink BELOW all non-weak names, then rank by score within each group.
+  // The signal is NEVER hidden — it just ranks last, carrying its ⚠ WEAK badge.
+  // Tier comes from the live scan row (_raw.edge_tier) via findRow.
+  const _isWeak = x => {
+    const lr = (window.__BV && window.__BV.findRow) ? window.__BV.findRow(x.sym) : null;
+    const et = (lr && lr._raw && lr._raw.edge_tier) || x.edge_tier || null;
+    return !!(et && et.tier === "WEAK");
+  };
+  const _byScoreDesc = (a, b) => {
+    const wa = _isWeak(a), wb = _isWeak(b);
+    if (wa !== wb) return wa ? 1 : -1;   // weak sinks to the bottom
+    return _sc(b) - _sc(a);              // score-descending within each group
+  };
   const items = useMemoSC(() => {
     if (activeSurface === "buy")     return WATCHLIST.filter(w => w.verdict === "BUY").sort(_byScoreDesc);
     if (activeSurface === "elite")   return WATCHLIST.filter(w => w.score >= 70).sort(_byScoreDesc);
@@ -125,6 +138,15 @@ function ScanList({ activeSurface, activeTicker, onTicker, widthCat, collapsed }
 
 function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
   const verdictTone = item.verdict === "BUY" ? "gn" : item.verdict === "AVOID" ? "rd" : "amb";
+  // KILL->LABEL / honest edge tier (2026-06-11 audit). Read from the live scan
+  // row (_raw carries the /api/universe fields). edge_tier = honest PROVEN/
+  // DEVELOPING/WEAK/UNPROVEN badge from the realized track record; edge_warning =
+  // weak-setup chip for a signal that WOULD have been score-killed but is kept
+  // visible. Informational only — the BUY stays clickable regardless.
+  const _liveRow = (window.__BV && window.__BV.findRow) ? window.__BV.findRow(item.sym) : null;
+  const _edge = (_liveRow && _liveRow._raw && _liveRow._raw.edge_tier) || item.edge_tier || null;
+  const _warn = (_liveRow && _liveRow._raw && _liveRow._raw.edge_warning) || item.edge_warning || null;
+  const _edgeVar = { good: "gn", neutral: "info", muted: "dim2", warn: "rd" };
   if (collapsed) {
     // thin rail mode — just symbol + chg
     return (
@@ -170,6 +192,13 @@ function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
         <div className="sc-row-foot">
           <Pill tone={verdictTone} small>{window.biasRead ? window.biasRead(item).label : (window.secBias ? window.secBias(item.verdict) : item.verdict)}</Pill>
           <span className="sc-row-setup mono dim">{item.setup}</span>
+          {_edge && (
+            <span className="mono" title={_edge.label}
+              style={{ fontSize: "9.5px", fontWeight: 700, letterSpacing: ".04em",
+                       color: `var(--${_edgeVar[_edge.tone] || "dim2"})` }}>
+              {_edge.icon} {_edge.tier}
+            </span>
+          )}
         </div>
       )}
       {(widthCat === "M" || widthCat === "L" || widthCat === "XL") && (() => {
@@ -182,6 +211,12 @@ function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
             <span className="sc-chip" title="distance to breakout pivot"><span className="sc-chip-k">PIV</span><b className={isFinite(s.toPivot) && Math.abs(s.toPivot) <= 1 ? "up" : "dim2"}>{isFinite(s.toPivot) ? (s.toPivot >= 0 ? "+" : "") + s.toPivot + "%" : "—"}</b></span>
             {s.insider !== 0 && <span className={`sc-flowdot sc-flowdot--${s.insider > 0 ? "buy" : "sell"}`} title={`insider net ${s.insider > 0 ? "buying" : "selling"} (90d)`}>{s.insider > 0 ? "▲" : "▼"}</span>}
             {s.erDays <= 7 && <span className="sc-chip sc-chip--er" title={`earnings in ${s.erDays} sessions`}>⚡ ER {s.erDays}d</span>}
+            {_warn && _warn.label && (
+              <span className="sc-chip" title={_warn.note || _warn.source || _warn.label}
+                style={{ color: "var(--rd)" }}>
+                <b>{_warn.label}</b>
+              </span>
+            )}
           </div>
         );
       })()}

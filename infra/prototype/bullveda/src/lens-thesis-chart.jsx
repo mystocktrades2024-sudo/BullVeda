@@ -283,7 +283,7 @@ function LensChart({ ticker, mode }) {
   React.useEffect(() => { if (!tfTouched) setTf(modeTf); }, [modeTf]);
   const [full, setFull] = useTCs(false);
   const [indMenu, setIndMenu] = useTCs(false);
-  const [ind, setInd] = useTCs({ ema:false, bb:false, avwap:false, ichi:false, smc:false, smcLux:false, vp:false, fvgLux:false, rsi:false, macd:false, ttd:true, stv:false });
+  const [ind, setInd] = useTCs({ ema:false, bb:false, avwap:false, ichi:false, smc:false, smcLux:false, vp:false, fvgLux:false, rsi:true, macd:true, ttd:true, stv:false });
   const togInd = (k) => setInd(s => ({ ...s, [k]: !s[k] }));
   const [smcSub, setSmcSub] = useTCs(SMC_SUB_DEFAULT);
   const togSub = (k) => setSmcSub(s => ({ ...s, [k]: !s[k] }));
@@ -375,8 +375,6 @@ function LensChart({ ticker, mode }) {
         </div>}
         <NewsFlags news={news} bars={d ? d.bars : null} />
       </div>
-
-      {!full && <ReplayPractice ticker={ticker} />}
 
       {!full && d && <div className="lens-call">
         <span className="label-cap">The Read · Chart · {tf}</span>
@@ -775,119 +773,4 @@ function LWChart({ d, ind, smcSub, full }) {
     </>
   );
 }
-// ─── Replay / Practice mode — step historical bars, place paper entries ──
-function ReplayPractice({ ticker }) {
-  // REAL historical daily bars — step through actual price action, not a seeded curve
-  const raw = useCandles(ticker.symbol, "1D");
-  const bars = useTC(() => (raw && raw.length >= 40)
-    ? raw.slice(-90).map(b => ({ o: b.open, h: b.high, l: b.low, c: b.close }))
-    : null, [raw]);
-
-  const START = 28;
-  const [idx, setIdx] = useTCs(START);
-  const [playing, setPlaying] = useTCs(false);
-  const [entry, setEntry] = useTCs(null);     // { price, i }
-  const [trades, setTrades] = useTCs([]);
-  const nBars = bars ? bars.length : 0;
-  const atEnd = idx >= nBars - 1;
-
-  React.useEffect(() => {
-    if (!playing || !nBars) return;
-    const t = setInterval(() => setIdx(i => (i >= nBars - 1 ? i : i + 1)), 650);
-    return () => clearInterval(t);
-  }, [playing, nBars]);
-  React.useEffect(() => { if (atEnd) setPlaying(false); }, [atEnd]);
-
-  if (!bars || !bars.length) return (
-    <div className="rp"><div className="rp-head"><div className="rp-head-l"><span className="rp-tag mono">PRACTICE · REPLAY</span><span className="rp-sub mono dim2">loading real historical bars…</span></div></div></div>
-  );
-  const cur = bars[Math.min(idx, bars.length - 1)];
-  const livePct = entry ? (cur.c - entry.price) / entry.price * 100 : null;
-  const buy = () => setEntry({ price: cur.c, i: idx });
-  const sell = () => {
-    if (!entry) return;
-    const pct = (cur.c - entry.price) / entry.price * 100;
-    setTrades(t => [{ entry: entry.price, exit: cur.c, pct: +pct.toFixed(2), held: idx - entry.i, win: pct >= 0 }, ...t].slice(0, 8));
-    setEntry(null);
-  };
-  const reset = () => { setIdx(START); setEntry(null); setPlaying(false); setTrades([]); };
-  const step = (d) => { setPlaying(false); setIdx(i => Math.max(START, Math.min(bars.length - 1, i + d))); };
-
-  // chart geometry — full width reserved, reveal up to idx
-  const W = 760, H = 196, padL = 8, padR = 46, padT = 10, padB = 8;
-  const vis = bars.slice(0, idx + 1);
-  const lo = Math.min(...vis.map(b => b.l)), hi = Math.max(...vis.map(b => b.h));
-  const x = i => padL + (i / (bars.length - 1)) * (W - padL - padR);
-  const y = v => padT + (1 - (v - lo) / ((hi - lo) || 1)) * (H - padT - padB);
-  const bw = Math.max(2, (W - padL - padR) / bars.length * 0.62);
-
-  const wins = trades.filter(t => t.win).length;
-  const avg = trades.length ? trades.reduce((a, t) => a + t.pct, 0) / trades.length : 0;
-
-  return (
-    <div className="rp">
-      <div className="rp-head">
-        <div className="rp-head-l">
-          <span className="rp-tag mono">PRACTICE · REPLAY</span>
-          <span className="rp-sub mono dim2">step the bars · place paper entries · see how they'd have worked — no live money</span>
-        </div>
-        <div className="rp-stats mono">
-          <span>Bar <b>{idx - START + 1}</b>/<b>{bars.length - START}</b></span>
-          {trades.length > 0 && <><span className="rp-sep">·</span><span>{wins}/{trades.length} wins</span><span className="rp-sep">·</span><span className={avg >= 0 ? "up" : "dn"}>avg {avg >= 0 ? "+" : ""}{avg.toFixed(2)}%</span></>}
-        </div>
-      </div>
-
-      <div className="rp-chart">
-        <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" className="rp-svg">
-          {entry && <line x1={padL} y1={y(entry.price)} x2={W - padR} y2={y(entry.price)} stroke="var(--copper)" strokeDasharray="3 3" opacity="0.8" />}
-          {entry && <text x={W - padR + 3} y={y(entry.price) + 3} fontSize="9" className="mono" fill="var(--copper)">entry ${entry.price.toFixed(2)}</text>}
-          {vis.map((b, i) => {
-            const up = b.c >= b.o;
-            const col = up ? "var(--gn)" : "var(--rd)";
-            return (
-              <g key={i}>
-                <line x1={x(i)} y1={y(b.h)} x2={x(i)} y2={y(b.l)} stroke={col} strokeWidth="1" opacity="0.85" />
-                <rect x={x(i) - bw / 2} y={y(Math.max(b.o, b.c))} width={bw} height={Math.max(1, Math.abs(y(b.o) - y(b.c)))} fill={col} opacity="0.9" />
-              </g>
-            );
-          })}
-          {/* current price marker */}
-          <line x1={padL} y1={y(cur.c)} x2={x(idx)} y2={y(cur.c)} stroke="var(--ink-3)" strokeDasharray="1 4" opacity="0.5" />
-          <text x={W - padR + 3} y={y(cur.c) + 3} fontSize="9.5" className="mono" fill="var(--ink-1)" fontWeight="700">${cur.c.toFixed(2)}</text>
-        </svg>
-      </div>
-
-      <div className="rp-bar">
-        <div className="rp-ctrls">
-          <button className="rp-btn" onClick={reset} title="Reset">⏮</button>
-          <button className="rp-btn" onClick={() => step(-1)} disabled={idx <= START} title="Back">◀</button>
-          <button className="rp-btn rp-btn--play" onClick={() => setPlaying(p => !p)} disabled={atEnd}>{playing ? "⏸ Pause" : "▶ Play"}</button>
-          <button className="rp-btn" onClick={() => step(1)} disabled={atEnd} title="Forward">▶▮</button>
-        </div>
-        <div className="rp-trade">
-          {entry ? (
-            <>
-              <span className={`rp-live mono ${livePct >= 0 ? "up" : "dn"}`}>{livePct >= 0 ? "+" : ""}{livePct.toFixed(2)}% <span className="dim2">open</span></span>
-              <button className="rp-act rp-act--sell" onClick={sell}>Sell at ${cur.c.toFixed(2)}</button>
-            </>
-          ) : (
-            <button className="rp-act rp-act--buy" onClick={buy} disabled={atEnd}>Buy at ${cur.c.toFixed(2)}</button>
-          )}
-        </div>
-      </div>
-
-      {trades.length > 0 && (
-        <div className="rp-log mono">
-          {trades.map((t, i) => (
-            <span key={i} className={`rp-log-row ${t.win ? "up" : "dn"}`}>
-              ${t.entry.toFixed(2)}→${t.exit.toFixed(2)} <b>{t.pct >= 0 ? "+" : ""}{t.pct}%</b> <span className="dim2">{t.held}b</span>
-            </span>
-          ))}
-        </div>
-      )}
-      <div className="rp-foot mono dim2">Practice only — hindsight on past bars to build pattern-reading skill. Not advice; results don't predict the future.</div>
-    </div>
-  );
-}
-
 window.LensChart = LensChart;

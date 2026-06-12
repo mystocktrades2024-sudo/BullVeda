@@ -194,6 +194,17 @@
       score: Math.round(score), verdict: verdict, setup: r.setup_type || r.setup || "",
       // two-axis verdict (2026-06-10): orthogonal direction vs action
       bias: r.bias || null, action: r.action || null, reasonClass: r.reason_class || null,
+      // Per-mode directional bias (2026-06-11) — lets the scanner's "Directional bias"
+      // side toggle stay consistent with the home SCAN FUNNEL (which counts per-mode
+      // bias). Without this the funnel said "263 bullish" but clicking it filtered by
+      // the macro-gated verdict (1 BUY on a CPI day) → blank scanner.
+      biasByMode: (function () {
+        var d = r.decisions_by_mode || {}, o = {};
+        ["swing", "position", "investment"].forEach(function (k) {
+          if (d[k] && d[k].bias) o[k] = String(d[k].bias).toLowerCase();
+        });
+        return o;
+      })(),
       tfsn: tfsn, tfsnScore: tfsn.reduce(function (a, b) { return a + b; }, 0),
       mtf: mtf, mtfUp: mtf.filter(function (m) { return m === "up"; }).length,
       sigCount: signals.length, signals: signals,

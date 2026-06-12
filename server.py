@@ -3723,6 +3723,11 @@ async def universe_api(limit: int = 0):
             "setup_type": ((ctp.get("setup") or {}).get("setup_type")
                            or (r.get("trade_plan") or {}).get("setup_type")),
             "catalyst_tier": r.get("catalyst_tier"), "entry_quality": r.get("entry_quality"),
+            # KILL->LABEL / honest edge tier (2026-06-11 audit). edge_tier =
+            # {tier,label,icon,tone,sort_rank,pf,n,...} from realized track record
+            # (PROVEN/DEVELOPING/WEAK/UNPROVEN); edge_warning = weak-setup chip for a
+            # signal that WOULD have been score-killed but is now kept visible.
+            "edge_tier": r.get("edge_tier"), "edge_warning": r.get("edge_warning"),
             "price": r.get("price"), "pct_chg": r.get("perf_1d"),
             "rr": rr, "stop": stop, "entry_lo": elo, "t1": t1, "t2": t2, "t3": t3,
             "rvol": r.get("rvol"), "rs_rank": r.get("rs_rank"), "rsi": r.get("rsi"),

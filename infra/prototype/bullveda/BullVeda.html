@@ -5921,8 +5921,11 @@ body {
 .rp-foot { font-size:9.5px; padding-top:5px; border-top:1px solid var(--glass-line); }
 
 .tc-full { position:fixed; inset:0; z-index:9000; background:var(--bg); padding:14px 18px; overflow-y:auto; }
-.tc-full .tc-chart-card { flex:1; display:flex; flex-direction:column; }
+.tc-full .tc-chart-card { flex:1; min-height:0; display:flex; flex-direction:column; }
 .tc-full .tc-svg { flex:1; min-height:0; height:auto; }
+/* In full mode keep the oscillator sub-panes at a fixed reserved height so the
+   main price pane (flex:1) yields room for them instead of pushing them off-screen. */
+.tc-full .tc-osc { flex:0 0 auto; }
 .tc-ind-wrap { position:relative; display:inline-block; }
 .tc-ind-btn.is-open { background:color-mix(in oklab,var(--copper) 18%,transparent); border-color:color-mix(in oklab,var(--copper) 40%,transparent); color:var(--copper); }
 .tc-ind-menu { position:absolute; top:calc(100% + 4px); right:0; z-index:50; min-width:170px; background:var(--bg-1); border:1px solid var(--line-2); border-radius:var(--r-2); padding:5px; display:flex; flex-direction:column; gap:2px; box-shadow:0 18px 40px -12px rgba(0,0,0,0.6); }
@@ -11136,6 +11139,17 @@ body.light .trk-date-input { color-scheme: light; }
       score: Math.round(score), verdict: verdict, setup: r.setup_type || r.setup || "",
       // two-axis verdict (2026-06-10): orthogonal direction vs action
       bias: r.bias || null, action: r.action || null, reasonClass: r.reason_class || null,
+      // Per-mode directional bias (2026-06-11) — lets the scanner's "Directional bias"
+      // side toggle stay consistent with the home SCAN FUNNEL (which counts per-mode
+      // bias). Without this the funnel said "263 bullish" but clicking it filtered by
+      // the macro-gated verdict (1 BUY on a CPI day) → blank scanner.
+      biasByMode: (function () {
+        var d = r.decisions_by_mode || {}, o = {};
+        ["swing", "position", "investment"].forEach(function (k) {
+          if (d[k] && d[k].bias) o[k] = String(d[k].bias).toLowerCase();
+        });
+        return o;
+      })(),
       tfsn: tfsn, tfsnScore: tfsn.reduce(function (a, b) { return a + b; }, 0),
       mtf: mtf, mtfUp: mtf.filter(function (m) { return m === "up"; }).length,
       sigCount: signals.length, signals: signals,
@@ -21373,7 +21387,7 @@ function LensChart({ ticker, mode }) {
   }, [modeTf]);
   const [full, setFull] = useTCs(false);
   const [indMenu, setIndMenu] = useTCs(false);
-  const [ind, setInd] = useTCs({ ema: false, bb: false, avwap: false, ichi: false, smc: false, smcLux: false, vp: false, fvgLux: false, rsi: false, macd: false, ttd: true, stv: false });
+  const [ind, setInd] = useTCs({ ema: false, bb: false, avwap: false, ichi: false, smc: false, smcLux: false, vp: false, fvgLux: false, rsi: true, macd: true, ttd: true, stv: false });
   const togInd = (k) => setInd((s) => ({ ...s, [k]: !s[k] }));
   const [smcSub, setSmcSub] = useTCs(SMC_SUB_DEFAULT);
   const togSub = (k) => setSmcSub((s) => ({ ...s, [k]: !s[k] }));
@@ -21406,7 +21420,7 @@ function LensChart({ ticker, mode }) {
       }
     },
     l
-  ))), /* @__PURE__ */ React.createElement("div", { className: "tc-chart-card", style: { position: "relative" } }, loading ? /* @__PURE__ */ React.createElement("div", { className: "tc-lw", style: { display: "flex", alignItems: "center", justifyContent: "center" } }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "loading real ", tf, " candles\u2026")) : failed || !d ? /* @__PURE__ */ React.createElement("div", { className: "tc-lw", style: { display: "flex", alignItems: "center", justifyContent: "center" } }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "No ", tf, " candles available for ", ticker.symbol, ".")) : /* @__PURE__ */ React.createElement(LWChart, { d, ind, smcSub, full }), /* @__PURE__ */ React.createElement(TrendDash, { mtf, show: ind.ttd, ema1: 50 }), d && /* @__PURE__ */ React.createElement("div", { className: "tc-legend mono" }, /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw tc-sw--cop" }), d.validPlan ? "entry" : "~entry", " $", d.entry), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw tc-sw--rd" }), "stop $", d.stop), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw tc-sw--gn" }), "T1 $", d.t1, " \xB7 T2 $", d.t2), ind.ema && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--cy)" } }), "EMA 9/21/50"), ind.bb && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--blue)" } }), "Bollinger"), ind.avwap && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--amb)" } }), "aVWAP"), ind.ichi && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "#43A047" } }), "Ichimoku \xB7 cloud + lagging span"), ind.smc && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--blue)" } }), "SMC \xB7 BOS/CHoCH/OB"), ind.smcLux && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--blue)" } }), "SMC \xB7 LuxAlgo \xB7 BOS/CHoCH \xB7 OB \xB7 FVG \xB7 EQH/EQL"), ind.vp && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw tc-sw--cop" }), "POC ", /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--cy)" } }), "value area \xB7 volume profile"), ind.fvgLux && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "#089981" } }), "FVG \xB7 LuxAlgo (extend + mitigation)"), ind.stv && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "#22c55e" } }), "Super Trend V \xB7 Buy/Sell + TP"), ind.rsi && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "#7E57C2" } }), "RSI 14 \xB7 pane"), ind.macd && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "#2962FF" } }), "MACD 12/26/9 \xB7 pane"), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "drag to pan \xB7 scroll to zoom \xB7 hover for OHLC")), /* @__PURE__ */ React.createElement(NewsFlags, { news, bars: d ? d.bars : null })), !full && /* @__PURE__ */ React.createElement(ReplayPractice, { ticker }), !full && d && /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 Chart \xB7 ", tf), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", { className: `kpi-tone--${tone3(tfx.tone)}` }, tfx.bias), " on ", tf, " \u2014 ", tfx.read, " ", d.validPlan ? /* @__PURE__ */ React.createElement(React.Fragment, null, "Plan: entry ", /* @__PURE__ */ React.createElement("b", { className: "cy" }, "$", d.entry), ", stop ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "$", d.stop), ", targets ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "$", d.t1, "/$", d.t2), ".") : /* @__PURE__ */ React.createElement(React.Fragment, null, "No active scan trade-plan \u2014 levels shown are price-estimates."))));
+  ))), /* @__PURE__ */ React.createElement("div", { className: "tc-chart-card", style: { position: "relative" } }, loading ? /* @__PURE__ */ React.createElement("div", { className: "tc-lw", style: { display: "flex", alignItems: "center", justifyContent: "center" } }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "loading real ", tf, " candles\u2026")) : failed || !d ? /* @__PURE__ */ React.createElement("div", { className: "tc-lw", style: { display: "flex", alignItems: "center", justifyContent: "center" } }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "No ", tf, " candles available for ", ticker.symbol, ".")) : /* @__PURE__ */ React.createElement(LWChart, { d, ind, smcSub, full }), /* @__PURE__ */ React.createElement(TrendDash, { mtf, show: ind.ttd, ema1: 50 }), d && /* @__PURE__ */ React.createElement("div", { className: "tc-legend mono" }, /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw tc-sw--cop" }), d.validPlan ? "entry" : "~entry", " $", d.entry), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw tc-sw--rd" }), "stop $", d.stop), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw tc-sw--gn" }), "T1 $", d.t1, " \xB7 T2 $", d.t2), ind.ema && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--cy)" } }), "EMA 9/21/50"), ind.bb && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--blue)" } }), "Bollinger"), ind.avwap && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--amb)" } }), "aVWAP"), ind.ichi && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "#43A047" } }), "Ichimoku \xB7 cloud + lagging span"), ind.smc && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--blue)" } }), "SMC \xB7 BOS/CHoCH/OB"), ind.smcLux && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--blue)" } }), "SMC \xB7 LuxAlgo \xB7 BOS/CHoCH \xB7 OB \xB7 FVG \xB7 EQH/EQL"), ind.vp && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw tc-sw--cop" }), "POC ", /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "var(--cy)" } }), "value area \xB7 volume profile"), ind.fvgLux && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "#089981" } }), "FVG \xB7 LuxAlgo (extend + mitigation)"), ind.stv && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "#22c55e" } }), "Super Trend V \xB7 Buy/Sell + TP"), ind.rsi && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "#7E57C2" } }), "RSI 14 \xB7 pane"), ind.macd && /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "tc-sw", style: { background: "#2962FF" } }), "MACD 12/26/9 \xB7 pane"), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "drag to pan \xB7 scroll to zoom \xB7 hover for OHLC")), /* @__PURE__ */ React.createElement(NewsFlags, { news, bars: d ? d.bars : null })), !full && d && /* @__PURE__ */ React.createElement("div", { className: "lens-call" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap" }, "The Read \xB7 Chart \xB7 ", tf), /* @__PURE__ */ React.createElement("span", { className: "mono" }, /* @__PURE__ */ React.createElement("b", { className: `kpi-tone--${tone3(tfx.tone)}` }, tfx.bias), " on ", tf, " \u2014 ", tfx.read, " ", d.validPlan ? /* @__PURE__ */ React.createElement(React.Fragment, null, "Plan: entry ", /* @__PURE__ */ React.createElement("b", { className: "cy" }, "$", d.entry), ", stop ", /* @__PURE__ */ React.createElement("b", { className: "dn" }, "$", d.stop), ", targets ", /* @__PURE__ */ React.createElement("b", { className: "up" }, "$", d.t1, "/$", d.t2), ".") : /* @__PURE__ */ React.createElement(React.Fragment, null, "No active scan trade-plan \u2014 levels shown are price-estimates."))));
 }
 function TrendDash({ mtf, show }) {
   if (!show) return null;
@@ -21943,58 +21957,6 @@ function LWChart({ d, ind, smcSub, full }) {
     };
   }, [d, ind.macd, full]);
   return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { ref: wrap, className: "tc-lw" }), ind.macd && /* @__PURE__ */ React.createElement("div", { ref: macdWrap, className: "tc-osc", style: { width: "100%", height: 120, position: "relative", borderTop: "1px solid var(--glass-line)", marginTop: 2 } }), ind.rsi && /* @__PURE__ */ React.createElement("div", { ref: rsiWrap, className: "tc-osc", style: { width: "100%", height: 120, position: "relative", borderTop: "1px solid var(--glass-line)", marginTop: 2 } }));
-}
-function ReplayPractice({ ticker }) {
-  const raw = useCandles(ticker.symbol, "1D");
-  const bars = useTC(() => raw && raw.length >= 40 ? raw.slice(-90).map((b) => ({ o: b.open, h: b.high, l: b.low, c: b.close })) : null, [raw]);
-  const START = 28;
-  const [idx, setIdx] = useTCs(START);
-  const [playing, setPlaying] = useTCs(false);
-  const [entry, setEntry] = useTCs(null);
-  const [trades, setTrades] = useTCs([]);
-  const nBars = bars ? bars.length : 0;
-  const atEnd = idx >= nBars - 1;
-  React.useEffect(() => {
-    if (!playing || !nBars) return;
-    const t = setInterval(() => setIdx((i) => i >= nBars - 1 ? i : i + 1), 650);
-    return () => clearInterval(t);
-  }, [playing, nBars]);
-  React.useEffect(() => {
-    if (atEnd) setPlaying(false);
-  }, [atEnd]);
-  if (!bars || !bars.length) return /* @__PURE__ */ React.createElement("div", { className: "rp" }, /* @__PURE__ */ React.createElement("div", { className: "rp-head" }, /* @__PURE__ */ React.createElement("div", { className: "rp-head-l" }, /* @__PURE__ */ React.createElement("span", { className: "rp-tag mono" }, "PRACTICE \xB7 REPLAY"), /* @__PURE__ */ React.createElement("span", { className: "rp-sub mono dim2" }, "loading real historical bars\u2026"))));
-  const cur = bars[Math.min(idx, bars.length - 1)];
-  const livePct = entry ? (cur.c - entry.price) / entry.price * 100 : null;
-  const buy = () => setEntry({ price: cur.c, i: idx });
-  const sell = () => {
-    if (!entry) return;
-    const pct = (cur.c - entry.price) / entry.price * 100;
-    setTrades((t) => [{ entry: entry.price, exit: cur.c, pct: +pct.toFixed(2), held: idx - entry.i, win: pct >= 0 }, ...t].slice(0, 8));
-    setEntry(null);
-  };
-  const reset = () => {
-    setIdx(START);
-    setEntry(null);
-    setPlaying(false);
-    setTrades([]);
-  };
-  const step = (d) => {
-    setPlaying(false);
-    setIdx((i) => Math.max(START, Math.min(bars.length - 1, i + d)));
-  };
-  const W = 760, H = 196, padL = 8, padR = 46, padT = 10, padB = 8;
-  const vis = bars.slice(0, idx + 1);
-  const lo = Math.min(...vis.map((b) => b.l)), hi = Math.max(...vis.map((b) => b.h));
-  const x = (i) => padL + i / (bars.length - 1) * (W - padL - padR);
-  const y = (v) => padT + (1 - (v - lo) / (hi - lo || 1)) * (H - padT - padB);
-  const bw = Math.max(2, (W - padL - padR) / bars.length * 0.62);
-  const wins = trades.filter((t) => t.win).length;
-  const avg = trades.length ? trades.reduce((a, t) => a + t.pct, 0) / trades.length : 0;
-  return /* @__PURE__ */ React.createElement("div", { className: "rp" }, /* @__PURE__ */ React.createElement("div", { className: "rp-head" }, /* @__PURE__ */ React.createElement("div", { className: "rp-head-l" }, /* @__PURE__ */ React.createElement("span", { className: "rp-tag mono" }, "PRACTICE \xB7 REPLAY"), /* @__PURE__ */ React.createElement("span", { className: "rp-sub mono dim2" }, "step the bars \xB7 place paper entries \xB7 see how they'd have worked \u2014 no live money")), /* @__PURE__ */ React.createElement("div", { className: "rp-stats mono" }, /* @__PURE__ */ React.createElement("span", null, "Bar ", /* @__PURE__ */ React.createElement("b", null, idx - START + 1), "/", /* @__PURE__ */ React.createElement("b", null, bars.length - START)), trades.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "rp-sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", null, wins, "/", trades.length, " wins"), /* @__PURE__ */ React.createElement("span", { className: "rp-sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: avg >= 0 ? "up" : "dn" }, "avg ", avg >= 0 ? "+" : "", avg.toFixed(2), "%")))), /* @__PURE__ */ React.createElement("div", { className: "rp-chart" }, /* @__PURE__ */ React.createElement("svg", { width: "100%", height: H, viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "xMidYMid meet", className: "rp-svg" }, entry && /* @__PURE__ */ React.createElement("line", { x1: padL, y1: y(entry.price), x2: W - padR, y2: y(entry.price), stroke: "var(--copper)", strokeDasharray: "3 3", opacity: "0.8" }), entry && /* @__PURE__ */ React.createElement("text", { x: W - padR + 3, y: y(entry.price) + 3, fontSize: "9", className: "mono", fill: "var(--copper)" }, "entry $", entry.price.toFixed(2)), vis.map((b, i) => {
-    const up = b.c >= b.o;
-    const col = up ? "var(--gn)" : "var(--rd)";
-    return /* @__PURE__ */ React.createElement("g", { key: i }, /* @__PURE__ */ React.createElement("line", { x1: x(i), y1: y(b.h), x2: x(i), y2: y(b.l), stroke: col, strokeWidth: "1", opacity: "0.85" }), /* @__PURE__ */ React.createElement("rect", { x: x(i) - bw / 2, y: y(Math.max(b.o, b.c)), width: bw, height: Math.max(1, Math.abs(y(b.o) - y(b.c))), fill: col, opacity: "0.9" }));
-  }), /* @__PURE__ */ React.createElement("line", { x1: padL, y1: y(cur.c), x2: x(idx), y2: y(cur.c), stroke: "var(--ink-3)", strokeDasharray: "1 4", opacity: "0.5" }), /* @__PURE__ */ React.createElement("text", { x: W - padR + 3, y: y(cur.c) + 3, fontSize: "9.5", className: "mono", fill: "var(--ink-1)", fontWeight: "700" }, "$", cur.c.toFixed(2)))), /* @__PURE__ */ React.createElement("div", { className: "rp-bar" }, /* @__PURE__ */ React.createElement("div", { className: "rp-ctrls" }, /* @__PURE__ */ React.createElement("button", { className: "rp-btn", onClick: reset, title: "Reset" }, "\u23EE"), /* @__PURE__ */ React.createElement("button", { className: "rp-btn", onClick: () => step(-1), disabled: idx <= START, title: "Back" }, "\u25C0"), /* @__PURE__ */ React.createElement("button", { className: "rp-btn rp-btn--play", onClick: () => setPlaying((p) => !p), disabled: atEnd }, playing ? "\u23F8 Pause" : "\u25B6 Play"), /* @__PURE__ */ React.createElement("button", { className: "rp-btn", onClick: () => step(1), disabled: atEnd, title: "Forward" }, "\u25B6\u25AE")), /* @__PURE__ */ React.createElement("div", { className: "rp-trade" }, entry ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: `rp-live mono ${livePct >= 0 ? "up" : "dn"}` }, livePct >= 0 ? "+" : "", livePct.toFixed(2), "% ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "open")), /* @__PURE__ */ React.createElement("button", { className: "rp-act rp-act--sell", onClick: sell }, "Sell at $", cur.c.toFixed(2))) : /* @__PURE__ */ React.createElement("button", { className: "rp-act rp-act--buy", onClick: buy, disabled: atEnd }, "Buy at $", cur.c.toFixed(2)))), trades.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "rp-log mono" }, trades.map((t, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: `rp-log-row ${t.win ? "up" : "dn"}` }, "$", t.entry.toFixed(2), "\u2192$", t.exit.toFixed(2), " ", /* @__PURE__ */ React.createElement("b", null, t.pct >= 0 ? "+" : "", t.pct, "%"), " ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, t.held, "b")))), /* @__PURE__ */ React.createElement("div", { className: "rp-foot mono dim2" }, "Practice only \u2014 hindsight on past bars to build pattern-reading skill. Not advice; results don't predict the future."));
 }
 window.LensChart = LensChart;
 </script>
@@ -28610,7 +28572,16 @@ function ScanColumn({
 }
 function ScanList({ activeSurface, activeTicker, onTicker, widthCat, collapsed }) {
   const _sc = (x) => x.score == null || !isFinite(x.score) ? -1 : x.score;
-  const _byScoreDesc = (a, b) => _sc(b) - _sc(a);
+  const _isWeak = (x) => {
+    const lr = window.__BV && window.__BV.findRow ? window.__BV.findRow(x.sym) : null;
+    const et = lr && lr._raw && lr._raw.edge_tier || x.edge_tier || null;
+    return !!(et && et.tier === "WEAK");
+  };
+  const _byScoreDesc = (a, b) => {
+    const wa = _isWeak(a), wb = _isWeak(b);
+    if (wa !== wb) return wa ? 1 : -1;
+    return _sc(b) - _sc(a);
+  };
   const items = useMemoSC(() => {
     if (activeSurface === "buy") return WATCHLIST.filter((w) => w.verdict === "BUY").sort(_byScoreDesc);
     if (activeSurface === "elite") return WATCHLIST.filter((w) => w.score >= 70).sort(_byScoreDesc);
@@ -28647,6 +28618,10 @@ function ScanList({ activeSurface, activeTicker, onTicker, widthCat, collapsed }
 }
 function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
   const verdictTone = item.verdict === "BUY" ? "gn" : item.verdict === "AVOID" ? "rd" : "amb";
+  const _liveRow = window.__BV && window.__BV.findRow ? window.__BV.findRow(item.sym) : null;
+  const _edge = _liveRow && _liveRow._raw && _liveRow._raw.edge_tier || item.edge_tier || null;
+  const _warn = _liveRow && _liveRow._raw && _liveRow._raw.edge_warning || item.edge_warning || null;
+  const _edgeVar = { good: "gn", neutral: "info", muted: "dim2", warn: "rd" };
   if (collapsed) {
     return /* @__PURE__ */ React.createElement(
       "button",
@@ -28668,10 +28643,33 @@ function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
     /* @__PURE__ */ React.createElement("div", { className: "sc-row-head" }, /* @__PURE__ */ React.createElement("span", { className: "sc-row-rank mono dim" }, String(rank).padStart(2, "0")), /* @__PURE__ */ React.createElement("span", { className: `sc-row-sym mono ${active ? "copper" : ""}` }, /* @__PURE__ */ React.createElement("b", null, item.sym)), /* @__PURE__ */ React.createElement("span", { className: `sc-row-chg mono ${item.chg >= 0 ? "up" : "dn"}` }, item.chg == null || !isFinite(item.chg) ? "\u2014" : (item.chg >= 0 ? "+" : "") + item.chg.toFixed(2) + "%"), /* @__PURE__ */ React.createElement("span", { className: "sc-row-score mono" }, /* @__PURE__ */ React.createElement("b", null, item.score == null || !isFinite(item.score) ? "\u2014" : item.score))),
     (widthCat === "L" || widthCat === "XL" || widthCat === "M") && /* @__PURE__ */ React.createElement("div", { className: "sc-row-meta" }, /* @__PURE__ */ React.createElement("span", { className: "sc-row-name dim" }, item.name), (widthCat === "L" || widthCat === "XL") && /* @__PURE__ */ React.createElement("span", { className: "sc-row-px mono dim2" }, item.price != null && isFinite(item.price) && item.price > 0 ? "$" + item.price.toFixed(2) : "\u2014")),
     (widthCat === "M" || widthCat === "L" || widthCat === "XL") && /* @__PURE__ */ React.createElement("div", { className: "sc-conv", title: `conviction ${item.score == null ? "\u2014" : item.score}/100` }, /* @__PURE__ */ React.createElement("span", { className: "sc-conv-fill", style: { width: `${item.score == null || !isFinite(item.score) ? 0 : Math.max(0, Math.min(100, item.score))}%`, background: `var(--${(item.score || 0) >= 66 ? "gn" : (item.score || 0) >= 50 ? "amb" : "rd"})` } })),
-    (widthCat === "L" || widthCat === "XL") && /* @__PURE__ */ React.createElement("div", { className: "sc-row-foot" }, /* @__PURE__ */ React.createElement(Pill, { tone: verdictTone, small: true }, window.biasRead ? window.biasRead(item).label : window.secBias ? window.secBias(item.verdict) : item.verdict), /* @__PURE__ */ React.createElement("span", { className: "sc-row-setup mono dim" }, item.setup)),
+    (widthCat === "L" || widthCat === "XL") && /* @__PURE__ */ React.createElement("div", { className: "sc-row-foot" }, /* @__PURE__ */ React.createElement(Pill, { tone: verdictTone, small: true }, window.biasRead ? window.biasRead(item).label : window.secBias ? window.secBias(item.verdict) : item.verdict), /* @__PURE__ */ React.createElement("span", { className: "sc-row-setup mono dim" }, item.setup), _edge && /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        className: "mono",
+        title: _edge.label,
+        style: {
+          fontSize: "9.5px",
+          fontWeight: 700,
+          letterSpacing: ".04em",
+          color: `var(--${_edgeVar[_edge.tone] || "dim2"})`
+        }
+      },
+      _edge.icon,
+      " ",
+      _edge.tier
+    )),
     (widthCat === "M" || widthCat === "L" || widthCat === "XL") && (() => {
       const s = scanSignals(item);
-      return /* @__PURE__ */ React.createElement("div", { className: "sc-row-chips" }, /* @__PURE__ */ React.createElement("span", { className: "sc-chip", title: "relative volume vs 20-day avg" }, /* @__PURE__ */ React.createElement("span", { className: "sc-chip-k" }, "RVOL"), /* @__PURE__ */ React.createElement("b", { className: isFinite(s.rvol) && s.rvol >= 1.5 ? "up" : "dim2" }, isFinite(s.rvol) ? s.rvol.toFixed(1) + "\xD7" : "\u2014")), /* @__PURE__ */ React.createElement("span", { className: "sc-chip", title: "ML model P(up) over swing horizon" }, /* @__PURE__ */ React.createElement("span", { className: "sc-chip-k" }, "P\u2191"), /* @__PURE__ */ React.createElement("b", { className: s.pUp == null ? "dim2" : `kpi-tone--${s.pUp >= 60 ? "gn" : s.pUp >= 45 ? "amb" : "rd"}` }, s.pUp == null ? "\u2014" : s.pUp + "%")), /* @__PURE__ */ React.createElement("span", { className: "sc-chip", title: "reward:risk to T1" }, /* @__PURE__ */ React.createElement("span", { className: "sc-chip-k" }, "R:R"), /* @__PURE__ */ React.createElement("b", { className: isFinite(s.rr) && s.rr >= 2 ? "up" : "dim2" }, isFinite(s.rr) ? s.rr.toFixed(1) : "\u2014")), /* @__PURE__ */ React.createElement("span", { className: "sc-chip", title: "distance to breakout pivot" }, /* @__PURE__ */ React.createElement("span", { className: "sc-chip-k" }, "PIV"), /* @__PURE__ */ React.createElement("b", { className: isFinite(s.toPivot) && Math.abs(s.toPivot) <= 1 ? "up" : "dim2" }, isFinite(s.toPivot) ? (s.toPivot >= 0 ? "+" : "") + s.toPivot + "%" : "\u2014")), s.insider !== 0 && /* @__PURE__ */ React.createElement("span", { className: `sc-flowdot sc-flowdot--${s.insider > 0 ? "buy" : "sell"}`, title: `insider net ${s.insider > 0 ? "buying" : "selling"} (90d)` }, s.insider > 0 ? "\u25B2" : "\u25BC"), s.erDays <= 7 && /* @__PURE__ */ React.createElement("span", { className: "sc-chip sc-chip--er", title: `earnings in ${s.erDays} sessions` }, "\u26A1 ER ", s.erDays, "d"));
+      return /* @__PURE__ */ React.createElement("div", { className: "sc-row-chips" }, /* @__PURE__ */ React.createElement("span", { className: "sc-chip", title: "relative volume vs 20-day avg" }, /* @__PURE__ */ React.createElement("span", { className: "sc-chip-k" }, "RVOL"), /* @__PURE__ */ React.createElement("b", { className: isFinite(s.rvol) && s.rvol >= 1.5 ? "up" : "dim2" }, isFinite(s.rvol) ? s.rvol.toFixed(1) + "\xD7" : "\u2014")), /* @__PURE__ */ React.createElement("span", { className: "sc-chip", title: "ML model P(up) over swing horizon" }, /* @__PURE__ */ React.createElement("span", { className: "sc-chip-k" }, "P\u2191"), /* @__PURE__ */ React.createElement("b", { className: s.pUp == null ? "dim2" : `kpi-tone--${s.pUp >= 60 ? "gn" : s.pUp >= 45 ? "amb" : "rd"}` }, s.pUp == null ? "\u2014" : s.pUp + "%")), /* @__PURE__ */ React.createElement("span", { className: "sc-chip", title: "reward:risk to T1" }, /* @__PURE__ */ React.createElement("span", { className: "sc-chip-k" }, "R:R"), /* @__PURE__ */ React.createElement("b", { className: isFinite(s.rr) && s.rr >= 2 ? "up" : "dim2" }, isFinite(s.rr) ? s.rr.toFixed(1) : "\u2014")), /* @__PURE__ */ React.createElement("span", { className: "sc-chip", title: "distance to breakout pivot" }, /* @__PURE__ */ React.createElement("span", { className: "sc-chip-k" }, "PIV"), /* @__PURE__ */ React.createElement("b", { className: isFinite(s.toPivot) && Math.abs(s.toPivot) <= 1 ? "up" : "dim2" }, isFinite(s.toPivot) ? (s.toPivot >= 0 ? "+" : "") + s.toPivot + "%" : "\u2014")), s.insider !== 0 && /* @__PURE__ */ React.createElement("span", { className: `sc-flowdot sc-flowdot--${s.insider > 0 ? "buy" : "sell"}`, title: `insider net ${s.insider > 0 ? "buying" : "selling"} (90d)` }, s.insider > 0 ? "\u25B2" : "\u25BC"), s.erDays <= 7 && /* @__PURE__ */ React.createElement("span", { className: "sc-chip sc-chip--er", title: `earnings in ${s.erDays} sessions` }, "\u26A1 ER ", s.erDays, "d"), _warn && _warn.label && /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          className: "sc-chip",
+          title: _warn.note || _warn.source || _warn.label,
+          style: { color: "var(--rd)" }
+        },
+        /* @__PURE__ */ React.createElement("b", null, _warn.label)
+      ));
     })(),
     widthCat === "XL" && /* @__PURE__ */ React.createElement("div", { className: "sc-row-spark" }, /* @__PURE__ */ React.createElement(Sparkline, { data: fakeSpark(item.sym), color: `var(--${item.chg >= 0 ? "gn" : "rd"})`, w: 180, h: 20 }))
   );
@@ -29311,21 +29309,38 @@ function realFunnel(mode) {
   const m = String(mode || window.__tmode || "swing").toLowerCase();
   const key = m.indexOf("pos") === 0 ? "position" : m.indexOf("inv") === 0 ? "investment" : "swing";
   let bull = 0, neu = 0, bear = 0, gateBlocked = 0;
+  const gateReasons = {};
   rows.forEach((r) => {
     const raw = r._raw || {};
-    const dbm = raw.decisions_by_mode || null;
-    let v = String(dbm && dbm[key] && dbm[key].verdict || r.verdict || "").toUpperCase();
-    const comp = String(raw.stage || r.verdict || "").toUpperCase();
-    if (v === "AVOID" && comp && comp !== "AVOID" && comp !== "SELL" && comp !== "SHORT") {
-      gateBlocked++;
-      v = comp;
+    const md = raw.decisions_by_mode && raw.decisions_by_mode[key] || null;
+    let bias = String(md && md.bias || raw.bias || "").toLowerCase();
+    if (!bias && typeof window !== "undefined" && window.biasRead) {
+      try {
+        bias = String(window.biasRead(r) || "").toLowerCase();
+      } catch (e) {
+      }
     }
-    if (v === "WAIT") v = "WATCH";
-    if (v === "BUY") bull++;
-    else if (v === "SHORT" || v === "AVOID" || v === "SELL") bear++;
+    if (bias === "bullish") bull++;
+    else if (bias === "bearish") bear++;
     else neu++;
+    const dec = raw.decision || {};
+    const topVerdict = String(dec.verdict || raw.stage || r.verdict || "").toUpperCase();
+    const topAction = String(dec.action || "").toLowerCase();
+    if (bias !== "bearish" && (topVerdict === "WAIT" || topVerdict === "AVOID" || topAction === "avoid")) {
+      gateBlocked++;
+      const rsn = String(dec.reason || "");
+      const tag = /blackout/i.test(rsn) ? rsn.split("(")[0].split(":").slice(0, 2).join(":").trim() : /distribution/i.test(rsn) ? "distribution days" : /spy/i.test(rsn) ? "SPY entry gate" : /sector blocklist/i.test(rsn) ? "sector blocklist" : "";
+      if (tag) gateReasons[tag] = (gateReasons[tag] || 0) + 1;
+    }
   });
-  return { universe: rows.length, bullish: bull, neutral: neu, bearish: bear, gateBlocked };
+  let gateReason = "", best = 0;
+  for (const k in gateReasons) {
+    if (gateReasons[k] > best) {
+      best = gateReasons[k];
+      gateReason = k;
+    }
+  }
+  return { universe: rows.length, bullish: bull, neutral: neu, bearish: bear, gateBlocked, gateReason };
 }
 function realEngineRows(id) {
   const rows = HR.pool();
@@ -29630,7 +29645,7 @@ function HomeHero({ mode, onSurface }) {
     const bits = [];
     if (sc != null && sc <= -1.5) bits.push(`SPY ${sc.toFixed(1)}%`);
     if (dd != null && dd >= 7) bits.push(`${dd} distribution days`);
-    const why = bits.length ? bits.join(" \xB7 ") : "market-wide entry gate";
+    const why = F.gateReason ? F.gateReason : bits.length ? bits.join(" \xB7 ") : "market-wide entry gate";
     return /* @__PURE__ */ React.createElement(
       "div",
       {
@@ -31751,21 +31766,25 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
     setFlash(`exported ${rs.length} rows`);
   };
   const rows = useMemoSS(() => {
-    let r = SS_UNIVERSE;
+    let r = window.__BV && window.__BV.ready && window.__BV.scanRows ? window.__BV.scanRows().map((t) => window.__BV.timeQuick ? Object.assign(t, window.__BV.timeQuick(t) || {}) : t) : SS_UNIVERSE;
     if (tab === "top-picks") r = r.filter((t) => t.score >= 75);
     if (tab === "earnings") r = r.filter((t) => t.er <= 14);
     if (tab === "surges") r = r.filter((t) => parseFloat(t.rvol) >= 1.5);
     if (tab === "killed") r = r.filter((t) => t.verdict === "AVOID");
     if (tab === "fresh") r = r.slice(0, 3);
     if (tab === "ai-edge") r = r.filter((t) => t.aiEdge >= 0.05);
-    if (side === "BUY") r = r.filter((t) => t.verdict === "BUY");
-    if (side === "WATCH") r = r.filter((t) => t.verdict === "WATCH");
-    if (side === "SHORT") r = r.filter((t) => t.verdict === "AVOID");
+    if (side === "BUY" || side === "WATCH" || side === "SHORT") {
+      const _m = String(typeof window !== "undefined" && window.__tmode || "swing").toLowerCase();
+      const _mkey = _m.indexOf("pos") === 0 ? "position" : _m.indexOf("inv") === 0 ? "investment" : "swing";
+      const _bias = (t) => String(t.biasByMode && t.biasByMode[_mkey] || t.bias || "").toLowerCase();
+      const _want = side === "BUY" ? "bullish" : side === "WATCH" ? "neutral" : "bearish";
+      r = r.filter((t) => _bias(t) === _want);
+    }
     if (pills.top20) r = r.filter((t) => t.score >= 70);
     if (pills.rvol) r = r.filter((t) => parseFloat(t.rvol) >= 1.5);
     if (pills.er14) r = r.filter((t) => t.er <= 14);
     if (pills.insider) r = r.filter((t) => t.sent > 0);
-    if (pills.t1) r = r.filter((t) => t.tier === "T1");
+    if (pills.t1) r = r.filter((t) => t.cat === "T1");
     if (pills.breakout) r = r.filter((t) => (t.setup || "").toLowerCase().includes("break"));
     if (pills.watch) r = r.filter((t) => window.WatchStore && window.WatchStore.has(t.sym));
     if (secF !== "all") r = r.filter((t) => t.sector === secF);

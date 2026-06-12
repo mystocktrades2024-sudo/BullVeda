@@ -433,21 +433,37 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
   };
 
   const rows = useMemoSS(() => {
-    let r = SS_UNIVERSE;
+    // Read the LIVE scan rows on every recompute — NOT the module-level SS_UNIVERSE
+    // const, which is frozen at page-load. The home SCAN FUNNEL reads scanRows() live
+    // every render, so a frozen scanner drifted out of sync after any data refresh
+    // (funnel 336 vs scanner 233 on 2026-06-11 — a newer scan the funnel saw but the
+    // const didn't). scanRows() returns BV's row cache, which is rebuilt on refresh.
+    let r = (window.__BV && window.__BV.ready && window.__BV.scanRows)
+      ? window.__BV.scanRows().map(t => (window.__BV.timeQuick ? Object.assign(t, window.__BV.timeQuick(t) || {}) : t))
+      : SS_UNIVERSE;
     if (tab === "top-picks") r = r.filter(t => t.score >= 75);
     if (tab === "earnings") r = r.filter(t => t.er <= 14);
     if (tab === "surges") r = r.filter(t => parseFloat(t.rvol) >= 1.5);
     if (tab === "killed") r = r.filter(t => t.verdict === "AVOID");
     if (tab === "fresh") r = r.slice(0, 3);
     if (tab === "ai-edge") r = r.filter(t => t.aiEdge >= 0.05);
-    if (side === "BUY")   r = r.filter(t => t.verdict === "BUY");
-    if (side === "WATCH") r = r.filter(t => t.verdict === "WATCH");
-    if (side === "SHORT") r = r.filter(t => t.verdict === "AVOID");
+    // "Directional bias" side toggle filters by the BIAS axis (gate-blind), NOT the
+    // macro-gated verdict — consistent with the home SCAN FUNNEL. On a CPI/macro
+    // blackout day the verdict is WAIT for the whole universe (so `verdict==="BUY"`
+    // matched ~1 row → blank scanner) while bias stays bullish/neutral/bearish.
+    // Per-mode bias keeps the count identical to the funnel for the active horizon.
+    if (side === "BUY" || side === "WATCH" || side === "SHORT") {
+      const _m = String((typeof window !== "undefined" && window.__tmode) || "swing").toLowerCase();
+      const _mkey = _m.indexOf("pos") === 0 ? "position" : _m.indexOf("inv") === 0 ? "investment" : "swing";
+      const _bias = (t) => String((t.biasByMode && t.biasByMode[_mkey]) || t.bias || "").toLowerCase();
+      const _want = side === "BUY" ? "bullish" : side === "WATCH" ? "neutral" : "bearish";
+      r = r.filter(t => _bias(t) === _want);
+    }
     if (pills.top20)   r = r.filter(t => t.score >= 70);
     if (pills.rvol)    r = r.filter(t => parseFloat(t.rvol) >= 1.5);
     if (pills.er14)    r = r.filter(t => t.er <= 14);
     if (pills.insider) r = r.filter(t => t.sent > 0);
-    if (pills.t1)      r = r.filter(t => t.tier === "T1");
+    if (pills.t1)      r = r.filter(t => t.cat === "T1");   // CATALYST tier (t.cat), NOT conviction tier (t.tier). The "⚡ T1 CATALYST" pill was reading conviction_tier, which is 0 on a no-BUY day (CPI blackout) → empty; catalyst_tier T1 = 239 names.
     if (pills.breakout)r = r.filter(t => (t.setup || "").toLowerCase().includes("break"));
     if (pills.watch)   r = r.filter(t => window.WatchStore && window.WatchStore.has(t.sym));
     if (secF !== "all") r = r.filter(t => t.sector === secF);

@@ -788,9 +788,13 @@ def _52week_position(df: pd.DataFrame) -> dict:
     else:
         prior_high = high_52
     vol_confirm = False
+    vol_ratio_50d = None
     if vol is not None and len(vol) >= 50:
         try:
-            vol_confirm = float(vol.iloc[-1]) > 1.3 * float(vol.iloc[-50:].mean())
+            _mean50 = float(vol.iloc[-50:].mean())
+            if _mean50 > 0:
+                vol_ratio_50d = round(float(vol.iloc[-1]) / _mean50, 2)
+                vol_confirm = vol_ratio_50d > 1.3
         except Exception:
             vol_confirm = False
     cleared_base = price >= prior_high
@@ -805,6 +809,10 @@ def _52week_position(df: pd.DataFrame) -> dict:
         "near_52w_high": pct_from_high < 0.05,   # within 5% — momentum zone (proximity, NOT a breakout)
         "at_breakout":   at_breakout,            # price cleared prior base high + volume thrust = REAL breakout
         "breakout_vol_confirm": vol_confirm,
+        # 50d-baseline ratio the breakout gate ACTUALLY uses — display this next to
+        # the BREAKOUT tag so it matches the gate (the `rvol` field uses a 20d
+        # baseline and can read <1.3 even when this 50d ratio cleared the gate).
+        "breakout_vol_ratio_50d": vol_ratio_50d,
         "breakout_unconfirmed": bool(cleared_base and not vol_confirm),  # cleared base but no volume — watch, don't tag
         "near_52w_low":  pct_from_low  < 0.10,   # within 10% below — danger zone
         "stage2":        pct_from_high < 0.05 and pct_from_low > 0.30,  # classic Stage 2
@@ -2710,15 +2718,20 @@ def score_optionality(df: pd.DataFrame, info: dict, sr: dict,
     if abs(news.get("score", 0)) >= 2:
         cat_pts += 1; catalysts.append(f"News ({news.get('bias', 'neutral')})")
 
-    # Polygon NLP news momentum — stronger signal than Yahoo RSS
+    # NLP news momentum — stronger signal than Yahoo RSS. Source-score floors are
+    # calibrated to the DE-SATURATED scale (2026-06-11 fix); legacy 0.35/0.6 floors
+    # were for the old saturated ±1 scale and would award ~0 names post-fix.
+    _nsc_cat = _news_sent_cfg()
     _pns_opt = news_sentiment_score or {}
-    if _pns_opt.get("momentum") == "bullish" and _pns_opt.get("source_score", 0) >= 0.35:
-        _pns_pts = 2 if _pns_opt.get("source_score", 0) >= 0.6 else 1
+    if (_pns_opt.get("momentum") == "bullish"
+            and _pns_opt.get("source_score", 0) >= _nsc_cat["catalyst_pts_plus1_source_score"]):
+        _pns_pts = 2 if _pns_opt.get("source_score", 0) >= _nsc_cat["catalyst_pts_plus2_source_score"] else 1
         cat_pts += _pns_pts
-        catalysts.append(f"Polygon NLP bullish ({_pns_opt.get('article_count', 0)} articles, {_pns_opt.get('source_score', 0):+.2f})")
-    elif _pns_opt.get("momentum") == "bearish" and _pns_opt.get("source_score", 0) <= -0.35:
+        catalysts.append(f"NLP news bullish ({_pns_opt.get('article_count', 0)} articles, {_pns_opt.get('source_score', 0):+.2f})")
+    elif (_pns_opt.get("momentum") == "bearish"
+            and _pns_opt.get("source_score", 0) <= _nsc_cat["catalyst_bearish_source_score"]):
         cat_pts -= 1
-        catalysts.append(f"Polygon NLP bearish ({_pns_opt.get('source_score', 0):+.2f})")
+        catalysts.append(f"NLP news bearish ({_pns_opt.get('source_score', 0):+.2f})")
 
     target = info.get("target_mean_price")
     target_high = info.get("target_high_price")
@@ -4440,17 +4453,23 @@ def tag_catalysts(indicators: dict, pead_data: dict,
             tags.append("GAMMA_WALL_ABOVE")
             tier = min(tier, 2)
 
-    # Polygon news momentum — upgrade to T2 when strong (3+ articles, bullish, high weighted score)
+    # News momentum — thresholds calibrated to the DE-SATURATED source_score scale
+    # (median ~0.10, p90 ~0.13) per the 2026-06-11 fix. The legacy 0.4 floor was
+    # set for the old saturated ±1 scale and would fire on ~0 names post-fix; the
+    # weak `count>=2 with no score floor` branch was the 86%-prevalence noise.
+    # momentum=="bullish" alone is now selective (~15%) once de-saturated.
+    _nsc = _news_sent_cfg()
     pns = news_sentiment_score or {}
     _pns_momentum = pns.get("momentum", "")
     _pns_count = pns.get("article_count", 0)
     _pns_score = pns.get("source_score", 0)
-    if _pns_momentum == "bullish" and _pns_count >= 3 and _pns_score >= 0.4:
+    if (_pns_momentum == "bullish" and _pns_count >= _nsc["tag_t2_min_articles"]
+            and _pns_score >= _nsc["tag_t2_source_score"]):
         tags.append("NEWS_MOMENTUM")
         tier = min(tier, 2)
-    elif _pns_momentum == "bullish" and _pns_count >= 2:
+    elif _pns_momentum == "bullish" and _pns_count >= _nsc["tag_t3_min_articles"]:
         tags.append("NEWS_MOMENTUM")
-        # T3 — weaker news signal
+        # T3 — weaker news signal (momentum bullish but below strong source-score floor)
 
     if not tags:
         tags.append("CONTINUATION")
@@ -5510,6 +5529,36 @@ def compute_options_intelligence(chain: dict, price: float) -> dict:
     return result
 
 
+_NEWS_SENT_CFG_CACHE: dict = {"v": None}
+
+
+def _news_sent_cfg() -> dict:
+    """Cached loader for scoring.news_sentiment config block (de-saturation fix)."""
+    if _NEWS_SENT_CFG_CACHE["v"] is not None:
+        return _NEWS_SENT_CFG_CACHE["v"]
+    out = {
+        "continuous_polarity": True,
+        "tag_t2_source_score": 0.13,
+        "tag_t2_min_articles": 3,
+        "tag_t3_min_articles": 2,
+        "catalyst_pts_plus1_source_score": 0.13,
+        "catalyst_pts_plus2_source_score": 0.20,
+        "catalyst_bearish_source_score": -0.13,
+    }
+    try:
+        import json as _j
+        from pathlib import Path as _P
+        _p = _P(__file__).resolve().parent / "config" / "config.json"
+        blk = (_j.loads(_p.read_text()).get("scoring") or {}).get("news_sentiment") or {}
+        for k in out:
+            if k in blk:
+                out[k] = blk[k]
+    except Exception:
+        pass
+    _NEWS_SENT_CFG_CACHE["v"] = out
+    return out
+
+
 def compute_news_sentiment_score(news_articles: list | None) -> dict:
     """
     Source-weighted, recency-decayed news sentiment from Polygon per-article NLP.
@@ -5549,16 +5598,34 @@ def compute_news_sentiment_score(news_articles: list | None) -> dict:
         publisher = (article.get("publisher") or {}).get("name", "")
         src_w = 1.5 if any(t in publisher for t in TIER1) else 1.0
 
-        # Per-article NLP sentiment from Polygon insights[]
+        # Per-article NLP sentiment from EODHD/Polygon insights[].
+        # DE-SATURATION FIX (2026-06-11): the legacy path scored each insight as a
+        # discrete +1/-1 by the coarse `sentiment` LABEL and OMITTED neutral from the
+        # denominator — so an article that is 93% neutral / 7% positive (label
+        # "positive") scored +1.0. Result: 785/908 names pinned to "bullish",
+        # 73% pegged at source_score=1.0 → the signal carried ~0 bits.
+        # continuous_polarity=true instead averages the continuous (pos-neg)
+        # polarity from each insight's sentiment_reasoning over ALL insights
+        # (neutral counted as 0 in the denominator). Falls back to discrete with
+        # neutral=0 when reasoning is absent. Set continuous_polarity=false to revert.
         insights = article.get("insights") or []
+        _continuous = _news_sent_cfg().get("continuous_polarity", True)
         sent_vals = []
         for ins in insights:
-            s = (ins.get("sentiment") or "").lower()
-            if s == "positive":
-                sent_vals.append(1.0)
-            elif s == "negative":
-                sent_vals.append(-1.0)
-            # neutral = 0, omit to not dilute
+            sr = ins.get("sentiment_reasoning") if isinstance(ins, dict) else None
+            if _continuous and isinstance(sr, dict) and ("pos" in sr or "neg" in sr):
+                sent_vals.append(float(sr.get("pos", 0.0)) - float(sr.get("neg", 0.0)))
+            else:
+                s = (ins.get("sentiment") or "").lower()
+                if _continuous:
+                    # No reasoning available: discrete but DO count neutral as 0
+                    # in the denominator (legacy omitted it — the saturation cause).
+                    sent_vals.append(1.0 if s == "positive" else -1.0 if s == "negative" else 0.0)
+                elif s == "positive":
+                    sent_vals.append(1.0)
+                elif s == "negative":
+                    sent_vals.append(-1.0)
+                # legacy mode: neutral omitted to not dilute
 
         if not sent_vals:
             # Fallback to ticker_sentiment score if available
@@ -10623,6 +10690,22 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         indicators=tech["indicators"],
     )
 
+    # Breakout sub-state (display split; does NOT mutate setup_family so Wilson
+    # attribution keys stay stable). The "Breakout Expansion" family mixes coiled
+    # VCP bases (pivot still overhead, low RVOL is correct) with names that have
+    # ACTUALLY broken out (cleared base + volume thrust). 2026-06-11: surface the
+    # distinction so the dashboard can show "Breakout (fired)" vs "VCP base (watch)".
+    _bo_tags = [str(t).upper() for t in (catalyst_tags or [])]
+    _bo_ind = tech["indicators"]
+    if "BREAKOUT" in _bo_tags or _bo_ind.get("at_52w_breakout"):
+        breakout_state = "fired"          # cleared prior base high + >1.3x 50d vol
+    elif _bo_ind.get("breakout_unconfirmed"):
+        breakout_state = "unconfirmed"    # cleared base but no volume — watch, not a buy
+    elif "VCP" in _bo_tags or "NEAR_VCP" in _bo_tags or _bo_ind.get("near_vcp"):
+        breakout_state = "coiled"         # in a contraction base, pivot overhead
+    else:
+        breakout_state = None
+
     # Regime4 from regime dict (may not be present in older runs)
     regime4 = str(regime.get("regime4", regime_name)).lower()
 
@@ -11303,38 +11386,76 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
                 # The regime-specific overrides the global
                 _setup_mult = _regime_mult
 
+        # KILL->LABEL MODE (2026-06-11, audit docs/signal_screener_audit_2026_06_11.html).
+        # When signal_edge_labeling.mode == "label", a kill/demote multiplier (<1.0)
+        # does NOT suppress the score — the signal stays a visible BUY and the
+        # weak-edge evidence is surfaced as an `edge_warning` instead. The user
+        # decides. mode == "suppress" restores legacy behavior. Boosts (>1.0) are
+        # unaffected either way.
+        _label_mode = str(
+            ((config or {}).get("signal_edge_labeling") or {}).get("mode", "suppress")
+        ).lower() == "label"
+        _edge_warning = None
         if _setup_mult != 1.0 and _setup_mult >= 0:
             # 2026-05-10 fix: was `> 0` — silently dropped mult=0.0 (the kill
             # value), so EMA21 Pullback / 52wk Breakout / Variant F TC×bull
             # kills never fired despite being in config with evidence backing.
             # Root cause of 12.7% live BUY WR over 2 weeks (n=63).
             _pre_mult_score = float(normalized)
-            normalized = float(normalized) * _setup_mult
-            # SCORE-MULT-AUDIT-TRAIL (2026-05-12) — when the multiplier zeros or
-            # demotes the score, stamp WHY on the result row. Without this trail,
-            # CF-class confusion happens: top-level setup_family says "Breakout
-            # Expansion" while plan.setup_type says "EMA21 Pullback" (in kill list).
-            # User sees score=0 with no visible reason.
-            if _setup_mult == 0.0:
-                _setup_mult_audit = {
-                    "killed": True,
-                    "raw_setup": _setup_for_mult,
-                    "pre_mult_score": round(_pre_mult_score, 1),
-                    "multiplier": 0.0,
-                    "reason": f"setup_score_multiplier kill: '{_setup_for_mult}' = 0.0",
-                    "source": (_validations.get(_setup_for_mult) or {}).get("note", ""),
+            _v_lbl = (_validations.get(_setup_for_mult) or {})
+            if _label_mode and _setup_mult < 1.0:
+                # Convert the kill/demote to an honest label — score untouched.
+                _pf_lbl = _v_lbl.get("pf")
+                _n_lbl = _v_lbl.get("n")
+                _edge_warning = {
+                    "kind": "weak_setup",
+                    "setup": _setup_for_mult,
+                    "former_multiplier": _setup_mult,
+                    "n": _n_lbl,
+                    "pf": _pf_lbl,
+                    "wr_lb": _v_lbl.get("wr_lb"),
+                    "note": _v_lbl.get("note", ""),
+                    "source": _v_lbl.get("source", "") or _v_lbl.get("note", ""),
+                    "label": ("⚠ weak edge: '" + str(_setup_for_mult) + "'"
+                              + (f" — PF {_pf_lbl} (n={_n_lbl})" if _pf_lbl is not None else "")),
                 }
-            elif _setup_mult < 1.0:
                 _setup_mult_audit = {
                     "killed": False,
+                    "labeled": True,
                     "raw_setup": _setup_for_mult,
                     "pre_mult_score": round(_pre_mult_score, 1),
-                    "multiplier": _setup_mult,
-                    "reason": f"setup_score_multiplier demote: '{_setup_for_mult}' × {_setup_mult}",
-                    "source": (_validations.get(_setup_for_mult) or {}).get("note", ""),
+                    "multiplier": 1.0,
+                    "reason": (f"label-mode: '{_setup_for_mult}' kept visible "
+                               f"(was ×{_setup_mult}); edge_warning attached"),
+                    "source": _v_lbl.get("note", ""),
                 }
             else:
-                _setup_mult_audit = None
+                normalized = float(normalized) * _setup_mult
+                # SCORE-MULT-AUDIT-TRAIL (2026-05-12) — when the multiplier zeros or
+                # demotes the score, stamp WHY on the result row. Without this trail,
+                # CF-class confusion happens: top-level setup_family says "Breakout
+                # Expansion" while plan.setup_type says "EMA21 Pullback" (in kill list).
+                # User sees score=0 with no visible reason.
+                if _setup_mult == 0.0:
+                    _setup_mult_audit = {
+                        "killed": True,
+                        "raw_setup": _setup_for_mult,
+                        "pre_mult_score": round(_pre_mult_score, 1),
+                        "multiplier": 0.0,
+                        "reason": f"setup_score_multiplier kill: '{_setup_for_mult}' = 0.0",
+                        "source": _v_lbl.get("note", ""),
+                    }
+                elif _setup_mult < 1.0:
+                    _setup_mult_audit = {
+                        "killed": False,
+                        "raw_setup": _setup_for_mult,
+                        "pre_mult_score": round(_pre_mult_score, 1),
+                        "multiplier": _setup_mult,
+                        "reason": f"setup_score_multiplier demote: '{_setup_for_mult}' × {_setup_mult}",
+                        "source": _v_lbl.get("note", ""),
+                    }
+                else:
+                    _setup_mult_audit = None
         else:
             _setup_mult_audit = None
     except Exception:
@@ -11861,6 +11982,10 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         # the user (CF case: setup_family=Breakout Expansion + plan.setup_type=
         # EMA21 Pullback → mult=0.0 → score=0 with no visible reason).
         "score_mult_audit": _setup_mult_audit if '_setup_mult_audit' in dir() else None,
+        # KILL->LABEL (2026-06-11) — when signal_edge_labeling.mode == "label", a
+        # setup that WOULD have been score-killed is kept visible and carries this
+        # honest weak-edge warning instead. None when no kill applied / suppress mode.
+        "edge_warning": _edge_warning if '_edge_warning' in dir() else None,
         # ENTRY-QUALITY TILT AUDIT (2026-05-22) — surface the additive tilt
         # applied by entry_quality_score_tilt when flag is ON. None when flag
         # is OFF or quality has no tilt entry.
@@ -11914,6 +12039,7 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         "reaction_checklist": reaction_checklist,
         "entry_timing":       entry_timing,
         "setup_family":       setup_family,
+        "breakout_state":     breakout_state,
         "hold_period_guide":  hold_period_guide,
         "momentum_audit":     _momentum_audit if '_momentum_audit' in dir() else None,
         "defrot_audit":       _defrot_audit if '_defrot_audit' in dir() else None,

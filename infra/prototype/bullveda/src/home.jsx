@@ -686,29 +686,45 @@ function realFunnel(mode) {
   const m = String(mode || window.__tmode || "swing").toLowerCase();
   const key = m.indexOf("pos") === 0 ? "position" : m.indexOf("inv") === 0 ? "investment" : "swing";
   let bull = 0, neu = 0, bear = 0, gateBlocked = 0;
+  const gateReasons = {};
   rows.forEach(r => {
     const raw = r._raw || {};
-    const dbm = raw.decisions_by_mode || null;
-    let v = String((dbm && dbm[key] && dbm[key].verdict) || r.verdict || "").toUpperCase();
-    // Un-collapse entry/timing-gate AVOIDs. A market-wide gate (SPY crash-day,
-    // distribution days, macro blackout, sector blocklist, earnings blackout)
-    // stamps decisions_by_mode=AVOID on EVERY blocked name even when the name's
-    // own directional read is WAIT/WATCH — which would otherwise paint the whole
-    // universe "bearish" on a single red SPY day (e.g. SPY −2.6% on 2026-06-08 →
-    // 0 bull / 0 neutral / 1000 avoid). When the per-mode verdict is AVOID but the
-    // composite (score-based) verdict is NOT bearish, classify by the composite
-    // read and tally it as an entry-gate block instead of a bearish name.
-    const comp = String(raw.stage || r.verdict || "").toUpperCase(); // = decision.verdict
-    if (v === "AVOID" && comp && comp !== "AVOID" && comp !== "SELL" && comp !== "SHORT") {
-      gateBlocked++;
-      v = comp;
+    const md = (raw.decisions_by_mode && raw.decisions_by_mode[key]) || null;
+    // DIRECTION = the BIAS axis (gate-blind), NOT the action verdict. A market-wide
+    // gate (CPI/macro blackout, SPY crash-day, distribution days, sector/earnings
+    // blackout) flattens the per-mode VERDICT→WAIT for the WHOLE universe while the
+    // BIAS stays bullish/neutral/bearish. Reading verdict here showed 1 bull / 1074
+    // neutral on the 2026-06-11 CPI blackout day; bias correctly reads 263 bull /
+    // 456 neu / 189 bear. Two-axis verdict — direction and action are separate axes
+    // (see memory: feedback_two_axis_verdict + decisions_by_mode_collapses_on_market_gate).
+    let bias = String((md && md.bias) || raw.bias || "").toLowerCase();
+    if (!bias && typeof window !== "undefined" && window.biasRead) {
+      try { bias = String(window.biasRead(r) || "").toLowerCase(); } catch (e) {}
     }
-    if (v === "WAIT") v = "WATCH";
-    if (v === "BUY") bull++;
-    else if (v === "SHORT" || v === "AVOID" || v === "SELL") bear++;
+    if (bias === "bullish") bull++;
+    else if (bias === "bearish") bear++;
     else neu++;
+    // ACTION axis (overlay): a directionally-OK name blocked from a long entry
+    // today. The market-wide gate lives in the TOP-LEVEL decision (decision.reason /
+    // decision.verdict) — NOT the per-mode reason (which is the per-name structural
+    // "no edge at current price" note). On the CPI day every top-level verdict is
+    // WAIT with reason "Macro blackout: CPI".
+    const dec = raw.decision || {};
+    const topVerdict = String(dec.verdict || raw.stage || r.verdict || "").toUpperCase();
+    const topAction = String(dec.action || "").toLowerCase();
+    if (bias !== "bearish" && (topVerdict === "WAIT" || topVerdict === "AVOID" || topAction === "avoid")) {
+      gateBlocked++;
+      const rsn = String(dec.reason || "");
+      const tag = /blackout/i.test(rsn) ? rsn.split("(")[0].split(":").slice(0, 2).join(":").trim()
+                : /distribution/i.test(rsn) ? "distribution days"
+                : /spy/i.test(rsn) ? "SPY entry gate"
+                : /sector blocklist/i.test(rsn) ? "sector blocklist" : "";
+      if (tag) gateReasons[tag] = (gateReasons[tag] || 0) + 1;
+    }
   });
-  return { universe: rows.length, bullish: bull, neutral: neu, bearish: bear, gateBlocked: gateBlocked };
+  let gateReason = "", best = 0;
+  for (const k in gateReasons) { if (gateReasons[k] > best) { best = gateReasons[k]; gateReason = k; } }
+  return { universe: rows.length, bullish: bull, neutral: neu, bearish: bear, gateBlocked, gateReason };
 }
 
 // Build each engine's top-5 from the REAL scan universe (audit-log intersected).
@@ -1170,7 +1186,9 @@ function HomeHero({ mode, onSurface }) {
             const bits = [];
             if (sc != null && sc <= -1.5) bits.push(`SPY ${sc.toFixed(1)}%`);
             if (dd != null && dd >= 7) bits.push(`${dd} distribution days`);
-            const why = bits.length ? bits.join(" · ") : "market-wide entry gate";
+            // Prefer the actual gate reason extracted from the rows (e.g. the
+            // "Macro blackout: CPI" that flattens the universe on a print day).
+            const why = F.gateReason ? F.gateReason : (bits.length ? bits.join(" · ") : "market-wide entry gate");
             return (
               <div className="qh-funnel-gate mono"
                    title="A market-wide risk gate is blocking NEW long entries today. The entry-gated names are not bearish — they're shown by their own directional read above and excluded from longs only until the gate clears.">

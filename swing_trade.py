@@ -4336,10 +4336,19 @@ def run_daily_scan(force_fresh: bool = False):
         # owner's signal_log. For a universal 500-user signal layer they must not shape the
         # signal — skip when signal_layer_portfolio_blind is on. See config _note.
         _portfolio_blind = bool((_de_cfg.get("signal_layer_portfolio_blind") or {}).get("_enabled", False))
-        if _portfolio_blind:
+        # KILL->LABEL (2026-06-11): when signal_edge_labeling.mode == "label", the
+        # setup-kill list + score-band kills must NOT block the verdict — they become
+        # informational labels instead. Feed the engine empty kill-lists so the
+        # setup_performance hard-gate always passes; the weak-edge label rides on the
+        # row via analysis.py edge_warning + edge_labels.py edge_tier.
+        _edge_label_mode = str(
+            ((_de_cfg.get("signal_edge_labeling") or {}).get("mode", "suppress"))
+        ).lower() == "label"
+        if _portfolio_blind or _edge_label_mode:
             _setup_kills = {}
             _setup_band_kills = {}
-            log.info("  Signal layer PORTFOLIO-BLIND: account-derived setup kills (signal_log) skipped")
+            _why_skip = "PORTFOLIO-BLIND" if _portfolio_blind else "EDGE-LABEL mode"
+            log.info(f"  Signal layer {_why_skip}: setup kills not used to block (label/blind)")
         else:
             _setup_kills = compute_setup_kill_list()
             # #7: stratified — also kill specific (setup, score_band) combos
@@ -4402,6 +4411,17 @@ def run_daily_scan(force_fresh: bool = False):
         except Exception as _ms_e:
             log.debug(f"QQQ-SPY momentum spread step skipped: {_ms_e}")
 
+        # PHASE 2 (2026-06-11, audit docs/signal_screener_audit_2026_06_11.html) —
+        # honest regime-conditional edge tier. INFORMATIONAL ONLY: attaches an
+        # edge_tier badge (PROVEN/DEVELOPING/WEAK/UNPROVEN) to each row from the
+        # realized track record. Never gates a verdict or zeroes a score.
+        try:
+            from edge_labels import lookup_edge as _edge_lookup
+        except Exception:
+            _edge_lookup = None
+        _edge_tiers_cfg = (_de_cfg.get("signal_edge_labeling") or {}).get("tiers")
+        _edge_regime4 = (bundle.get("regime") or {}).get("regime4") or _bundle_regime
+
         _de_count = 0
         _de_failed = 0
         for _sec_key, _sec_val in bundle.items():
@@ -4419,6 +4439,15 @@ def run_daily_scan(force_fresh: bool = False):
                                            setup_band_kill_list=_setup_band_kills,
                                            system_status=_sys_status,
                                            config=cfg)
+                # PHASE 2 — attach honest edge tier (display + sort only).
+                if _edge_lookup is not None:
+                    try:
+                        _et = _edge_lookup(_row.get("setup_family"), _edge_regime4,
+                                           tiers=_edge_tiers_cfg)
+                        if _et:
+                            _row["edge_tier"] = _et
+                    except Exception:
+                        pass
                 # Task #3: write per-ticker setup size multiplier (dashboard reads this)
                 _setup_name = _row.get("setup_family") or _row.get("setup") or _row.get("setup_type")
                 _mult = _setup_mults.get(_setup_name) if _setup_name else None
