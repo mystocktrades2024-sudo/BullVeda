@@ -21,10 +21,10 @@
   },
   "_meta": {
     "schema_version": "2.0",
-    "last_backtested": "2026-06-06",
+    "last_backtested": "2026-06-13",
     "last_backtest_wr": 0.857,
     "last_backtest_config": "config_e (4x20%, 5d hold, score>=68 bull/72 choppy)",
-    "last_modified": "2026-06-06",
+    "last_modified": "2026-06-13",
     "notes": "Fix #23 \u2014 version-locked. Don't change thresholds without a fresh backtest.",
     "trading_style_defaults": "swing",
     "swing_defaults_applied": "2026-04-14",
@@ -224,6 +224,14 @@
       "catalyst_pts_plus1_source_score": 0.13,
       "catalyst_pts_plus2_source_score": 0.2,
       "catalyst_bearish_source_score": -0.13
+    },
+    "smc_ob_confluence": {
+      "_note": "Flag-gated BOS/FVG confluence bonus on fresh bullish OBs in score_smc(). DEFAULT OFF. This is a SIGNAL-LAYER change affecting 500+ users (universal, portfolio-blind) \u2014 so the enable bar is PRODUCTION-grade, NOT a single in-sample backtest. ENABLE ONLY AFTER: (1) OUT-OF-SAMPLE walk-forward (not single-window in-sample), n>=30 in EACH test fold; (2) positive Wilson-LB lift that HOLDS across folds AND across regimes (not one point estimate); (3) survivorship + slippage haircuts applied; (4) a paper-observation window (signal is observe-only) confirming the live lift. 2026-06-13 in-sample baseline (154-trade 252d/min35): all confluence subsets n<30 (OB-BOS n=7, OB-FVG n=8 WR62.5%/PF2.60, OB-BOS-FVG n=5) = INSUFFICIENT. Stays OFF.",
+      "_enabled": false,
+      "bos_bonus": 0.5,
+      "fvg_bonus": 0.5,
+      "max_bonus": 1.0,
+      "require_both": false
     }
   },
   "regime_thresholds": {
@@ -2393,6 +2401,18 @@
       "caveat": "forward pick-record (not point-in-time backtest); universal across users; re-run monthly"
     },
     "_note": "UNIVERSAL setup multiplier \u2014 consumed by analysis.py ONLY when signal_layer_portfolio_blind._enabled=true (replaces the account-derived setup_score_multiplier). Regenerate: python3 scripts/build_universal_setup_kills.py"
+  },
+  "regime_conditional_ranker": {
+    "_enabled": true,
+    "_staged_at": "2026-06-13",
+    "_activated_at": "2026-06-13",
+    "_activation_note": "PAPER A/B OBSERVATION (paper-only system per feedback_paper_only_automation). Offline activation test on cache/last_bundle.json (06-13 risk_on_choppy, weak-catalyst day): BUY 34->6, all 6 survivors = Trend Continuation (the only profitable family, audit PF 1.41); 30 low-rank momentum BUYs demoted to WATCH, 2 quality WATCHes promoted. rank_score still emitted for every row so the A/B (composite verdict vs rank verdict) is observable in the audit ledger. Thresholds are outcome-calibrated on historical BUYs but on a single 2-month window — RE-CALIBRATE as paper volume accrues; revert with _enabled=false (byte-identical legacy path).",
+    "_comment": "RANK-REBUILD-2026-06-13 (audit docs/signal_screener_audit_2026_06_13). The composite 5-pillar `score` is ANTI-correlated with realized return (Pearson IC -0.10, t=-4.0); the inversion is regime-conditional (momentum pillars tech/rs work trending, invert choppy) and the Zacks/news bonus is a crowding fade (IC -0.14 choppy). signal_rank.compute_rank_score builds a regime-conditional rank from the PRE-bonus pillar norms (bonus structurally excluded). Validated (scripts/signal_walkforward.py): ranking each scan-day's top tercile by rank_score lifts the picked set PF 1.01 -> 1.71 (gate+rank 1.77). When _enabled, decision_engine ranks/promotes on rank_score while keeping score>=`gate_floor` as a quality GATE; the composite score is demoted from ranker to gate. DEFAULT OFF: rank_score is always computed + emitted (for A/B observation) but does not drive the verdict until flipped. Reversible: set _enabled=false. Weights live in signal_rank.DEFAULT_WEIGHTS unless overridden in `weights` below.",
+    "gate_floor": 60,
+    "rank_buy_threshold": {"trending": 50, "choppy": 36, "risk_off": 36},
+    "_rank_axis_note": "rank_score is '% of weighted-max achievable' (NOT the composite 0-100 axis) so it has its OWN threshold, not the regime buy_threshold. PER-REGIME because the trending blend runs on a higher axis (BUY-pool median 53) than choppy (median 39). Thresholds calibrated on the RIGHT population = actual historical BUY-verdict trades w/ resolved outcomes (NOT gate-passers, NOT full universe — those have selection bias: picks_history is curated/taken trades scoring higher than the live all_scored universe). Calibration: CHOPPY rank>=36 keeps ~65% of historical BUYs lifting PF 0.95->1.25 (rank>=40 => PF 1.54 / 47% keep); TRENDING BUYs barely separate by rank (all PF ~1.24-1.27, n=135) so threshold set near pool median 50 to trim the bottom half pending more trending-regime data. NOTE: on a weak low-catalyst choppy day this correctly yields FEW BUYs (the audit's whole point: system over-promotes in choppy). RE-CALIBRATE in paper A/B as volume accrues. Accepts scalar OR {trending,choppy,risk_off} dict keyed by signal_rank rank_regime_family.",
+    "weights": null,
+    "_validation": "single 2-month window (2026-04..06) with observed factor rotation (cat+qg NEGATIVE in April trending, positive May-June choppy). NOT a permanent law. Paper-validate via A/B before any live promotion (principle 19)."
   },
   "signal_edge_labeling": {
     "_enabled": true,

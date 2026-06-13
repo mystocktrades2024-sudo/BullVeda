@@ -211,13 +211,122 @@ def lookup_edge(setup_family: Optional[str], regime: Optional[str],
     }
 
 
+# ====================================================================
+# GENERIC AXIS TIERS (RANK-REBUILD-2026-06-13, part b)
+# Same honest-label philosophy, extended to the a-priori tiers that the
+# audit found INVERTED: catalyst_tier (T1 PF 0.71 choppy < T3 1.79) and
+# entry_quality (FRESH/EXTENDED demoted by the gate yet PULLBACK/MISSED-
+# trending out-perform). We do NOT relabel the descriptive fields — we
+# attach an EMPIRICAL regime-conditional grade so the inversion is visible
+# and usable for sort/conviction, never destructive. Mirrors lookup_edge.
+# ====================================================================
+_AXIS_CACHE: dict = {}
+
+
+def build_axis_table(field: str, picks_history_path: str,
+                     tiers: Optional[dict] = None) -> dict:
+    """Return {(value, coarse_regime): stats} + ('*ALL*', value) aggregates for
+    an arbitrary categorical signal `field` (e.g. 'catalyst_tier', 'entry_quality')."""
+    tiers = tiers or _DEFAULT_TIERS
+    try:
+        with open(picks_history_path) as fh:
+            doc = json.load(fh)
+    except Exception:
+        return {}
+    trades = doc.get("trades") if isinstance(doc, dict) else doc
+    if not isinstance(trades, list):
+        return {}
+    by_cell: dict = {}
+    by_val: dict = {}
+    for r in trades:
+        pc = r.get("pct_chg")
+        if not isinstance(pc, (int, float)) or math.isnan(pc):
+            continue
+        raw = r.get(field)
+        if raw is None or str(raw).strip() == "":
+            continue
+        val = str(raw).strip()
+        reg = coarse_regime(r.get("regime4") or r.get("regime"))
+        by_cell.setdefault((val, reg), []).append(float(pc))
+        by_val.setdefault(val, []).append(float(pc))
+
+    def _stats(returns: list[float]) -> dict:
+        n = len(returns)
+        wins = sum(1 for x in returns if x > 0)
+        pf = _pf(returns)
+        wlb = _wilson_lb(wins, n)
+        return {"n": n, "wr": round(100.0 * wins / n, 1) if n else 0.0,
+                "pf": round(pf, 2), "wilson_lb": round(wlb, 1),
+                "avg_ret": round(sum(returns) / n, 2) if n else 0.0,
+                "tier": _classify(n, pf, wlb, tiers)}
+
+    table = {cell: _stats(rets) for cell, rets in by_cell.items()}
+    for val, rets in by_val.items():
+        table[("*ALL*", val)] = _stats(rets)
+    return table
+
+
+def _load_axis_table(field: str, picks_history_path: str,
+                     tiers: Optional[dict]) -> dict:
+    try:
+        mtime = os.path.getmtime(picks_history_path)
+    except OSError:
+        mtime = 0
+    ck = (field, picks_history_path)
+    ent = _AXIS_CACHE.get(ck)
+    if ent and ent.get("mtime") == mtime and ent.get("tiers_id") == id(tiers):
+        return ent.get("table") or {}
+    table = build_axis_table(field, picks_history_path, tiers)
+    _AXIS_CACHE[ck] = {"mtime": mtime, "tiers_id": id(tiers), "table": table}
+    return table
+
+
+def lookup_tier(field: str, value, regime: Optional[str],
+                picks_history_path: str = "cache/picks_history.json",
+                tiers: Optional[dict] = None) -> Optional[dict]:
+    """Empirical regime-conditional grade for a categorical signal value.
+    Falls back to the all-regime aggregate when the (value x regime) cell is sparse.
+    Returns {field, value, tier, label, icon, tone, sort_rank, pf, n, wr,
+             wilson_lb, avg_ret, regime_cell, basis} or None."""
+    if value is None or str(value).strip() == "":
+        return None
+    val = str(value).strip()
+    table = _load_axis_table(field, picks_history_path, tiers)
+    if not table:
+        return None
+    reg = coarse_regime(regime)
+    cell = table.get((val, reg)); basis = "regime"
+    if not cell or cell.get("n", 0) < 10:
+        cell = table.get(("*ALL*", val)); basis = "all"
+    if not cell:
+        return None
+    tier = cell["tier"]
+    meta = _TIER_META.get(tier, _TIER_META["UNPROVEN"])
+    reg_word = {"bull": "trending", "neutral": "choppy", "bear": "risk-off"}.get(reg, reg)
+    scope = reg_word if basis == "regime" else "all-regime"
+    return {
+        "field": field, "value": val, "tier": tier,
+        "label": f"{field}={val} {tier.title()} in {scope}: PF {cell['pf']} (n={cell['n']})",
+        "icon": meta["icon"], "tone": meta["tone"], "sort_rank": meta["rank"],
+        "pf": cell["pf"], "n": cell["n"], "wr": cell["wr"],
+        "wilson_lb": cell["wilson_lb"], "avg_ret": cell["avg_ret"],
+        "regime_cell": reg, "basis": basis,
+    }
+
+
 if __name__ == "__main__":
-    # quick self-test against the live file
-    import pprint
     t = build_edge_table("cache/picks_history.json")
-    print(f"cells: {len(t)}")
+    print(f"edge cells: {len(t)}")
     for reg in ("bull", "neutral", "bear"):
         for fam in ("Trend Continuation", "Breakout Expansion", "Impulse Catalyst"):
             e = lookup_edge(fam, reg)
             if e:
                 print(f"{fam:22} x {reg:8} -> {e['tier']:10} {e['label']}")
+    print("\n-- axis tiers (catalyst_tier, entry_quality) --")
+    for field in ("catalyst_tier", "entry_quality"):
+        for reg in ("bull", "neutral"):
+            for val in (("1", "2", "3") if field == "catalyst_tier"
+                        else ("FRESH", "PULLBACK", "EXTENDED", "MISSED")):
+                e = lookup_tier(field, val, reg)
+                if e:
+                    print(f"{field:14} {val:9} x {reg:8} -> {e['tier']:10} PF {e['pf']} (n={e['n']}, {e['basis']})")

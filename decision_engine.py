@@ -1343,7 +1343,30 @@ def _compute_final_verdict_impl(t: dict, regime: str | None = None,
     score = t.get("score") or 0
     threshold = _resolve_buy_threshold(regime, thresholds)
 
-    if score >= threshold:
+    # RANK-REBUILD-2026-06-13: regime-conditional ranker. When enabled, the
+    # composite `score` is DEMOTED from ranker to a >=gate_floor quality GATE,
+    # and promotion is decided by rank_score (built from pre-bonus pillar norms,
+    # IC-positive + monotone where composite is anti-correlated). DEFAULT OFF →
+    # legacy `score >= threshold` path is byte-identical when _enabled=false.
+    _rcr = (config or {}).get("regime_conditional_ranker", {}) or {}
+    _promote = score >= threshold
+    _rank_thr = None  # exposed to reason strings below
+    if _rcr.get("_enabled"):
+        _gate_floor = _rcr.get("gate_floor", 60)
+        _sb = t.get("scoring_breakdown") or {}
+        _rank = _sb.get("rank_score")
+        if _rank is None:
+            _rank = t.get("rank_score", score)  # fail-safe to composite
+        # rank_buy_threshold: scalar OR {trending,choppy,risk_off} keyed by rank_regime_family
+        _rbt = _rcr.get("rank_buy_threshold", 50)
+        if isinstance(_rbt, dict):
+            _fam = _sb.get("rank_regime_family", "choppy")
+            _rank_thr = _rbt.get(_fam, _rbt.get("choppy", 50))
+        else:
+            _rank_thr = _rbt
+        _promote = (score >= _gate_floor) and (float(_rank) >= float(_rank_thr))
+
+    if _promote:
         # A2 (2026-05-09): signal_filter whitelist gate. Demote to WATCH if
         # the (setup × regime × score_band × entry_quality) combination isn't
         # whitelisted. Off by default (config["signal_filter"]["_enabled"]=false)
@@ -1371,18 +1394,36 @@ def _compute_final_verdict_impl(t: dict, regime: str | None = None,
             log.debug(f"signal_filter eval failed (allowing through): {_sf_e}") if 'log' in dir() else None
             _filter_audit = None
 
+        if _rcr.get("_enabled"):
+            _sb2 = t.get("scoring_breakdown") or {}
+            _rk = _sb2.get("rank_score", t.get("rank_score"))
+            _buy_reason = (f"all gates passed; rank_score {_rk} >= {_rank_thr} "
+                           f"[{_sb2.get('rank_regime_family','?')}] AND score {score} >= gate "
+                           f"{_rcr.get('gate_floor', 60)} ({regime or 'default'})")
+        else:
+            _buy_reason = f"all gates passed; score {score} >= {threshold} ({regime or 'default'})"
         return {
             "verdict": "BUY",
-            "reason": f"all gates passed; score {score} >= {threshold} ({regime or 'default'})",
+            "reason": _buy_reason,
             "caveats": caveats,
             "gates_evaluated": gates,
             "demote_to": None,
             "signal_filter": _filter_audit,
         }
 
+    if _rcr.get("_enabled"):
+        _sb3 = t.get("scoring_breakdown") or {}
+        _rk = _sb3.get("rank_score", t.get("rank_score"))
+        if (score or 0) < _rcr.get("gate_floor", 60):
+            _watch_reason = f"all gates passed but score {score} < quality gate {_rcr.get('gate_floor', 60)}"
+        else:
+            _watch_reason = (f"all gates passed but rank_score {_rk} < rank BUY threshold "
+                             f"{_rank_thr} [{_sb3.get('rank_regime_family','?')}]")
+    else:
+        _watch_reason = f"all gates passed but score {score} < BUY threshold {threshold}"
     return {
         "verdict": "WATCH",
-        "reason": f"all gates passed but score {score} < BUY threshold {threshold}",
+        "reason": _watch_reason,
         "caveats": caveats,
         "gates_evaluated": gates,
         "demote_to": None,

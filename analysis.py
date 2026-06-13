@@ -11896,6 +11896,26 @@ def analyze_ticker(ticker: str, df: pd.DataFrame, info: dict,
         "final_score":  float(normalized),         # post-clamp 0-100
     }
 
+    # RANK-REBUILD-2026-06-13: regime-conditional rank score from PRE-bonus pillar
+    # norms (bonus structurally excluded — it is a crowding fade, IC -0.14 in choppy).
+    # ALWAYS computed + emitted for A/B observation; only DRIVES the verdict when
+    # config.regime_conditional_ranker._enabled is true (consumed in decision_engine).
+    try:
+        from signal_rank import compute_rank_score as _crs
+        _rcr_cfg = (config or {}).get("regime_conditional_ranker", {}) or {}
+        _rank = _crs(
+            {"cat_score": cat_score_norm, "qg_score": qg_score_norm,
+             "tech_score": tech_score_norm, "rs_score": rs_score_norm,
+             "sm_score": sm_score_norm},
+            str(regime.get("regime4", "") or ""),
+            weights=_rcr_cfg.get("weights") or None,
+        )
+        scoring_breakdown["rank_score"] = _rank["rank_score"]
+        scoring_breakdown["rank_regime_family"] = _rank["regime_family"]
+    except Exception:
+        scoring_breakdown["rank_score"] = float(normalized)  # fail-safe: fall back to composite
+        scoring_breakdown["rank_regime_family"] = "fallback"
+
     # Checklist 7.3: surface sizing multiplier for downstream position-sizer.
     # This is the ONLY channel by which the setup-weight multiplier influences
     # trading decisions now — it no longer touches the score.

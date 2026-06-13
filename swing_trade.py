@@ -4419,6 +4419,10 @@ def run_daily_scan(force_fresh: bool = False):
             from edge_labels import lookup_edge as _edge_lookup
         except Exception:
             _edge_lookup = None
+        try:
+            from edge_labels import lookup_tier as _tier_lookup
+        except Exception:
+            _tier_lookup = None
         _edge_tiers_cfg = (_de_cfg.get("signal_edge_labeling") or {}).get("tiers")
         _edge_regime4 = (bundle.get("regime") or {}).get("regime4") or _bundle_regime
 
@@ -4446,6 +4450,21 @@ def run_daily_scan(force_fresh: bool = False):
                                            tiers=_edge_tiers_cfg)
                         if _et:
                             _row["edge_tier"] = _et
+                    except Exception:
+                        pass
+                # RANK-REBUILD-2026-06-13 (part b) — empirical regime-conditional
+                # grade for the a-priori tiers the audit found INVERTED. Honest
+                # label only (display/sort/conviction); never relabels or gates.
+                if _tier_lookup is not None:
+                    try:
+                        _cte = _tier_lookup("catalyst_tier", _row.get("catalyst_tier"),
+                                            _edge_regime4, tiers=_edge_tiers_cfg)
+                        if _cte:
+                            _row["catalyst_tier_empirical"] = _cte
+                        _eqe = _tier_lookup("entry_quality", _row.get("entry_quality"),
+                                            _edge_regime4, tiers=_edge_tiers_cfg)
+                        if _eqe:
+                            _row["entry_quality_empirical"] = _eqe
                     except Exception:
                         pass
                 # Task #3: write per-ticker setup size multiplier (dashboard reads this)
