@@ -16,6 +16,21 @@ LOG_FILE="$LOG_DIR/scan_$(date +%Y-%m-%d).log"
 # Ensure log directory exists
 mkdir -p "$LOG_DIR"
 
+# WEEKEND GATE (2026-06-13, QUOTA-WEEKEND-GATE): each run deep-enriches ~1,078
+# tickers × ~14 EODHD endpoints. Market closed Sat/Sun → pure quota burn, no new
+# data. date +%u: Mon=1..Sun=7; skip 6(Sat)+7(Sun). Reversible: delete this block.
+if [ "$(date +%u)" -ge 6 ]; then
+  echo "$(date '+%F %T') weekend ($(date +%A)) — daily scan skipped (market closed, EODHD quota saved)" >> "$LOG_FILE"
+  exit 0
+fi
+# Holiday gate: reuse seasonality._MAJOR_HOLIDAYS. Fail-OPEN — if python errors,
+# python exits non-zero → no skip → scan runs (better than silently skipping a
+# trading day). NOTE: holiday list lapses after 2027-01-01 (extend it then).
+if "$PYTHON" -c "import sys,datetime; sys.path.insert(0,'$SCRIPT_DIR'); import seasonality as s; sys.exit(0 if s.is_market_holiday(datetime.date.today()) else 1)" 2>/dev/null; then
+  echo "$(date '+%F %T') US market holiday — daily scan skipped (market closed, EODHD quota saved)" >> "$LOG_FILE"
+  exit 0
+fi
+
 # Raise the file-descriptor soft limit (2026-06-04). launchd jobs inherit ~256 fds;
 # the HEAVY morning scan deep-enriches 1,500 tickers with 16 concurrent workers, which
 # opens far more sockets/files than that and exhausts the limit mid-enrichment. The

@@ -26,6 +26,33 @@ LOG_DIR="$ROOT/cache/logs"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/launchd-wrapper.log"
 
+# WEEKEND GATE (2026-06-13, QUOTA-WEEKEND-GATE): the jobs below are market-data
+# scans/snapshots — market closed Sat/Sun → no new intraday/EOD data, so they
+# only burn EODHD quota (hit 96K/100K Sat 06-13). date +%u: Mon=1..Sun=7;
+# skip 6(Sat)+7(Sun). Other wrapper jobs (edgar/ml-retrain/congress/weekly-*)
+# are UNAFFECTED — they are not in this list. Reversible: delete this block.
+WEEKDAY_ONLY=(
+  "com.swingtrade.premarket-scan"
+  "com.swingtrade.morning-briefing"
+  "com.swingtrade.rolling-tail"
+  "com.swingtrade.ticker-snapshots"
+)
+for wd in "${WEEKDAY_ONLY[@]}"; do
+  if [ "$LABEL" = "$wd" ]; then
+    # Weekend skip (Sat=6/Sun=7)
+    if [ "$(date +%u)" -ge 6 ]; then
+      echo "$(date '+%F %T') [$LABEL] weekend skip ($(date +%A)) — market closed, EODHD quota saved" >> "$LOG"
+      exit 0
+    fi
+    # Holiday skip — reuse seasonality._MAJOR_HOLIDAYS, fail-OPEN (python error → run).
+    if python3 -c "import sys,datetime; sys.path.insert(0,'$ROOT'); import seasonality as s; sys.exit(0 if s.is_market_holiday(datetime.date.today()) else 1)" 2>/dev/null; then
+      echo "$(date '+%F %T') [$LABEL] holiday skip — market closed, EODHD quota saved" >> "$LOG"
+      exit 0
+    fi
+    break
+  fi
+done
+
 # 2026-05-27: CPU/concurrency guard for heavy jobs. Jobs in HEAVY_LABELS
 # get skipped if load avg > 8 OR a swing scan is running OR another heavy
 # job is active. Prevents recurrence of 2026-05-27 12:11 outage (walk-forward

@@ -39,6 +39,14 @@ def _is_weekday(d: date) -> bool:
     return d.weekday() < 5
 
 
+def is_market_holiday(d: date) -> bool:
+    """True if d is a full US market close in _MAJOR_HOLIDAYS. Public helper for
+    the launchd quota weekend/holiday gate (QUOTA-WEEKEND-GATE 2026-06-13).
+    NOTE: _MAJOR_HOLIDAYS currently runs through 2027-01-01 — extend it when the
+    list lapses or this silently returns False for later years."""
+    return d in _MAJOR_HOLIDAYS
+
+
 def _last_n_trading_days_of_month(year: int, month: int, n: int) -> list[date]:
     """Return the last n weekdays of the given month (approximate trading days)."""
     if month == 12:
