@@ -6726,7 +6726,8 @@ def classify_expected_pullback(indicators: dict) -> str:
 def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
                        indicators: dict, direction: str = "long",
                        beta: float | None = None,
-                       config: dict | None = None) -> dict:
+                       config: dict | None = None,
+                       strategy_mode: str = "swing") -> dict:
     """
     Generate mandatory trade plan: entry, stop, targets, setup type.
     No trade without defined stop. No trade without >= 3:1 R:R.
@@ -7214,7 +7215,12 @@ def compute_trade_plan(ticker: str, df: pd.DataFrame, sr: dict,
     if (config or {}).get("use_structural_targets") and direction == "long":
         try:
             from target_engine import analyze_trade_cached as _te_cached
-            _te_mode = str((config or {}).get("_strategy_mode", "swing")).lower()
+            # Mode resolution: explicit kwarg is the discoverable path; config
+            # injection (`_strategy_mode`, mirrors the `_regime_name` convention)
+            # wins when set. Default "swing". Prior to this fix `_strategy_mode`
+            # was read but NEVER written anywhere → the override always ran swing,
+            # silently mis-targeting any position/invest plan routed through here.
+            _te_mode = str((config or {}).get("_strategy_mode") or strategy_mode or "swing").lower()
             if _te_mode not in ("swing", "position", "invest"):
                 _te_mode = "swing"
             _te = _te_cached(ticker, direction="long", mode=_te_mode,

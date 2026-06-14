@@ -629,9 +629,9 @@ function _deriveVerdict(p) {
   const t1r = p.t1?.r_multiple || 0;
   const p1 = p.t1?.p_reach || 0;
   if (w.some(x => /choch/i.test(x))) return { label:'TIGHTEN STOP', cls:'am' };
-  if (t1c >= 5 && p1 >= 0.45 && t1r >= 2.5) return { label:'BUY · ENTER', cls:'gn' };
-  if (t1c >= 4 && p1 >= 0.30 && t1r >= 2.0)  return { label:'HOLD · ADD DIP', cls:'gn' };
-  if (t1c < 3 || t1r < 1.5) return { label:'WEAK · SKIP', cls:'rd' };
+  if (t1c >= 5 && p1 >= 0.45 && t1r >= 2.5) return { label:'PRIME TARGET', cls:'gn' };
+  if (t1c >= 4 && p1 >= 0.30 && t1r >= 2.0)  return { label:'GOOD TARGET', cls:'gn' };
+  if (t1c < 3 || t1r < 1.5) return { label:'WEAK TARGET', cls:'rd' };
   if (p1 < 0.20) return { label:'LOW P(reach)', cls:'rd' };
   return { label:'REVIEW', cls:'am' };
 }
@@ -1042,8 +1042,9 @@ function renderVerdictStrip() {
     if (p.is_etf)      return { lbl:m, val:'ETF', cls:'am' };
     const w = p.warnings || [];
     const t1c = p.t1?.confluence || 0, t1r = p.t1?.r_multiple || 0;
+    // DEAD: unmounted — do NOT re-introduce action verbs (see feedback_overview_verdict_must_bind_canonical)
     if (w.some(x => /choch/i.test(x))) return { lbl:m, val:'TIGHTEN', cls:'am' };
-    if (t1c >= 5 && t1r >= 2.5) return { lbl:m, val:'BUY', cls:'gn' };
+    if (t1c >= 5 && t1r >= 2.5) return { lbl:m, val:'STRONG', cls:'gn' };
     if (t1c < 3 || t1r < 1.5)    return { lbl:m, val:'WEAK', cls:'rd' };
     return { lbl:m, val:'WATCH', cls:'am' };
   });
@@ -1088,7 +1089,7 @@ function renderStrategyFit() {
       ? `<b>T1</b> ${fmtPx(t1.price)} (conf ${(t1.confluence||0).toFixed(1)} · ${escapeHtml(safeStr(t1.behavior))})${t2 ? ` · <b>T2</b> ${fmtPx(t2.price)} (conf ${(t2.confluence||0).toFixed(1)} · ${escapeHtml(safeStr(t2.behavior))})` : ''}<br><b>Stop</b> ${fmtPx(p?.stop?.price)} · <b>P(reach)</b> ${t1.p_reach != null ? Math.round(t1.p_reach*100)+'%' : '—'}`
       : '<span style="color:var(--qink-3)">no targets</span>';
     const isActive = m.ui === STATE.activeStrategy;
-    return `<div class="qov-fc ${m.cls}${isBest ? ' best' : ''}${isActive ? ' active' : ''}">${isBest ? '<div class="qov-best-badge">★ BEST FIT</div>' : ''}<div class="qov-fc-mode">${m.label}</div><div class="qov-fc-hold">${m.hold}</div><div class="qov-fc-verdict ${v.cls}">${v.label}</div><div class="qov-fc-reason">${reason}</div><div class="qov-fc-tgts">${tgts}</div></div>`;
+    return `<div class="qov-fc ${m.cls}${isBest ? ' best' : ''}${isActive ? ' active' : ''}">${isBest ? '<div class="qov-best-badge">★ BEST FIT</div>' : ''}<div class="qov-fc-mode">${m.label}</div><div class="qov-fc-hold">${m.hold}</div><div class="qov-fc-verdict ${v.cls}"><span style="font:700 8px var(--qmono);opacity:.6;display:block;letter-spacing:.12em">TARGET QUALITY</span>${v.label}</div><div class="qov-fc-reason">${reason}</div><div class="qov-fc-tgts">${tgts}</div></div>`;
   }).join('');
   setHTML('qovFitGrid', html);
   const bestMode = bestIdx >= 0 ? modes[bestIdx].label : '—';

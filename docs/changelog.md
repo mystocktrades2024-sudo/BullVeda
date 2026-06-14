@@ -6,6 +6,48 @@ of what shipped and when, so root CLAUDE.md can stay lean.
 
 ---
 
+## 2026-06-14 — Propagate structural targets to Elite + close the `_strategy_mode` trap
+
+**Why:** the overhead-supply gate fix (below) only reaches surfaces that read the *live* structural ladder. An audit of the downstream surfaces found the **Overview** and **Plan (BullVeda)** tabs correctly bind `/api/trade_engine?mode=` (→ `target_engine.select_targets`), but **Elite Picks** did not — so the gate fix never reached 6 of its 9 cells.
+
+**ELITE-STRUCT-TARGETS (P1)** — Elite reads a *precomputed* bundle, and `build_data._mode_plan` clobbered Position/Invest `t1/t2` with unanchored math (position = entry +3×/+6×ATR; invest = +25%/+50% flat) *after* `compact_row`. So Position, Invest, and all SHORT elite cells displayed exactly the fixed-multiple targets the 2026-06-08 structural cutover was built to kill (e.g. AAPL invest projected T2 +50% ≈ $437 vs the real structural $342). Fix: `_mode_plan` now prefers the **structural ladder** read from the `target_engine` cache (`cache/target_engine/{T}_{MODE}.json`) — the same data Overview serves — via a **cache-only** read (`target_engine._cache_path`/`_cache_is_fresh`/`_cache_read`, 12h-fresh + schema-gated, **never a live fetch inside the build**). The mode-appropriate **stop** is kept (the engine's stop is swing-calibrated, too tight for a 90–540d hold), R:R is recomputed against the structural T1, and a cold/stale cache falls back to the ATR/% math (tagged `target_method`). The twice-daily prewarm (03:00) + eod (19:30) `precompute_top1000.py` keeps all 3 modes fresh at the morning build, so Elite Position/Invest now match Overview.
+
+**TE-STRATEGY-MODE (P2)** — `compute_trade_plan`'s structural override read `config["_strategy_mode"]`, a key **written nowhere** in the codebase, so the override always ran `mode="swing"` regardless of horizon — a latent trap that would silently mis-target any position/invest plan routed through the function. Promoted to a discoverable `strategy_mode="swing"` kwarg (config injection still wins, mirroring the `_regime_name` convention). Behavior-neutral today (every caller is swing).
+
+**OVERVIEW-TQ-LABEL (P2)** — the Overview Strategy-Fit cards rendered a bold green `BUY · ENTER` / `HOLD · ADD DIP` / `WEAK · SKIP` computed from *target quality* (confluence × R × P-reach), in the same action vocabulary + gn/am/rd colors as the canonical BUY/WATCH/AVOID verdict — readable as "the system says buy" when `T.stage` may say WATCH. Relabeled to `PRIME / GOOD / WEAK TARGET` nouns under a `TARGET QUALITY` caption (a *separate axis*, not the action verdict). The canonical exec-brief verdict (binds `T.stage` / `decisions_by_mode`) is untouched, preserving the `feedback_overview_verdict_must_bind_canonical` invariant.
+
+**Files:** `infra/prototype/build_data.py` (`_struct_targets` + `_mode_plan`), `analysis.py` (`compute_trade_plan` kwarg), `infra/prototype/subtabs/overview/overview.js` (`_deriveVerdict` + `renderStrategyFit`).
+
+---
+
+## 2026-06-14 — Overhead-supply gate: structural targets can't leapfrog a wall
+
+**Bug (FTNT swing):** the Overview ladder showed T1 $165.56 / T2 $169.57 at 2.40R/2.90R while a clear **double top sat at ~$150**. `target_engine.select_targets` picks T1 by *confluence × R-band* but never checked whether an unbroken resistance sits *between* entry and the chosen level — so it leapfrogged the $150 double top and anchored T1 on a stale VAH ($165.55, left over from when FTNT traded $160–175 before its crash to $85). The R:R shown on the chart (`te.t1.r_multiple`) was therefore computed off a target on the far side of a wall — an honest-looking 2.40R that was really a buy-into-resistance.
+
+**Principle:** targets follow **path order** — T1 is the first *unbroken* supply price must clear; the min-R floor gates whether the trade is worth taking, it must never silently relocate T1 to a farther level. ("Unbroken" is automatic: entry == current price, so any candidate above it hasn't been closed through.)
+
+**Fix** (`target_engine.py`):
+- New `HARD_SUPPLY_TYPES = {BSL, SWING, OB, VAH}` — the source types that constitute a genuine wall (equal-highs/double-top, prior swing high, bear order block, value-area high). HVN (magnet), Fib/Round/AVWAP (projections, not committed supply) are excluded.
+- `select_targets` now selects T1/T2 in **price order among walls** before falling back to R-band/projection selection:
+  - **T1** = nearest unbroken wall above entry. **T2** = next wall beyond T1. Only when no wall qualifies does the original R-band logic run (correct for blue-sky / breakout-extension names with no overhead supply).
+  - **Meaningful-distance floor** (`0.25×ATR`): a wall basically at entry means "price is AT the level," not a forward target — skip to the next wall. (FTNT's $147.19 immediate high is skipped; the $150.05 double top becomes T1.)
+  - **Horizon scaling:** SWING honors sub-floor walls (a 2-15d hold cannot ignore a wall 0.3R overhead). POSITION / INVEST look *through* near-term supply — they only respect a wall already clearing their min-R floor, else fall through to the projection stack.
+- Sub-floor T1 emits an `overhead_supply_cap` warning. The honest (often <1R) R:R flows straight into `confidence.rr_quality`, so the structural confidence reflects the wall — **Option 3 (cap-and-reflect), not hard-reject.**
+
+**Scope (deliberate):** this changes the **structural target engine only** — the path that drives the Overview ladder *and* its displayed R:R. The legacy composite-score path (`analysis.compute_trade_plan` → catalyst-pillar R:R) is **untouched**, because capping `target1` there would recalibrate the universal score distribution for all users and require a walk-forward re-validation. Surfacing the honest ladder + R:R + cap warning on the structural surface delivers the fix without that blast radius.
+
+**Result (FTNT):** SWING T1 $150.05 (0.32R, the double top) + cap warning · POSITION T1 $177.61 (2.27R) · INVEST T1 $170.00 (1.17R) — longer horizons correctly look through the near wall.
+
+**Overview-tab coherence sweep** (`lens-overview.jsx`): audited every surface that consumes T1/T2/R:R/stop so they all reflect the gated structural plan, not the legacy scan-row. Two shared helpers added — `teRRof(te, ticker)` (structural R:R, scan-row fallback) and `teLevelsOf(te, ticker)` (structural levels, `coherentLevels` fallback). Re-wired: §2 "Are We Cleared?" Reward:Risk check (`BuyChecklist` — now correctly **fails** ≥2.0 on a buy-into-wall name instead of passing the legacy 2.40R), §4 thesis reference table + AI-thesis "Levels:" prompt (`ThesisCard`), the INVALIDATION stop and §5 pre-mortem stop (`LensOverview` — now quote the ladder stop). Each component subscribes via `useTradeEngine` so it re-renders when the per-mode payload lands. Render-verified headless (Playwright basic-auth): no React errors, FTNT shows T1 $150.05 / R:R 0.32R everywhere, old 2.40R / $165.56 gone.
+
+**Deliberately NOT changed — composite "Bullish NN" Plan lens** (`composite-verdict.jsx:27,43`): still scores off `adj.rMultiple` (scan-row R:R). Routing it to structural `teRR` would split the score (scanner reads scan-row synchronously for 1000 names; the trade-engine cache only holds the viewed ticker → same name would score differently scanner vs detail). The correct fix is to **precompute structural R:R into every scan row** so the composite reads it consistently — a backend pipeline change that warrants a walk-forward validation pass. Left for that cycle; the action-guiding surfaces above already carry the honest R:R.
+
+**Hero state soft-demote (Option 2, user-approved)** (`lens-overview.jsx` `DecisionHero`): the live-state crown set `ACTIONABLE` purely on price-in-buy-zone, ignoring reward — so FTNT read "▶ ACTIONABLE · in the buy zone" while R:R was 0.32R. Added a demote: when `L.valid && st === "ACTIONABLE" && rrToT1 < RR_FLOOR (2.0, matches the §2 checklist)`, the state becomes `⚠ CAUTION · poor R:R X.XXR — capped at $T1, needs a break to continue`. Tradeable still (BUY stays clickable — user-agency); the headline just stops saying "go" when there's no reward. Tone-aware icon added (`stIcon`: ▶ default, ⚠ caution). Render-verified: FTNT shows CAUTION, ACTIONABLE gone, no React errors.
+
+**Config / rollback:** `config.json → overhead_supply_gate._enabled` (default `true`). Set `false` to revert to pure R-band selection. 26/26 tests pass; bundle rebuilt via `node build_bullveda.cjs`.
+
+---
+
 ## 2026-06-11 — Thesis Chart RSI/MACD sub-panes: un-truncate in full mode + on by default
 
 **Bug:** In the Thesis Chart full-screen mode (`.tc-full`), the RSI(14) and MACD(12,26,9) oscillator sub-panes were truncated at the bottom of the viewport — only a sliver of MACD showed. Root cause: `.tc-full .tc-chart-card` was `flex:1` without `min-height:0`, so the card grew to fit its *content* instead of staying bounded by the viewport height. The main price pane (`.tc-lw { flex:1 }`) then absorbed nearly all that height and pushed the fixed-height sub-panes below the fold. The panes also carried the default `flex-shrink:1`, so they got squeezed when room was tight.

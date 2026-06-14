@@ -3181,32 +3181,77 @@ def main():
         ema21_w = (r.get("weekly") or {}).get("ema21") if isinstance(r.get("weekly"), dict) else None
         px = r.get("price") or 0
 
+        def _struct_targets(mode: str):
+            """Precomputed STRUCTURAL T1/T2 from the target_engine cache — the same
+            ladder Overview serves via /api/trade_engine?mode=. CACHE-ONLY read
+            (12h fresh + schema-gated via target_engine's own helpers); never
+            triggers a live fetch inside the build. Returns (t1, t2) or None — a
+            cold/stale cache → None → caller keeps the ATR/% fallback below.
+            Matches the 2026-06-08 system-wide structural cutover so Position/Invest
+            stop using the unanchored fixed-multiple targets (invest +25/+50%) that
+            cutover was built to kill."""
+            try:
+                import target_engine as _te
+                _p = _te._cache_path(sym, mode)
+                if not _te._cache_is_fresh(_p):
+                    return None
+                d = _te._cache_read(_p) or {}
+                if d.get("decision") != "trade":
+                    return None
+                t1 = float(((d.get("t1") or {}).get("price")) or 0)
+                t2 = float(((d.get("t2") or {}).get("price")) or 0)
+                if t1 > px and t2 > t1:
+                    return (round(t1, 2), round(t2, 2))
+            except Exception:
+                return None
+            return None
+
         def _mode_plan(mode: str) -> dict:
             """Return mode-specific stop/T1/T2 overrides on top of swing trade_plan.
-            ATR-based methods need atr_pct; fall back to fixed % if missing."""
+
+            TARGETS prefer the STRUCTURAL ladder (target_engine cache) so Position/
+            Invest match the Overview tab; falls back to ATR/% only on a cold cache.
+            STOP stays mode-appropriate — the structural engine's stop is swing-
+            calibrated (1.25-1.5× ATR), far too tight for a 90-540d hold — so we
+            keep the ATR/SMA200 stop and recompute R:R against the structural T1."""
             if not px:
                 return {}
             atr_abs = (atr_pct / 100.0) * px if atr_pct else (px * 0.025)  # default 2.5% if no ATR
             if mode == "position":
                 # 2× ATR stop (or 5% fallback), T1 = +3×ATR, T2 = +6×ATR
-                return {
+                base = {
                     "stop":    round(px - 2.0 * atr_abs, 2),
                     "target1": round(px + 3.0 * atr_abs, 2),
                     "target2": round(px + 6.0 * atr_abs, 2),
                     "rr_ratio": 3.0,
                     "stop_method": "2× ATR" if atr_pct else "-5% fixed",
+                    "target_method": "atr_multiple",
                 }
-            if mode == "invest":
+            elif mode == "invest":
                 # Stop at 200d MA breach (or -15% drawdown), T1 = +25%, T2 = +50%
                 stop = sma200 * 0.97 if sma200 else px * 0.85
-                return {
+                base = {
                     "stop":    round(stop, 2),
                     "target1": round(px * 1.25, 2),
                     "target2": round(px * 1.50, 2),
                     "rr_ratio": round((px * 0.25) / max(0.01, px - stop), 2) if px > stop else 0,
                     "stop_method": "SMA200 trail" if sma200 else "-15% drawdown",
+                    "target_method": "pct_fixed",
                 }
-            return {}
+            else:
+                return {}
+            # Structural target override (cache-only) — keep the mode stop, swap the
+            # targets to the structural ladder, recompute R:R against structural T1.
+            st = _struct_targets(mode)
+            if st:
+                t1s, t2s = st
+                base["target1"] = t1s
+                base["target2"] = t2s
+                _stop = base["stop"]
+                if px > _stop:
+                    base["rr_ratio"] = round((t1s - px) / max(0.01, px - _stop), 2)
+                base["target_method"] = "structural"
+            return base
 
         # POSITION: admission ≥55, BUY ≥68, WATCH 55-68, mcap ≥ $2B
         pos = _mode_score(r, POSITION_W)
