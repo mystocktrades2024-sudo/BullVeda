@@ -23,6 +23,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -33,6 +34,22 @@ def _hash_key(*parts) -> str:
     """Deterministic sha1 of row content → used as sync_key for idempotent upsert."""
     return hashlib.sha1("|".join(str(p) for p in parts).encode()).hexdigest()[:32]
 
+
+# OCC option symbol: ROOT(1-6 alpha) + YYMMDD(6) + C/P + strike(8 digits).
+# e.g. ARMK260717C00050000 → ARMK. Options paper trades leak the full OCC
+# symbol into closed_trades.ticker, which has no row in the stock `tickers`
+# table → FK violation that poisoned the whole closed_trades batch.
+_OCC_RE = re.compile(r"^([A-Za-z]{1,6})\d{6}[CP]\d{8}$")
+
+
+def _norm_ticker(raw) -> str:
+    """Normalize a ticker for FK consistency: uppercase, strip, and collapse an
+    OCC option symbol down to its underlying. Used by BOTH the tickers upsert
+    and every FK-bearing table so the inserted value always has a tickers row."""
+    t = (raw or "").upper().strip()
+    m = _OCC_RE.match(t)
+    return m.group(1) if m else t
+
 # Force-enable mode 1 for the migration regardless of .env setting
 os.environ["SUPABASE_MODE"] = "1"
 
@@ -42,6 +59,22 @@ ROOT = Path(__file__).parent
 DB_PATH = ROOT / "data" / "swingtrade.db"
 DATA_DIR = ROOT / "data"
 BATCH_SIZE = 100
+MAX_RETRIES = 4          # per-batch retries on transient network errors
+RETRY_BACKOFF = 1.5      # base seconds, exponential (1.5, 3, 6, ...)
+
+# Markers that mean "transient network blip — retry", not "bad data — skip".
+# signal_log was abandoning ~2400 rows on a single `Connection reset by peer`.
+_TRANSIENT_MARKERS = (
+    "connection reset", "peer", "timeout", "timed out", "readerror",
+    "writeerror", "connecterror", "connectionerror", "serverdisconnected",
+    "remoteprotocolerror", "broken pipe", "temporarily unavailable",
+    "502", "503", "504",
+)
+
+
+def _is_transient(e) -> bool:
+    s = (type(e).__name__ + " " + str(e)).lower()
+    return any(m in s for m in _TRANSIENT_MARKERS)
 
 
 def _load_json(path: Path):
@@ -122,7 +155,7 @@ def _src_closed_trades(conn) -> list[dict]:
     if j and isinstance(j, dict):
         for t in (j.get("closed_trades") or []):
             rows.append({
-                "ticker": t.get("ticker"),
+                "ticker": _norm_ticker(t.get("ticker")),
                 "direction": t.get("direction"),
                 "entry_date": t.get("entry_date"),
                 "exit_date": t.get("exit_date"),
@@ -388,17 +421,17 @@ def _src_tickers(conn) -> list[dict]:
     j = _load_json(DATA_DIR / "signal_log.json")
     if isinstance(j, list):
         for s in j:
-            t = (s.get("ticker") or "").upper().strip()
+            t = _norm_ticker(s.get("ticker"))
             if t:
                 syms.add(t)
     ps = _load_json(DATA_DIR / "portfolio_state.json")
     if isinstance(ps, dict):
         for p in (ps.get("positions") or []):
-            t = (p.get("ticker") or "").upper().strip()
+            t = _norm_ticker(p.get("ticker"))
             if t:
                 syms.add(t)
         for c in (ps.get("closed_trades") or []):
-            t = (c.get("ticker") or "").upper().strip()
+            t = _norm_ticker(c.get("ticker"))
             if t:
                 syms.add(t)
     return [{"ticker": s} for s in sorted(syms) if 1 <= len(s) <= 8]
@@ -448,19 +481,52 @@ def _migrate_one(sb, table: str, payloads: list[dict], on_conflict: str | None,
             keys_seen[k] = r
         payloads = list(keys_seen.values())
     t0 = time.time()
+
+    def _push(rows):
+        if on_conflict:
+            sb.table(table).upsert(rows, on_conflict=on_conflict).execute()
+        else:
+            sb.table(table).insert(rows).execute()
+
     for batch_start in range(0, len(payloads), BATCH_SIZE):
         batch = payloads[batch_start:batch_start + BATCH_SIZE]
-        try:
-            if on_conflict:
-                sb.table(table).upsert(batch, on_conflict=on_conflict).execute()
-            else:
-                sb.table(table).insert(batch).execute()
-            out["n_pushed"] += len(batch)
-        except Exception as e:
+        # 1) Try the batch, retrying transient network blips with backoff.
+        last_exc = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                _push(batch)
+                out["n_pushed"] += len(batch)
+                last_exc = None
+                break
+            except Exception as e:
+                last_exc = e
+                if _is_transient(e) and attempt < MAX_RETRIES - 1:
+                    time.sleep(RETRY_BACKOFF * (2 ** attempt))
+                    continue
+                break
+        if last_exc is None:
+            continue  # batch succeeded
+
+        # 2) Still failing. A persistent transient error → record + KEEP GOING
+        # (do NOT break — abandoning the rest is the bug we're fixing).
+        if _is_transient(last_exc):
             out["n_failed"] += len(batch)
-            err = f"batch {batch_start}-{batch_start+len(batch)}: {type(e).__name__}: {str(e)[:300]}"
-            out["errors"].append(err)
-            break
+            out["errors"].append(
+                f"batch {batch_start}-{batch_start+len(batch)} (transient, gave up "
+                f"after {MAX_RETRIES}): {type(last_exc).__name__}: {str(last_exc)[:200]}")
+            continue
+
+        # 3) Non-transient (constraint/data) → per-row fallback so ONE poison
+        # row (e.g. an option symbol with no tickers FK) can't drop 49 good rows.
+        for r in batch:
+            try:
+                _push([r])
+                out["n_pushed"] += 1
+            except Exception as e2:
+                out["n_failed"] += 1
+                if len(out["errors"]) < 20:
+                    rid = (r.get(on_conflict) if on_conflict else None) or r.get("ticker") or "?"
+                    out["errors"].append(f"row {rid}: {type(e2).__name__}: {str(e2)[:160]}")
     out["duration_ms"] = int((time.time() - t0) * 1000)
     return out
 
