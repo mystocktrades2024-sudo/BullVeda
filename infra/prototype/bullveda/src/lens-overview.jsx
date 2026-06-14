@@ -209,6 +209,21 @@ function teLevels(te, livePrice) {
   };
 }
 
+// teRRof — per-mode structural R:R from a cached trade_engine payload, else the
+// scan-row fallback. SINGLE source so every Overview surface (ladder, §2 entry
+// checklist, thesis ref/AI prompt, invalidation) agrees on R:R — critical after
+// the overhead-supply gate, which can drop T1's R:R below the legacy scan value.
+function teRRof(te, ticker) {
+  if (te && te.t1 && typeof te.t1.r_multiple === "number" && isFinite(te.t1.r_multiple)) return te.t1.r_multiple;
+  return (ticker && typeof ticker.rMultiple === "number") ? ticker.rMultiple : 0;
+}
+// teLevelsOf — coherent {price,pivot,stop,t1,t2,valid} with structural precedence
+// (rich trade_engine → scan-row coherentLevels). Mirrors DecisionHero's `L`.
+function teLevelsOf(te, ticker) {
+  const base = window.coherentLevels(ticker);
+  return teLevels(te, base.price) || base;
+}
+
 // ─── discoveryFootprint — which screen engines REALLY surfaced this name ───
 // Reads each engine's live signal for this ticker from real data: RS rank, ML
 // P(up), earnings-beat list, options UOA list, insider Form-4 edge, SMC pillar.
@@ -576,11 +591,22 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
 
   // ── live STATE relative to the trigger — the "what do I do now" crown ──
   const buyTop = entry * 1.03;
-  let st, stTone, stNote;
+  let st, stTone, stNote, stIcon = "▶";   // ▶ default; ⚠ for caution
   if (!L.valid) { st = "NO PLAN"; stTone = "ink"; stNote = "off-universe · live quote only — levels below are price-estimates, not a scan plan"; }
   else if (L.price < entry) { st = "WATCH"; stTone = "amb"; stNote = `${((entry - L.price) / L.price * 100).toFixed(1)}% below trigger · arm alert at $${entry.toFixed(2)}`; }
   else if (L.price <= buyTop) { st = "ACTIONABLE"; stTone = "gn"; stNote = "in the buy zone · trigger cleared"; }
   else { st = "EXTENDED"; stTone = "amb"; stNote = `${((L.price - entry) / entry * 100).toFixed(1)}% above trigger · wait for a pullback`; }
+
+  // Option 2 soft-demote (2026-06-14) — a buy-zone state with too-thin reward is
+  // NOT actionable. When R:R to T1 is below the floor (name jammed under a wall,
+  // e.g. FTNT 0.32R into a $150 double top), demote ACTIONABLE → CAUTION so the
+  // headline matches the ladder. Stays tradeable (BUY remains clickable) — the
+  // truth lives in the state, it does not hard-block the action (user-agency).
+  const RR_FLOOR = 2.0;   // matches the §2 entry-checklist Reward:Risk gate
+  if (L.valid && st === "ACTIONABLE" && rrToT1 < RR_FLOOR) {
+    st = "CAUTION"; stTone = "amb"; stIcon = "⚠";
+    stNote = `poor R:R ${rrToT1.toFixed(2)}R — capped at $${L.t1.toFixed(2)}, needs a break to continue`;
+  }
 
   // sizing math (risk-based): risk budget ÷ per-share stop distance
   const shares = (L.valid && risk > 0) ? Math.round(navRisk / risk) : 0;
@@ -680,7 +706,7 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
       {/* ── the setup, drawn · + price-to-levels ladder + live state ── */}
         <div className="dh-ladder">
           <div className="dh-state">
-            <span className={`dh-state-badge dh-state--${stTone} mono`}>▶ {st}</span>
+            <span className={`dh-state-badge dh-state--${stTone} mono`}>{stIcon} {st}</span>
             <span className="dh-state-note mono">{stNote}</span>
           </div>
           <div className="dh-rungs">
@@ -795,6 +821,11 @@ window.DecisionHero = DecisionHero;
 
 function ThesisCard({ ticker, mode }) {
   const [tAi, setTAi] = React.useState(null);   // null | "loading" | text
+  // structural per-mode plan — keeps the ref table + AI thesis levels coherent
+  // with the hero ladder (overhead-supply gate aware).
+  const te = useTradeEngine(ticker.symbol, mode);
+  const Lt = teLevelsOf(te, ticker);
+  const rrT = teRRof(te, ticker);
   const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
   const net = cv ? cv.net : (ticker.score || 60);
   const bias = cv ? cv.biasLabel : (window.secBias ? window.secBias(ticker.verdict) : ticker.verdict);
@@ -811,9 +842,9 @@ function ThesisCard({ ticker, mode }) {
   const bears = cv ? cv.lenses.filter(l => l.v < 48).sort((a, b) => a.v - b.v).slice(0, 3) : [];
   const ref = [
     ["Entry", `$${entry.toFixed(2)}`],
-    ["Stop", `$${(ticker.stop || 0).toFixed(2)}`],
-    ["T1 · T2", `$${(ticker.t1 || 0).toFixed(2)} · $${(ticker.t2 || 0).toFixed(2)}`],
-    ["R:R", `${(ticker.rMultiple || 0).toFixed(2)}R`],
+    ["Stop", `$${((Lt && Lt.stop) || ticker.stop || 0).toFixed(2)}`],
+    ["T1 · T2", `$${((Lt && Lt.t1) || ticker.t1 || 0).toFixed(2)} · $${((Lt && Lt.t2) || ticker.t2 || 0).toFixed(2)}`],
+    ["R:R", `${(rrT || 0).toFixed(2)}R`],
     ["Setup", ticker.setupFamily || "—"],
     ["Win · Wilson", ss.winRate ? `${(ss.winRate * 100).toFixed(0)}% · ${(ss.wilsonLB * 100).toFixed(0)}% LB` : "—"],
     ["Sample", ss.n ? `n=${ss.n}` : "—"],
@@ -822,7 +853,7 @@ function ThesisCard({ ticker, mode }) {
   const aiThesis = () => `Write a crisp swing-trade thesis for ${ticker.symbol}${ticker.name ? " (" + ticker.name + ")" : ""}, ${mode} timeframe, overall read ${bias} ${net}/100. 4-5 sentences in plain English: the core idea, the 2-3 strongest supporting points, the single biggest risk, and the key levels to watch.
 Supporting: ${bulls.length ? bulls.map(b => `${b.k} ${b.v}/100 (${b.why})`).join("; ") : "composite score " + net}.
 Risks / weakest: ${bears.length ? bears.map(b => `${b.k} ${b.v}/100 (${b.why})`).join("; ") : erTxt}.
-Levels: entry $${entry.toFixed(2)}, stop $${(ticker.stop || 0).toFixed(2)}, targets $${(ticker.t1 || 0).toFixed(2)} / $${(ticker.t2 || 0).toFixed(2)}, R:R ${(ticker.rMultiple || 0).toFixed(2)}, setup ${ticker.setupFamily || "continuation"}.`;
+Levels: entry $${entry.toFixed(2)}, stop $${((Lt && Lt.stop) || ticker.stop || 0).toFixed(2)}, targets $${((Lt && Lt.t1) || ticker.t1 || 0).toFixed(2)} / $${((Lt && Lt.t2) || ticker.t2 || 0).toFixed(2)}, R:R ${(rrT || 0).toFixed(2)}, setup ${ticker.setupFamily || "continuation"}.`;
   const writeThesis = async () => { setTAi("loading"); const r = await window.aiComplete(aiThesis()); setTAi(r.text); };
   const Pt = ({ b }) => (
     <div className="thx-pt"><span className="thx-pt-k mono">{b.k}</span><span className={`thx-score thx-score--${sTone(b.v)} mono`}>{b.v}</span><span className="thx-pt-d">{b.why}</span></div>
@@ -979,6 +1010,10 @@ window.NewsCatalysts = NewsCatalysts;
 })();
 
 function BuyChecklist({ ticker, mode }) {
+  // structural per-mode R:R — the §2 readiness gate must agree with the hero
+  // ladder, so a buy-into-wall name (low R:R after the overhead-supply gate)
+  // correctly FAILS the Reward:Risk check instead of passing on the legacy value.
+  const teBc = useTradeEngine(ticker.symbol, mode);
   const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
   const net = cv ? cv.net : (ticker.score || 60);
   const bias = cv ? cv.biasLabel : (window.biasRead ? window.biasRead(ticker).label : (window.secBias ? window.secBias(ticker.verdict) : "—"));
@@ -986,7 +1021,7 @@ function BuyChecklist({ ticker, mode }) {
   const proj = (window.AIPredict && ticker.symbol) ? window.AIPredict.projection(ticker.symbol, moKey) : null;
   const lensV = n => cv ? (cv.lenses.find(l => l.k === n || l.k.startsWith(n)) || {}).v : null;
   const ss = ticker.setupStats || {};
-  const rr = ticker.rMultiple || 0;
+  const rr = teRRof(teBc, ticker);
   const erDays = ticker.earnings ? ticker.earnings.days : null;
   const hold = ticker.holdDays || 9;
   const checks = [
@@ -1242,6 +1277,10 @@ function ShapDrivers({ ticker }) {
 
 function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle }) {
   const ticker = (window.modeAdjust ? window.modeAdjust(t0, mode) : t0);
+  // structural per-mode plan for the section-level surfaces (INVALIDATION stop +
+  // pre-mortem stop) so they quote the SAME stop as the hero ladder.
+  const teOv = useTradeEngine(ticker.symbol, mode);
+  const Lov = teLevelsOf(teOv, ticker);
 
   // route a lens name → lens id, used by the hero dissent pills + confluence grid
   const routeLens = (name) => {
@@ -1258,7 +1297,7 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
 
       {/* ── INVALIDATION · the kill-switch sits WITH the trade (risk-first, P3/P15) ── */}
       {(() => {
-        const L = window.coherentLevels ? window.coherentLevels(ticker) : ticker;
+        const L = Lov;
         const er = ticker.earnings && ticker.earnings.days;
         const rs = ticker.rsRank;
         return (
@@ -1325,7 +1364,7 @@ function LensOverview({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroSt
             <div className="ov-honest-sub label-cap">▼ What would make this wrong · pre-mortem</div>
             <div className="premortem">
               {(() => {
-                const L = window.coherentLevels ? window.coherentLevels(ticker) : ticker;
+                const L = Lov;
                 const reg = String((window.__BV && window.__BV.market && window.__BV.market.regime4) || (ticker._scan && ticker._scan._raw && ticker._scan._raw.regime4) || "the current regime").replace(/_/g, " ");
                 const rs = ticker.rsRank;
                 const er = ticker.earnings && ticker.earnings.days;

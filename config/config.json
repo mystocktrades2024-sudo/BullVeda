@@ -277,7 +277,7 @@
   "regime4_thresholds": {
     "_max_size_pct_note": "max_size_pct is a multiplier on the half-Kelly position size. 100 = full size, 70 = 70% of calculated size, 0 = no new longs.",
     "entry_quality_regime_relax": {
-      "_comment": "ENTRY-Q-REGIME-RELAX (2026-05-13). Per-regime list of entry_quality bands that are normally hard-blocked from BUY but ALLOWED here. Evidence: scripts/regime_sharpe_decomp.py output on n=897 trades \u2014 MISSED PF 2.59 / Sharpe +0.33 / n=302, EXTENDED PF 1.33 / Sharpe +0.10 / n=335. PULLBACK (n=72) is only PF 0.88 \u2014 gate is currently inverted. Relax in risk_on_choppy only (where bulk of profitable trades live). Empty/missing = legacy hard-block behavior preserved. 2026-06-13 RE-AUDIT (matured 1,456 trades, RANK-REBUILD): the May choppy MISSED edge (PF 2.59) DECAYED to 0.93 and EXTENDED to 0.93 (edge erosion, principle 11) — but DO NOT remove the relax: under the regime_conditional_ranker the relax+rank combo is correct (a high-catalyst EXTENDED/MISSED name SHOULD promote; a weak one gets a low rank_score and is filtered there, not by this gate). Measured: within the rank-promoted pool (n=874) this gate now blocks only 2 names (both FRESH/choppy, both losers) — it is a near-no-op + evidence-aligned (FRESH PF 0.67 = worst entry_quality, correctly blocked; MISSED best, correctly relaxed). No behavioral change made; gate left as-is by design.",
+      "_comment": "ENTRY-Q-REGIME-RELAX (2026-05-13). Per-regime list of entry_quality bands that are normally hard-blocked from BUY but ALLOWED here. Evidence: scripts/regime_sharpe_decomp.py output on n=897 trades \u2014 MISSED PF 2.59 / Sharpe +0.33 / n=302, EXTENDED PF 1.33 / Sharpe +0.10 / n=335. PULLBACK (n=72) is only PF 0.88 \u2014 gate is currently inverted. Relax in risk_on_choppy only (where bulk of profitable trades live). Empty/missing = legacy hard-block behavior preserved. 2026-06-13 RE-AUDIT (matured 1,456 trades, RANK-REBUILD): the May choppy MISSED edge (PF 2.59) DECAYED to 0.93 and EXTENDED to 0.93 (edge erosion, principle 11) \u2014 but DO NOT remove the relax: under the regime_conditional_ranker the relax+rank combo is correct (a high-catalyst EXTENDED/MISSED name SHOULD promote; a weak one gets a low rank_score and is filtered there, not by this gate). Measured: within the rank-promoted pool (n=874) this gate now blocks only 2 names (both FRESH/choppy, both losers) \u2014 it is a near-no-op + evidence-aligned (FRESH PF 0.67 = worst entry_quality, correctly blocked; MISSED best, correctly relaxed). No behavioral change made; gate left as-is by design.",
       "_validations": {
         "risk_on_choppy": {
           "EXTENDED": {
@@ -2406,11 +2406,15 @@
     "_enabled": true,
     "_staged_at": "2026-06-13",
     "_activated_at": "2026-06-13",
-    "_activation_note": "PAPER A/B OBSERVATION (paper-only system per feedback_paper_only_automation). Offline activation test on cache/last_bundle.json (06-13 risk_on_choppy, weak-catalyst day): BUY 34->6, all 6 survivors = Trend Continuation (the only profitable family, audit PF 1.41); 30 low-rank momentum BUYs demoted to WATCH, 2 quality WATCHes promoted. rank_score still emitted for every row so the A/B (composite verdict vs rank verdict) is observable in the audit ledger. Thresholds are outcome-calibrated on historical BUYs but on a single 2-month window — RE-CALIBRATE as paper volume accrues; revert with _enabled=false (byte-identical legacy path).",
+    "_activation_note": "PAPER A/B OBSERVATION (paper-only system per feedback_paper_only_automation). Offline activation test on cache/last_bundle.json (06-13 risk_on_choppy, weak-catalyst day): BUY 34->6, all 6 survivors = Trend Continuation (the only profitable family, audit PF 1.41); 30 low-rank momentum BUYs demoted to WATCH, 2 quality WATCHes promoted. rank_score still emitted for every row so the A/B (composite verdict vs rank verdict) is observable in the audit ledger. Thresholds are outcome-calibrated on historical BUYs but on a single 2-month window \u2014 RE-CALIBRATE as paper volume accrues; revert with _enabled=false (byte-identical legacy path).",
     "_comment": "RANK-REBUILD-2026-06-13 (audit docs/signal_screener_audit_2026_06_13). The composite 5-pillar `score` is ANTI-correlated with realized return (Pearson IC -0.10, t=-4.0); the inversion is regime-conditional (momentum pillars tech/rs work trending, invert choppy) and the Zacks/news bonus is a crowding fade (IC -0.14 choppy). signal_rank.compute_rank_score builds a regime-conditional rank from the PRE-bonus pillar norms (bonus structurally excluded). Validated (scripts/signal_walkforward.py): ranking each scan-day's top tercile by rank_score lifts the picked set PF 1.01 -> 1.71 (gate+rank 1.77). When _enabled, decision_engine ranks/promotes on rank_score while keeping score>=`gate_floor` as a quality GATE; the composite score is demoted from ranker to gate. DEFAULT OFF: rank_score is always computed + emitted (for A/B observation) but does not drive the verdict until flipped. Reversible: set _enabled=false. Weights live in signal_rank.DEFAULT_WEIGHTS unless overridden in `weights` below.",
     "gate_floor": 60,
-    "rank_buy_threshold": {"trending": 50, "choppy": 36, "risk_off": 36},
-    "_rank_axis_note": "rank_score is '% of weighted-max achievable' (NOT the composite 0-100 axis) so it has its OWN threshold, not the regime buy_threshold. PER-REGIME because the trending blend runs on a higher axis (BUY-pool median 53) than choppy (median 39). Thresholds calibrated on the RIGHT population = actual historical BUY-verdict trades w/ resolved outcomes (NOT gate-passers, NOT full universe — those have selection bias: picks_history is curated/taken trades scoring higher than the live all_scored universe). Calibration: CHOPPY rank>=36 keeps ~65% of historical BUYs lifting PF 0.95->1.25 (rank>=40 => PF 1.54 / 47% keep); TRENDING BUYs barely separate by rank (all PF ~1.24-1.27, n=135) so threshold set near pool median 50 to trim the bottom half pending more trending-regime data. NOTE: on a weak low-catalyst choppy day this correctly yields FEW BUYs (the audit's whole point: system over-promotes in choppy). RE-CALIBRATE in paper A/B as volume accrues. Accepts scalar OR {trending,choppy,risk_off} dict keyed by signal_rank rank_regime_family.",
+    "rank_buy_threshold": {
+      "trending": 50,
+      "choppy": 36,
+      "risk_off": 36
+    },
+    "_rank_axis_note": "rank_score is '% of weighted-max achievable' (NOT the composite 0-100 axis) so it has its OWN threshold, not the regime buy_threshold. PER-REGIME because the trending blend runs on a higher axis (BUY-pool median 53) than choppy (median 39). Thresholds calibrated on the RIGHT population = actual historical BUY-verdict trades w/ resolved outcomes (NOT gate-passers, NOT full universe \u2014 those have selection bias: picks_history is curated/taken trades scoring higher than the live all_scored universe). Calibration: CHOPPY rank>=36 keeps ~65% of historical BUYs lifting PF 0.95->1.25 (rank>=40 => PF 1.54 / 47% keep); TRENDING BUYs barely separate by rank (all PF ~1.24-1.27, n=135) so threshold set near pool median 50 to trim the bottom half pending more trending-regime data. NOTE: on a weak low-catalyst choppy day this correctly yields FEW BUYs (the audit's whole point: system over-promotes in choppy). RE-CALIBRATE in paper A/B as volume accrues. Accepts scalar OR {trending,choppy,risk_off} dict keyed by signal_rank rank_regime_family.",
     "weights": null,
     "_validation": "single 2-month window (2026-04..06) with observed factor rotation (cat+qg NEGATIVE in April trending, positive May-June choppy). NOT a permanent law. Paper-validate via A/B before any live promotion (principle 19)."
   },
@@ -2430,5 +2434,15 @@
       },
       "unproven_max_n": 30
     }
+  },
+  "overhead_supply_gate": {
+    "_enabled": true,
+    "_comment": "Path-order gate (2026-06-14): structural T1 cannot leapfrog the nearest unbroken overhead supply (BSL/SWING/OB/VAH). When the nearest wall sits below the mode min-R floor it still becomes T1 with its honest sub-floor R:R (Option 3 cap-and-reflect). Scoped to target_engine.select_targets only; does NOT touch the composite-score path. Set _enabled=false to revert to pure R-band selection.",
+    "hard_supply_types": [
+      "BSL",
+      "SWING",
+      "OB",
+      "VAH"
+    ]
   }
 }

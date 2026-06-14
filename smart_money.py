@@ -614,6 +614,29 @@ def detect_bos_choch(df: pd.DataFrame, lookback: int = 40) -> dict:
 # 5. Composite SMC Score
 # ─────────────────────────────────────────────────────────────────────────────
 
+_SMC_OB_CONFLUENCE_CFG: dict = {"v": None}
+
+
+def _smc_ob_confluence_cfg() -> dict:
+    """Cached loader for scoring.smc_ob_confluence (flag-gated OB confluence bonus)."""
+    if _SMC_OB_CONFLUENCE_CFG["v"] is not None:
+        return _SMC_OB_CONFLUENCE_CFG["v"]
+    out = {"_enabled": False, "bos_bonus": 0.5, "fvg_bonus": 0.5,
+           "max_bonus": 1.0, "require_both": False}
+    try:
+        import json as _j
+        from pathlib import Path as _P
+        _p = _P(__file__).resolve().parent / "config" / "config.json"
+        blk = (_j.loads(_p.read_text()).get("scoring") or {}).get("smc_ob_confluence") or {}
+        for k in out:
+            if k in blk:
+                out[k] = blk[k]
+    except Exception:
+        pass
+    _SMC_OB_CONFLUENCE_CFG["v"] = out
+    return out
+
+
 def score_smc(df: pd.DataFrame, price: float, indicators: dict) -> dict:
     """
     Main entry point.  Calls all four SMC detectors and computes a composite
@@ -660,6 +683,8 @@ def score_smc(df: pd.DataFrame, price: float, indicators: dict) -> dict:
         "ob_stop"         : None,
         "fvg_target"      : None,
         "smc_direction"   : "neutral",
+        "ob_confluence"   : {"has_ob": False, "bos_confirmed": False,
+                             "fvg_confirmed": False, "factors": [], "bonus_applied": 0.0},
         "details"         : {},
         "weekly_order_blocks": [],
     }
@@ -739,6 +764,48 @@ def score_smc(df: pd.DataFrame, price: float, indicators: dict) -> dict:
             score += 0.5
             details["bullish_fvg"] = f"+0.5 | Open bullish FVG target @ {fvg_target:.2f}"
 
+        # ── BOS + FVG confluence on the fresh bullish OB (FLAG-GATED) ─────────
+        # Thesis: a fresh bullish OB is higher-probability when the impulse that
+        # formed it ALSO broke structure (BOS) and left a Fair Value Gap right off
+        # the zone (displacement). Tags are ALWAYS computed (so the lens + the
+        # validation harness can read them); the SCORE bonus is applied only when
+        # scoring.smc_ob_confluence._enabled is true. Validate the Wilson-LB lift on
+        # the OB∩BOS∩FVG intersection (n≥30, ≥5pp) via validate_ob_confluence.py
+        # BEFORE enabling — Principle 7. 2026-06-13 baseline: parts negative, OFF.
+        ob_confluence = {
+            "has_ob": ob_entry_zone is not None,
+            "bos_confirmed": bool(bos_choch.get("bos_bullish")),
+            "fvg_confirmed": False,
+            "factors": [], "bonus_applied": 0.0,
+        }
+        if ob_entry_zone is not None:
+            # FVG-off-the-OB: an open bullish FVG whose gap sits between the OB high
+            # and ~3% above price (the imbalance left by the displacement off the OB).
+            _ob_hi = ob_entry_zone["high"]
+            for fvg in fvg_zones:
+                if fvg.get("type") != "bullish" or fvg.get("status") == "closed":
+                    continue
+                _fb = fvg.get("bottom")
+                if _fb is not None and _ob_hi <= _fb <= price * 1.03:
+                    ob_confluence["fvg_confirmed"] = True
+                    break
+            if ob_confluence["bos_confirmed"]:
+                ob_confluence["factors"].append("BOS")
+            if ob_confluence["fvg_confirmed"]:
+                ob_confluence["factors"].append("FVG")
+            _conf = _smc_ob_confluence_cfg()
+            _ok = (len(ob_confluence["factors"]) == 2) if _conf.get("require_both") else bool(ob_confluence["factors"])
+            if _conf.get("_enabled") and _ok:
+                bonus = 0.0
+                if "BOS" in ob_confluence["factors"]:
+                    bonus += float(_conf.get("bos_bonus", 0.5))
+                if "FVG" in ob_confluence["factors"]:
+                    bonus += float(_conf.get("fvg_bonus", 0.5))
+                bonus = min(bonus, float(_conf.get("max_bonus", 1.0)))
+                score += bonus
+                ob_confluence["bonus_applied"] = round(bonus, 4)
+                details["ob_confluence"] = f"+{bonus:.2f} | OB confluence: {'+'.join(ob_confluence['factors'])}"
+
         # ── Liquidity sweep within last 3 bars  +1.0 ─────────────────────────
         recent_sweeps = [s for s in liquidity_sweeps if s.get("bars_ago", 99) <= 3]
         if recent_sweeps:
@@ -788,6 +855,7 @@ def score_smc(df: pd.DataFrame, price: float, indicators: dict) -> dict:
             "ob_stop"         : ob_stop,
             "fvg_target"      : fvg_target,
             "smc_direction"   : smc_direction,
+            "ob_confluence"   : ob_confluence,
             "details"         : details,
             # 2026-05-12 — weekly OBs (informational, not scored — see comment
             # above near detect_weekly_order_blocks call)

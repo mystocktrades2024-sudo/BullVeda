@@ -156,6 +156,43 @@ MAGNET_SOURCES = {"HVN", "EW_INT", "EW_MAJ"}  # HVN center / POC + EW wave objec
 REJECTION_SOURCES = {"VAH", "AVWAP_52", "FVG", "OB"}  # mean-revert / overhead supply
 MIXED_SOURCES = {"BSL", "SWING", "FIB", "FIB_4H", "FIB_D"}  # liquidity / fib go either way
 
+# ── Overhead-supply gate (2026-06-14) ────────────────────────────────────────
+# Path-order principle: T1 is the FIRST unbroken supply price must clear — the
+# engine must never leapfrog a nearer wall to a higher-R level (the FTNT bug:
+# T1 jumped past the $150 double top to a stale VAH at $165). HARD_SUPPLY_TYPES
+# are the source types that constitute a genuine wall (prior committed supply):
+#   BSL   = equal-highs (double/triple top — the strongest cap)
+#   SWING = prior swing high
+#   OB    = bear order block (institutional supply)
+#   VAH   = value-area high
+# HVN (magnet, price gravitates not rejects), Fib/Round/AVWAP (projections, not
+# committed supply) are intentionally excluded. When the nearest such wall sits
+# BELOW the min-R T1 floor, it still becomes T1 with its honest (often sub-floor)
+# R:R — which flows into confidence.rr_quality so the score reflects the wall,
+# never a leapfrogged target (Option 3 — cap-and-reflect, not hard-reject).
+HARD_SUPPLY_TYPES = {"BSL", "SWING", "OB", "VAH"}
+
+
+def _overhead_gate_enabled() -> bool:
+    """Read config/config.json → overhead_supply_gate._enabled once (default ON).
+    Reversible kill-switch without code changes; never fails the engine.
+    """
+    cached = getattr(_overhead_gate_enabled, "_cache", None)
+    if cached is not None:
+        return cached
+    val = True
+    try:
+        import json as _json, os as _os
+        _p = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                           "config", "config.json")
+        with open(_p) as _f:
+            _c = _json.load(_f)
+        val = bool((_c.get("overhead_supply_gate") or {}).get("_enabled", True))
+    except Exception:
+        val = True  # default ON — the leapfrog is a correctness bug, not an opt-in
+    _overhead_gate_enabled._cache = val
+    return val
+
 
 # ════════════════════════════════════════════════════════════════════════
 # Project 2 · Milestone 2.3 — Mode completeness helpers
@@ -1063,7 +1100,8 @@ def cluster_levels_and_score(raw_sources: list, atr: float, cluster_atr: float =
     return candidates
 
 
-def select_targets(candidates: list, entry: float, stop: float, mode: str) -> tuple:
+def select_targets(candidates: list, entry: float, stop: float, mode: str,
+                   atr: Optional[float] = None) -> tuple:
     """Select T1 / T2 / T3 from clustered candidates.
 
     Returns (t1, t2, t3) Candidate objects (any may be None).
@@ -1090,16 +1128,49 @@ def select_targets(candidates: list, entry: float, stop: float, mode: str) -> tu
     min_r_t1 = cfg["min_r_t1"] if cfg["min_r_t1"] is not None else 1.0
     min_r_t2 = cfg["min_r_t2"] if cfg["min_r_t2"] is not None else 2.0
 
-    t1_pool = [c for c in candidates if (c.price - entry) / risk >= min_r_t1]
-    if not t1_pool:
-        return None, None, None
+    # ── Overhead-supply gate — targets follow PATH ORDER, never leapfrog a wall ─
+    # The nearest unbroken HARD_SUPPLY level above entry is T1; the next is T2 —
+    # even when they sit below the min-R floors. entry == current price, so any
+    # level above it is by definition unbroken supply. The (often sub-floor) R:R
+    # is intentional and flows into confidence.rr_quality, so the score reflects
+    # the wall rather than a leapfrogged target (Option 3 — cap-and-reflect).
+    #
+    # Meaningful-distance floor: a wall within ~0.25 ATR of entry means price is
+    # AT that level (not a forward target) — skip it and look to the next wall.
+    # Falls back to a fraction of risk when ATR isn't passed.
+    min_gap = (atr * 0.25) if (atr and atr > 0) else (risk * 0.15)
+    walls = []
+    if _overhead_gate_enabled():
+        walls = [c for c in candidates
+                 if c.price > entry + min_gap
+                 and any(s.type in HARD_SUPPLY_TYPES for s in c.sources)]
+        # Horizon scaling: a 2-15d SWING genuinely cannot ignore a wall 0.3R
+        # overhead, so swing honors sub-floor walls. POSITION (1-6mo) / INVEST
+        # (1-5yr) look THROUGH near-term supply — they only respect a wall that
+        # already clears the horizon's min-R floor (a significant level), and
+        # otherwise fall through to the R-band / projection stack.
+        if mode != "swing":
+            walls = [w for w in walls if (w.price - entry) / risk >= min_r_t1]
+        walls.sort(key=lambda c: c.price)
 
-    # T1: highest confluence within first R-band
-    t1 = max(t1_pool, key=lambda c: (c.confluence, -c.price))
+    # ── T1 — nearest unbroken wall (path order); else R-band selection (blue-sky
+    #         / breakout extension — reaching up to a projection level is correct).
+    if walls:
+        t1 = walls[0]
+    else:
+        t1_pool = [c for c in candidates if (c.price - entry) / risk >= min_r_t1]
+        if not t1_pool:
+            return None, None, None
+        t1 = max(t1_pool, key=lambda c: (c.confluence, -c.price))
 
-    # T2: beyond T1, highest confluence in R-band
-    t2_pool = [c for c in candidates if c.price > t1.price and (c.price - entry) / risk >= min_r_t2]
-    t2 = max(t2_pool, key=lambda c: (c.confluence, -c.price)) if t2_pool else None
+    # ── T2 — next unbroken wall beyond T1 (path order); else highest-confluence
+    #         candidate in the ≥min_r_t2 R-band.
+    next_walls = [w for w in walls if w.price > t1.price]
+    if next_walls:
+        t2 = next_walls[0]
+    else:
+        t2_pool = [c for c in candidates if c.price > t1.price and (c.price - entry) / risk >= min_r_t2]
+        t2 = max(t2_pool, key=lambda c: (c.confluence, -c.price)) if t2_pool else None
 
     # T3: bull-stretch beyond T2 (or beyond T1 if T2 absent). Prefer candidates
     # whose source stack carries a stretch anchor (Fib extension or EW objective).
@@ -1450,7 +1521,7 @@ def analyze_trade(ticker: str, direction: str = "long", mode: str = "position",
     candidates.sort(key=lambda c: c.price)
 
     # 11. Select T1 / T2 / T3
-    t1_c, t2_c, t3_c = select_targets(candidates, entry, stop_price, mode)
+    t1_c, t2_c, t3_c = select_targets(candidates, entry, stop_price, mode, atr=atr)
 
     # 12. Classify behavior + estimate p_reach (× momentum reachability)
     def cand_to_target(c: Candidate, entry: float, risk: float, stop: float) -> Target:
@@ -1532,6 +1603,17 @@ def analyze_trade(ticker: str, direction: str = "long", mode: str = "position",
         warnings.append("t3_stretch_unarmed — reachability/momentum did not confirm bull-stretch")
     if t1 is None and mode != "invest":
         warnings.append("no_target_meets_minimum_r")
+    # Overhead-supply cap surfaced: T1 is the nearest unbroken wall and sits below
+    # the mode's min-R floor — honest "buying into resistance, poor R:R to first
+    # obstacle" signal. The sub-floor R:R already drags confidence.rr_quality.
+    _min_r_t1 = cfg.get("min_r_t1")  # None for invest → guard excludes it
+    if (t1 is not None and _min_r_t1 is not None and t1.r_multiple is not None
+            and t1.r_multiple < _min_r_t1):
+        warnings.append(
+            f"overhead_supply_cap — T1 ${t1.price:.2f} is the nearest unbroken "
+            f"resistance at {t1.r_multiple:.2f}R (below {_min_r_t1:.1f}R floor); "
+            f"price must clear it to continue. R:R reflects the first obstacle, "
+            f"not a leapfrogged target.")
     if stop_info["distance_atr"] > 3.0:
         warnings.append("stop_distance_exceeds_3atr")
     if structure_info.get("last_choch") and structure_info["trend"] == "uptrend":

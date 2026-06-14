@@ -110,6 +110,7 @@ def _structure(df: pd.DataFrame, ph: List[int], pl: List[int], tf: str) -> Dict[
 # ── order blocks: last opposite candle before a structure-breaking displacement ─
 def _order_blocks(df: pd.DataFrame, events: List[Dict[str, Any]], atr: float) -> List[Dict[str, Any]]:
     o = df["Open"].values; h = df["High"].values; l = df["Low"].values; c = df["Close"].values
+    v = df["Volume"].values if "Volume" in df.columns else None
     idx = df.index
     n = len(df)
     obs: List[Dict[str, Any]] = []
@@ -139,8 +140,22 @@ def _order_blocks(df: pd.DataFrame, events: List[Dict[str, Any]], atr: float) ->
         cur = float(c[-1])
         held = touched and ((typ == "demand" and cur > hi) or (typ == "supply" and cur < lo))
         state = "held" if held else ("mitigated" if touched else "fresh")
+        # ── Phase-1 display enrichment (2026-06-13) — informational annotations
+        # for the SMC tab; do NOT feed the structure score (see detect()). ──
+        # #1 BOS vs CHoCH: the break that created this OB (BoS = continuation,
+        #    CHoCH = reversal). OBs are already structure-anchored by construction.
+        bos_type = e.get("evt", "")            # 'BoS' | 'CHoCH'
+        # #3 Relative volume at OB formation (institutional accumulation footprint).
+        rel_vol = None
+        if v is not None and j >= 5:
+            _avg = float(v[max(0, j - 20):j].mean() or 0)
+            if _avg > 0:
+                rel_vol = round(float(v[j]) / _avg, 2)
+        # #6 Reaction quality on the touch: rejection (held) vs absorbed (mitigated).
+        reaction = "rejection" if state == "held" else ("absorbed" if state == "mitigated" else "untested")
         obs.append({"lo": round(lo, 2), "hi": round(hi, 2), "type": typ, "state": state,
-                    "date": fmt_date(idx[j], ""), "i": j})
+                    "date": fmt_date(idx[j], ""), "i": j,
+                    "bos_type": bos_type, "rel_vol": rel_vol, "reaction": reaction})
     # de-dup overlapping, keep most recent 6
     obs = sorted(obs, key=lambda x: -x["i"])
     out: List[Dict[str, Any]] = []
@@ -418,6 +433,45 @@ def detect(df: pd.DataFrame, meta: Dict[str, Any], ticker: str, light: bool = Fa
     htf = _htf_levels(df, tf)
     mtf = _mtf(df, tf)
     cur = float(df["Close"].iloc[-1])
+
+    # ── Phase-1 OB display enrichment (2026-06-13) — informational badges only.
+    # #2 FVG confluence (OB ∩ FVG), #4 HTF alignment, plus a transparent factor
+    # count. NONE of this feeds the structure score below — it's investigation
+    # context the user reads. Re-ranking on these waits on Wilson-bucket validation
+    # (n≥30 OOS) per the 500-user signal-enable bar.
+    _htf_biases = [str(r.get("bias", "")).upper() for r in (mtf or [])
+                   if "primary" not in str(r.get("note", "")).lower()]
+    for ob in obs:
+        _bull = ob["type"] == "demand"
+        # #2 OB ∩ FVG: a same-direction FVG overlapping the OB zone or the
+        # displacement just off it (within 1 ATR above a demand OB / below a supply OB).
+        ob["has_fvg"] = False
+        for g in fvgs:
+            if (_bull and g.get("type") == "bull") or (not _bull and g.get("type") == "bear"):
+                if _bull and g["lo"] <= ob["hi"] + atr and g["hi"] >= ob["lo"]:
+                    ob["has_fvg"] = True; break
+                if (not _bull) and g["hi"] >= ob["lo"] - atr and g["lo"] <= ob["hi"]:
+                    ob["has_fvg"] = True; break
+        # #4 HTF alignment: OB direction agrees with a higher-timeframe bias.
+        _want = "BULL" if _bull else "BEAR"
+        ob["htf_aligned"] = _want in _htf_biases
+        # transparent confluence factors + count (descriptive, NOT a win-prob score)
+        factors = []
+        if ob.get("bos_type") == "BoS":
+            factors.append("BoS")
+        elif ob.get("bos_type") == "CHoCH":
+            factors.append("CHoCH")
+        if ob.get("has_fvg"):
+            factors.append("FVG")
+        if ob.get("rel_vol") is not None and ob["rel_vol"] >= 1.3:
+            factors.append(f"vol {ob['rel_vol']}×")
+        if ob.get("htf_aligned"):
+            factors.append("HTF")
+        if ob.get("reaction") == "rejection":
+            factors.append("rejection")
+        ob["confluence"] = factors
+        # confluence count excludes the bare CHoCH label (reversal, not a quality plus)
+        ob["confluence_n"] = sum(1 for f in factors if f != "CHoCH")
 
     # draw on liquidity: nearest untapped target in the bias direction
     draw = None

@@ -127,6 +127,10 @@ def tag_trade_with_smc(trade: dict) -> dict:
     out["choch_bearish_at_entry"] = None
     out["nearest_bull_ob_low"] = None
     out["nearest_bull_ob_high"] = None
+    # OB confluence intersection tags (2026-06-13) — from score_smc().ob_confluence
+    out["ob_conf_has_ob"] = None
+    out["ob_conf_bos"] = None
+    out["ob_conf_fvg"] = None
 
     if not ticker or not entry_date or entry_price <= 0:
         return out
@@ -146,6 +150,11 @@ def tag_trade_with_smc(trade: dict) -> dict:
     bos = smc.get("bos_choch", {}) or {}
     out["bos_bullish_at_entry"] = bool(bos.get("bos_bullish"))
     out["choch_bearish_at_entry"] = bool(bos.get("choch_bearish"))
+    # OB confluence (OB ∩ BOS ∩ FVG) — the actual confluence thesis
+    obc = smc.get("ob_confluence", {}) or {}
+    out["ob_conf_has_ob"] = bool(obc.get("has_ob"))
+    out["ob_conf_bos"] = bool(obc.get("bos_confirmed"))
+    out["ob_conf_fvg"] = bool(obc.get("fvg_confirmed"))
 
     # Find nearest fresh/tested bullish OB below entry within 5%
     obs = smc.get("order_blocks", []) or []
@@ -270,6 +279,12 @@ def main():
     bear_overhead = [t for t in valid if t.get("has_overhead_bear_ob_2pct")]
     smc_pos     = [t for t in valid if (t.get("smc_score_at_entry") or 0) >= 1.5]
     smc_neg     = [t for t in valid if (t.get("smc_score_at_entry") or 0) <= -0.5]
+    # ── CONFLUENCE INTERSECTION (the actual thesis: OB ∩ BOS ∩ FVG) ──────────
+    ob_only   = [t for t in valid if t.get("ob_conf_has_ob") and not t.get("ob_conf_bos") and not t.get("ob_conf_fvg")]
+    ob_bos    = [t for t in valid if t.get("ob_conf_has_ob") and t.get("ob_conf_bos")]
+    ob_fvg    = [t for t in valid if t.get("ob_conf_has_ob") and t.get("ob_conf_fvg")]
+    ob_either = [t for t in valid if t.get("ob_conf_has_ob") and (t.get("ob_conf_bos") or t.get("ob_conf_fvg"))]
+    ob_both   = [t for t in valid if t.get("ob_conf_has_ob") and t.get("ob_conf_bos") and t.get("ob_conf_fvg")]
 
     blocks = [
         baseline,
@@ -280,6 +295,12 @@ def main():
         wilson_block("Has overhead Bear OB (≤2%)", bear_overhead, baseline["wr_lb"]),
         wilson_block("SMC score ≥ 1.5 (bullish direction)", smc_pos, baseline["wr_lb"]),
         wilson_block("SMC score ≤ -0.5 (bearish direction)", smc_neg, baseline["wr_lb"]),
+        # confluence intersection rows
+        wilson_block("OB only (no BOS, no FVG)", ob_only, baseline["wr_lb"]),
+        wilson_block("OB ∩ BOS", ob_bos, baseline["wr_lb"]),
+        wilson_block("OB ∩ FVG", ob_fvg, baseline["wr_lb"]),
+        wilson_block("OB ∩ (BOS or FVG)", ob_either, baseline["wr_lb"]),
+        wilson_block("OB ∩ BOS ∩ FVG (full confluence)", ob_both, baseline["wr_lb"]),
     ]
 
     print("\n" + "=" * 110)
@@ -307,7 +328,12 @@ def main():
     print(verdict(blocks[1], "#2 (Wilson bump on OB confluence)"))
     print(verdict(blocks[3], "#2a (BOS-bullish boost)"))
     print(verdict(blocks[7], "#2b (SMC-direction-bullish boost)"))
-    print(verdict(blocks[6], "Overhead bear OB penalty"))
+    print(verdict(blocks[5], "Overhead bear OB penalty"))
+    print("  ── confluence intersection (the smc_ob_confluence flag) ──")
+    print(verdict(blocks[9],  "OB ∩ BOS"))
+    print(verdict(blocks[10], "OB ∩ FVG"))
+    print(verdict(blocks[11], "OB ∩ (BOS or FVG)"))
+    print(verdict(blocks[12], "★ OB ∩ BOS ∩ FVG  (full confluence → the flag)"))
 
     # ── #5 simulation: OB-low-as-stop ──────────────────────────────────────
     print("\n" + "=" * 110)

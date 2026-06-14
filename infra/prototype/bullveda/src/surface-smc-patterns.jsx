@@ -108,12 +108,16 @@ function spDecision(m) {
     bias = "SHORT";
     verdict = (nearEntry && r.zone === "premium") ? "SHORT" : "AVOID";
   }
+  // confluence count of the chosen in-direction OB — informational annotation
+  // only (never feeds the verdict / score / ranking).
+  const confN = (ob && typeof ob.confluence_n === "number") ? ob.confluence_n : null;
   return {
     verdict, bias, target, stop, rr,
     entry: nearEntry ? entry : null,
     score: SP_HR.num(m.smc_score, null),
     headline: m.headline || (m.bias ? m.bias.toUpperCase() : "—"),
     zone: r.zone || null, pct: SP_HR.num(r.pct, null), tf: m.tf || "",
+    confN,
     bull, bear,
   };
 }
@@ -164,7 +168,7 @@ function useSPBoard() {
         sym: c.sym, name: c.name, sector: c.sector,
         px: SP_HR.num(c.px, m ? SP_HR.num(m.cur_close, null) : null),
         verdict: d.verdict, bias: d.bias, score: d.score, headline: d.headline,
-        zone: d.zone, pct: d.pct, tf: d.tf,
+        zone: d.zone, pct: d.pct, tf: d.tf, confN: d.confN,
         entry: d.entry, stop: d.stop, target: d.target, rr: d.rr,
       };
     }).filter(Boolean).sort((a, b) => (SP_HR.num(b.score, -1)) - (SP_HR.num(a.score, -1)));
@@ -257,7 +261,7 @@ function SPBoard({ rows, loading, scanned, onTicker }) {
             <td><span className={`aip-verdict aip-verdict--${spVTone(p.verdict)}`}>{p.verdict}</span></td>
             <td><span className={p.bias === "LONG" ? "up" : p.bias === "SHORT" ? "dn" : "warn"}>{p.bias}</span></td>
             <td className="r mono tabular"><b className={`kpi-tone--${p.score == null ? "ink" : p.score >= 66 ? "gn" : p.score >= 50 ? "amb" : "rd"}`}>{p.score == null ? "—" : p.score}</b></td>
-            <td className="mono dim2" style={{ fontSize: 11 }}>{p.headline}</td>
+            <td className="mono dim2" style={{ fontSize: 11 }}>{p.headline}{p.confN != null && p.confN > 0 ? <span className={`spx-tag ${p.confN >= 3 ? "" : "spx-tag--v"}`} style={{ marginLeft: 6 }} title="Structure-confluence factors on the nearest in-direction order block (informational — not a win-probability; does not affect score or ranking).">{p.confN}× conf</span> : null}</td>
             <td className="mono" style={{ fontSize: 11 }}>{p.zone ? <span className={`spx-tag ${p.zone === "discount" ? "" : "spx-tag--v"}`}>{p.zone}{p.pct != null ? ` ${p.pct}%` : ""}</span> : <span className="dim2">—</span>}</td>
             <td className="r mono tabular copper" style={{ fontSize: 11 }}>{spMoney(p.entry)}</td>
             <td className="r mono tabular dn" style={{ fontSize: 11 }}>{spMoney(p.stop)}</td>

@@ -148,9 +148,14 @@ function SMCAnnotatedChart({ m, state }) {
       </defs>
       {/* OTE band */}
       <rect x={padL} y={y(r.ote_hi)} width={W - padL - padR} height={Math.max(2, y(r.ote_lo) - y(r.ote_hi))} fill="var(--copper)" opacity="0.10" />
-      {/* OB zones */}
-      {obs.map((o, i) => { addLabel(o.hi, `${o.type === "demand" ? "▲ OB+" : "▼ OB−"} ${o.state}`, o.type === "demand" ? "var(--gn)" : "var(--rd)");
-        return <rect key={"ob" + i} x={padL} y={y(o.hi)} width={W - padL - padR} height={Math.max(3, y(o.lo) - y(o.hi))} fill={o.type === "demand" ? "url(#ac-obp)" : "url(#ac-obm)"} stroke={`var(--${o.type === "demand" ? "gn" : "rd"})`} strokeOpacity="0.35" strokeWidth="0.6" />; })}
+      {/* OB zones — Phase-1 confluence reflected on the map: label gets the factor
+          count + a BoS(ⓑ)/CHoCH(ⓒ) marker, and higher-confluence OBs render with a
+          bolder border. Zones/levels are unchanged — purely visual weight. */}
+      {obs.map((o, i) => {
+        const cn = o.confluence_n || 0;
+        const _bos = o.bos_type === "BoS" ? " ⓑ" : o.bos_type === "CHoCH" ? " ⓒ" : "";
+        addLabel(o.hi, `${o.type === "demand" ? "▲ OB+" : "▼ OB−"} ${o.state}${cn ? ` ·${cn}✓` : ""}${_bos}`, o.type === "demand" ? "var(--gn)" : "var(--rd)");
+        return <rect key={"ob" + i} x={padL} y={y(o.hi)} width={W - padL - padR} height={Math.max(3, y(o.lo) - y(o.hi))} fill={o.type === "demand" ? "url(#ac-obp)" : "url(#ac-obm)"} stroke={`var(--${o.type === "demand" ? "gn" : "rd"})`} strokeOpacity={0.35 + Math.min(cn, 3) * 0.18} strokeWidth={0.6 + Math.min(cn, 3) * 0.5} />; })}
       {/* FVG zones */}
       {fvgs.map((g, i) => { addLabel(g.hi, "▦ FVG", "var(--violet)");
         return <rect key={"fv" + i} x={padL} y={y(g.hi)} width={W - padL - padR} height={Math.max(2, y(g.lo) - y(g.hi))} fill="var(--violet)" opacity="0.12" strokeDasharray="3 3" stroke="var(--violet)" strokeOpacity="0.3" />; })}
@@ -637,29 +642,72 @@ function SMCMicroChart({ m }) {
   );
 }
 
+// Tone a single confluence factor chip: positive structure factors (BoS, FVG,
+// HTF alignment, rejection, vol) read green-ish; bare CHoCH (reversal break) is
+// amber/neutral. Informational only — these annotate structure quality, they do
+// NOT change the engine's smc_score or verdict.
+function smcConfTone(f) {
+  const t = (f || "").toLowerCase();
+  if (t.startsWith("choch")) return "amb";
+  if (t.startsWith("bos") || t.startsWith("fvg") || t.startsWith("htf") || t.startsWith("rejection") || t.startsWith("vol")) return "gn";
+  if (t.startsWith("absorbed")) return "cy";
+  return "ink";
+}
+
+// Per-OB confluence annotations: transparent factor chips + count + rel-vol +
+// touch reaction. Honest "—" when a field is null/false. Display-only — never
+// touches smc_score / verdict / sort order.
+function OBConfluence({ r }) {
+  const conf = Array.isArray(r.confluence) ? r.confluence : [];
+  const n = (typeof r.confluence_n === "number") ? r.confluence_n : null;
+  const rv = (typeof r.rel_vol === "number" && isFinite(r.rel_vol)) ? r.rel_vol : null;
+  const reac = r.reaction || null;
+  const reacTone = reac === "rejection" ? "gn" : reac === "absorbed" ? "cy" : "ink";
+  const hasVolChip = conf.some(f => /^vol\b/i.test(f || ""));
+  const hasReacChip = conf.some(f => (f || "").toLowerCase() === (reac || "").toLowerCase());
+  if (!conf.length && n == null && rv == null && !reac) return <span className="mono dim2">—</span>;
+  return (
+    <div className="ob-conf" style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+      {n != null && <Pill tone={n >= 3 ? "gn" : n >= 1 ? "amb" : "ink"} small dot>{n} factor{n === 1 ? "" : "s"}</Pill>}
+      {conf.map((f, i) => <Pill key={i} tone={smcConfTone(f)} small>{f}</Pill>)}
+      {!hasVolChip && rv != null && <Pill tone={rv >= 1.5 ? "gn" : "ink"} small>vol {rv.toFixed(1)}×</Pill>}
+      {!hasReacChip && reac && <Pill tone={reacTone} small>{reac}</Pill>}
+    </div>
+  );
+}
+
 function OBTable({ m, state }) {
   if (!_smcUsable(m) || !m.order_blocks.length) return <SmcEmpty state={state} what="order blocks" />;
   const cur = m.cur_close;
+  const anyConf = m.order_blocks.some(o => (Array.isArray(o.confluence) && o.confluence.length) || typeof o.confluence_n === "number" || o.bos_type || typeof o.rel_vol === "number" || o.has_fvg || o.htf_aligned || o.reaction);
   return (
-    <table className="dtable">
-      <thead>
-        <tr><th>Zone</th><th>Type</th><th>State</th><th>Distance</th></tr>
-      </thead>
-      <tbody>
-        {m.order_blocks.map((r, i) => {
-          const mid = (r.lo + r.hi) / 2;
-          const dist = ((mid - cur) / cur * 100);
-          return (
-            <tr key={i}>
-              <td className="mono">{smcMoney(r.lo)}–{smcMoney(r.hi)}</td>
-              <td><Pill tone={r.type === "demand" ? "gn" : "rd"} small>{r.type.toUpperCase()}</Pill></td>
-              <td><span className={`ob-mit ob-mit--${r.state === "fresh" ? "fresh" : r.state === "held" ? "tapped" : "spent"}`}><span className="ob-mit-dot" />{r.state === "fresh" ? "Fresh" : r.state === "held" ? "Tapped · held" : "Mitigated"}</span></td>
-              <td className="mono dim">{dist >= 0 ? "+" : ""}{dist.toFixed(1)}% · {r.date}</td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <div>
+      <table className="dtable">
+        <thead>
+          <tr><th>Zone</th><th>Type</th><th>State</th><th>Confluence</th><th>Distance</th></tr>
+        </thead>
+        <tbody>
+          {m.order_blocks.map((r, i) => {
+            const mid = (r.lo + r.hi) / 2;
+            const dist = ((mid - cur) / cur * 100);
+            return (
+              <tr key={i}>
+                <td className="mono">{smcMoney(r.lo)}–{smcMoney(r.hi)}</td>
+                <td><Pill tone={r.type === "demand" ? "gn" : "rd"} small>{r.type.toUpperCase()}</Pill>{r.bos_type ? <> <Pill tone={r.bos_type === "CHoCH" ? "amb" : "gn"} small>{r.bos_type}</Pill></> : null}</td>
+                <td><span className={`ob-mit ob-mit--${r.state === "fresh" ? "fresh" : r.state === "held" ? "tapped" : "spent"}`}><span className="ob-mit-dot" />{r.state === "fresh" ? "Fresh" : r.state === "held" ? "Tapped · held" : "Mitigated"}</span></td>
+                <td><OBConfluence r={r} /></td>
+                <td className="mono dim">{dist >= 0 ? "+" : ""}{dist.toFixed(1)}% · {r.date}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {anyConf && (
+        <div className="mono dim2" style={{ fontSize: 10.5, marginTop: 6 }}>
+          Confluence chips are structure-quality annotations from the engine (break type · FVG overlap · relative volume · HTF alignment · touch reaction) — informational context, not a win-probability. They do not change the SMC score or verdict.
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1153,9 +1201,12 @@ function SMCStructureMap({ m, state }) {
   const zones = []
     .concat((m.order_blocks || []).slice(0, 4).map(o => ({
       top: o.hi, bot: o.lo, type: o.type === "demand" ? "OB+" : "OB−",
-      tone: o.type === "demand" ? "gn" : "rd", note: `${o.type} · ${o.state}` })))
+      tone: o.type === "demand" ? "gn" : "rd",
+      cn: o.confluence_n || 0,
+      bos: o.bos_type === "BoS" ? "ⓑ" : o.bos_type === "CHoCH" ? "ⓒ" : "",
+      note: `${o.type} · ${o.state}${(o.confluence_n || 0) ? ` ·${o.confluence_n}✓` : ""}` })))
     .concat((m.fvgs || []).filter(g => g.state === "unfilled").slice(0, 3).map(g => ({
-      top: g.hi, bot: g.lo, type: "FVG", tone: "violet", note: `${g.type} · unfilled` })));
+      top: g.hi, bot: g.lo, type: "FVG", tone: "violet", cn: 0, bos: "", note: `${g.type} · unfilled` })));
   const spot = m.cur_close;
   const cl = m.spark.slice(-16);
   const allP = cl.concat(zones.flatMap(z => [z.top, z.bot])).concat([spot]);
@@ -1178,12 +1229,12 @@ function SMCStructureMap({ m, state }) {
         return (
           <g key={i}>
             <rect x={padL} y={y(z.top)} width={W-padL-padR} height={Math.max(4,y(z.bot)-y(z.top))} fill={fill}
-              stroke={`var(--${z.tone})`} strokeOpacity="0.4" strokeWidth="0.7" strokeDasharray={z.type==="FVG"?"4 3":"none"}/>
+              stroke={`var(--${z.tone})`} strokeOpacity={0.4 + Math.min(z.cn || 0, 3) * 0.17} strokeWidth={0.7 + Math.min(z.cn || 0, 3) * 0.5} strokeDasharray={z.type==="FVG"?"4 3":"none"}/>
             {/* connector + label tab on right */}
             <line x1={W-padR} y1={cy} x2={W-padR+14} y2={cy} stroke={`var(--${z.tone})`} strokeOpacity="0.5"/>
             <rect x={W-padR+14} y={cy-11} width={130} height={22} rx="5" fill="var(--bg-1)" stroke={`var(--${z.tone})`} strokeOpacity="0.5"/>
             <text x={W-padR+20} y={cy+1} fontSize="9.5" className="mono" fill={`var(--${z.tone})`} fontWeight="600">
-              {z.type==="OB+"?"▲ OB+":z.type==="OB−"?"▼ OB−":"▦ FVG"}
+              {(z.type==="OB+"?"▲ OB+":z.type==="OB−"?"▼ OB−":"▦ FVG") + (z.bos ? " " + z.bos : "")}
             </text>
             <text x={W-padR+20} y={cy+10} fontSize="7.5" className="mono" fill="var(--ink-3)">{z.note}</text>
             <text x={W-padR+138} y={cy-1} fontSize="9" className="mono" textAnchor="end" fill={`var(--${z.tone})`}>${((z.top+z.bot)/2).toFixed(1)}</text>
