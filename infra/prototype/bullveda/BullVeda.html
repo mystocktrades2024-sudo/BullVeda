@@ -7810,6 +7810,24 @@ body {
 .ss2-bulk-l span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ss2-bulk-r { display: flex; gap: 6px; flex-wrap: wrap; }
 
+/* ── Recurrence chip (🔁 N× · WR%) — "times we've flagged this name before" ──
+   Real per-ticker aggregate from data/signal_log.json, joined onto /api/universe.
+   Tone tracks the resolved win-rate. Sits inline in the SYM cell (flex row). */
+.ss2-seen {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 5px; border-radius: 999px; font-size: 10px; line-height: 1.5;
+  border: 1px solid transparent; white-space: nowrap; cursor: default;
+}
+.ss2-seen--link { cursor: pointer; transition: filter .12s, box-shadow .12s; }
+.ss2-seen--link:hover { filter: brightness(1.18); box-shadow: 0 0 0 1px currentColor inset; }
+.ss2-seen .ss2-seen-ic { font-size: 9px; opacity: .8; }
+.ss2-seen b { font-weight: 700; }
+.ss2-seen .ss2-seen-wr { opacity: .85; font-size: 9px; }
+.ss2-seen--gn  { background: var(--gn-bg);  border-color: color-mix(in oklab, var(--gn) 38%, transparent);  color: var(--gn); }
+.ss2-seen--amb { background: var(--amb-bg); border-color: color-mix(in oklab, var(--amb) 38%, transparent); color: var(--amb); }
+.ss2-seen--rd  { background: var(--rd-bg);  border-color: color-mix(in oklab, var(--rd) 38%, transparent);  color: var(--rd); }
+.ss2-seen--neu { background: color-mix(in oklab, var(--ink-4) 14%, transparent); border-color: color-mix(in oklab, var(--ink-4) 30%, transparent); color: var(--ink-3, var(--ink-4)); }
+
 /* ===== surface-social.css ===== */
 /* surface-social.css */
 .soc-surface { padding:16px 20px; display:flex; flex-direction:column; gap:14px; overflow-y:auto; }
@@ -11167,7 +11185,20 @@ body.light .trk-date-input { color-scheme: light; }
       rr: rr ? rr.toFixed(1) : "—",
       rvol: rvol != null ? rvol.toFixed(2) : "—",
       rs: rs ? rs.toFixed(0) : "—",
-      wlb: null, n: null, pf: null, regWR: null, // ledger-derived (🔶) → feed-honest
+      // Per-ticker recurrence from the real signal track record (server join over
+      // data/signal_log.json). `seen` powers the scanner's "🔁 N×" chip; wlb/n/pf
+      // are the previously-honest-null ledger columns, now populated from the same
+      // resolved-outcome aggregate. regWR stays null (regime-conditional, not in feed).
+      seen: (function () {
+        var rc = r.recurrence;
+        if (!rc || !rc.n) return null;
+        return { n: rc.n, w: rc.wins, l: rc.losses, open: rc.open,
+                 wr: rc.wr, pf: rc.pf, last: rc.last };
+      })(),
+      wlb: (r.recurrence && r.recurrence.wr != null) ? r.recurrence.wr : null,
+      n: (r.recurrence && r.recurrence.n != null) ? r.recurrence.n : null,
+      pf: (r.recurrence && r.recurrence.pf != null) ? r.recurrence.pf : null,
+      regWR: null, // regime-conditional → not in scan feed
       iv: num(r.iv_rank),
       sent: Math.round(num(r.sent_score, 5) - 5),
       er: num(r.earn_days),
@@ -31599,6 +31630,10 @@ const SS_UNIVERSE = window.__BV && window.__BV.ready ? window.__BV.scanRows().ma
       wlb: Math.max(28, Math.min(72, t.score * 0.7 + 5)).toFixed(0),
       n: 180 + code % 8 * 50,
       pf: (1.2 + (t.score - 50) / 50).toFixed(1),
+      seen: code % 4 === 0 ? null : (function() {
+        var nn = code % 23 + 1, w = Math.round(nn * (0.4 + code % 5 / 12)), l = Math.max(0, nn - w - code % 3);
+        return { n: nn, w, l, open: Math.max(0, nn - w - l), wr: w + l ? Math.round(100 * w / (w + l)) : null, pf: +(0.9 + code % 9 / 8).toFixed(1), last: "2026-05-" + (10 + code % 18) };
+      })(),
       iv: 30 + code % 24,
       sent: code % 7 - 3,
       er: 4 + code % 60,
@@ -32257,11 +32292,24 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
       onChange: () => toggleSel(t.sym),
       onClick: (e) => e.stopPropagation()
     }
-  )), /* @__PURE__ */ React.createElement("td", { className: "mono ss2-sym" }, /* @__PURE__ */ React.createElement("span", { className: "ss2-star" }, "\u2605"), /* @__PURE__ */ React.createElement("b", null, t.sym)), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, t.name), /* @__PURE__ */ React.createElement("td", { className: "dim2 mono" }, t.sector), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, /* @__PURE__ */ React.createElement("span", { className: "ss2-tfsn" }, (t.tfsn || []).map((v, k) => /* @__PURE__ */ React.createElement("span", { key: k, className: `ss2-tfsn-dot ss2-tfsn--${v === 2 ? "pass" : v === 1 ? "neut" : "fail"}`, title: ["Tech", "Fund", "SMC", "News"][k] })))), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, t.mechanism), /* @__PURE__ */ React.createElement("td", { className: "r" }, /* @__PURE__ */ React.createElement("span", { className: `ss2-score ss2-score--${t.score >= 75 ? "gn" : t.score >= 60 ? "amb" : "rd"}` }, t.score)), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: secBiasTone(t.verdict), small: true }, secBias(t.verdict))), /* @__PURE__ */ React.createElement("td", { className: "r" }, (() => {
+  )), /* @__PURE__ */ React.createElement("td", { className: "mono ss2-sym" }, /* @__PURE__ */ React.createElement("span", { className: "ss2-star" }, "\u2605"), /* @__PURE__ */ React.createElement("b", null, t.sym), /* @__PURE__ */ React.createElement(SeenChip, { seen: t.seen, sym: t.sym })), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, t.name), /* @__PURE__ */ React.createElement("td", { className: "dim2 mono" }, t.sector), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, /* @__PURE__ */ React.createElement("span", { className: "ss2-tfsn" }, (t.tfsn || []).map((v, k) => /* @__PURE__ */ React.createElement("span", { key: k, className: `ss2-tfsn-dot ss2-tfsn--${v === 2 ? "pass" : v === 1 ? "neut" : "fail"}`, title: ["Tech", "Fund", "SMC", "News"][k] })))), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, t.mechanism), /* @__PURE__ */ React.createElement("td", { className: "r" }, /* @__PURE__ */ React.createElement("span", { className: `ss2-score ss2-score--${t.score >= 75 ? "gn" : t.score >= 60 ? "amb" : "rd"}` }, t.score)), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: secBiasTone(t.verdict), small: true }, secBias(t.verdict))), /* @__PURE__ */ React.createElement("td", { className: "r" }, (() => {
     const n = t.ready;
     const tn = n >= 6 ? "gn" : n >= 4 ? "amb" : "rd";
     return /* @__PURE__ */ React.createElement("span", { className: `ss2-ready ss2-ready--${tn}`, title: `${n} of 6 entry criteria met` }, n, "/6");
   })()), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `ss2-tier ss2-tier--${String(t.tier || "\u2014").toLowerCase()}`, title: String(t.tier).toUpperCase() === "AVOID" && (t.verdict || "").toUpperCase() === "BUY" ? "Composite verdict is BUY but the conviction engine sizes this at 0 (regime-gated)" : "Conviction tier" }, t.tier)), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, t.setup), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `ss2-eq ss2-eq--${t.eq === "EXTENDED" ? "amb" : t.eq === "MISSED" ? "rd" : "ink"}` }, t.eq)), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: "ss2-cat mono" }, t.cat)), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: "ss2-edge", title: "EDGE \xB7 composite factor score \u2014 quantitative analytics, informational only (not a recommendation)" }, /* @__PURE__ */ React.createElement("span", { className: `ss2-medal ss2-medal--${gradeTone(t.edge)}`, style: { "--deg": t.edgePct * 3.6 + "deg" } }, t.edge), /* @__PURE__ */ React.createElement("span", { className: "ss2-gstrip" }, GRADE_FACTORS.map(([k, lbl, full]) => /* @__PURE__ */ React.createElement("span", { key: k, className: "ss2-gs", title: `${full} \xB7 grade ${t.grades[k]}` }, /* @__PURE__ */ React.createElement("span", { className: "ss2-gs-k" }, lbl), /* @__PURE__ */ React.createElement("span", { className: `ss2-gs-v g-${t.grades[k].toLowerCase()}` }, t.grades[k])))))), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, t.price != null && isFinite(t.price) && t.price > 0 ? "$" + t.price.toFixed(2) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.chg >= 0 ? "up" : "dn"}` }, t.chg == null || !isFinite(t.chg) ? "\u2014" : (t.chg >= 0 ? "+" : "") + t.chg.toFixed(2) + "%"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.off52 >= -5 ? "up" : t.off52 >= -15 ? "" : "dim"}`, title: "distance from 52-week high" }, t.off52 == null ? "\u2014" : t.off52 + "%"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.vwap >= 0 ? "up" : "dn"}`, title: "price vs session VWAP" }, t.vwap == null ? "\u2014" : (t.vwap >= 0 ? "+" : "") + t.vwap + "%"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, /* @__PURE__ */ React.createElement("b", { className: parseFloat(t.rr) >= 2 ? "up" : "" }, t.rr)), /* @__PURE__ */ React.createElement("td", { className: "mono ss2-plan", title: t.t3plan ? "Stop \xB7 Entry \xB7 Target \xB7 T3 bull-stretch (armed)" : "Stop \xB7 Entry \xB7 Target" }, /* @__PURE__ */ React.createElement("span", { className: "dn" }, /* @__PURE__ */ React.createElement("i", { className: "ss2-plan-k" }, "S"), "$", t.stop), /* @__PURE__ */ React.createElement("span", { className: "copper" }, /* @__PURE__ */ React.createElement("i", { className: "ss2-plan-k" }, "E"), "$", t.entry), /* @__PURE__ */ React.createElement("span", { className: "up" }, /* @__PURE__ */ React.createElement("i", { className: "ss2-plan-k" }, "T"), "$", t.t1plan), t.t3plan ? /* @__PURE__ */ React.createElement("span", { style: { color: "var(--violet)" }, title: "T3 bull-stretch extension \u2014 momentum-confirmed runner target beyond T2" }, /* @__PURE__ */ React.createElement("i", { className: "ss2-plan-k" }, "T3"), "$", t.t3plan) : null), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, t.atr == null ? "\u2014" : t.atr), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${parseFloat(t.rvol) >= 1.5 ? "up" : "dim"}` }, t.rvol == null || t.rvol === "\u2014" ? "\u2014" : t.rvol + "\xD7"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.adx >= 25 ? "up" : t.adx >= 20 ? "warn" : "dim"}`, title: "ADX \xB7 trend strength" }, t.adx == null ? "\u2014" : t.adx), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `ss2-sq ss2-sq--${(t.squeeze || "off").toLowerCase()}` }, !t.squeeze || t.squeeze === "OFF" ? "\u2014" : t.squeeze)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim", title: "beta vs SPY" }, t.beta == null ? "\u2014" : t.beta.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim", title: "dollar volume (price \xD7 RVOL-adj shares)" }, t.dvol == null ? "\u2014" : ssFmtBig(t.dvol)), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.si >= 20 ? "warn" : "dim"}`, title: `short interest \xB7 ${t.dtc == null ? "n/a" : t.dtc} days to cover` }, t.si == null ? "\u2014" : t.si + "%"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim", title: "avg bid/ask spread" }, t.spread == null ? "\u2014" : t.spread + "bp"), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(MTFDots, { states: t.mtf })), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.regWR >= 60 ? "up" : t.regWR >= 50 ? "warn" : "dn"}` }, t.regWR == null ? "\u2014" : t.regWR + "%"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, t.rs == null ? "\u2014" : t.rs), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.r1m >= 0 ? "up" : "dn"}`, title: "1-month return" }, t.r1m == null ? "\u2014" : (t.r1m >= 0 ? "+" : "") + t.r1m + "%"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.r3m >= 0 ? "up" : "dn"}`, title: "3-month return" }, t.r3m == null ? "\u2014" : (t.r3m >= 0 ? "+" : "") + t.r3m + "%"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.wlb >= 50 ? "up" : "warn"}` }, t.wlb == null ? "\u2014" : t.wlb + "%"), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular dim" }, t.n == null ? "\u2014" : t.n), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular" }, t.pf == null ? "\u2014" : t.pf), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.iv >= 70 ? "warn" : "dim"}`, title: "IV rank" }, t.iv == null ? "\u2014" : t.iv + "%"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.sent > 0 ? "up" : t.sent < 0 ? "dn" : "dim"}` }, t.sent == null ? "\u2014" : (t.sent > 0 ? "+" : "") + t.sent.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.tgt >= 15 ? "up" : t.tgt >= 5 ? "warn" : "dim"}`, title: "upside to mean analyst target" }, t.tgt == null ? "\u2014" : "+" + t.tgt + "%"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.newsAge <= 6 ? "warn" : "dim"}`, title: "hours since last catalyst" }, t.newsAge == null ? "\u2014" : t.newsAge + "h"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.insUsd > 0 ? "up" : t.insUsd < 0 ? "dn" : "dim"}`, title: "insider net 90d" }, t.insUsd === 0 ? "\u2014" : (t.insUsd > 0 ? "+" : "\u2212") + "$" + Math.abs(t.insUsd).toFixed(1) + "M"), /* @__PURE__ */ React.createElement("td", { className: `r mono tabular ${t.er <= 14 ? "warn" : "dim"}` }, t.er <= 60 ? t.er : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "mono ss2-signals" }, ssSignals(t).map((s) => /* @__PURE__ */ React.createElement("span", { key: s.id, className: "ss2-sig", title: `${s.label} \u2014 ${s.desc}` }, s.icon)), ssSignals(t).length === 0 && /* @__PURE__ */ React.createElement("span", { className: "dim" }, "\u2014")), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular ss2-aiedge", title: "ML ensemble forward edge \u2014 expected risk-adjusted excess return from the model" }, /* @__PURE__ */ React.createElement("span", { className: t.aiEdge >= 0.05 ? "up" : t.aiEdge <= -0.05 ? "dn" : "dim" }, t.aiEdge == null ? "\u2014" : (t.aiEdge >= 0 ? "+" : "") + t.aiEdge.toFixed(2)), /* @__PURE__ */ React.createElement("span", { className: "ss2-aiedge-bar" }, /* @__PURE__ */ React.createElement("i", { className: t.aiEdge >= 0 ? "up" : "dn", style: { width: `${t.aiEdge == null ? 0 : Math.min(100, Math.abs(t.aiEdge) * 180)}%` } }))), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(SsSpark, { sym: t.sym, chg: t.chg })), /* @__PURE__ */ React.createElement("td", { className: "r mono tabular", title: "median sessions to T1 \xB7 time-stop (Time Anatomy)" }, t.taMedT1 == null ? /* @__PURE__ */ React.createElement("span", { className: "dim" }, "\u2014") : /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", { className: "copper" }, "S", t.taMedT1), /* @__PURE__ */ React.createElement("span", { className: "dim2" }, " \xB7 \u23F2S", t.taStop)))))))), selected.size > 0 && /* @__PURE__ */ React.createElement("div", { className: "ss2-bulk" }, /* @__PURE__ */ React.createElement("div", { className: "ss2-bulk-l" }, /* @__PURE__ */ React.createElement(Pill, { tone: "copper", dot: true }, selected.size, " SELECTED"), flash ? /* @__PURE__ */ React.createElement("span", { className: "mono gn" }, "\u2713 ", flash) : /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, [...selected].slice(0, 4).join(" \xB7 "), selected.size > 4 ? ` +${selected.size - 4}` : "")), /* @__PURE__ */ React.createElement("div", { className: "ss2-bulk-r" }, /* @__PURE__ */ React.createElement("button", { className: "btn btn--sm", onClick: addSelWatch }, "\uFF0B WATCHLIST"), /* @__PURE__ */ React.createElement("button", { className: "btn btn--sm", onClick: () => setFlash(`${selected.size} sent to Playbook`) }, "\u{1F4D3} PLAYBOOK"), /* @__PURE__ */ React.createElement("button", { className: "btn btn--sm", onClick: () => setFlash(`basket of ${selected.size} built`) }, "\u{1F9FA} BUILD BASKET"), /* @__PURE__ */ React.createElement("button", { className: "btn btn--sm", onClick: () => setFlash(`backtest queued \xB7 ${selected.size} names`) }, "\u2699 BACKTEST"), /* @__PURE__ */ React.createElement("button", { className: "btn btn--sm", onClick: exportCSV }, "\u2913 EXPORT CSV"), /* @__PURE__ */ React.createElement("button", { className: "btn btn--sm", onClick: clearSel, title: "Clear selection" }, "\u2715")))));
+}
+function SeenChip({ seen, sym }) {
+  if (!seen || !seen.n) return null;
+  const wr = seen.wr;
+  const tone = wr == null ? "neu" : wr >= 55 ? "gn" : wr >= 45 ? "amb" : "rd";
+  const rec = (seen.w || 0) + "W\u2013" + (seen.l || 0) + "L" + (seen.open ? " \xB7 " + seen.open + " open" : "");
+  const tip = "Seen " + seen.n + "\xD7 as a logged signal" + (seen.last ? " \xB7 last " + seen.last : "") + " \xB7 " + rec + (wr != null ? " (" + wr + "% win-rate)" : "") + (seen.pf != null ? " \xB7 PF " + seen.pf : "") + " \xB7 click \u2192 Track Record \xB7 The Ledger";
+  const go = (e) => {
+    e.stopPropagation();
+    window.__trkIntent = { tab: "ledger", ticker: sym };
+    if (window.__setSurface) window.__setSurface("track-record");
+  };
+  return /* @__PURE__ */ React.createElement("span", { className: `ss2-seen ss2-seen--${tone} ss2-seen--link`, title: tip, onClick: go }, /* @__PURE__ */ React.createElement("span", { className: "ss2-seen-ic" }, "\u{1F501}"), /* @__PURE__ */ React.createElement("b", null, seen.n, "\xD7"), wr != null && /* @__PURE__ */ React.createElement("span", { className: "ss2-seen-wr" }, wr, "%"));
 }
 function MTFDots({ states }) {
   const labels = ["1H", "4H", "1D", "1W"];
@@ -36294,9 +36342,14 @@ function heatColor(v, cap = 4) {
 }
 function SurfaceTrackRecord({ onTicker }) {
   const SL = window.SigLedger;
+  const [intent] = useTR(() => {
+    const i = window.__trkIntent || null;
+    window.__trkIntent = null;
+    return i;
+  });
   const [metric, setMetric] = useTR("edge");
   const [group, setGroup] = useTR("W");
-  const [tab, setTab] = useTR("heatmap");
+  const [tab, setTab] = useTR(intent && intent.tab ? intent.tab : "heatmap");
   const [srcFilter, setSrcFilter] = useTR(null);
   const hzs = useTRm(() => SL.HZ.filter((h) => h.group === group), [group]);
   const board = useTRm(() => SL.leaderboard(metric), [metric]);
@@ -36321,7 +36374,7 @@ function SurfaceTrackRecord({ onTicker }) {
   } }, /* @__PURE__ */ React.createElement("b", { className: "amb" }, "Live feed unavailable \u2014 showing modeled fallback."), " /v2/data_leaders.json could not be loaded, so the curves below are an illustrative model. Real resolved trades drive the ", /* @__PURE__ */ React.createElement("b", null, "Portfolio"), " and", /* @__PURE__ */ React.createElement("b", null, " Performance"), " surfaces. Reload once the ledger feed is reachable."), /* @__PURE__ */ React.createElement("div", { className: "lab-tabs trk-tabs" }, [["heatmap", "Heatmap"], ["leaderboard", "Leaderboard"], ["decay", "Decay curves"], ["ledger", "The Ledger"], ["calibration", "AI Calibration"], ["regime", "By Regime"], ["equity", "Equity curve"]].map(([id, l]) => /* @__PURE__ */ React.createElement("button", { key: id, className: `lab-tab ${tab === id ? "is-on" : ""}`, onClick: () => setTab(id) }, l)), (tab === "heatmap" || tab === "decay") && /* @__PURE__ */ React.createElement("div", { className: "trk-grp" }, Object.entries(TR_GROUPS).map(([g, l]) => /* @__PURE__ */ React.createElement("button", { key: g, className: `trk-grp-btn ${group === g ? "is-on" : ""}`, onClick: () => setGroup(g), title: l }, g === "D" ? "Daily" : g === "W" ? "Weekly" : "Monthly")))), tab === "heatmap" && /* @__PURE__ */ React.createElement(HeatmapView, { SL, hzs, metric, group }), tab === "leaderboard" && /* @__PURE__ */ React.createElement(LeaderboardView, { board, metric, onPick: (s) => {
     setSrcFilter(s);
     setTab("ledger");
-  } }), tab === "decay" && /* @__PURE__ */ React.createElement(DecayView, { SL, hzs, board, metric, group }), tab === "ledger" && /* @__PURE__ */ React.createElement(LedgerView, { SL, metric, srcFilter, setSrcFilter, onTicker }), tab === "calibration" && /* @__PURE__ */ React.createElement(CalibrationView, { SL, metric }), tab === "regime" && /* @__PURE__ */ React.createElement(RegimeView, { SL, metric }), tab === "equity" && /* @__PURE__ */ React.createElement(EquityView, { SL, metric }), /* @__PURE__ */ React.createElement("div", { className: "pf-note mono dim2" }, "Every published call is logged at signal time & scored forward \u2014 ", /* @__PURE__ */ React.createElement("b", null, "direction-aligned"), " (a short that falls is a win). ", /* @__PURE__ */ React.createElement("b", null, metric === "edge" ? "Edge vs SPY" : "Raw return"), " shown \xB7 only matured horizons enter stats; younger calls show partial paths labeled ", /* @__PURE__ */ React.createElement("b", null, "maturing"), ". ", SL.real ? "Live ledger \xB7 signal_log + audit_ledger." : "Modeled fallback \u2014 live feed unavailable."));
+  } }), tab === "decay" && /* @__PURE__ */ React.createElement(DecayView, { SL, hzs, board, metric, group }), tab === "ledger" && /* @__PURE__ */ React.createElement(LedgerView, { SL, metric, srcFilter, setSrcFilter, onTicker, initialTicker: intent && intent.tab === "ledger" ? intent.ticker : null }), tab === "calibration" && /* @__PURE__ */ React.createElement(CalibrationView, { SL, metric }), tab === "regime" && /* @__PURE__ */ React.createElement(RegimeView, { SL, metric }), tab === "equity" && /* @__PURE__ */ React.createElement(EquityView, { SL, metric }), /* @__PURE__ */ React.createElement("div", { className: "pf-note mono dim2" }, "Every published call is logged at signal time & scored forward \u2014 ", /* @__PURE__ */ React.createElement("b", null, "direction-aligned"), " (a short that falls is a win). ", /* @__PURE__ */ React.createElement("b", null, metric === "edge" ? "Edge vs SPY" : "Raw return"), " shown \xB7 only matured horizons enter stats; younger calls show partial paths labeled ", /* @__PURE__ */ React.createElement("b", null, "maturing"), ". ", SL.real ? "Live ledger \xB7 signal_log + audit_ledger." : "Modeled fallback \u2014 live feed unavailable."));
 }
 function HeatmapView({ SL, hzs, metric, group }) {
   const rows = SL.SOURCES.map((src) => ({ src, cells: hzs.map((hz) => ({ hz, ...SL.aggregate(src.id, hz, metric) })) }));
@@ -36352,11 +36405,11 @@ function DecayView({ SL, hzs, board, metric, group }) {
     return /* @__PURE__ */ React.createElement("g", { key: s.id }, /* @__PURE__ */ React.createElement("polyline", { points: pts, fill: "none", stroke: COL[si % COL.length], strokeWidth: "2", opacity: "0.9" }), ds.map((d, i) => d.n > 0 ? /* @__PURE__ */ React.createElement("circle", { key: i, cx: xs[i], cy: y(d.mean), r: "2.6", fill: COL[si % COL.length] }) : null));
   }))), /* @__PURE__ */ React.createElement("div", { className: "lab-verdict mono dim2" }, "Avg ", metric === "edge" ? "edge vs SPY" : "return", " by horizon. Where a line ", /* @__PURE__ */ React.createElement("b", null, "peaks"), " is the engine's best holding period; where it crosses zero is its ", /* @__PURE__ */ React.createElement("b", null, "half-life"), " \u2014 hold past that and the edge is gone."));
 }
-function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
+function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker, initialTicker }) {
   const [dir, setDir] = useTR("all");
   const [view, setView] = useTR("path");
   const [period, setPeriod] = useTR("all");
-  const [tickerQ, setTickerQ] = useTR("");
+  const [tickerQ, setTickerQ] = useTR(initialTicker || "");
   const [dateFrom, setDateFrom] = useTR("");
   const [dateTo, setDateTo] = useTR("");
   const [page, setPage] = useTR(0);

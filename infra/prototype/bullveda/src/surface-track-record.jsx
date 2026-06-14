@@ -16,9 +16,12 @@ function heatColor(v, cap = 4) {
 
 function SurfaceTrackRecord({ onTicker }) {
   const SL = window.SigLedger;
+  // One-shot deep-link intent (e.g. from the scanner's recurrence chip): jump
+  // straight to a tab pre-filtered for a ticker. Read-and-clear once on mount.
+  const [intent] = useTR(() => { const i = window.__trkIntent || null; window.__trkIntent = null; return i; });
   const [metric, setMetric] = useTR("edge");   // edge | raw
   const [group, setGroup] = useTR("W");          // D | W | M
-  const [tab, setTab] = useTR("heatmap");
+  const [tab, setTab] = useTR(intent && intent.tab ? intent.tab : "heatmap");
   const [srcFilter, setSrcFilter] = useTR(null);
 
   const hzs = useTRm(() => SL.HZ.filter(h => h.group === group), [group]);
@@ -75,7 +78,7 @@ function SurfaceTrackRecord({ onTicker }) {
       {tab === "heatmap" && <HeatmapView SL={SL} hzs={hzs} metric={metric} group={group} />}
       {tab === "leaderboard" && <LeaderboardView board={board} metric={metric} onPick={(s) => { setSrcFilter(s); setTab("ledger"); }} />}
       {tab === "decay" && <DecayView SL={SL} hzs={hzs} board={board} metric={metric} group={group} />}
-      {tab === "ledger" && <LedgerView SL={SL} metric={metric} srcFilter={srcFilter} setSrcFilter={setSrcFilter} onTicker={onTicker} />}
+      {tab === "ledger" && <LedgerView SL={SL} metric={metric} srcFilter={srcFilter} setSrcFilter={setSrcFilter} onTicker={onTicker} initialTicker={intent && intent.tab === "ledger" ? intent.ticker : null} />}
       {tab === "calibration" && <CalibrationView SL={SL} metric={metric} />}
       {tab === "regime" && <RegimeView SL={SL} metric={metric} />}
       {tab === "equity" && <EquityView SL={SL} metric={metric} />}
@@ -179,11 +182,11 @@ function DecayView({ SL, hzs, board, metric, group }) {
 }
 
 // ── The Ledger ──────────────────────────────────────────────────
-function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker }) {
+function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker, initialTicker }) {
   const [dir, setDir] = useTR("all");
   const [view, setView] = useTR("path"); // path | full
   const [period, setPeriod] = useTR("all"); // 1m|3m|6m|1y|ytd|all
-  const [tickerQ, setTickerQ] = useTR(""); // ticker filter (comma/space-separated, substring match)
+  const [tickerQ, setTickerQ] = useTR(initialTicker || ""); // ticker filter (comma/space-separated, substring match) — seeded from a deep-link intent
   const [dateFrom, setDateFrom] = useTR(""); // explicit logged-date range (YYYY-MM-DD)
   const [dateTo, setDateTo] = useTR("");
   const [page, setPage] = useTR(0);

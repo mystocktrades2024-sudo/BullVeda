@@ -211,6 +211,7 @@
       sqRank: sqRank, squeeze: squeeze, ready: ready,
       mechanism: r.setup ? r.setup + (r.reject_reason ? " · " + r.reject_reason : "") : (r.reject_reason || "—"),
       tier: r.conviction_tier || "—", eq: r.entry_quality || "—",
+      breakoutState: r.breakout_state || null,   // fired / coiled / unconfirmed (engine) — BREAKOUT pill split
       cat: r.catalyst_tier != null ? "T" + r.catalyst_tier : "—",
       stop: num(r.stop) != null ? r.stop.toFixed(2) : "—",
       entry: num(r.entry_lo) != null ? r.entry_lo.toFixed(2) : "—",
@@ -221,7 +222,20 @@
       rr: rr ? rr.toFixed(1) : "—",
       rvol: rvol != null ? rvol.toFixed(2) : "—",
       rs: rs ? rs.toFixed(0) : "—",
-      wlb: null, n: null, pf: null, regWR: null, // ledger-derived (🔶) → feed-honest
+      // Per-ticker recurrence from the real signal track record (server join over
+      // data/signal_log.json). `seen` powers the scanner's "🔁 N×" chip; wlb/n/pf
+      // are the previously-honest-null ledger columns, now populated from the same
+      // resolved-outcome aggregate. regWR stays null (regime-conditional, not in feed).
+      seen: (function () {
+        var rc = r.recurrence;
+        if (!rc || !rc.n) return null;
+        return { n: rc.n, w: rc.wins, l: rc.losses, open: rc.open,
+                 wr: rc.wr, pf: rc.pf, last: rc.last };
+      })(),
+      wlb: (r.recurrence && r.recurrence.wr != null) ? r.recurrence.wr : null,
+      n: (r.recurrence && r.recurrence.n != null) ? r.recurrence.n : null,
+      pf: (r.recurrence && r.recurrence.pf != null) ? r.recurrence.pf : null,
+      regWR: null, // regime-conditional → not in scan feed
       iv: num(r.iv_rank),
       sent: Math.round(num(r.sent_score, 5) - 5),
       er: num(r.earn_days),

@@ -75,6 +75,10 @@ const SS_UNIVERSE = (window.__BV && window.__BV.ready) ? window.__BV.scanRows().
       wlb: Math.max(28, Math.min(72, t.score * 0.7 + 5)).toFixed(0),
       n: 180 + (code % 8) * 50,
       pf: (1.2 + (t.score - 50) / 50).toFixed(1),
+      seen: (code % 4 === 0) ? null : (function () {
+        var nn = (code % 23) + 1, w = Math.round(nn * (0.4 + (code % 5) / 12)), l = Math.max(0, nn - w - (code % 3));
+        return { n: nn, w: w, l: l, open: Math.max(0, nn - w - l), wr: (w + l) ? Math.round(100 * w / (w + l)) : null, pf: +(0.9 + (code % 9) / 8).toFixed(1), last: "2026-05-" + (10 + code % 18) };
+      })(),
       iv: 30 + (code % 24),
       sent: ((code % 7) - 3),
       er: 4 + (code % 60),
@@ -138,7 +142,7 @@ const SS_SIGNALS = [
   { icon: "⚡", id: "catalyst", label: "Fresh catalyst", desc: "News catalyst in the last 6 hours",       test: t => t.newsAge <= 6 },
   { icon: "🧲", id: "squeeze",  label: "Squeeze",        desc: "Volatility squeeze on or just fired",     test: t => t.squeeze === "ON" || t.squeeze === "FIRED" },
   { icon: "📅", id: "er",       label: "Earnings ≤ 14d", desc: "Reports earnings within 14 days",         test: t => t.er <= 14 },
-  { icon: "💰", id: "insider",  label: "Insider buying", desc: "Net insider buying over the last 90 days", test: t => t.insUsd > 0 },
+  { icon: "💰", id: "insider",  label: "Insider buying", desc: "Net insider buying over the last 90 days", test: t => t.insNet > 0 },
 ];
 function ssSignals(t) { return SS_SIGNALS.filter(s => s.test(t)); }
 
@@ -441,11 +445,17 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
     let r = (window.__BV && window.__BV.ready && window.__BV.scanRows)
       ? window.__BV.scanRows().map(t => (window.__BV.timeQuick ? Object.assign(t, window.__BV.timeQuick(t) || {}) : t))
       : SS_UNIVERSE;
+    // True 80th-percentile score across the live universe — so "TOP 20% SCORE" means
+    // what it says (was an absolute score>=70, i.e. top ~12%, not 20%).
+    const _p80 = (function () {
+      const s = r.map(t => t.score).filter(x => typeof x === "number").sort((a, b) => b - a);
+      return s.length ? s[Math.min(s.length - 1, Math.floor(s.length * 0.2))] : 70;
+    })();
     if (tab === "top-picks") r = r.filter(t => t.score >= 75);
     if (tab === "earnings") r = r.filter(t => t.er <= 14);
     if (tab === "surges") r = r.filter(t => parseFloat(t.rvol) >= 1.5);
-    if (tab === "killed") r = r.filter(t => t.verdict === "AVOID");
-    if (tab === "fresh") r = r.slice(0, 3);
+    if (tab === "killed") r = r.filter(t => String(t.bias).toLowerCase() === "bearish");   // EXCLUDED = bearish-bias (gate-blind), matching the funnel's avoid segment. Was t.verdict==="AVOID" → 0 on a macro-gate day (verdict flattens to WAIT).
+    if (tab === "fresh") r = r.filter(t => String(t.eq).toUpperCase() === "FRESH");   // real FRESH entry-quality (within 0.5 ATR of value). Was a slice(0,3) placeholder.
     if (tab === "ai-edge") r = r.filter(t => t.aiEdge >= 0.05);
     // "Directional bias" side toggle filters by the BIAS axis (gate-blind), NOT the
     // macro-gated verdict — consistent with the home SCAN FUNNEL. On a CPI/macro
@@ -459,12 +469,14 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
       const _want = side === "BUY" ? "bullish" : side === "WATCH" ? "neutral" : "bearish";
       r = r.filter(t => _bias(t) === _want);
     }
-    if (pills.top20)   r = r.filter(t => t.score >= 70);
+    if (pills.top20)   r = r.filter(t => t.score >= _p80);   // true top-20% by universe percentile
     if (pills.rvol)    r = r.filter(t => parseFloat(t.rvol) >= 1.5);
     if (pills.er14)    r = r.filter(t => t.er <= 14);
-    if (pills.insider) r = r.filter(t => t.sent > 0);
+    if (pills.insider) r = r.filter(t => t.insNet > 0);   // INSIDER = net insider buying (insider_net). Was reading t.sent (NEWS sentiment, wrong axis — 559 false hits). insider_usd is empty in the feed, so insider_net is the live signal.
     if (pills.t1)      r = r.filter(t => t.cat === "T1");   // CATALYST tier (t.cat), NOT conviction tier (t.tier). The "⚡ T1 CATALYST" pill was reading conviction_tier, which is 0 on a no-BUY day (CPI blackout) → empty; catalyst_tier T1 = 239 names.
-    if (pills.breakout)r = r.filter(t => (t.setup || "").toLowerCase().includes("break"));
+    if (pills.breakout)r = r.filter(t => t.breakoutState
+      ? (t.breakoutState === "fired" || t.breakoutState === "unconfirmed")   // ACTUALLY broke out (cleared base) — excludes coiled VCP bases still under pivot
+      : (t.setup || "").toLowerCase().includes("break"));                    // fallback: family match until the next scan populates breakout_state
     if (pills.watch)   r = r.filter(t => window.WatchStore && window.WatchStore.has(t.sym));
     if (secF !== "all") r = r.filter(t => t.sector === secF);
     if (setupF !== "all") r = r.filter(t => t.setup === setupF);
@@ -522,13 +534,30 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
     return c.rows.filter(r => r.count >= 2).length;
   }, []);
 
+  // Live tab badge counts — must match the actual tab filters AND the live universe.
+  // The frozen SS_TABS.count (module const) drifted from reality after a data refresh
+  // (badge EARNINGS 161 / AI EDGE 1 vs live 36 / 0 on 2026-06-11). Same frozen-const
+  // class as the rows pipeline; recompute from live scanRows here.
+  const tabCounts = useMemoSS(() => {
+    const u = (window.__BV && window.__BV.ready && window.__BV.scanRows) ? window.__BV.scanRows() : SS_UNIVERSE;
+    return {
+      scanner:     u.length,
+      "top-picks": u.filter(t => t.score >= 75).length,
+      fresh:       u.filter(t => String(t.eq).toUpperCase() === "FRESH").length,
+      earnings:    u.filter(t => t.er <= 14).length,
+      surges:      u.filter(t => parseFloat(t.rvol) >= 1.5).length,
+      "ai-edge":   u.filter(t => t.aiEdge >= 0.05).length,
+      killed:      u.filter(t => String(t.bias).toLowerCase() === "bearish").length,
+    };
+  }, [wlTick]);
+
   return (
     <div className="surface ss-surface ss2-surface">
       <div className="ss2-tabs">
         {SS_TABS.map(t => (
           <button key={t.id} className={`ss2-tab ${tab === t.id ? "is-on" : ""}`} onClick={() => setTab(t.id)}>
             <span className="ss2-tab-l">{t.label}</span>
-            <span className={`ss2-tab-c mono ${t.tone ? `ss2-c--${t.tone}` : ""}`}>{t.id === "consensus" ? consensusCount : t.count}</span>
+            <span className={`ss2-tab-c mono ${t.tone ? `ss2-c--${t.tone}` : ""}`}>{t.id === "consensus" ? consensusCount : (tabCounts[t.id] != null ? tabCounts[t.id] : t.count)}</span>
           </button>
         ))}
       </div>
@@ -769,7 +798,7 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
                   checked={selected.has(t.sym)}
                   onChange={() => toggleSel(t.sym)}
                   onClick={(e) => e.stopPropagation()} /></td>
-                <td className="mono ss2-sym"><span className="ss2-star">★</span><b>{t.sym}</b></td>
+                <td className="mono ss2-sym"><span className="ss2-star">★</span><b>{t.sym}</b><SeenChip seen={t.seen} sym={t.sym} /></td>
                 <td className="mono dim">{t.name}</td>
                 <td className="dim2 mono">{t.sector}</td>
                 <td className="mono dim"><span className="ss2-tfsn">{(t.tfsn||[]).map((v,k)=>(
@@ -871,6 +900,41 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
       </React.Fragment>
       )}
     </div>
+  );
+}
+
+// Recurrence chip — "we've flagged this name N× before, and here's the W-L".
+// Real per-ticker aggregate from the signal track record (data/signal_log.json),
+// joined server-side onto /api/universe rows. Null seen → render nothing (first
+// time we've ever surfaced the name). Tone follows the resolved win-rate so a
+// repeatedly-failing name reads red even with a high recurrence count.
+function SeenChip({ seen, sym }) {
+  if (!seen || !seen.n) return null;
+  const wr = seen.wr;
+  const tone = wr == null ? "neu" : wr >= 55 ? "gn" : wr >= 45 ? "amb" : "rd";
+  const rec = (seen.w || 0) + "W–" + (seen.l || 0) + "L"
+    + (seen.open ? " · " + seen.open + " open" : "");
+  const tip = "Seen " + seen.n + "× as a logged signal"
+    + (seen.last ? " · last " + seen.last : "")
+    + " · " + rec
+    + (wr != null ? " (" + wr + "% win-rate)" : "")
+    + (seen.pf != null ? " · PF " + seen.pf : "")
+    + " · click → Track Record · The Ledger";
+  // Deep-link into Track Record → The Ledger, pre-filtered to this ticker, via a
+  // one-shot global intent the surface consumes on mount (same pattern as
+  // window.__setSurface / window._openQuickAction). stopPropagation so the row's
+  // open-ticker handler doesn't also fire.
+  const go = (e) => {
+    e.stopPropagation();
+    window.__trkIntent = { tab: "ledger", ticker: sym };
+    if (window.__setSurface) window.__setSurface("track-record");
+  };
+  return (
+    <span className={`ss2-seen ss2-seen--${tone} ss2-seen--link`} title={tip} onClick={go}>
+      <span className="ss2-seen-ic">🔁</span>
+      <b>{seen.n}×</b>
+      {wr != null && <span className="ss2-seen-wr">{wr}%</span>}
+    </span>
   );
 }
 

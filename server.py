@@ -3462,6 +3462,73 @@ async def journal_api(limit: int = 400):
 _UNIVERSE_CACHE = {"mtime": None, "payload": None}
 _TICKER_FULL_CACHE = {"mtime": None, "index": None}
 
+# ── Per-ticker signal recurrence ("times we've flagged this before" + W-L) ──
+# Built ONCE from data/signal_log.json (the real system track record — every logged
+# signal, ~2 months deep). Powers the scanner's recurrence chip so a user can see at
+# a glance "we've surfaced this name 28× before, and here's how those resolved."
+# Counts ALL logged signals (the honest "times seen"); the W-L/PF use only RESOLVED
+# entries. Cached by file mtime so it's free on every /api/universe call.
+_RECUR_CACHE = {"mtime": None, "map": None}
+_RECUR_WIN = {"WIN_EXPIRED", "TARGET_HIT"}
+_RECUR_LOSS = {"STOPPED", "LOSS_EXPIRED"}
+
+def _signal_recurrence_map():
+    import json, os
+    path = BASE_DIR / "data" / "signal_log.json"
+    try:
+        mt = os.path.getmtime(path)
+    except Exception:
+        return {}
+    if _RECUR_CACHE["mtime"] == mt and _RECUR_CACHE["map"] is not None:
+        return _RECUR_CACHE["map"]
+    try:
+        rows = json.loads(path.read_text())
+    except Exception:
+        return _RECUR_CACHE["map"] or {}
+    agg = {}
+    for s in rows:
+        if not isinstance(s, dict):
+            continue
+        tk = str(s.get("ticker") or "").upper()
+        if not tk:
+            continue
+        a = agg.get(tk)
+        if a is None:
+            a = agg[tk] = {"n": 0, "wins": 0, "losses": 0, "open": 0,
+                           "_win_pnl": 0.0, "_loss_pnl": 0.0, "last": None}
+        a["n"] += 1
+        d = s.get("date")
+        if d and (a["last"] is None or d > a["last"]):
+            a["last"] = d
+        res = s.get("result")
+        if res in _RECUR_WIN:
+            a["wins"] += 1
+        elif res in _RECUR_LOSS:
+            a["losses"] += 1
+        else:
+            a["open"] += 1
+        try:
+            pnl = s.get("actual_pnl_pct")
+            if pnl is not None:
+                pnl = float(pnl)
+                if pnl >= 0:
+                    a["_win_pnl"] += pnl
+                else:
+                    a["_loss_pnl"] += pnl
+        except Exception:
+            pass
+    out = {}
+    for tk, a in agg.items():
+        resolved = a["wins"] + a["losses"]
+        wr = round(100.0 * a["wins"] / resolved) if resolved else None
+        loss_mag = abs(a["_loss_pnl"])
+        pf = round(a["_win_pnl"] / loss_mag, 2) if loss_mag > 0 else None
+        out[tk] = {"n": a["n"], "wins": a["wins"], "losses": a["losses"],
+                   "open": a["open"], "wr": wr, "pf": pf, "last": a["last"]}
+    _RECUR_CACHE["mtime"] = mt
+    _RECUR_CACHE["map"] = out
+    return out
+
 _REV_TREND_CACHE = {"mtime": None, "map": {}}
 def _revision_trend_for(sym: str):
     """Real estimate-revision breadth from data/earnings_beat_predictions.json (cached
@@ -3685,6 +3752,8 @@ async def universe_api(limit: int = 0):
                 ml_pup[str(_sym).upper()] = round(float(_d["p_up"]), 4)
     except Exception:
         ml_pup = {}
+    # Per-ticker recurrence from the real signal track record (cached by mtime).
+    recur = _signal_recurrence_map()
     def row(r):
         ctp = r.get("canonical_trade_plan") or {}
         entry = ctp.get("entry") or {}
@@ -3723,6 +3792,11 @@ async def universe_api(limit: int = 0):
             "setup_type": ((ctp.get("setup") or {}).get("setup_type")
                            or (r.get("trade_plan") or {}).get("setup_type")),
             "catalyst_tier": r.get("catalyst_tier"), "entry_quality": r.get("entry_quality"),
+            # Breakout sub-state (fired / coiled / unconfirmed) — engine-computed
+            # (analysis.py) so the scanner BREAKOUT pill can show names that ACTUALLY
+            # broke out (cleared base + volume) vs coiled VCP bases still under their
+            # pivot. Null until the next scan repopulates the bundle.
+            "breakout_state": r.get("breakout_state"),
             # KILL->LABEL / honest edge tier (2026-06-11 audit). edge_tier =
             # {tier,label,icon,tone,sort_rank,pf,n,...} from realized track record
             # (PROVEN/DEVELOPING/WEAK/UNPROVEN); edge_warning = weak-setup chip for a
@@ -3790,6 +3864,10 @@ async def universe_api(limit: int = 0):
             # 10-gate rule-engine audit (Overview §2 GateCascade) + why-blocked reason
             "gates_evaluated": (r.get("gates_evaluated") if isinstance(r.get("gates_evaluated"), list) else None),
             "reject_reason": r.get("reject_reason") or None,
+            # Recurrence — how many times this name has surfaced as a logged signal
+            # before + how those resolved (real, from data/signal_log.json). Null when
+            # never seen. Powers the scanner's "🔁 seen N×" chip.
+            "recurrence": recur.get(str(r.get("ticker") or "").upper()),
         }
     # Sanitize NaN/Infinity → None. Some bundle rows carry non-finite floats
     # (e.g. a divide-by-zero rr/sharpe); Starlette's JSONResponse uses
