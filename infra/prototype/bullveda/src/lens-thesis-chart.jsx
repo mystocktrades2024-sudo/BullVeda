@@ -143,8 +143,31 @@ function useChartNews(sym) {
   return n;
 }
 
+// MTF previous-period High/Low (LuxAlgo SMC "Highs & Lows MTF"): bucket the loaded
+// bars by calendar day / week / month and take the last COMPLETED bucket of each.
+// Pure derivation from bars already on hand — no extra fetch.
+function computeMTFLevels(bars) {
+  if (!bars || bars.length < 2) return null;
+  const g = { day: {}, week: {}, month: {} }, order = { day: [], week: [], month: [] };
+  bars.forEach(b => {
+    const dt = new Date(b.time * 1000);
+    const keys = { day: dt.getUTCFullYear() * 10000 + dt.getUTCMonth() * 100 + dt.getUTCDate(),
+                   week: Math.floor(b.time / 86400 / 7), month: dt.getUTCFullYear() * 12 + dt.getUTCMonth() };
+    ["day", "week", "month"].forEach(p => { const k = keys[p];
+      if (!g[p][k]) { g[p][k] = { hi: b.high, lo: b.low }; order[p].push(k); }
+      else { if (b.high > g[p][k].hi) g[p][k].hi = b.high; if (b.low < g[p][k].lo) g[p][k].lo = b.low; } });
+  });
+  const prev = p => { const o = order[p]; return o.length >= 2 ? g[p][o[o.length - 2]] : null; };
+  const pd = prev("day"), pw = prev("week"), pm = prev("month");
+  const lvls = [];
+  if (pd) { lvls.push({ tag: "PDH", level: pd.hi, kind: "day" }, { tag: "PDL", level: pd.lo, kind: "day" }); }
+  if (pw) { lvls.push({ tag: "PWH", level: pw.hi, kind: "week" }, { tag: "PWL", level: pw.lo, kind: "week" }); }
+  if (pm) { lvls.push({ tag: "PMH", level: pm.hi, kind: "month" }, { tag: "PML", level: pm.lo, kind: "month" }); }
+  return lvls.length ? lvls : null;
+}
+
 // compute all overlays/indicators from REAL bars (logic unchanged — now fed real data)
-function computeIndicators(bars, lv, tf) {
+function computeIndicators(bars, lv, tf, smcSwing) {
   const ema = (per) => { const k = 2 / (per + 1); let pr = bars[0].close; return bars.map((b, i) => { pr = i === 0 ? b.close : b.close * k + pr * (1 - k); return { time: b.time, value: +pr.toFixed(2) }; }); };
   const e9 = ema(9), e21 = ema(21), e50 = ema(50);
   const bbU = [], bbM = [], bbL = [];
@@ -184,6 +207,14 @@ function computeIndicators(bars, lv, tf) {
   const vpMax = Math.max(...vpb.map(x => x.v), 1); const pocI = vpb.reduce((m, x, i) => x.v > vpb[m].v ? i : m, 0);
   const vTot = vpb.reduce((a, x) => a + x.v, 0); let vacc = vpb[pocI].v, vloI = pocI, vhiI = pocI;
   while (vacc < vTot * 0.7 && (vloI > 0 || vhiI < VN - 1)) { const dn = vloI > 0 ? vpb[vloI - 1].v : -1, up = vhiI < VN - 1 ? vpb[vhiI + 1].v : -1; if (up >= dn) { vhiI++; vacc += vpb[vhiI].v; } else { vloI--; vacc += vpb[vloI].v; } }
+  // ── Money Flow Profile (LuxAlgo-style): same price bins, but each bar's money
+  //    flow (volume × typical price) is split into bullish (close≥open) vs bearish.
+  //    Row total width = money flow at that level; the green/red split = sentiment;
+  //    the widest node is the money-flow POC. Mirrors LuxAlgo's combined Volume/
+  //    Money-Flow + Sentiment profile, reusing this chart's mid-bin convention. ──
+  const mfb = Array.from({ length: VN }, (_, i) => ({ lo: vlo + i * vbin, hi: vlo + (i + 1) * vbin, mid: vlo + (i + 0.5) * vbin, bull: 0, bear: 0, mf: 0 }));
+  bars.forEach(b => { const m = (b.high + b.low) / 2; const bi = Math.min(VN - 1, Math.max(0, Math.floor((m - vlo) / vbin))); const tp = (b.high + b.low + b.close) / 3; const flow = (b.value || 0) * tp; if (b.close >= b.open) mfb[bi].bull += flow; else mfb[bi].bear += flow; mfb[bi].mf += flow; });
+  const mfMax = Math.max(...mfb.map(x => x.mf), 1); const mfpI = mfb.reduce((m, x, i) => x.mf > mfb[m].mf ? i : m, 0);
   const last = bars[bars.length - 1].close;
 
   // ── LuxAlgo Smart Money Concepts (window.computeSMC) — internal+swing structure,
@@ -191,16 +222,16 @@ function computeIndicators(bars, lv, tf) {
   //    premium/discount. Indices mapped to bar time for the Lightweight chart. ──
   let smc = null;
   if (window.computeSMC) {
-    const lux = window.computeSMC(bars.map(b => ({ o: b.open, hi: b.high, lo: b.low, c: b.close })),
-      { swingLen: 20, intLen: 5, eq: true, swings: true, fvg: true });
+    const lux = window.computeSMC(bars.map(b => ({ o: b.open, hi: b.high, lo: b.low, c: b.close, v: b.value })),
+      { swingLen: smcSwing || 20, intLen: 5, eq: true, swings: true, fvg: true });
     if (lux && lux.ok) {
       const T = i => (bars[i] ? bars[i].time : null);
       const ev = s => ({ time: T(s.toIdx), fromTime: T(s.fromIdx), level: s.level, tag: s.tag, dir: s.dir, internal: s.internal });
       smc = {
         struct: lux.swingStruct.map(ev).filter(e => e.time),
         intStruct: lux.intStruct.map(ev).filter(e => e.time),
-        swingOB: lux.swingOB.filter(o => o.mitIdx < 0).slice(0, 5).map(o => ({ time: T(o.idx), high: o.high, low: o.low, bias: o.bias, internal: false })).filter(o => o.time),
-        intOB: lux.intOB.filter(o => o.mitIdx < 0).slice(0, 8).map(o => ({ time: T(o.idx), high: o.high, low: o.low, bias: o.bias, internal: true })).filter(o => o.time),
+        swingOB: lux.swingOB.filter(o => o.mitIdx < 0).slice(0, 5).map(o => ({ time: T(o.idx), high: o.high, low: o.low, bias: o.bias, internal: false, buyVol: o.buyVol, sellVol: o.sellVol, vol: o.vol })).filter(o => o.time),
+        intOB: lux.intOB.filter(o => o.mitIdx < 0).slice(0, 8).map(o => ({ time: T(o.idx), high: o.high, low: o.low, bias: o.bias, internal: true, buyVol: o.buyVol, sellVol: o.sellVol, vol: o.vol })).filter(o => o.time),
         fvg: lux.fvg.filter(g => g.mitIdx < 0).slice(0, 12).map(g => ({ time: T(Math.max(0, g.idx - 1)), top: g.top, bottom: g.bottom, bias: g.bias })).filter(g => g.time),
         equal: lux.equal.slice(-6).map(e => ({ fromTime: T(e.fromIdx), toTime: T(e.toIdx), level: e.level, tag: e.tag })).filter(e => e.fromTime && e.toTime),
         swingPts: (lux.swingPts || []).map(p => ({ time: T(p.idx), level: p.level, tag: p.tag, up: p.up })).filter(p => p.time),
@@ -231,7 +262,7 @@ function computeIndicators(bars, lv, tf) {
   const stv = computeSuperTrend(bars, stvLen(tf || "1D"), 1, 10);
 
   return { spot: last, entry: +(lv.pivot || last).toFixed(2), stop: +(lv.stop || last * 0.94).toFixed(2), t1: +(lv.t1 || last * 1.06).toFixed(2), t2: +(lv.t2 || last * 1.12).toFixed(2), validPlan: !!lv.valid,
-    bars, e9, e21, e50, bbU, bbM, bbL, avwap, tenkan, kijun, spanA, spanB, chikou, breaks: breaks.slice(-6), obs, vpb, vpMax, poc: vpb[pocI].mid, vah: vpb[vhiI].hi, val: vpb[vloI].lo, smc, fvgLux, rsi, macd, stv };
+    bars, e9, e21, e50, bbU, bbM, bbL, avwap, tenkan, kijun, spanA, spanB, chikou, breaks: breaks.slice(-6), obs, vpb, vpMax, poc: vpb[pocI].mid, vah: vpb[vhiI].hi, val: vpb[vloI].lo, mfb, mfMax, mfpoc: mfb[mfpI].mid, smc, mtfLevels: computeMTFLevels(bars), fvgLux, rsi, macd, stv };
 }
 
 // per-timeframe thesis derived from the REAL EMA stack + most recent structure break
@@ -272,8 +303,8 @@ function NewsFlags({ news, bars }) {
 }
 
 // LuxAlgo SMC sub-feature toggles (mirror the standalone prototype) + labels
-const SMC_SUB = [["swing","Swing"],["internal","Internal"],["swingOB","Swing OB"],["intOB","Int OB"],["fvg","FVG"],["eq","EQH/EQL"],["hl","Strong/Weak"],["zones","Prem/Disc"],["swings","Swings"],["color","Color"]];
-const SMC_SUB_DEFAULT = { swing:true, internal:true, swingOB:false, intOB:true, fvg:false, eq:true, hl:true, zones:false, swings:false, color:false };
+const SMC_SUB = [["swing","Swing"],["internal","Internal"],["swingOB","Swing OB"],["intOB","Int OB"],["fvg","FVG"],["eq","EQH/EQL"],["hl","Strong/Weak"],["zones","Prem/Disc"],["swings","Swings"],["mtf","MTF Levels"],["vol","OB Volume"],["color","Color"]];
+const SMC_SUB_DEFAULT = { swing:true, internal:true, swingOB:false, intOB:true, fvg:false, eq:true, hl:true, zones:false, swings:false, mtf:true, vol:true, color:false };
 
 function LensChart({ ticker, mode }) {
   const modeTf = mode === "POSITION" ? "1D" : mode === "INVESTMENT" ? "1W" : "1D";
@@ -283,16 +314,17 @@ function LensChart({ ticker, mode }) {
   React.useEffect(() => { if (!tfTouched) setTf(modeTf); }, [modeTf]);
   const [full, setFull] = useTCs(false);
   const [indMenu, setIndMenu] = useTCs(false);
-  const [ind, setInd] = useTCs({ ema:false, bb:false, avwap:false, ichi:false, smc:false, smcLux:false, vp:false, fvgLux:false, rsi:true, macd:true, ttd:true, stv:false });
+  const [ind, setInd] = useTCs({ ema:false, bb:false, avwap:false, ichi:false, smc:false, smcLux:false, vp:false, mfp:false, fvgLux:false, rsi:true, macd:true, ttd:true, stv:false });
   const togInd = (k) => setInd(s => ({ ...s, [k]: !s[k] }));
   const [smcSub, setSmcSub] = useTCs(SMC_SUB_DEFAULT);
   const togSub = (k) => setSmcSub(s => ({ ...s, [k]: !s[k] }));
+  const [smcSwing, setSmcSwing] = useTCs(20);   // LuxAlgo SMC swing-structure length
 
   // REAL candles for the active timeframe + multi-timeframe biases + live news
   const barsRaw = useCandles(ticker.symbol, tf);
   const loading = barsRaw === null, failed = barsRaw === false;
   const lv = window.coherentLevels ? window.coherentLevels(ticker) : { price: ticker.price, pivot: ticker.price, stop: ticker.price * 0.94, t1: ticker.price * 1.06, t2: ticker.price * 1.12, valid: false };
-  const d = useTC(() => (barsRaw && barsRaw.length >= 5) ? computeIndicators(barsRaw, lv, tf) : null, [barsRaw, lv.pivot, lv.stop, lv.t1, lv.t2, tf]);
+  const d = useTC(() => (barsRaw && barsRaw.length >= 5) ? computeIndicators(barsRaw, lv, tf, smcSwing) : null, [barsRaw, lv.pivot, lv.stop, lv.t1, lv.t2, tf, smcSwing]);
   const mtf = useMtfBias(ticker.symbol);
   const news = useChartNews(ticker.symbol);
   const tfx = tfThesis(d);
@@ -311,7 +343,7 @@ function LensChart({ ticker, mode }) {
             <button className={`tc-tog tc-ind-btn ${indMenu?"is-open":""}`} onClick={()=>setIndMenu(v=>!v)}>+ Indicators ▾</button>
             {indMenu && (
               <div className="tc-ind-menu">
-                {[["ema","EMA 9/21/50"],["bb","Bollinger 20·2"],["avwap","Anchored VWAP"],["ichi","Ichimoku Cloud"],["vp","Volume Profile"],["smc","Smart Money Concepts"],["smcLux","Smart Money Concepts · LuxAlgo"],["fvgLux","Fair Value Gap · LuxAlgo"],["stv","Super Trend V"],["rsi","RSI (14)"],["macd","MACD (12,26,9)"],["ttd","Traders Trend Dashboard"]].map(([k,l])=>(
+                {[["ema","EMA 9/21/50"],["bb","Bollinger 20·2"],["avwap","Anchored VWAP"],["ichi","Ichimoku Cloud"],["vp","Volume Profile"],["mfp","Money Flow Profile"],["smc","Smart Money Concepts"],["smcLux","Smart Money Concepts · LuxAlgo"],["fvgLux","Fair Value Gap · LuxAlgo"],["stv","Super Trend V"],["rsi","RSI (14)"],["macd","MACD (12,26,9)"],["ttd","Traders Trend Dashboard"]].map(([k,l])=>(
                   <button key={k} className={`tc-ind-item ${ind[k]?"is-on":""}`} onClick={()=>togInd(k)}>
                     <span className="tc-ind-chk">{ind[k]?"✓":""}</span>{l}
                   </button>
@@ -348,6 +380,11 @@ function LensChart({ ticker, mode }) {
                 border: "1px solid " + (smcSub[k] ? "color-mix(in oklab, var(--blue) 45%, transparent)" : "var(--ink-2)"),
                 color: smcSub[k] ? "var(--ink-0)" : "var(--ink-3)" }}>{l}</button>
           ))}
+          <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginLeft: 4 }}>swing</span>
+          <input type="number" min={5} max={100} step={5} value={smcSwing}
+            onChange={e => { const v = Math.max(5, Math.min(100, +e.target.value || 20)); setSmcSwing(v); }}
+            className="mono" style={{ width: 46, fontSize: 10.5, padding: "2px 4px", borderRadius: 6,
+              background: "var(--bg-2)", border: "1px solid var(--ink-2)", color: "var(--ink-0)" }} />
         </div>
       )}
 
@@ -365,8 +402,9 @@ function LensChart({ ticker, mode }) {
           {ind.avwap && <span><i className="tc-sw" style={{background:"var(--amb)"}}/>aVWAP</span>}
           {ind.ichi && <span><i className="tc-sw" style={{background:"#43A047"}}/>Ichimoku · cloud + lagging span</span>}
           {ind.smc && <span><i className="tc-sw" style={{background:"var(--blue)"}}/>SMC · BOS/CHoCH/OB</span>}
-          {ind.smcLux && <span><i className="tc-sw" style={{background:"var(--blue)"}}/>SMC · LuxAlgo · BOS/CHoCH · OB · FVG · EQH/EQL</span>}
+          {ind.smcLux && <span><i className="tc-sw" style={{background:"var(--blue)"}}/>SMC · LuxAlgo · BOS/CHoCH · volumetric OB · FVG · EQH/EQL · MTF <i className="tc-sw" style={{background:"#5b9bf2"}}/>PD <i className="tc-sw" style={{background:"#f59e0b"}}/>PW <i className="tc-sw" style={{background:"#a78bfa"}}/>PM</span>}
           {ind.vp && <span><i className="tc-sw tc-sw--cop"/>POC <i className="tc-sw" style={{background:"var(--cy)"}}/>value area · volume profile</span>}
+          {ind.mfp && <span>money flow profile · sentiment <i className="tc-sw" style={{background:"#26a69a"}}/>buy <i className="tc-sw" style={{background:"#ef5350"}}/>sell · nodes <i className="tc-sw" style={{background:"#ffeb3b"}}/>high <i className="tc-sw" style={{background:"#2962ff"}}/>avg <i className="tc-sw" style={{background:"#f23645"}}/>low</span>}
           {ind.fvgLux && <span><i className="tc-sw" style={{background:"#089981"}}/>FVG · LuxAlgo (extend + mitigation)</span>}
           {ind.stv && <span><i className="tc-sw" style={{background:"#22c55e"}}/>Super Trend V · Buy/Sell + TP</span>}
           {ind.rsi && <span><i className="tc-sw" style={{background:"#7E57C2"}}/>RSI 14 · pane</span>}
@@ -467,7 +505,7 @@ function LWChart({ d, ind, smcSub, full }) {
         s.priceLines.push(mk(sm.trailing.top, "#f87171", sm.trailing.swTrend < 0 ? "Strong High" : "Weak High"));
         s.priceLines.push(mk(sm.trailing.bottom, "#4ade80", sm.trailing.swTrend > 0 ? "Strong Low" : "Weak Low"));
       }
-      if (ss.eq) sm.equal.slice(-3).forEach(e => s.priceLines.push(mk(e.level, e.tag === "EQH" ? "#f87171" : "#4ade80", e.tag)));
+      // EQH/EQL now drawn as paired connector lines in the SVG overlay (see below)
     }
 
     // overlay line series
@@ -496,10 +534,7 @@ function LWChart({ d, ind, smcSub, full }) {
     if (ind.smc) d.breaks.forEach(b => m.push({ time: b.time, position: b.dir === "bull" ? "belowBar" : "aboveBar",
       color: b.dir === "bull" ? "#4ade80" : "#f87171", shape: b.dir === "bull" ? "arrowUp" : "arrowDown", text: b.tag }));
     if (ind.smcLux && d.smc) {
-      if (ss.swing) d.smc.struct.forEach(b => m.push({ time: b.time, position: b.dir === "up" ? "belowBar" : "aboveBar",
-        color: b.dir === "up" ? "#4ade80" : "#f87171", shape: b.dir === "up" ? "arrowUp" : "arrowDown", text: b.tag }));
-      if (ss.internal) d.smc.intStruct.slice(-8).forEach(b => m.push({ time: b.time, position: b.dir === "up" ? "belowBar" : "aboveBar",
-        color: b.dir === "up" ? "#86efac" : "#fca5a5", shape: "circle", text: b.tag.toLowerCase() }));
+      // swing/internal BOS·CHoCH now drawn as labeled break-lines in the SVG overlay
       if (ss.swings && d.smc.swingPts) d.smc.swingPts.forEach(p => m.push({ time: p.time, position: p.up ? "belowBar" : "aboveBar",
         color: "#8590a3", shape: "circle", text: p.tag }));
     }
@@ -552,6 +587,72 @@ function LWChart({ d, ind, smcSub, full }) {
     return () => { if (_raf) cancelAnimationFrame(_raf); if (svg) svg.remove(); };
   }, [d, ind.vp, full]);
 
+  // Money Flow Profile overlay — faithful LuxAlgo-style two-sided profile, anchored
+  // to the RIGHT margin (just left of the price axis):
+  //   • center  : price-level label boxes
+  //   • right    : total money-flow node, tier-colored (yellow high / blue avg / red low) + USD(%)
+  //   • left     : sentiment delta — green net-buying / red net-selling + (%)
+  //   • POC zone : widest-flow row highlighted with a full-width band
+  // Re-aligns to the price axis on zoom/pan/resize via the follow-loop.
+  useTCe(() => {
+    const s = seriesRef.current; if (!s.chart) return;
+    const host = wrap.current; if (!host) return;
+    let svg = host.querySelector(".tc-mfp-ov");
+    const SVGNS = "http://www.w3.org/2000/svg";
+    const fmtUSD = v => { const a = Math.abs(v); const sgn = v < 0 ? "-" : ""; if (a >= 1e9) return sgn + (a / 1e9).toFixed(2) + "B"; if (a >= 1e6) return sgn + (a / 1e6).toFixed(1) + "M"; if (a >= 1e3) return sgn + (a / 1e3).toFixed(0) + "K"; return sgn + a.toFixed(0); };
+    const draw = () => {
+      if (svg) svg.remove(), svg = null;
+      if (!ind.mfp || !d.mfb) return;
+      const W = host.clientWidth, H = host.clientHeight;
+      let psw = 56; try { psw = s.chart.priceScale("right").width() || 56; } catch (e) {}
+      const plotR = W - psw - 2;
+      const labelW = 50, volMaxW = Math.min(150, Math.max(90, W * 0.15)), sentMaxW = Math.min(150, Math.max(90, W * 0.15));
+      const labelX = plotR - volMaxW - labelW;     // left edge of price-label box
+      const volX0 = labelX + labelW;               // money-flow bars start here, extend right
+      if (labelX - sentMaxW < W * 0.30) { /* too narrow; still draw, clamp */ }
+      const totMF = d.mfb.reduce((a, x) => a + x.mf, 0) || 1;
+      let maxAbsNet = 0; d.mfb.forEach(x => { const n = Math.abs(x.bull - x.bear); if (n > maxAbsNet) maxAbsNet = n; }); maxAbsNet = maxAbsNet || 1;
+      svg = document.createElementNS(SVGNS, "svg");
+      svg.setAttribute("class", "tc-mfp-ov");
+      svg.style.cssText = `position:absolute;left:0;top:0;width:${W}px;height:${H}px;pointer-events:none;z-index:3;font-family:var(--mono,monospace);`;
+      const rect = (x, y, w, h, fill, op, stroke) => { const r = document.createElementNS(SVGNS, "rect"); r.setAttribute("x", x); r.setAttribute("y", y); r.setAttribute("width", Math.max(0.5, w)); r.setAttribute("height", Math.max(0.5, h)); if (fill) r.setAttribute("fill", fill); else r.setAttribute("fill", "none"); r.setAttribute("opacity", op); if (stroke) { r.setAttribute("stroke", stroke); r.setAttribute("stroke-width", 1); } svg.appendChild(r); return r; };
+      const txt = (x, y, str, fill, anchor, sz) => { const t = document.createElementNS(SVGNS, "text"); t.setAttribute("x", x); t.setAttribute("y", y); t.setAttribute("fill", fill); t.setAttribute("text-anchor", anchor); t.setAttribute("dominant-baseline", "central"); t.setAttribute("font-size", (sz || 9)); t.textContent = str; svg.appendChild(t); };
+      d.mfb.forEach(b => {
+        if (b.mf <= 0) return;
+        const yT = s.candle.priceToCoordinate(b.hi), yB = s.candle.priceToCoordinate(b.lo);
+        if (yT == null || yB == null) return;
+        const y = Math.min(yT, yB), h = Math.max(1, Math.abs(yB - yT) - 1.5), yc = y + h / 2;
+        const ratio = b.mf / d.mfMax;
+        const isPoc = Math.abs(b.mid - d.mfpoc) < 1e-9;
+        // POC zone band across the whole chart
+        if (isPoc) rect(0, y, plotR, h + 1.5, "#ffeb3b", 0.09);
+        // ── money-flow node (right of label), tier-colored ──
+        const volFill = ratio > 0.53 ? "#ffeb3b" : ratio > 0.37 ? "#2962ff" : "#f23645";
+        const volW = Math.max(1, ratio * volMaxW);
+        rect(volX0, y, volW, h, volFill, isPoc ? 0.5 : 0.32);
+        if (h >= 11 && volW > 46) txt(volX0 + 4, yc, fmtUSD(b.mf) + " (" + (b.mf / totMF * 100).toFixed(1) + "%)", "#e7ebf2", "start", 8.5);
+        // ── sentiment delta (left of label) ──
+        const net = b.bull - b.bear;
+        const sentW = Math.max(1, Math.abs(net) / maxAbsNet * sentMaxW);
+        const sentFill = net >= 0 ? "#26a69a" : "#ef5350";
+        rect(labelX - sentW, y, sentW, h, sentFill, isPoc ? 0.55 : 0.34);
+        if (h >= 11 && sentW > 46) txt(labelX - 4, yc, fmtUSD(net) + " (" + (Math.abs(net) / b.mf * 100).toFixed(0) + "%)", "#e7ebf2", "end", 8.5);
+        // ── price-level label box (center) ──
+        rect(labelX, y + Math.max(0, (h - 14) / 2), labelW, Math.min(14, h), "rgba(20,26,32,0.78)", 0.92, "rgba(120,140,170,0.45)");
+        if (h >= 9) txt(labelX + labelW / 2, yc, b.mid.toFixed(2), "#cfd6e0", "middle", 8.5);
+      });
+      host.appendChild(svg);
+    };
+    draw();
+    let _raf = 0, _sig = "", _pMin = Infinity, _pMax = -Infinity;
+    for (const bb of d.bars) { if (bb.low < _pMin) _pMin = bb.low; if (bb.high > _pMax) _pMax = bb.high; }
+    const _ts = s.chart.timeScale();
+    const _sigOf = () => `${host.clientWidth}x${host.clientHeight}|${s.candle.priceToCoordinate(_pMin)}|${s.candle.priceToCoordinate(_pMax)}|${_ts.timeToCoordinate(d.bars[0].time)}|${_ts.timeToCoordinate(d.bars[d.bars.length - 1].time)}`;
+    const _loop = () => { const ns = _sigOf(); if (ns !== _sig) { _sig = ns; draw(); } _raf = requestAnimationFrame(_loop); };
+    if (ind.mfp && d.mfb) _loop();
+    return () => { if (_raf) cancelAnimationFrame(_raf); if (svg) svg.remove(); };
+  }, [d, ind.mfp, full]);
+
   // SMC zones overlay — LuxAlgo order blocks / FVG / premium-discount as boxes,
   // anchored to bar-time and extended right; re-aligns to the axes on zoom/pan.
   useTCe(() => {
@@ -568,15 +669,22 @@ function LWChart({ d, ind, smcSub, full }) {
       svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       svg.setAttribute("class", "tc-smc-ov");
       svg.style.cssText = `position:absolute;left:0;top:0;width:${W}px;height:${H}px;pointer-events:none;z-index:2;`;
+      const SVGNS2 = "http://www.w3.org/2000/svg";
+      let psw = 56; try { psw = s.chart.priceScale("right").width() || 56; } catch (e) {}
+      const rightEdge = W - psw - 2;
       const box = (x0, yT, yB, fill, op, stroke) => {
         if (x0 == null || yT == null || yB == null) return;
-        const x = Math.max(0, x0), r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        const x = Math.max(0, x0), r = document.createElementNS(SVGNS2, "rect");
         r.setAttribute("x", x); r.setAttribute("y", Math.min(yT, yB));
         r.setAttribute("width", Math.max(2, W - x)); r.setAttribute("height", Math.max(1, Math.abs(yB - yT)));
         r.setAttribute("fill", fill); r.setAttribute("opacity", op);
         if (stroke) { r.setAttribute("stroke", stroke); r.setAttribute("stroke-opacity", "0.5"); r.setAttribute("stroke-width", "1"); }
         svg.appendChild(r);
       };
+      const line = (x1, y1, x2, y2, color, dash, w) => { if ([x1, y1, x2, y2].some(v => v == null)) return; const ln = document.createElementNS(SVGNS2, "line"); ln.setAttribute("x1", x1); ln.setAttribute("y1", y1); ln.setAttribute("x2", x2); ln.setAttribute("y2", y2); ln.setAttribute("stroke", color); ln.setAttribute("stroke-width", w || 1); if (dash) ln.setAttribute("stroke-dasharray", dash); ln.setAttribute("opacity", 0.92); svg.appendChild(ln); };
+      const rectEl = (x, y, w, h, fill, op) => { const r = document.createElementNS(SVGNS2, "rect"); r.setAttribute("x", x); r.setAttribute("y", y); r.setAttribute("width", Math.max(0.5, w)); r.setAttribute("height", Math.max(0.5, h)); r.setAttribute("fill", fill); r.setAttribute("opacity", op); svg.appendChild(r); };
+      const label = (x, y, str, color, anchor) => { const t = document.createElementNS(SVGNS2, "text"); t.setAttribute("x", x); t.setAttribute("y", y); t.setAttribute("fill", color); t.setAttribute("text-anchor", anchor || "start"); t.setAttribute("dominant-baseline", "central"); t.setAttribute("font-size", 9.5); t.setAttribute("font-family", "var(--mono,monospace)"); t.textContent = str; svg.appendChild(t); };
+      const fmtVol = v => { const a = Math.abs(v); if (a >= 1e9) return (a / 1e9).toFixed(1) + "B"; if (a >= 1e6) return (a / 1e6).toFixed(1) + "M"; if (a >= 1e3) return (a / 1e3).toFixed(0) + "K"; return a.toFixed(0); };
       // premium / discount / equilibrium bands (anchored at last swing extreme)
       if (ss.zones && sm.trailing && sm.trailing.startTime != null) {
         const x0 = xOf(sm.trailing.startTime), tp = sm.trailing.top, bt = sm.trailing.bottom;
@@ -588,11 +696,31 @@ function LWChart({ d, ind, smcSub, full }) {
       }
       // order blocks (swing = bordered, internal = lighter fill) — each gated
       const obs = [...(ss.swingOB ? sm.swingOB : []), ...(ss.intOB ? sm.intOB : [])];
-      obs.forEach(o =>
-        box(xOf(o.time), yOf(o.high), yOf(o.low), o.bias > 0 ? "#5b9bf2" : "#f87171", o.internal ? 0.10 : 0.16, o.internal ? null : (o.bias > 0 ? "#5b9bf2" : "#f87171"))
-      );
+      obs.forEach(o => {
+        const x0 = xOf(o.time), yT = yOf(o.high), yB = yOf(o.low);
+        box(x0, yT, yB, o.bias > 0 ? "#5b9bf2" : "#f87171", o.internal ? 0.10 : 0.16, o.internal ? null : (o.bias > 0 ? "#5b9bf2" : "#f87171"));
+        // volumetric: buy/sell split bar + total-volume label at the OB's left edge
+        if (ss.vol && o.vol > 0 && x0 != null && yT != null && yB != null) {
+          const y = Math.min(yT, yB), h = Math.abs(yB - yT), bx = Math.max(0, x0);
+          const buyFrac = Math.max(0, Math.min(1, o.buyVol / o.vol));
+          rectEl(bx, y, 4, h * (1 - buyFrac), "#ef5350", 0.85);
+          rectEl(bx, y + h * (1 - buyFrac), 4, h * buyFrac, "#26a69a", 0.85);
+          if (h >= 12) label(bx + 7, y + h / 2, fmtVol(o.vol) + " · " + Math.round(buyFrac * 100) + "%▲", "#dfe5ee", "start");
+        }
+      });
       // fair value gaps
       if (ss.fvg) sm.fvg.forEach(g => box(xOf(g.time), yOf(g.top), yOf(g.bottom), g.bias > 0 ? "#4ade80" : "#f87171", 0.09));
+      // swing / internal structure as labeled BOS·CHoCH break-lines
+      const drawStruct = (arr, solid) => arr.forEach(b => { const x1 = xOf(b.fromTime), x2 = xOf(b.time), y = yOf(b.level); if (x1 == null || x2 == null || y == null) return; const col = b.dir === "up" ? "#4ade80" : "#f87171"; line(x1, y, x2, y, col, solid ? null : "2 3", solid ? 1.4 : 1); label(x2 + 3, y, b.tag, col, "start"); });
+      if (ss.swing) drawStruct(sm.struct.slice(-8), true);
+      if (ss.internal) drawStruct(sm.intStruct.slice(-10), false);
+      // EQH / EQL as paired connector lines between the two equal pivots
+      if (ss.eq) sm.equal.forEach(e => { const x1 = xOf(e.fromTime), x2 = xOf(e.toTime), y = yOf(e.level); if (x1 == null || x2 == null || y == null) return; const col = e.tag === "EQH" ? "#f0a35e" : "#5fb0e0"; line(x1, y, x2, y, col, "1 2", 1.2); label(x2 + 3, y, e.tag, col, "start"); });
+      // MTF previous-period High/Low levels (PD/PW/PM) as dashed rays + labels
+      if (ss.mtf && d.mtfLevels) {
+        const colOf = { day: "#5b9bf2", week: "#f59e0b", month: "#a78bfa" };
+        d.mtfLevels.forEach(Lv => { const y = yOf(Lv.level); if (y == null) return; const c = colOf[Lv.kind] || "#8590a3"; line(0, y, rightEdge, y, c, "5 4", 1); label(rightEdge - 4, y, Lv.tag + " " + Lv.level.toFixed(2), c, "end"); });
+      }
       host.appendChild(svg);
     };
     draw();

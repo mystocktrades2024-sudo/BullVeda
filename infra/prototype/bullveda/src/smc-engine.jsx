@@ -41,6 +41,7 @@ function computeSMC(bars, opt) {
   const H = bars.map(b => +(b.hi != null ? b.hi : b.high));
   const L = bars.map(b => +(b.lo != null ? b.lo : b.low));
   const C = bars.map(b => +(b.c != null ? b.c : b.close));
+  const V = bars.map(b => +(b.v != null ? b.v : (b.value != null ? b.value : 0)) || 0);
 
   // ── volatility measure: ATR(min(200,n)) (simple TR mean) ──
   const atrWin = Math.min(200, n);
@@ -93,7 +94,10 @@ function computeSMC(bars, opt) {
       if (bias === SMC_BEARISH) { if (pHigh[j] > best) { best = pHigh[j]; chosen = j; } }
       else { if (pLow[j] < best) { best = pLow[j]; chosen = j; } }
     }
-    pushOB(list, { high: pHigh[chosen], low: pLow[chosen], idx: chosen, bias, internal, mitIdx: -1 });
+    // volumetric: split the formation-window volume into buying (up bars) vs selling
+    let bv = 0, sv = 0; const a = Math.max(0, chosen - 1), z = Math.min(n - 1, chosen + 1);
+    for (let j = a; j <= z; j++) { if (C[j] >= O[j]) bv += V[j]; else sv += V[j]; }
+    pushOB(list, { high: pHigh[chosen], low: pLow[chosen], idx: chosen, bias, internal, mitIdx: -1, buyVol: bv, sellVol: sv, vol: bv + sv });
   }
 
   // getCurrentStructure: record pivots + (swing) labels + trailing reset
