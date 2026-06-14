@@ -1343,13 +1343,34 @@ def _compute_final_verdict_impl(t: dict, regime: str | None = None,
     score = t.get("score") or 0
     threshold = _resolve_buy_threshold(regime, thresholds)
 
+    # BUY-FLOOR-72-2026-06-14: optional absolute composite quality floor (default
+    # OFF). When enabled, a name scoring below `floor` is demoted BUY->WATCH
+    # regardless of the regime threshold OR the ranker — the sub-70 composite band
+    # loses money (audit_signal_to_ledger). Composite-only: catalyst sleeves bypass
+    # this code path via _eval_hard_gates and never reach here. Scoring untouched;
+    # byte-identical when _enabled=false (floor=0 → the `>= _score_floor` is a no-op).
+    _bsf = (config or {}).get("buy_score_floor", {}) or {}
+    # `regimes` is an allowlist (empty/missing => all). Choppy/risk-off only by
+    # default — trending is excluded because the sub-70 evidence is choppy-window.
+    # `fallback_only`: apply ONLY when the ranker is OFF — the ranker separates the
+    # 65-72 band finer than a blunt floor (keep PF 1.03 / demote 0.57), so it owns
+    # the call while ON; the floor stays armed as a legacy safety net.
+    _bsf_regs = _bsf.get("regimes")
+    _ranker_on = bool(((config or {}).get("regime_conditional_ranker") or {}).get("_enabled"))
+    _bsf_on = (
+        bool(_bsf.get("_enabled"))
+        and (not _bsf_regs or (regime or "").lower() in [str(x).lower() for x in _bsf_regs])
+        and (not _bsf.get("fallback_only") or not _ranker_on)
+    )
+    _score_floor = int(_bsf.get("floor", 0)) if _bsf_on else 0
+
     # RANK-REBUILD-2026-06-13: regime-conditional ranker. When enabled, the
     # composite `score` is DEMOTED from ranker to a >=gate_floor quality GATE,
     # and promotion is decided by rank_score (built from pre-bonus pillar norms,
     # IC-positive + monotone where composite is anti-correlated). DEFAULT OFF →
     # legacy `score >= threshold` path is byte-identical when _enabled=false.
     _rcr = (config or {}).get("regime_conditional_ranker", {}) or {}
-    _promote = score >= threshold
+    _promote = (score >= threshold) and (score >= _score_floor)
     _rank_thr = None  # exposed to reason strings below
     if _rcr.get("_enabled"):
         _gate_floor = _rcr.get("gate_floor", 60)
@@ -1364,7 +1385,7 @@ def _compute_final_verdict_impl(t: dict, regime: str | None = None,
             _rank_thr = _rbt.get(_fam, _rbt.get("choppy", 50))
         else:
             _rank_thr = _rbt
-        _promote = (score >= _gate_floor) and (float(_rank) >= float(_rank_thr))
+        _promote = (score >= _gate_floor) and (float(_rank) >= float(_rank_thr)) and (score >= _score_floor)
 
     if _promote:
         # A2 (2026-05-09): signal_filter whitelist gate. Demote to WATCH if
@@ -1411,7 +1432,11 @@ def _compute_final_verdict_impl(t: dict, regime: str | None = None,
             "signal_filter": _filter_audit,
         }
 
-    if _rcr.get("_enabled"):
+    if _score_floor and score < _score_floor:
+        # BUY-FLOOR-72: the absolute composite floor is the binding demotion reason
+        # (it vetoes regardless of regime threshold or ranker). Surface it explicitly.
+        _watch_reason = f"all gates passed but score {score} < BUY score floor {_score_floor} (buy_score_floor)"
+    elif _rcr.get("_enabled"):
         _sb3 = t.get("scoring_breakdown") or {}
         _rk = _sb3.get("rank_score", t.get("rank_score"))
         if (score or 0) < _rcr.get("gate_floor", 60):
