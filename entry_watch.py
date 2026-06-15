@@ -74,6 +74,11 @@ FAMILY_ALLOWLIST = {"Trend Continuation"}
 # zone-depth below, giving junk R:R (~0.5). Firm BUY-candidate uses buy_min_rr
 # (3.0). FRT $124.59 / R:R 0.5 bug, 2026-06-15. Override: entry_watch.soft_min_rr.
 SOFT_MIN_RR = 1.5
+# Soft tier also requires price to have pulled at least this fraction into the
+# zone (from the ceiling). Stops ceiling-grazes from firing when T1 is far and
+# R:R looks OK at the top (DVY $156.53 = zone ceiling, R:R 1.61). 0.35 = must
+# pull >=1/3 down toward the EMAs. Override: entry_watch.soft_depth_frac.
+SOFT_DEPTH_FRAC = 0.35
 
 
 def _send_enabled() -> bool:
@@ -315,9 +320,11 @@ def run_entry_watch_pass(dry_run: bool = False) -> dict:
         ew_cfg = cfg.get("entry_watch") or {}
         allow = set(ew_cfg.get("family_allowlist") or FAMILY_ALLOWLIST)
         soft_min_rr = float(ew_cfg.get("soft_min_rr", SOFT_MIN_RR))
+        soft_depth_frac = float(ew_cfg.get("soft_depth_frac", SOFT_DEPTH_FRAC))
     except Exception:
         allow = FAMILY_ALLOWLIST
         soft_min_rr = SOFT_MIN_RR
+        soft_depth_frac = SOFT_DEPTH_FRAC
 
     regime = _current_regime()
     quotes = _get_schwab_batch(list(targets.keys()))
@@ -339,6 +346,13 @@ def run_entry_watch_pass(dry_run: bool = False) -> dict:
         # Determine which tier this candidate would be (for both shadow + live).
         rr_live = _live_rr(price, z["t1"], z["stop"]) if (z["stop"] and z["t1"]) else None
         would_buy = bool(z["sole_blocker_is_entry"] and rr_live and rr_live >= z["buy_min_rr"])
+        # Soft tier must be a REAL pullback — price pulled at least soft_depth_frac
+        # into the zone, not just grazing the ceiling (= ema8+0.5ATR). R:R alone
+        # can't catch this when T1 is far (DVY: ceiling R:R 1.61 > 1.5 floor but it
+        # only touched its 8-EMA). Firm tier (would_buy) bypasses — R:R≥3 is deep.
+        _depth = z["zone_high"] - z["zone_low"]
+        deep_enough = _depth > 0 and price <= z["zone_high"] - soft_depth_frac * _depth
+        soft_ok = bool(rr_live and rr_live >= soft_min_rr and deep_enough)
 
         # SHADOW MODE: log the candidate with every filter dimension stamped, so
         # we can score forward outcomes by regime/family/mc_p/rank later. No Slack.
@@ -360,10 +374,10 @@ def run_entry_watch_pass(dry_run: bool = False) -> dict:
             _shadow_record(rec)
             shadow_logged.append({"ticker": ticker, "tier": rec["tier"]})
 
-            # Mirror to Slack as a clean card — but only when R:R is worth it.
-            # Soft tier needs rr >= soft_min_rr; firm (would_buy) always passes.
+            # Mirror to Slack as a clean card — but only for a real entry.
+            # Soft tier needs R:R + a genuine pullback (soft_ok); firm always passes.
             # (We still shadow-LOG everything above for the OOS record.)
-            if _shadow_slack_enabled() and (would_buy or (rr_live and rr_live >= soft_min_rr)):
+            if _shadow_slack_enabled() and (would_buy or soft_ok):
                 _slack(*_entry_card(ticker, price, z, rr_live, would_buy, regime, allow))
             continue
 
@@ -398,9 +412,9 @@ def run_entry_watch_pass(dry_run: bool = False) -> dict:
                     alerts_sent.append({"ticker": ticker, "type": "entry_buy", "price": price, "rr": round(rr, 2)})
                 continue  # don't also send Tier-1 for the same name
 
-        # Tier 1 — soft: in zone AND R:R clears the soft floor (skip junk R:R at
-        # the top of a wide zone), but other gates may still apply.
-        if (rr_live and rr_live >= soft_min_rr) and not sent(ticker, "entry_zone"):
+        # Tier 1 — soft: a real pullback into the zone (R:R floor + depth), not a
+        # ceiling graze, but other gates may still apply.
+        if soft_ok and not sent(ticker, "entry_zone"):
             blk = "" if z["sole_blocker_is_entry"] else " (other gates still apply — verify on dashboard)"
             emit(
                 "WARN",
