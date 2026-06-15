@@ -36,7 +36,7 @@ CAVEAT = ("_Composite-score-based notification — score is weakly/anti-predicti
 def _send(level: str, title: str, body: str):
     try:
         from alerts import send_alert
-        send_alert(level=level, title=title, body=body)
+        send_alert(level=level, title=title, body=body, force_slack=True)
     except Exception as e:
         log.debug(f"alert dispatch failed: {e}")
 

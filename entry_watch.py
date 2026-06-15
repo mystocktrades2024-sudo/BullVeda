@@ -85,6 +85,16 @@ def _send_enabled() -> bool:
         return False
 
 
+def _slack(level: str, title: str, body: str):
+    """Post to Slack regardless of level (shadow feed is INFO but owner-requested).
+    send_alert leaves INFO local unless force_slack=True."""
+    try:
+        from alerts import send_alert
+        send_alert(level=level, title=title, body=body, force_slack=True)
+    except Exception as e:
+        log.debug(f"shadow slack dispatch failed: {e}")
+
+
 def _shadow_slack_enabled() -> bool:
     """Whether to ALSO mirror shadow candidates to Slack (observation feed).
 
@@ -328,7 +338,7 @@ def run_entry_watch_pass(dry_run: bool = False) -> dict:
                     bits.append(f"R:R {rr_live:.1f}")
                 if would_buy:
                     # Firm BUY-candidate — pulled deep enough that entry + R:R clear.
-                    _send(
+                    _slack(
                         "INFO",
                         f"🎯 SHADOW BUY-CANDIDATE · {ticker}",
                         f"*${price:.2f} pulled into buy zone [{z['zone_low']:.2f}–{z['zone_high']:.2f}] — entry + R:R clear.*\n"
@@ -336,7 +346,7 @@ def run_entry_watch_pass(dry_run: bool = False) -> dict:
                         f"_Observation-only — NOT a validated signal (shadow until OOS confirms edge)._",
                     )
                 else:
-                    _send(
+                    _slack(
                         "INFO",
                         f"🔬 SHADOW · {ticker} in zone",
                         f"${price:.2f} in zone [{z['zone_low']:.2f}–{z['zone_high']:.2f}] · "

@@ -85,12 +85,16 @@ def _slack_post(webhook: str, text: str, blocks: list | None = None) -> bool:
 _LEVEL_EMOJI = {"INFO": "ℹ️", "WARN": "⚠️", "CRITICAL": "🔴"}
 
 
-def send_alert(level: str, title: str, body: str = "", webhook: str | None = None) -> bool:
+def send_alert(level: str, title: str, body: str = "", webhook: str | None = None,
+               force_slack: bool = False) -> bool:
     """Severity-tiered alert. level ∈ {INFO, WARN, CRITICAL}.
 
     - Logs at appropriate severity
     - Mac notification for WARN/CRITICAL
     - Slack post for WARN/CRITICAL only (INFO stays local to reduce noise)
+    - force_slack=True posts INFO to Slack too (no Mac notification) — used by
+      opt-in feeds (entry-watcher shadow, daily signal alerts) the owner wants
+      in Slack but that aren't warnings.
     """
     level = level.upper()
     if level not in _LEVEL_EMOJI:
@@ -118,8 +122,8 @@ def send_alert(level: str, title: str, body: str = "", webhook: str | None = Non
         except Exception:
             pass
 
-    # Slack for WARN/CRITICAL — auto-load webhook from env/.env if not passed
-    if level in ("WARN", "CRITICAL"):
+    # Slack for WARN/CRITICAL (or any level when force_slack) — auto-load webhook
+    if level in ("WARN", "CRITICAL") or force_slack:
         if not webhook:
             try:
                 from secrets_loader import get_secret as _gs
