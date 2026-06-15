@@ -55,14 +55,25 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
     <div className="lens lens--plan2">
       <PlanActionPanel pm={pm} size={size} mode={mode} sym={ticker.symbol} family={ticker.setupFamily} />
 
+      {/* §1 — Time Anatomy (moved to top · full-width) */}
+      <div className="lens-section lens-section--full">
+        <SectionHeader n={1} title="Time Anatomy"
+          sub={`hold ${ticker.holdLabel ? ticker.holdLabel : "~" + ticker.holdDays + "d"} · sessions plotted to scale`}
+          style={headerStyle} right={<StateToggle name="plv2-4" />} />
+        <StateWrap state={s4.value} source="planner · setup_stats + calendar">
+          <div className="lens-pad"><TimeAnatomyV2 ticker={ticker} pm={pm} /></div>
+        </StateWrap>
+      </div>
+
       <div className="lens-section">
         <SectionHeader title="Why / Why Not · the case for &amp; against" style="minimal"
           sub="real factors pro &amp; con · pre-mortem before you commit" />
         <div className="lens-pad"><WhyWhyNot pm={pm} size={size} ticker={ticker} mode={mode} /></div>
       </div>
 
+      <div className="lens-2col plan-2col">
       <div className="lens-section">
-        <SectionHeader n={1} title="Trade Blueprint"
+        <SectionHeader n={2} title="Trade Blueprint"
           sub="payoff geometry · stop / entry / T1 / T2 · R-multiples (size-independent)"
           style={headerStyle} right={<StateToggle name="plv2-1" />} />
         <StateWrap state={s1.value} source="Schwab quotes · ATR est (stop÷1.25)">
@@ -80,7 +91,7 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={2} title="Sizing Workbench · live"
+        <SectionHeader n={3} title="Sizing Workbench · live"
           sub="adjust Kelly fraction + size multiplier · shares, $ risk, NAV% recompute live"
           style={headerStyle} right={<StateToggle name="plv2-2" />} />
         <StateWrap state={s2.value} source="risk engine · portfolio_state">
@@ -93,10 +104,11 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
           </div>
         </StateWrap>
       </div>
+      </div>
 
       <div className="lens-section">
-        <SectionHeader n={3} title="Decision Gates · go/no-go"
-          sub="the full pre-trade audit — size caps recompute in §2"
+        <SectionHeader n={4} title="Decision Gates · go/no-go"
+          sub="the full pre-trade audit — size caps recompute in §3"
           style={headerStyle} right={<StateToggle name="plv2-3" />} />
         <StateWrap state={s3.value} source="rule engine · live gates">
           <div className="lens-pad"><DecisionGates pm={pm} size={size} ticker={ticker} /></div>
@@ -104,22 +116,12 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
       </div>
 
       <div className="lens-section">
-        <SectionHeader n={4} title={`Fill Realism · ${fillLive ? "live fills" : "modeled fills"}`}
+        <SectionHeader n={5} title={`Fill Realism · ${fillLive ? "live fills" : "modeled fills"}`}
           sub={fillLive
             ? "what you'd realistically fill at — next-bar open + live spread + ADV-scaled slippage"
             : "what you'd likely fill at — next-bar open + spread + slippage (modeled from β; live spread/ADV unavailable)"}
           style={headerStyle} />
         <div className="lens-pad"><FillRealism pm={pm} size={size} /></div>
-      </div>
-
-      <div className="lens-2col plan-2col">
-      <div className="lens-section">
-        <SectionHeader n={5} title="Time Anatomy"
-          sub={`hold ${ticker.holdLabel ? ticker.holdLabel : "~" + ticker.holdDays + "d"} · sessions plotted to scale`}
-          style={headerStyle} right={<StateToggle name="plv2-4" />} />
-        <StateWrap state={s4.value} source="planner · setup_stats + calendar">
-          <div className="lens-pad"><TimeAnatomyV2 ticker={ticker} pm={pm} /></div>
-        </StateWrap>
       </div>
 
       <div className="lens-section">
@@ -129,7 +131,6 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
         <StateWrap state={s5.value} source={`playbook · ${mode.toLowerCase()} horizon rules`}>
           <div className="lens-pad"><PlaybookTree mode={mode} pm={pm} /></div>
         </StateWrap>
-      </div>
       </div>
 
       <div className="lens-2col plan-2col">
@@ -187,7 +188,7 @@ function LensPlan({ ticker: t0, mode, sizeCat, headerStyle, kpiStyle, heroStyle 
 // SWING is the base ladder. We NO LONGER fabricate targets by constant multipliers;
 // if the engine has no per-mode decision we keep the swing ladder (honest) and only
 // change the plotted horizon. (Targets aren't horizon-scaled until the structural-
-// target engine ships — see _modeReal note in §1.)
+// target engine ships — see _modeReal note in §2.)
 function modeAdjustP2(ticker, mode) {
   const nz = (v, f) => (typeof v === "number" && isFinite(v)) ? v : f;
   const m = (mode || "SWING").toUpperCase();
@@ -386,7 +387,7 @@ function WhyWhyNot({ pm, size, ticker, mode }) {
 
   // risk budget
   if (size.lossNavPct <= 0.5) pros.push({ h: `Risk contained ${size.lossNavPct.toFixed(2)}% NAV`, d: `max loss $${Math.round(size.maxLoss)} at the stop` });
-  else if (size.lossNavPct > 0.75) cons.push({ h: `Risk hot ${size.lossNavPct.toFixed(2)}% NAV`, d: "over the 0.75% per-trade budget — cut size in §2" });
+  else if (size.lossNavPct > 0.75) cons.push({ h: `Risk hot ${size.lossNavPct.toFixed(2)}% NAV`, d: "over the 0.75% per-trade budget — cut size in §3" });
 
   // earnings proximity
   if (erD != null && erD <= hold) cons.push({ h: `Earnings in ${erD}d`, d: "inside the hold window — overnight gap risk through the print" });
@@ -713,7 +714,7 @@ function TradeBlueprint({ pm, size }) {
         <span className="tbv2-scale-sep">·</span>
         <span title="Position-weighted R if both targets fill: (⅓ at T1 + runner at T2) ÷ shares.">Blended <b className="up">{blendedR.toFixed(2)}R</b> if plan fills</span>
         <span className="tbv2-scale-sep">·</span>
-        <span className="dim2">after the T1 partial + stop→BE the runner's <b className="up">planned downside is removed</b> (barring a gap through the stop — see §4)</span>
+        <span className="dim2">after the T1 partial + stop→BE the runner's <b className="up">planned downside is removed</b> (barring a gap through the stop — see §5)</span>
       </div>
     </div>
   );
@@ -776,7 +777,7 @@ function SizingWorkbench({ pm, size, sizeMult, onSizeMult, kellyFrac, onKellyFra
         <SwTile label="% NAV"    value={`${navPct.toFixed(1)}%`}         tone={navPct > 10 ? "rd" : navPct > 7 ? "amb" : "gn"} sub="cap 10%" />
         <SwTile label="Max loss" value={`$${maxLoss.toFixed(0)}`}        tone="rd" sub={`${lossNavPct.toFixed(2)}% NAV`} />
         <SwTile label="R-mult"   value={`${(reward/risk).toFixed(2)}R`}  tone="copper" sub="T1 / risk"
-                tip="Reward-to-risk at the first target — the same ratio shown in §1, recomputed at your current size." />
+                tip="Reward-to-risk at the first target — the same ratio shown in §2, recomputed at your current size." />
         <SwTile label="Expectancy"
                 value={pm.evR != null ? `${pm.evR >= 0 ? "+" : "−"}$${Math.abs(pm.evR * risk * sh).toFixed(0)}` : "—"}
                 tone={pm.evR == null ? "ink" : pm.evR >= 0 ? "gn" : "rd"}
@@ -785,7 +786,7 @@ function SizingWorkbench({ pm, size, sizeMult, onSizeMult, kellyFrac, onKellyFra
       </div>
       <div className="sw-gates">
         <div className="sw-gates-cap label-cap">
-          Live size caps · recompute as you size · full go/no-go in §3
+          Live size caps · recompute as you size · full go/no-go in §4
           {pm.navDemo
             ? <span className="sw-navtag is-demo" onClick={onEditNav} style={{ cursor: "pointer" }} title="Click to set your account size"> NAV $100k (demo · click to set yours)</span>
             : <span className="sw-navtag" onClick={onEditNav} style={{ cursor: "pointer" }} title="Click to change your account size"> NAV ${Math.round(pm.NAV).toLocaleString()} (yours · edit)</span>}
