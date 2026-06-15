@@ -29,8 +29,8 @@ SNAPSHOT_PATH = BASE_DIR / "data" / "signal_alert_snapshot.json"
 # holds WATCH/AVOID (never BUY) — the canonical BUY decision lives in these
 # curated per-mode lists (verdict=='BUY') and the row-level verdict.
 MODE_LISTS = {"swing": "buy_candidates", "position": "medium_term_picks", "invest": "long_term_picks"}
-CAVEAT = ("_Composite-score-based notification — score is weakly/anti-predictive "
-          "per our audits; treat as a heads-up, not a vetted edge._")
+RULE = "—" * 21
+CAVEAT = "⚠️ Score-based heads-up — not vetted edge"
 
 
 def _send(level: str, title: str, body: str):
@@ -98,18 +98,21 @@ def run_signal_alerts(dry_run: bool = False) -> dict:
             if tk not in prev_elite:
                 new_elite.append({"ticker": tk})
 
-    # Emit — grouped digest messages, not dozens of pings.
+    # Emit — clean scannable cards (match the entry-alert card style).
     if flips:
         by_m = {}
         for f in flips:
             by_m.setdefault(f["mode"], []).append(f["ticker"])
-        lines = [f"• *{m}*: {', '.join(ts)}" for m, ts in by_m.items()]
-        emit("INFO", f"⬆️ {len(flips)} new BUY(s) today (→BUY)",
-             "\n".join(lines) + f"\n{CAVEAT}")
+        lines = [RULE]
+        for m in MODE_LISTS:                         # stable swing/position/invest order
+            if by_m.get(m):
+                lines.append(f"{m.upper():9}{', '.join(by_m[m])}")
+        lines.append(CAVEAT)
+        emit("INFO", f"⬆️  New BUYs today  ·  {len(flips)}", "\n".join(lines))
     if new_elite:
         ts = ", ".join(e["ticker"] for e in new_elite)
-        emit("INFO", f"⭐ {len(new_elite)} new Elite Pick(s) today",
-             f"• {ts}\n{CAVEAT}")
+        emit("INFO", f"⭐  New Elite Picks today  ·  {len(new_elite)}",
+             f"{RULE}\n{ts}\n{CAVEAT}")
 
     if not dry_run:
         _save_snapshot(cur)
