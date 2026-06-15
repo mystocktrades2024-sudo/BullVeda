@@ -146,16 +146,6 @@ function HomeView({ onTicker, onSurface, mode, surface }) {
       <IndexStrip />
       <HomeHero mode={mode} onSurface={onSurface} />
 
-      {/* TIER 1.6 · AUTOMATED BOOK — the system's auto-traded paper account, shared
-          across all viewers (NOT the individual user's book). Per-user position
-          tracking isn't wired; this is the model/track-record portfolio. */}
-      {(window.__BV && window.__BV.portfolio && (window.__BV.portfolio.positions || []).length > 0) && (
-        <>
-          <div className="home-sec-label"><span className="mono">AUTOMATED BOOK · LIVE P&L</span><span className="mono dim2">system paper account · auto-traded · same for every viewer · click to open ticket</span></div>
-          <BookStrip onTicker={onTicker} />
-        </>
-      )}
-
       {/* TIER 1.5 · MARKET CONTEXT — the daily top-down briefing (regime · pre-market · calendar) */}
       <div className="home-sec-label"><span className="mono">MARKET CONTEXT · BEFORE YOU TRADE</span><span className="mono dim2">top-down read · regime gates your size · click any card to go deeper</span></div>
       <MarketBriefing onSurface={onSurface} onTicker={onTicker} />
