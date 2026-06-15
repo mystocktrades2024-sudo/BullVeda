@@ -4833,8 +4833,11 @@ def run_daily_scan(force_fresh: bool = False):
         import subprocess
         _proto_builder = BASE_DIR / "infra" / "prototype" / "build_data.py"
         if _proto_builder.exists():
+            # 360s (was 180): build_data.py intermittently exceeded 180s on cold
+            # caches and timed out, leaving infra/prototype/tickers.json stale —
+            # which then aborts the morning briefing (>24h max-age). 2x headroom.
             _r = subprocess.run(["python3", str(_proto_builder)], check=False,
-                                capture_output=True, timeout=180)
+                                capture_output=True, timeout=360)
             if _r.returncode == 0:
                 log.info(f"  Prototype data refreshed: infra/prototype/data.json")
             else:
