@@ -85,6 +85,21 @@ def _send_enabled() -> bool:
         return False
 
 
+def _shadow_slack_enabled() -> bool:
+    """Whether to ALSO mirror shadow candidates to Slack (observation feed).
+
+    Distinct from send_enabled: this does NOT mean validated/live. It just lets
+    the owner watch what the watcher detects during the validation window. Every
+    message is stamped SHADOW and annotates the validated-family status, so it is
+    never mistaken for a vetted BUY. config: entry_watch.shadow_slack (default False).
+    """
+    try:
+        cfg = json.load(open(CONFIG_PATH))
+        return bool((cfg.get("entry_watch") or {}).get("shadow_slack", False))
+    except Exception:
+        return False
+
+
 def _current_regime() -> str:
     try:
         b = json.load(open(BUNDLE_PATH))
@@ -299,6 +314,27 @@ def run_entry_watch_pass(dry_run: bool = False) -> dict:
             }
             _shadow_record(rec)
             shadow_logged.append({"ticker": ticker, "tier": rec["tier"]})
+
+            # Optional: mirror to Slack as a clearly-labeled OBSERVATION feed.
+            if _shadow_slack_enabled():
+                fam = z.get("setup_family") or "?"
+                fam_ok = fam in allow
+                fam_tag = "✓ validated family" if fam_ok else "✗ family historically loses (drop at go-live)"
+                tier_txt = "BUY-candidate (entry+R:R clear)" if would_buy else "in zone"
+                mcp = z.get("mc_p_profit")
+                bits = [f"{fam} — {fam_tag}", f"regime {regime}"]
+                if mcp is not None:
+                    bits.append(f"mc_p {mcp:.2f}")
+                if rr_live:
+                    bits.append(f"R:R {rr_live:.1f}")
+                _send(
+                    "INFO",
+                    f"🔬 SHADOW · {ticker} {tier_txt}",
+                    f"${price:.2f} in zone [{z['zone_low']:.2f}–{z['zone_high']:.2f}] · "
+                    f"{' · '.join(bits)}\n"
+                    f"_Observation-only — NOT a validated signal. Entry-watcher is in shadow "
+                    f"until out-of-sample data confirms edge._",
+                )
             continue
 
         # LIVE path — apply the validated family gate before alerting.
