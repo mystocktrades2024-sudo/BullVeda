@@ -68,6 +68,13 @@ MODE = "swing"  # v1 — entry timing is most acute for swings
 # Override via config.json -> entry_watch.family_allowlist.
 FAMILY_ALLOWLIST = {"Trend Continuation"}
 
+# Soft "entry zone" tier only Slacks when live R:R clears this floor. Without it
+# the soft tier pings at the TOP of a wide zone — e.g. a strong uptrend riding
+# its 8-EMA near 52w highs, where zone_high≈price but the stop is a full
+# zone-depth below, giving junk R:R (~0.5). Firm BUY-candidate uses buy_min_rr
+# (3.0). FRT $124.59 / R:R 0.5 bug, 2026-06-15. Override: entry_watch.soft_min_rr.
+SOFT_MIN_RR = 1.5
+
 
 def _send_enabled() -> bool:
     """Slack alerts are OFF until the entry-zone event is validated (principle 1).
@@ -305,9 +312,12 @@ def run_entry_watch_pass(dry_run: bool = False) -> dict:
     # families with confirmed edge.
     try:
         cfg = json.load(open(CONFIG_PATH))
-        allow = set((cfg.get("entry_watch") or {}).get("family_allowlist") or FAMILY_ALLOWLIST)
+        ew_cfg = cfg.get("entry_watch") or {}
+        allow = set(ew_cfg.get("family_allowlist") or FAMILY_ALLOWLIST)
+        soft_min_rr = float(ew_cfg.get("soft_min_rr", SOFT_MIN_RR))
     except Exception:
         allow = FAMILY_ALLOWLIST
+        soft_min_rr = SOFT_MIN_RR
 
     regime = _current_regime()
     quotes = _get_schwab_batch(list(targets.keys()))
@@ -350,8 +360,10 @@ def run_entry_watch_pass(dry_run: bool = False) -> dict:
             _shadow_record(rec)
             shadow_logged.append({"ticker": ticker, "tier": rec["tier"]})
 
-            # Mirror to Slack as a clean, scannable entry-alert card.
-            if _shadow_slack_enabled():
+            # Mirror to Slack as a clean card — but only when R:R is worth it.
+            # Soft tier needs rr >= soft_min_rr; firm (would_buy) always passes.
+            # (We still shadow-LOG everything above for the OOS record.)
+            if _shadow_slack_enabled() and (would_buy or (rr_live and rr_live >= soft_min_rr)):
                 _slack(*_entry_card(ticker, price, z, rr_live, would_buy, regime, allow))
             continue
 
@@ -386,8 +398,9 @@ def run_entry_watch_pass(dry_run: bool = False) -> dict:
                     alerts_sent.append({"ticker": ticker, "type": "entry_buy", "price": price, "rr": round(rr, 2)})
                 continue  # don't also send Tier-1 for the same name
 
-        # Tier 1 — soft: in zone, but other gates may still apply.
-        if not sent(ticker, "entry_zone"):
+        # Tier 1 — soft: in zone AND R:R clears the soft floor (skip junk R:R at
+        # the top of a wide zone), but other gates may still apply.
+        if (rr_live and rr_live >= soft_min_rr) and not sent(ticker, "entry_zone"):
             blk = "" if z["sole_blocker_is_entry"] else " (other gates still apply — verify on dashboard)"
             emit(
                 "WARN",
