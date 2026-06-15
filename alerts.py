@@ -137,7 +137,13 @@ def send_alert(level: str, title: str, body: str = "", webhook: str | None = Non
                 except Exception:
                     pass
         if webhook:
-            _slack_post(webhook, f"{emoji} *[{level}]* {title}\n{body}")
+            # force_slack feeds (entry alerts, daily digests) carry their own
+            # formatting/emoji — post clean, without the *[LEVEL]* prefix.
+            if force_slack and level == "INFO":
+                text = f"{title}\n{body}" if body else title
+            else:
+                text = f"{emoji} *[{level}]* {title}\n{body}"
+            _slack_post(webhook, text)
             return True
     return False
 
