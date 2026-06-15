@@ -313,7 +313,9 @@ def test_quote(symbol: str = "AAPL") -> None:
         print(f"\n✅ {tk} — {blob.get('assetMainType')}/{blob.get('assetSubType')}")
         print(f"   Last: ${q.get('lastPrice')}  Bid: ${q.get('bidPrice')}  Ask: ${q.get('askPrice')}")
         print(f"   Volume: {q.get('totalVolume'):,}  52w: ${f.get('low52')}–${f.get('high52')}")
-        print(f"   PE: {f.get('peRatio')}  EPS: {f.get('eps')}  Mcap: ${f.get('marketCap'):,.0f}")
+        mcap = f.get("marketCap")
+        mcap_str = f"${mcap:,.0f}" if mcap is not None else "—"
+        print(f"   PE: {f.get('peRatio')}  EPS: {f.get('eps')}  Mcap: {mcap_str}")
         print(f"   Beta: {f.get('beta')}  Div yield: {f.get('dividendYield')}%  Delayed: {q.get('quoteTime', 0) > 0 and bool(blob.get('delayed', False))}")
 
 
