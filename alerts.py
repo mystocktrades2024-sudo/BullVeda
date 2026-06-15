@@ -137,15 +137,30 @@ def send_alert(level: str, title: str, body: str = "", webhook: str | None = Non
                 except Exception:
                     pass
         if webhook:
-            # force_slack feeds (entry alerts, daily digests) carry their own
-            # formatting/emoji — post clean, without the *[LEVEL]* prefix.
-            if force_slack and level == "INFO":
+            # force_slack feeds carry their own card formatting/emoji — post
+            # clean, without the *[LEVEL]* prefix (any level).
+            if force_slack:
                 text = f"{title}\n{body}" if body else title
             else:
                 text = f"{emoji} *[{level}]* {title}\n{body}"
             _slack_post(webhook, text)
             return True
     return False
+
+
+def card(headline: str, rows=None, footer: str | None = None, label_w: int = 7) -> tuple:
+    """Build a clean, scannable alert card. Returns (headline, body) for send_alert.
+
+    rows = list of (label, value) tuples, rendered as aligned columns under a
+    rule line. Shared by entry alerts, daily digests, and position alerts so the
+    whole Slack feed looks consistent.
+    """
+    lines = ["—" * 21]
+    for label, value in (rows or []):
+        lines.append(f"{str(label):<{label_w}}{value}" if label else str(value))
+    if footer:
+        lines.append(footer)
+    return headline, "\n".join(lines)
 
 
 def _slack_blocks_for_picks(

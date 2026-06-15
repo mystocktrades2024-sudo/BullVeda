@@ -159,14 +159,14 @@ def main() -> int:
     print(f"[drift] delta: {delta:+.1f}pp")
 
     if delta < -args.threshold:
-        msg = (f":rotating_light: *Model drift detected*\n"
-               f"Live (last {args.window}d): {n} trades, WR *{live_wr:.1f}%*\n"
-               f"Backtest baseline: WR *{bt['wr_pct']:.1f}%*\n"
-               f"Delta: *{delta:+.1f}pp* (threshold ±{args.threshold}pp)\n"
-               f"\nLive performance has dropped meaningfully below the backtest. "
-               f"Check: (1) regime shift, (2) recent kill-list/threshold changes, "
-               f"(3) data-quality issues. Review at "
-               f"http://localhost:7432/v2/backtest-report")
+        rule = "—" * 21
+        msg = (f"🚨  Model drift detected  ·  {delta:+.1f}pp\n"
+               f"{rule}\n"
+               f"Live     {n} trades · WR {live_wr:.1f}%  (last {args.window}d)\n"
+               f"Baseline WR {bt['wr_pct']:.1f}%  (backtest)\n"
+               f"Delta    {delta:+.1f}pp  (threshold ±{args.threshold}pp)\n"
+               f"💡 Check regime shift · recent kill-list/threshold changes · "
+               f"data quality → http://localhost:7432/v2/backtest-report")
         print(f"\n*** ALERT *** delta {delta:+.1f}pp below threshold")
         if args.dry_run:
             print(f"[dry-run] would send:\n{msg}")

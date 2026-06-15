@@ -64,9 +64,19 @@ def _send(level: str, title: str, body: str):
     """Send via Slack + Mac notification. Best-effort."""
     try:
         from alerts import send_alert
-        send_alert(level=level, title=title, body=body)
+        send_alert(level=level, title=title, body=body, force_slack=True)
     except Exception as e:
         log.debug(f"Alert dispatch failed: {e}")
+
+
+def _card(rows, footer=None):
+    """Clean scannable card body (matches entry-alert + digest style)."""
+    lines = ["—" * 21]
+    for label, value in rows:
+        lines.append(f"{label:<8}{value}" if label else str(value))
+    if footer:
+        lines.append(footer)
+    return "\n".join(lines)
 
 
 def check_stop_approach(position: dict, current_price: float, atr: float) -> bool:
@@ -86,8 +96,10 @@ def check_stop_approach(position: dict, current_price: float, atr: float) -> boo
         if _already_sent_today(ticker, "stop_approach"):
             return False
         _send("WARN",
-              f"\u26a0\ufe0f {ticker} approaching stop",
-              f"Price ${current_price:.2f} within {distance/atr:.2f} ATR of stop ${stop:.2f}")
+              f"\u26a0\ufe0f  {ticker} \u2014 approaching stop",
+              _card([("Price", f"${current_price:.2f}"),
+                     ("Stop", f"${stop:.2f}"),
+                     ("Dist", f"{distance/atr:.2f} ATR away")]))
         _mark_sent(ticker, "stop_approach")
         return True
     return False
@@ -109,9 +121,10 @@ def check_t1_hit(position: dict, current_price: float) -> bool:
         entry = position.get("entry_price", t1)
         pnl_pct = abs((t1 - entry) / entry * 100)
         _send("INFO",
-              f"\U0001f3af {ticker} hit T1",
-              f"Price ${current_price:.2f} reached T1 ${t1:.2f} ({pnl_pct:.1f}% gain). "
-              f"Consider 50% partial + move stop to BE.")
+              f"\U0001f3af  {ticker} — T1 hit  ·  +{pnl_pct:.1f}%",
+              _card([("Price", f"${current_price:.2f}"),
+                     ("T1", f"${t1:.2f}")],
+                    footer="💡 Take 50% partial · move stop to break-even"))
         _mark_sent(ticker, "t1_hit")
         return True
     return False
@@ -134,9 +147,12 @@ def check_stop_hit(position: dict, current_price: float) -> bool:
     entry = position.get("entry_price", 0)
     pnl_pct = ((current_price - entry) / entry * 100) if entry and direction == "long" else 0
     _send("CRITICAL",
-          f"\U0001f6a8 {ticker} STOP HIT — EXIT NOW",
-          f"Price ${current_price:.2f} breached stop ${stop:.2f} ({pnl_pct:+.2f}% from entry ${entry:.2f}). "
-          f"Sell at market or set tight stop-limit.")
+          f"\U0001f6a8  {ticker} — STOP HIT · exit now",
+          _card([("Price", f"${current_price:.2f}"),
+                 ("Stop", f"${stop:.2f}"),
+                 ("Entry", f"${entry:.2f}"),
+                 ("P&L", f"{pnl_pct:+.2f}%")],
+                footer="💡 Sell at market or set a tight stop-limit"))
     _mark_sent(ticker, "stop_hit")
     return True
 
@@ -156,9 +172,10 @@ def check_t2_hit(position: dict, current_price: float) -> bool:
     entry = position.get("entry_price", 0)
     pnl_pct = abs((t2 - entry) / entry * 100) if entry else 0
     _send("INFO",
-          f"\U0001f4b0 {ticker} T2 HIT",
-          f"Price ${current_price:.2f} reached T2 ${t2:.2f} (+{pnl_pct:.1f}%). "
-          f"Full exit or trail remaining runner.")
+          f"\U0001f4b0  {ticker} — T2 hit  ·  +{pnl_pct:.1f}%",
+          _card([("Price", f"${current_price:.2f}"),
+                 ("T2", f"${t2:.2f}")],
+                footer="💡 Full exit or trail the runner"))
     _mark_sent(ticker, "t2_hit")
     return True
 
@@ -180,9 +197,11 @@ def check_adverse_gap(position: dict, current_price: float, prev_close: float, a
     gap_pct = (current_price / prev_close - 1) * 100
     direction_word = "GAP DOWN" if direction == "long" else "GAP UP"
     _send("WARN",
-          f"⚠️ {ticker} {direction_word} {gap_pct:+.1f}%",
-          f"Price ${current_price:.2f} vs prev close ${prev_close:.2f} — {abs(adverse_gap)/atr:.1f} ATR adverse. "
-          f"Review premarket/AH news; tighten stop or exit at open.")
+          f"⚠️  {ticker} — {direction_word} {gap_pct:+.1f}%",
+          _card([("Price", f"${current_price:.2f}"),
+                 ("Prev cl", f"${prev_close:.2f}"),
+                 ("Adverse", f"{abs(adverse_gap)/atr:.1f} ATR")],
+                footer="💡 Review premarket/AH news; tighten stop or exit at open"))
     _mark_sent(ticker, "adverse_gap")
     return True
 

@@ -103,15 +103,15 @@ def main(score_jump_threshold: float = 5.0) -> int:
             f"reports {p['report_date']} ({p['days_to_earnings']}d)"
         )
 
-    title = f"🎯 NEW STRONG beat-prediction{'s' if len(new_strong) + len(big_jumps) > 1 else ''}"
-    body = "\n".join(lines) + (
-        "\n\nView: V2 dashboard → 📅 Earnings tab → 'STRONG only' filter."
-    )
+    n = len(new_strong) + len(big_jumps)
+    title = f"🎯  New STRONG beat-prediction{'s' if n > 1 else ''}  ·  {n}"
+    body = ("—" * 21 + "\n" + "\n".join(lines)
+            + "\n💡 V2 dashboard → 📅 Earnings → 'STRONG only' filter")
 
     log.info(title); log.info(body)
     try:
         from alerts import send_alert
-        send_alert("WARN", title, body)
+        send_alert("WARN", title, body, force_slack=True)
     except Exception as ex:
         log.warning(f"Slack failed: {ex}")
     return 0
