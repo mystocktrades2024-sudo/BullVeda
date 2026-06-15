@@ -320,21 +320,30 @@ def run_entry_watch_pass(dry_run: bool = False) -> dict:
                 fam = z.get("setup_family") or "?"
                 fam_ok = fam in allow
                 fam_tag = "✓ validated family" if fam_ok else "✗ family historically loses (drop at go-live)"
-                tier_txt = "BUY-candidate (entry+R:R clear)" if would_buy else "in zone"
                 mcp = z.get("mc_p_profit")
                 bits = [f"{fam} — {fam_tag}", f"regime {regime}"]
                 if mcp is not None:
                     bits.append(f"mc_p {mcp:.2f}")
                 if rr_live:
                     bits.append(f"R:R {rr_live:.1f}")
-                _send(
-                    "INFO",
-                    f"🔬 SHADOW · {ticker} {tier_txt}",
-                    f"${price:.2f} in zone [{z['zone_low']:.2f}–{z['zone_high']:.2f}] · "
-                    f"{' · '.join(bits)}\n"
-                    f"_Observation-only — NOT a validated signal. Entry-watcher is in shadow "
-                    f"until out-of-sample data confirms edge._",
-                )
+                if would_buy:
+                    # Firm BUY-candidate — pulled deep enough that entry + R:R clear.
+                    _send(
+                        "INFO",
+                        f"🎯 SHADOW BUY-CANDIDATE · {ticker}",
+                        f"*${price:.2f} pulled into buy zone [{z['zone_low']:.2f}–{z['zone_high']:.2f}] — entry + R:R clear.*\n"
+                        f"{' · '.join(bits)} · stop ${z['stop']:.2f} → T1 ${z['t1']:.2f}\n"
+                        f"_Observation-only — NOT a validated signal (shadow until OOS confirms edge)._",
+                    )
+                else:
+                    _send(
+                        "INFO",
+                        f"🔬 SHADOW · {ticker} in zone",
+                        f"${price:.2f} in zone [{z['zone_low']:.2f}–{z['zone_high']:.2f}] · "
+                        f"{' · '.join(bits)}\n"
+                        f"_Observation-only — NOT a validated signal. Entry-watcher is in shadow "
+                        f"until out-of-sample data confirms edge._",
+                    )
             continue
 
         # LIVE path — apply the validated family gate before alerting.
