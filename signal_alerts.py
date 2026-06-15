@@ -55,19 +55,40 @@ def _save_snapshot(snap: dict):
     json.dump(snap, open(SNAPSHOT_PATH, "w"), indent=2, default=str)
 
 
+def _conv_tier(row: dict):
+    """Conviction tier from a row. dict {tier:..} or bare value. -1 == AVOID."""
+    c = row.get("conviction")
+    return c.get("tier") if isinstance(c, dict) else c
+
+
+def _actionable(row: dict) -> bool:
+    """A genuine, actionable BUY: conviction T1/T2/T3 (not AVOID/-1 or None).
+
+    Guards against the FRT-class bug — the engine sometimes stamps verdict=BUY on
+    conviction-AVOID names ("Pass — weak score"); surfacing those as a 'new BUY'
+    alert is misleading. Only tiers 1/2/3 are real.
+    """
+    return _conv_tier(row) in (1, 2, 3)
+
+
 def _current_state(bundle: dict) -> dict:
     """Build {buys: {mode: [tickers]}, elite: [tickers]} from the bundle.
 
-    buys[mode]  = names with verdict=='BUY' in that mode's curated list.
-    elite       = the curated top-conviction set (bundle.elite_picks).
+    buys[mode] = verdict=='BUY' AND actionable conviction (T1/T2/T3) in that mode.
+    elite      = bundle.elite_picks, filtered to actionable-conviction names
+                 (elite rows carry no conviction, so cross-ref all_scored).
     """
     buys = {}
     for mode, key in MODE_LISTS.items():
         lst = bundle.get(key) or []
         buys[mode] = sorted({r.get("ticker") for r in lst
-                             if isinstance(r, dict) and r.get("verdict") == "BUY" and r.get("ticker")})
+                             if isinstance(r, dict) and r.get("verdict") == "BUY"
+                             and _actionable(r) and r.get("ticker")})
+    conv_map = {r.get("ticker"): r for r in (bundle.get("all_scored") or [])
+                if isinstance(r, dict)}
     elite = sorted({r.get("ticker") for r in (bundle.get("elite_picks") or [])
-                    if isinstance(r, dict) and r.get("ticker")})
+                    if isinstance(r, dict) and r.get("ticker")
+                    and _actionable(conv_map.get(r.get("ticker"), {}))})
     return {"buys": buys, "elite": elite}
 
 
