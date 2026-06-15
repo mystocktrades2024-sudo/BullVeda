@@ -29,8 +29,20 @@ SNAPSHOT_PATH = BASE_DIR / "data" / "signal_alert_snapshot.json"
 # holds WATCH/AVOID (never BUY) — the canonical BUY decision lives in these
 # curated per-mode lists (verdict=='BUY') and the row-level verdict.
 MODE_LISTS = {"swing": "buy_candidates", "position": "medium_term_picks", "invest": "long_term_picks"}
+# Catalyst-driven strategy sleeves — fired flag lives in <field>.fired on each
+# all_scored row. These are the higher-mechanism signals (principle 14) and fire
+# rarely, so a dedicated daily "new signal" alert is high-value + low-noise.
+SLEEVES = {
+    "pead_audit": "PEAD (post-earnings drift)",
+    "insider_cluster_audit": "Insider Cluster",
+    "esp_play_audit": "ESP Play",
+    "meanrev_audit": "Mean Reversion",
+    "momentum_audit": "Momentum Continuation",
+    "defrot_audit": "Defensive Rotation",
+}
 RULE = "—" * 21
 CAVEAT = "⚠️ Score-based heads-up — not vetted edge"
+SLEEVE_NOTE = "🧬 Catalyst signal · Phase-1 paper validation"
 
 
 def _send(level: str, title: str, body: str):
@@ -84,12 +96,19 @@ def _current_state(bundle: dict) -> dict:
         buys[mode] = sorted({r.get("ticker") for r in lst
                              if isinstance(r, dict) and r.get("verdict") == "BUY"
                              and _actionable(r) and r.get("ticker")})
-    conv_map = {r.get("ticker"): r for r in (bundle.get("all_scored") or [])
-                if isinstance(r, dict)}
+    rows = bundle.get("all_scored") or []
+    conv_map = {r.get("ticker"): r for r in rows if isinstance(r, dict)}
     elite = sorted({r.get("ticker") for r in (bundle.get("elite_picks") or [])
                     if isinstance(r, dict) and r.get("ticker")
                     and _actionable(conv_map.get(r.get("ticker"), {}))})
-    return {"buys": buys, "elite": elite}
+    # Catalyst sleeves: tickers where the sleeve detector fired today.
+    sleeves = {}
+    for field, label in SLEEVES.items():
+        fired = sorted({r.get("ticker") for r in rows
+                        if isinstance(r.get(field), dict) and r[field].get("fired") and r.get("ticker")})
+        if fired:
+            sleeves[label] = fired
+    return {"buys": buys, "elite": elite, "sleeves": sleeves}
 
 
 def run_signal_alerts(dry_run: bool = False) -> dict:
@@ -100,7 +119,7 @@ def run_signal_alerts(dry_run: bool = False) -> dict:
     prev = _load_snapshot()
 
     emit = (lambda *_a: None) if dry_run else _send
-    flips, new_elite = [], []
+    flips, new_elite, new_sleeves = [], [], []
     seeded = not bool(prev)
 
     # --- #2: WATCH->BUY flips = new entrants to a mode's BUY list ---
@@ -119,6 +138,15 @@ def run_signal_alerts(dry_run: bool = False) -> dict:
             if tk not in prev_elite:
                 new_elite.append({"ticker": tk})
 
+    # --- #4: newly-fired catalyst sleeve signals (PEAD/insider/ESP/...) ---
+    prev_sleeves = prev.get("sleeves") or {}
+    if "sleeves" in prev:  # skip on first run (seed only)
+        for label, tickers in cur["sleeves"].items():
+            before = set(prev_sleeves.get(label) or [])
+            for tk in tickers:
+                if tk not in before:
+                    new_sleeves.append({"ticker": tk, "sleeve": label})
+
     # Emit — clean scannable cards (match the entry-alert card style).
     if flips:
         by_m = {}
@@ -134,6 +162,12 @@ def run_signal_alerts(dry_run: bool = False) -> dict:
         ts = ", ".join(e["ticker"] for e in new_elite)
         emit("INFO", f"⭐  New Elite Picks today  ·  {len(new_elite)}",
              f"{RULE}\n{ts}\n{CAVEAT}")
+    if new_sleeves:
+        by_s = {}
+        for e in new_sleeves:
+            by_s.setdefault(e["sleeve"], []).append(e["ticker"])
+        lines = [RULE] + [f"{s}\n  {', '.join(ts)}" for s, ts in by_s.items()] + [SLEEVE_NOTE]
+        emit("INFO", f"🧬  New catalyst signal(s)  ·  {len(new_sleeves)}", "\n".join(lines))
 
     if not dry_run:
         _save_snapshot(cur)
@@ -142,6 +176,7 @@ def run_signal_alerts(dry_run: bool = False) -> dict:
         "mode": "dry_run" if dry_run else "live",
         "flips": flips,
         "new_elite": new_elite,
+        "new_sleeves": new_sleeves,
         "seeded": seeded,
     }
 
