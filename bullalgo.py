@@ -496,7 +496,8 @@ def chart_series(ticker: str, tf_mode: str, bars_out: int = 180) -> dict:
         return out
 
     bars = [{"time": _t(ix), "open": round(float(r.open), 4), "high": round(float(r.high), 4),
-             "low": round(float(r.low), 4), "close": round(float(r.close), 4)}
+             "low": round(float(r.low), 4), "close": round(float(r.close), 4),
+             "value": float(r.get("volume", 0) or 0)}
             for ix, r in tail.iterrows()]
 
     close_s = d["close"]
@@ -676,22 +677,161 @@ def mcdx_series(ticker: str, tf_mode: str, bars_out: int = 180, n: int = 34) -> 
         except Exception: return int(pd.Timestamp(ts).timestamp())
 
     # histogram bars colored by money-flow state: green accumulation / red distribution / yellow neutral
+    #
+    # ALIGNMENT (2026-06-15): emit ONE point per tail bar — including the rolling
+    # warm-up bars where hot/banker are still NaN — as lightweight-charts
+    # "whitespace" points ({time} only, no value). Previously these warm-up bars
+    # were `continue`-skipped, so the histogram had FEWER points (e.g. 173) than
+    # the price chart (180); the two charts sync by LOGICAL range (bar index), so
+    # 0..180 mapped onto a 173-bar series left the MCDX bars compressed/left-
+    # shifted (badly so on weekly/monthly where the 34-bar warm-up eats a large
+    # fraction). Whitespace keeps the time axis identical → exact alignment.
     GREEN, YELLOW, RED = "#16c784", "#e8c170", "#ff5d6c"
-    hist = []
+    hist, bline = [], []
     for ix in idx:
+        t = _t(ix)
         v = hot.get(ix)
         if v is None or not np.isfinite(v):
-            continue
-        col = GREEN if v >= 55 else RED if v <= 45 else YELLOW
-        hist.append({"time": _t(ix), "value": round(float(v), 2), "color": col})
-    bline = [{"time": _t(ix), "value": round(_f(banker.get(ix)), 2)}
-             for ix in idx if banker.get(ix) is not None and np.isfinite(banker.get(ix))]
+            hist.append({"time": t})  # whitespace — preserves time-axis alignment
+        else:
+            col = GREEN if v >= 55 else RED if v <= 45 else YELLOW
+            hist.append({"time": t, "value": round(float(v), 2), "color": col})
+        b = banker.get(ix)
+        if b is None or not np.isfinite(b):
+            bline.append({"time": t})  # whitespace
+        else:
+            bline.append({"time": t, "value": round(float(b), 2)})
 
     bv = round(_f(banker.iloc[-1]), 1); hv = round(_f(hot.iloc[-1]), 1)
     state = "Accumulation" if hv >= 55 else "Distribution" if hv <= 45 else "Neutral"
     return {"available": True, "ticker": ticker, "tf": meta.get("tf"), "tier": tier,
             "hist": hist, "banker_line": bline,
             "current": {"banker": bv, "hot": hv, "state": state}}
+
+
+# ─────────────────────── REAL institutional footprint ───────────────────────
+# Honest counterweight to the MCDX panel: MCDX is momentum math wearing a
+# "banker/smart money" costume (no order-flow input exists for ANY retail feed).
+# This strip surfaces the institutional footprints that are GENUINELY observable
+# from the existing stack (EODHD + SEC) — no new data license:
+#   1. Accumulation (OBV + A/D line)  — the LEGITIMATE volume-accumulation signal
+#      MCDX only pretends to be. Computed live from bars. Real, same-day.
+#   2. Insider Form 4 (SEC)           — named insiders, real $ buy/sell, ~2d lag.
+#   3. Institutional 13F (EODHD)      — real named holders + QoQ share change,
+#      45-day lag (the structural latency of 13F — disclosed, not hidden).
+# Every block degrades to {"available": False} honestly when its feed is absent.
+def _obv_ad_accumulation(df: pd.DataFrame, lookback: int = 40) -> dict:
+    """OBV + Accumulation/Distribution line trend over the last `lookback` bars.
+    Returns slope-based state — the real volume-accumulation read (vs MCDX's fake)."""
+    d = _lc(df)
+    c, h, l, v = d["close"], d["high"], d["low"], d["volume"]
+    obv = (np.sign(c.diff().fillna(0.0)) * v).cumsum()
+    rng = (h - l).replace(0, np.nan)
+    mfm = (((c - l) - (h - c)) / rng).fillna(0.0)   # money-flow multiplier
+    ad = (mfm * v).cumsum()
+
+    def _slope_pct(s):
+        s = s.dropna().tail(lookback)
+        if len(s) < 5:
+            return None
+        x = np.arange(len(s), dtype=float)
+        m = np.polyfit(x, s.values.astype(float), 1)[0]   # units/bar
+        denom = abs(s.values).mean() or 1.0
+        return float(m * len(s) / denom * 100.0)          # % rise across the window
+
+    obv_t = _slope_pct(obv); ad_t = _slope_pct(ad)
+    votes = [t for t in (obv_t, ad_t) if t is not None]
+    if not votes:
+        return {"available": False}
+    avg = sum(votes) / len(votes)
+    state = "Accumulation" if avg > 4 else "Distribution" if avg < -4 else "Neutral"
+    return {"available": True, "state": state,
+            "obv_trend_pct": None if obv_t is None else round(obv_t, 1),
+            "ad_trend_pct":  None if ad_t  is None else round(ad_t, 1),
+            "lookback": lookback}
+
+
+def _insider_footprint(ticker: str, days: int = 90) -> dict:
+    """Real SEC Form 4 net buy/sell over `days`. Filters to dollar-valued insider
+    transactions (drops the zero-value / non-Form-4 noise EODHD interleaves)."""
+    try:
+        import eodhd_client as ec
+        import datetime as _dt
+        end = _dt.date.today(); start = end - _dt.timedelta(days=days)
+        rows = ec.insider_transactions(ticker.upper(), from_date=start.isoformat(),
+                                       to_date=end.isoformat()) or []
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+    buy_val = sell_val = 0.0; buys = sells = 0; top = []
+    for r in rows:
+        code = str(r.get("transactionCode") or r.get("type") or "").upper()
+        shares = _f(r.get("transactionAmount") or r.get("shares"))
+        price = _f(r.get("transactionPrice") or r.get("price"))
+        val = shares * price
+        if val <= 0:
+            continue                       # skip zero-value rows (data noise)
+        if code.startswith("P"):
+            buy_val += val; buys += 1; sgn = 1
+        elif code.startswith("S"):
+            sell_val += val; sells += 1; sgn = -1
+        else:
+            continue
+        top.append({"date": r.get("transactionDate") or r.get("date") or "",
+                    "name": r.get("ownerName") or r.get("name") or "",
+                    "side": "BUY" if sgn > 0 else "SELL",
+                    "value": round(val, 0)})
+    if buys == 0 and sells == 0:
+        return {"available": False, "window_days": days}
+    top.sort(key=lambda x: x["value"], reverse=True)
+    return {"available": True, "window_days": days,
+            "net_value": round(buy_val - sell_val, 0),
+            "buy_value": round(buy_val, 0), "sell_value": round(sell_val, 0),
+            "buys": buys, "sells": sells, "top": top[:5]}
+
+
+def _institutional_footprint(ticker: str) -> dict:
+    """Real 13F institutional ownership from EODHD: total %, named top holders,
+    net QoQ share change (45-day structural lag — disclosed)."""
+    try:
+        import eodhd_client as ec
+        f = ec.fundamentals(ticker.upper()) or {}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+    ss = f.get("SharesStats") or {}
+    holders = list(((f.get("Holders") or {}).get("Institutions") or {}).values())
+    if not holders and ss.get("PercentInstitutions") is None:
+        return {"available": False}
+    net_change = sum(_f(h.get("change")) for h in holders)
+    holders_sorted = sorted(holders, key=lambda h: _f(h.get("totalShares")), reverse=True)
+    top = [{"name": h.get("name"), "pct": round(_f(h.get("totalShares")), 2),
+            "change_p": round(_f(h.get("change_p")), 2), "date": h.get("date")}
+           for h in holders_sorted[:5]]
+    as_of = holders_sorted[0].get("date") if holders_sorted else None
+    return {"available": True,
+            "own_pct": _f(ss.get("PercentInstitutions")) or None,
+            "insider_own_pct": _f(ss.get("PercentInsiders")) or None,
+            "n_holders": len(holders), "net_share_change": round(net_change, 0),
+            "net_state": "Adding" if net_change > 0 else "Trimming" if net_change < 0 else "Flat",
+            "top": top, "as_of": as_of}
+
+
+def footprint(ticker: str, mode: str = "SWING") -> dict:
+    """REAL institutional-footprint strip (accumulation + insider + 13F).
+    The honest, attributable counterpart to the interpretive MCDX panel."""
+    from pattern_data import get_bars, norm_mode
+    ticker = ticker.upper()
+    df, tier, meta = get_bars(ticker, norm_mode(mode), enriched=False)
+    accumulation = {"available": False}
+    if df is not None and len(df) >= 20:
+        try:
+            accumulation = _obv_ad_accumulation(df)
+        except Exception as e:
+            accumulation = {"available": False, "error": str(e)}
+    return {"ticker": ticker, "mode": norm_mode(mode), "tier": tier,
+            "tf": meta.get("tf") if isinstance(meta, dict) else None,
+            "accumulation": accumulation,
+            "insider": _insider_footprint(ticker),
+            "institutional": _institutional_footprint(ticker)}
 
 
 # ───────────────────────── real-data wrapper ─────────────────────────

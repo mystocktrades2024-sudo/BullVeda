@@ -277,6 +277,7 @@ function DetailLens({ lensId, ticker, mode, sizeCat, headerStyle, kpiStyle, hero
   if (lensId === "portfolio") return <LensPortfolio {...props} />;
   if (lensId === "time" && window.LensTime) return <window.LensTime {...props} />;
   if (lensId === "tv" && window.LensTV) return <window.LensTV {...props} />;
+  if (lensId === "bullalgo" && window.LensBullAlgo) return <window.LensBullAlgo {...props} />;
   // AI Edge lens = real per-ticker model forecast (LensML, /api/ml). The
   // synthetic AIAnalystView (3-head vote + historical analogs — constructs the
   // real model doesn't emit) was removed here 2026-06-07; it survives only on

@@ -170,7 +170,7 @@ const NAV = [
   ]},
 ];
 
-// The 14 lenses
+// The lenses (TradingView / Portfolio / Risk removed 2026-06-15)
 const LENSES = [
   { id: "overview",    label: "Overview · Bias",    kbd: "1", q: "Should I look closer?",         accent: "copper", verdict: "gn"  },
   { id: "plan",        label: "Plan · Ticket",      kbd: "2", q: "Execution-ready ticket",         accent: "copper", verdict: "gn"  },
@@ -180,13 +180,11 @@ const LENSES = [
   { id: "smc",         label: "SMC",                kbd: "5", q: "Smart Money Concepts",           accent: "cy",     verdict: "gn"  },
   { id: "investment",  label: "Investment · Value", kbd: "V", q: "Intrinsic value & quality",      accent: "blue",   verdict: "amb" },
   { id: "earnings",    label: "Earnings",           kbd: "E", q: "ER countdown & implied move",    accent: "amb",    verdict: "amb" },
-  { id: "risk",        label: "Risk",               kbd: "R", q: "VaR · Kelly · drawdown · stress",  accent: "rd",     verdict: "amb" },
   { id: "options",     label: "Options",            kbd: "O", q: "IV · flow · payoff",             accent: "amb",    verdict: "amb" },
   { id: "tape",        label: "Tape · Flow",        kbd: "I", q: "News + insider + 13F",           accent: "violet", verdict: "gn"  },
-  { id: "portfolio",   label: "Portfolio · Book",   kbd: "P", q: "Does this fit my book?",         accent: "copper", verdict: "gn"  },
   { id: "mledge",      label: "AI Edge",            kbd: "M", q: "3-headed model forecast",        accent: "violet", verdict: "gn"  },
   { id: "time",        label: "Time Anatomy",       kbd: "8", q: "When does this resolve? (T1/T2)", accent: "copper", verdict: "gn"  },
-  { id: "tv",          label: "TradingView",        kbd: "9", q: "Live chart + push levels to desktop", accent: "blue",  verdict: "gn"  },
+  { id: "bullalgo",    label: "BullAlgo",           kbd: "9", q: "In-house LuxAlgo: signals + money flow", accent: "violet", verdict: "gn" },
 ];
 
 // Watchlist rows (mock)

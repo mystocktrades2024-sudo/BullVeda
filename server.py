@@ -10839,6 +10839,26 @@ async def bullalgo_mcdx_api(ticker: str, tf: str = "SWING"):
     return out
 
 
+@app.get("/api/bullalgo/{ticker}/footprint")
+async def bullalgo_footprint_api(ticker: str, mode: str = "SWING"):
+    """REAL institutional footprint — accumulation (OBV/AD) + insider Form 4 +
+    13F institutional. The honest, attributable counterpart to MCDX (which is
+    momentum math, not order flow). Sources: EODHD + SEC — no new data license."""
+    import time as _t
+    ticker = ticker.upper().strip(); mode = (mode or "SWING").upper().strip()
+    key = f"footprint|{ticker}|{mode}"; now = _t.time()
+    hit = _BULLALGO_CACHE.get(key)
+    if hit and (now - hit[0]) < _BULLALGO_TTL:
+        return hit[1]
+    try:
+        import bullalgo
+        out = bullalgo.footprint(ticker, mode)
+    except Exception as e:
+        return {"available": False, "ticker": ticker, "mode": mode, "message": f"footprint error: {e}"}
+    _BULLALGO_CACHE[key] = (now, out)
+    return out
+
+
 @app.get("/api/bullalgo/{ticker}/pac-chart")
 async def bullalgo_pac_chart_api(ticker: str, tf: str = "SWING"):
     """BullAlgo Price Action chart — candles + order-block boxes + structure

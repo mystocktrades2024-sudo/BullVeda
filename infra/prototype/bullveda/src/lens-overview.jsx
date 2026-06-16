@@ -343,7 +343,7 @@ function SurfacedBy({ ticker }) {
 }
 
 // ─── SetupChart — compact TradingView candles w/ plan price-lines on the axis ───
-function SetupChart({ L, sym, view = "full", sync = null }) {
+function SetupChart({ L, sym, view = "full", sync = null, mode = "SWING", chartType = "candles", drawTool = null }) {
   const wrap = React.useRef(null);
   const refs = React.useRef({});
 
@@ -354,20 +354,17 @@ function SetupChart({ L, sym, view = "full", sync = null }) {
     const BV = window.__BV;
     if (!BV || !BV.get || !sym) { setReal(null); return; }
     let alive = true;
-    BV.get("/api/ohlcv/" + encodeURIComponent(sym)).then(res => {
+    // mode-aware bars: SWING=daily / POSITION=weekly / INVESTMENT=monthly (pattern_data)
+    BV.get("/api/bullalgo/" + encodeURIComponent(sym) + "/chart?tf=" + encodeURIComponent(mode)).then(res => {
       if (!alive) return;
-      const candles = (res && res.candles) || [];
-      if (candles.length < 5) { setReal(null); return; }
-      const volArr = (res && res.volume) || [];
-      const bars = candles.map((c, i) => {
-        const vv = volArr[i]; const v = (vv && typeof vv === "object") ? (vv.value || 0) : (typeof vv === "number" ? vv : 0);
-        return { time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, value: v };
-      });
+      const bs = (res && res.bars) || [];
+      if (bs.length < 5) { setReal(null); return; }
+      const bars = bs.map(b => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close, value: b.value || 0 }));
       const ema = per => { const k = 2 / (per + 1); let pr = bars[0].close; return bars.map((b, i) => { pr = i === 0 ? b.close : b.close * k + pr * (1 - k); return { time: b.time, value: +pr.toFixed(2) }; }); };
       setReal({ bars, e9: ema(9), e21: ema(21) });
     }).catch(() => { if (alive) setReal(null); });
     return () => { alive = false; };
-  }, [sym]);
+  }, [sym, mode]);
   // deterministic seeded series — offline fallback (base → VCP contraction → live)
   const seeded = React.useMemo(() => {
     const str = sym || "ARCM"; let s = 0;
@@ -423,11 +420,15 @@ function SetupChart({ L, sym, view = "full", sync = null }) {
       timeScale: { visible: true, rightOffset: 2, borderColor: "rgba(255,255,255,0.10)" },
       handleScroll: true, handleScale: true,   // TV-style pan + zoom
     });
-    const candle = chart.addCandlestickSeries({
+    const _asip = () => { const rg = refs.current.range; return rg ? { priceRange: { minValue: rg.min, maxValue: rg.max } } : null; };
+    let candle;
+    if (chartType === "line") candle = chart.addLineSeries({ color: "#5dd6d6", lineWidth: 2, priceLineVisible: true, priceLineColor: "rgba(217,119,87,0.85)", lastValueVisible: true, autoscaleInfoProvider: _asip });
+    else if (chartType === "area") candle = chart.addAreaSeries({ lineColor: "#34d399", topColor: "rgba(52,211,153,0.22)", bottomColor: "rgba(52,211,153,0)", lineWidth: 2, priceLineVisible: true, priceLineColor: "rgba(217,119,87,0.85)", lastValueVisible: true, autoscaleInfoProvider: _asip });
+    else candle = chart.addCandlestickSeries({
       upColor: "#34d399", downColor: "#f87171", borderUpColor: "#34d399", borderDownColor: "#f87171",
       wickUpColor: "rgba(52,211,153,0.7)", wickDownColor: "rgba(248,113,113,0.7)",
       priceLineVisible: true, priceLineColor: "rgba(217,119,87,0.85)", priceLineStyle: 0, priceLineWidth: 1, lastValueVisible: true,
-      autoscaleInfoProvider: () => { const rg = refs.current.range; return rg ? { priceRange: { minValue: rg.min, maxValue: rg.max } } : null; },
+      autoscaleInfoProvider: _asip,
     });
     const vol = chart.addHistogramSeries({ priceFormat: { type: "volume" }, priceScaleId: "vol" });
     chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.86, bottom: 0 } });
@@ -446,10 +447,31 @@ function SetupChart({ L, sym, view = "full", sync = null }) {
     chart.subscribeCrosshairMove(prm => {
       if (!prm || !prm.time || !prm.seriesData) { legend.style.opacity = 0; return; }
       const dd = prm.seriesData.get(candle); if (!dd) { legend.style.opacity = 0; return; }
-      const o = dd.open, h = dd.high, l = dd.low, c = dd.close;
-      const up = c >= o, col = up ? "var(--gn)" : "var(--rd)";
       legend.style.opacity = 1;
-      legend.innerHTML = `<b style="color:${col}">${sym || ""}</b> &nbsp;O <b>${(+o).toFixed(2)}</b> H <b>${(+h).toFixed(2)}</b> L <b>${(+l).toFixed(2)}</b> C <b style="color:${col}">${(+c).toFixed(2)}</b>`;
+      if (dd.open != null) {   // candlestick
+        const o = dd.open, h = dd.high, l = dd.low, c = dd.close, up = c >= o, col = up ? "var(--gn)" : "var(--rd)";
+        legend.innerHTML = `<b style="color:${col}">${sym || ""}</b> &nbsp;O <b>${(+o).toFixed(2)}</b> H <b>${(+h).toFixed(2)}</b> L <b>${(+l).toFixed(2)}</b> C <b style="color:${col}">${(+c).toFixed(2)}</b>`;
+      } else {                 // line / area
+        legend.innerHTML = `<b style="color:var(--cy)">${sym || ""}</b> &nbsp;<b>${(+dd.value).toFixed(2)}</b>`;
+      }
+    });
+    // click-to-draw (trendline / rectangle), anchored in time+price → auto-adjusts on expand
+    refs.current.drawn = []; refs.current.drawPts = [];
+    chart.subscribeClick(prm => {
+      const tool = refs.current.drawTool; if (!tool || !prm.point || prm.time == null) return;
+      const price = candle.coordinateToPrice(prm.point.y); if (price == null) return;
+      refs.current.drawPts.push({ time: prm.time, value: +(+price).toFixed(2) });
+      if (refs.current.drawPts.length < 2) return;
+      const pts = refs.current.drawPts.slice().sort((a, b) => a.time - b.time);
+      if (tool === "trend") {
+        const ls = chart.addLineSeries({ color: "#e8c170", lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+        ls.setData(pts); refs.current.drawn.push({ kind: "series", s: ls });
+      } else if (tool === "rect") {
+        const top = Math.max(pts[0].value, pts[1].value), bot = Math.min(pts[0].value, pts[1].value);
+        const prim = _obBoxPrim([{ time: pts[0].time, time_right: pts[1].time, top, bot, kind: "bull", vol_label: "" }]);
+        candle.attachPrimitive(prim); refs.current.drawn.push({ kind: "prim", s: prim });
+      }
+      refs.current.drawPts = [];
     });
     // register as the MAIN time-scale for the MCDX pane below to follow (bidirectional)
     if (sync) {
@@ -506,8 +528,19 @@ function SetupChart({ L, sym, view = "full", sync = null }) {
       if (!cv || Math.abs(cv.width - w) > 6) fit();
     }, 350);
     refs.current.heal = heal;
-    return () => { try { clearInterval(heal); ro.disconnect(); chart.remove(); } catch (e) {} refs.current = {}; };
-  }, []);
+    return () => { try { clearInterval(heal); ro.disconnect(); chart.remove(); } catch (e) {} if (sync) sync.current.main = null; refs.current = {}; };
+  }, [chartType]);   // recreate the price series when the chart type changes
+
+  // keep the live draw tool + clear drawings
+  React.useEffect(() => {
+    const r = refs.current; if (!r) return;
+    r.drawTool = drawTool === "clear" ? null : drawTool;
+    if (drawTool === "clear" && r.chart) {
+      (r.drawn || []).forEach(d => { try { d.kind === "series" ? r.chart.removeSeries(d.s) : (r.candle && r.candle.detachPrimitive && r.candle.detachPrimitive(d.s)); } catch (e) {} });
+      r.drawn = [];
+    }
+    r.drawPts = [];
+  }, [drawTool]);
 
   // feed data + zones + bold level lines + EMAs
   React.useEffect(() => {
@@ -547,9 +580,10 @@ function SetupChart({ L, sym, view = "full", sync = null }) {
         mk(L.stop, "#f87171", `STOP ${L.stop.toFixed(2)}`),
       ];
     }
-    r.candle.setData(d.bars);
+    const priceData = chartType === "candles" ? d.bars : d.bars.map(b => ({ time: b.time, value: b.close }));
+    r.candle.setData(priceData);
     r.vol.setData(d.bars.map(b => ({ time: b.time, value: b.value, color: b.close >= b.open ? "rgba(52,211,153,0.30)" : "rgba(248,113,113,0.30)" })));
-    r.replay = () => { try { r.candle.setData(d.bars); } catch (e) {} };
+    r.replay = () => { try { r.candle.setData(priceData); } catch (e) {} };
     r.ov.forEach(o => r.chart.removeSeries(o)); r.ov = [];
     const addLine = (data, color) => { const ls = r.chart.addLineSeries({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }); ls.setData(data); r.ov.push(ls); };
     addLine(d.e9, "rgba(93,214,214,0.55)");
@@ -557,7 +591,7 @@ function SetupChart({ L, sym, view = "full", sync = null }) {
     r.chart.timeScale().fitContent();
     requestAnimationFrame(() => { (r.fit || r.draw) && (r.fit || r.draw)(); });
     setTimeout(() => { (r.fit || r.draw) && (r.fit || r.draw)(); }, 60);
-  }, [d, L.pivot, L.stop, L.t1, L.t2, view]);
+  }, [d, L.pivot, L.stop, L.t1, L.t2, view, chartType]);
 
   return <div ref={wrap} className="dh-lw" />;
 }
@@ -567,40 +601,24 @@ window.SetupChart = SetupChart;
 //     SAME /api/ohlcv daily bars as SetupChart so the x-axis aligns exactly.
 //     Honest: stochastic-RSV momentum proxy (green=inflow / red=outflow), NOT
 //     real order flow. Banker line = slow smoothing. ───
-function OverviewMcdx({ sym, sync = null }) {
+function OverviewMcdx({ sym, sync = null, mode = "SWING" }) {
   const wrap = React.useRef(null);
   const refs = React.useRef({});
-  const [bars, setBars] = React.useState(null);
+  const [data, setData] = React.useState(null);
   React.useEffect(() => {
     const BV = window.__BV;
-    if (!BV || !BV.get || !sym) { setBars(null); return; }
+    if (!BV || !BV.get || !sym) { setData(null); return; }
     let alive = true;
-    BV.get("/api/ohlcv/" + encodeURIComponent(sym)).then(res => {
+    // mode-aware MCDX (same pattern_data bars as the setup chart above → aligned)
+    BV.get("/api/bullalgo/" + encodeURIComponent(sym) + "/mcdx?tf=" + encodeURIComponent(mode)).then(r => {
       if (!alive) return;
-      const c = (res && res.candles) || [];
-      if (c.length < 40) { setBars(null); return; }
-      setBars(c.map(x => ({ time: x.time, high: x.high, low: x.low, close: x.close })));
-    }).catch(() => { if (alive) setBars(null); });
+      if (!r || !r.available || !r.hist) { setData(null); return; }
+      const st = (r.current && r.current.state) || "";
+      const state = /accum/i.test(st) ? "inflow" : /distrib/i.test(st) ? "outflow" : "neutral";
+      setData({ hist: r.hist, bline: r.banker_line || [], state });
+    }).catch(() => { if (alive) setData(null); });
     return () => { alive = false; };
-  }, [sym]);
-  const data = React.useMemo(() => {
-    if (!bars || bars.length < 40) return null;
-    const N = 34;
-    const rsv = bars.map((b, i) => {
-      const w = bars.slice(Math.max(0, i - N + 1), i + 1);
-      let lo = Infinity, hi = -Infinity;
-      for (const x of w) { if (x.low < lo) lo = x.low; if (x.high > hi) hi = x.high; }
-      const r = hi > lo ? (b.close - lo) / (hi - lo) * 100 : 50;
-      return Math.max(0, Math.min(100, r));
-    });
-    const ema = (a, p) => { const k = 2 / (p + 1); let pr = a[0]; return a.map((v, i) => { pr = i === 0 ? v : v * k + pr * (1 - k); return pr; }); };
-    const hot = ema(rsv, 5), bk = ema(rsv, 13);
-    return {
-      hist: bars.map((b, i) => ({ time: b.time, value: +hot[i].toFixed(2), color: hot[i] >= 55 ? "#16c784" : hot[i] <= 45 ? "#f87171" : "#e8c170" })),
-      bline: bars.map((b, i) => ({ time: b.time, value: +bk[i].toFixed(2) })),
-      state: hot[hot.length - 1] >= 55 ? "inflow" : hot[hot.length - 1] <= 45 ? "outflow" : "neutral",
-    };
-  }, [bars]);
+  }, [sym, mode]);
   React.useEffect(() => {
     if (!wrap.current || !window.LightweightCharts || !data) return;
     const LWC = window.LightweightCharts;
@@ -672,18 +690,18 @@ function _obBoxPrim(boxes) {
 
 // ─── PriceActionChart — order blocks + HH/HL/LH/LL + BOS/CHoCH + premium/discount.
 //     Reads /api/bullalgo/{sym}/pac-chart (SWING). Interactive + sync-aware. ───
-function PriceActionChart({ sym, sync = null }) {
+function PriceActionChart({ sym, sync = null, mode = "SWING" }) {
   const wrap = React.useRef(null);
   const refs = React.useRef({});
   const [d, setD] = React.useState(null);
   React.useEffect(() => {
     const BV = window.__BV; if (!BV || !BV.get || !sym) { setD(null); return; }
     let alive = true;
-    BV.get("/api/bullalgo/" + encodeURIComponent(sym) + "/pac-chart?tf=SWING").then(r => {
+    BV.get("/api/bullalgo/" + encodeURIComponent(sym) + "/pac-chart?tf=" + encodeURIComponent(mode)).then(r => {
       if (!alive) return; setD(r && r.available ? r : null);
     }).catch(() => { if (alive) setD(null); });
     return () => { alive = false; };
-  }, [sym]);
+  }, [sym, mode]);
   React.useEffect(() => {
     if (!wrap.current || !window.LightweightCharts || !d) return;
     const LWC = window.LightweightCharts;
@@ -753,6 +771,8 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
   const pickChartView = v => { setChartView(v); try { localStorage.setItem("dh-chart-view", v); } catch (e) {} };
   const [chartExpanded, setChartExpanded] = React.useState(false);
   const [paMode, setPaMode] = React.useState(false);   // Setup ↔ Price Action
+  const [chartType, setChartType] = React.useState("candles");   // candles | line | area
+  const [drawTool, setDrawTool] = React.useState(null);          // null | trend | rect | clear
   const chartSync = React.useRef({ main: null, mcdx: null, lock: false });
   // ── live actions (real): watchlist toggle + route to Automated Trade / Alerts ──
   const [wlOn, setWlOn] = React.useState(() => !!(window.WatchStore && window.WatchStore.has(ticker.symbol)));
@@ -958,16 +978,22 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
                 <button className={paMode ? "is-on" : ""} onClick={() => setPaMode(true)} title="Price Action — order blocks, structure, premium/discount">Price Action</button>
               </div>
               {!paMode && <div className="dh-chart-toggle mono">
-                <button className={chartView === "action" ? "is-on" : ""} onClick={() => pickChartView("action")} title="Tight frame — bigger candles">Action</button>
-                <button className={chartView === "full" ? "is-on" : ""} onClick={() => pickChartView("full")} title="Show the full trade — targets on chart">Full trade</button>
+                <button className={chartType === "candles" ? "is-on" : ""} onClick={() => setChartType("candles")} title="Candles">▮</button>
+                <button className={chartType === "line" ? "is-on" : ""} onClick={() => setChartType("line")} title="Line">⟋</button>
+                <button className={chartType === "area" ? "is-on" : ""} onClick={() => setChartType("area")} title="Area">◣</button>
+              </div>}
+              {!paMode && <div className="dh-chart-toggle mono">
+                <button className={drawTool === "trend" ? "is-on" : ""} onClick={() => setDrawTool(drawTool === "trend" ? null : "trend")} title="Draw trendline (click 2 points)">✎</button>
+                <button className={drawTool === "rect" ? "is-on" : ""} onClick={() => setDrawTool(drawTool === "rect" ? null : "rect")} title="Draw rectangle (click 2 corners)">▭</button>
+                <button onClick={() => { setDrawTool("clear"); setTimeout(() => setDrawTool(null), 30); }} title="Clear drawings">✕</button>
               </div>}
               <button className={"dh-expand-btn" + (chartExpanded ? " is-on" : "")} onClick={() => setChartExpanded(e => !e)} title="Expand chart — pan/zoom, everything auto-adjusts">{chartExpanded ? "⤡ Close" : "⤢ Expand"}</button>
             </div>
           </div>
           {paMode
-            ? <PriceActionChart sym={ticker.symbol} sync={chartSync} />
-            : <SetupChart L={L} sym={ticker.symbol} view={chartView} sync={chartSync} />}
-          <OverviewMcdx sym={ticker.symbol} sync={chartSync} />
+            ? <PriceActionChart sym={ticker.symbol} sync={chartSync} mode={mode} />
+            : <SetupChart L={L} sym={ticker.symbol} view={chartView} sync={chartSync} mode={mode} chartType={chartType} drawTool={drawTool} />}
+          <OverviewMcdx sym={ticker.symbol} sync={chartSync} mode={mode} />
         </div>
       </div>
 
