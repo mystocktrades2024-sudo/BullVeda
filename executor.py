@@ -197,6 +197,12 @@ def build_order_plan(picks: list[dict], equity: float, cash: float, cfg: dict,
     # Missing key → default 100 (backward-compat no-op).
     _ms = market_snapshot or {}
     max_size_pct = float(_ms.get("max_size_pct", 100))
+    # Executor-only share-price ceiling (2026-06-16): "trade only stocks <$150".
+    # Restricts the paper auto-buy to sub-cap names for share-granularity on a
+    # $10k account. This is EXECUTOR-scoped — it does NOT touch filters.max_price
+    # (universe-wide, $1000, deliberately raised for mega-cap SIGNALS which stay
+    # universal for all users). 0 / null disables the cap.
+    max_entry_price = float(cfg.get("executor", {}).get("max_entry_price", 0) or 0)
     # Paper-trading hard cap: remaining trade slots for today.
     # BUY-only for the 60-day paper window; SHORTs documented to re-enable later.
     already_today = daily_trades_taken_today()
@@ -256,6 +262,11 @@ def build_order_plan(picks: list[dict], equity: float, cash: float, cfg: dict,
             continue
         if stop >= entry:
             plan.append({"ticker": ticker, "action": "skip", "reason": f"stop {stop} >= entry {entry} (long only v1)"})
+            continue
+        if max_entry_price and entry > max_entry_price:
+            plan.append({"ticker": ticker, "action": "skip",
+                         "reason": f"entry ${entry:.2f} > ${max_entry_price:.0f} executor price cap"})
+            skipped += 1
             continue
         shares, why = _pick_size_shares(pk, equity, pct, cash, max_size_pct=max_size_pct)
         if shares <= 0:
