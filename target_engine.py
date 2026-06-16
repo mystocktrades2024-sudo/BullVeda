@@ -44,6 +44,56 @@ CACHE_TTL_SECONDS = 12 * 60 * 60  # 12 hours
 # older _schema is regenerated on next analyze_trade_cached call.
 CACHE_SCHEMA_VERSION = 2
 
+# ── Session-date cache invalidation (added 2026-06-15) ──────────────────────
+# Structural targets are a pure function of COMPLETED daily bars — they do not
+# change until a new session closes. So the correct freshness primitive is "was
+# this built from the latest completed market session?", NOT a wall-clock TTL.
+# A clock TTL either expires mid-session (wasteful recompute on unchanged data,
+# the 15:00–19:30 PT dead-zone) or serves stale post-close. Session-date keying
+# gives intraday/after-hours hits = 0 recompute = 0 EODHD, and recomputes
+# exactly once per ticker when the bar actually rolls (the 19:30 eod-targets
+# precompute already fires post-close to flip the whole universe).
+#
+# A trading day D is treated as the "latest completed session" only at/after
+# SESSION_ROLL_HOUR_PT on day D — late enough that EODHD has reliably posted
+# D's EOD bar (and after the 19:30 eod-targets precompute), so the clock-derived
+# expectation never outruns data availability. Time is Pacific (this box runs
+# Pacific per CLAUDE.md; datetime.now() is local).
+SESSION_ROLL_HOUR_PT = 20  # 8pm PT — today becomes the reference session after this
+BACKSTOP_TTL_SECONDS = 36 * 60 * 60  # hard ceiling regardless of session (stuck-clock / lapsed-holiday-list guard)
+
+
+def _is_market_holiday(d) -> bool:
+    """Best-effort US full-close check · reuses seasonality._MAJOR_HOLIDAYS.
+    Never raises (a missing/old holiday list just degrades to weekend-only)."""
+    try:
+        import seasonality as _seas
+        return bool(_seas.is_market_holiday(d))
+    except Exception:
+        return False
+
+
+def _latest_completed_session(now: "datetime | None" = None):
+    """Date of the last COMPLETED US market session (rolls back weekends + holidays).
+
+    Before SESSION_ROLL_HOUR_PT the reference is the prior trading day (today's
+    EOD bar not yet reliably posted); at/after it, today (if a trading day).
+    Returns a datetime.date.
+    """
+    now = now or datetime.now()
+    d = now.date()
+    if now.hour < SESSION_ROLL_HOUR_PT:
+        d = d - timedelta(days=1)
+    # Roll back over Sat/Sun + holidays to the last actual trading day
+    while d.weekday() >= 5 or _is_market_holiday(d):
+        d = d - timedelta(days=1)
+    return d
+
+
+def _current_session_str() -> str:
+    """ISO date of the latest completed session — the cache validity key."""
+    return _latest_completed_session().isoformat()
+
 # ════════════════════════════════════════════════════════════════════════
 # CONFIG · per-mode parameters + source weights
 # ════════════════════════════════════════════════════════════════════════
@@ -1762,7 +1812,7 @@ def to_json(analysis: TradeAnalysis) -> dict:
 
 
 # ════════════════════════════════════════════════════════════════════════
-# CACHE LAYER · 12h TTL JSON file per ticker × mode
+# CACHE LAYER · session-date-keyed JSON file per ticker × mode (was 12h TTL)
 # ════════════════════════════════════════════════════════════════════════
 def _cache_path(ticker: str, mode: str) -> Path:
     """cache/target_engine/{TICKER}_{MODE}.json"""
@@ -1771,25 +1821,37 @@ def _cache_path(ticker: str, mode: str) -> Path:
 
 
 def _cache_is_fresh(path: Path, ttl: int = CACHE_TTL_SECONDS) -> bool:
-    """File exists AND age < ttl seconds AND schema matches current version.
+    """Session-date freshness (added 2026-06-15) — replaces the wall-clock TTL.
 
-    A pre-Phase-1 cache file (no `_schema` key, or an older version) is reported
-    stale so analyze_trade_cached regenerates it with t3 + new sources +
-    reachability. This makes the whole cache dir self-invalidate on a schema bump
-    without a manual delete.
+    A cached file is fresh iff it was built from the latest COMPLETED market
+    session (`session_date` == today's reference session). Served regardless of
+    age within that session → intraday/after-hours tab opens are always hits
+    (0 recompute, 0 EODHD). It recomputes only when a new daily bar has closed.
+
+    Layered gates (all must pass):
+      1. file exists + readable + schema matches current version
+      2. age < BACKSTOP_TTL_SECONDS — a hard ceiling so a stuck clock or lapsed
+         holiday list can never serve an absurdly old file forever
+      3. session_date == current session  ·  OR, for legacy files written before
+         the session stamp existed, fall back to the old `ttl` age rule until the
+         nightly precompute rewrites them (graceful migration — no recompute storm)
     """
     if not path.exists():
         return False
-    age = time.time() - path.stat().st_mtime
-    if age >= ttl:
-        return False
-    # Schema-version gate
     cached = _cache_read(path)
     if cached is None:
         return False
     if cached.get("_schema") != CACHE_SCHEMA_VERSION:
         return False
-    return True
+    age = time.time() - path.stat().st_mtime
+    if age >= BACKSTOP_TTL_SECONDS:
+        return False
+    sd = cached.get("session_date")
+    if sd is None:
+        # Legacy file (pre-session-stamp): honor the old 12h wall-clock TTL so it
+        # keeps serving until the nightly job rewrites it with a session_date.
+        return age < ttl
+    return sd == _current_session_str()
 
 
 def _cache_read(path: Path) -> Optional[dict]:
@@ -1802,9 +1864,11 @@ def _cache_read(path: Path) -> Optional[dict]:
 
 
 def _cache_write(path: Path, payload: dict) -> None:
-    """Atomic write via temp file + rename. Stamps current schema version."""
+    """Atomic write via temp file + rename. Stamps schema version + session_date
+    (the latest-completed-session key that `_cache_is_fresh` validates against)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {**payload, "_schema": CACHE_SCHEMA_VERSION}
+    payload = {**payload, "_schema": CACHE_SCHEMA_VERSION,
+               "session_date": _current_session_str()}
     tmp = path.with_suffix(".tmp")
     with open(tmp, "w") as f:
         json.dump(payload, f, indent=2, default=str)
@@ -1817,7 +1881,9 @@ def analyze_trade_cached(ticker: str, direction: str = "long", mode: str = "posi
                          df_override: Optional["pd.DataFrame"] = None) -> dict:
     """Cached wrapper around analyze_trade · returns dict (JSON-ready).
 
-    - Reads from cache/target_engine/{TICKER}_{MODE}.json if file is < 12h old
+    - Reads from cache/target_engine/{TICKER}_{MODE}.json if it was built from
+      the latest completed market session (see _cache_is_fresh — session-date
+      keyed, not wall-clock TTL)
     - Otherwise runs the engine, writes to cache, returns
     - force_refresh=True bypasses cache entirely
     - df_override: when set, bypasses cache (point-in-time backtest mode) — the
@@ -1830,7 +1896,9 @@ def analyze_trade_cached(ticker: str, direction: str = "long", mode: str = "posi
     if use_cache and not force_refresh and _cache_is_fresh(path):
         cached = _cache_read(path)
         if cached is not None:
-            cached["_cache"] = {"status": "hit", "age_sec": int(time.time() - path.stat().st_mtime)}
+            cached["_cache"] = {"status": "hit",
+                                "age_sec": int(time.time() - path.stat().st_mtime),
+                                "session_date": cached.get("session_date")}
             return cached
 
     # Cache miss (or backtest mode) · run engine

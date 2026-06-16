@@ -265,7 +265,7 @@ Use `ls` / `find` to discover files. Key entry points:
 - `config/config.json` — main config; variants in `config/variants/`
 - `data/swingtrade.db` — SQLite PRIMARY (18 tables); `data/signal_log.json` — trade journal
 - `cache/` — regenerable (gitignored); `cache/last_bundle.json` = latest scan output
-- `cache/target_engine/` — structural-target JSON cache, 12h TTL, one file per `{TICKER}_{MODE}` (regenerable)
+- `cache/target_engine/` — structural-target JSON cache, **session-date keyed** (fresh while built from the latest completed session; 36h backstop), one file per `{TICKER}_{MODE}` (regenerable). Was 12h wall-clock TTL until 2026-06-15 — switched to session-date keying so intraday/after-hours tab opens are always cache hits (0 recompute, 0 EODHD) and recompute fires only when a new daily bar closes (`target_engine._latest_completed_session`).
 - `_legacy/` — quarantined Polygon/Schwab/Finviz-Elite stubs
 - `.env` — secrets (EODHD, Alpaca, Slack, Gmail)
 
