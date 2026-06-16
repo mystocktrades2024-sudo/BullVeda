@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How Stop · T1 · T2 Are Calculated — New Trader Guide</title>
+<style>
+  :root{
+    --bg:#0a0d0c; --panel:#11161a; --panel2:#161d23; --line:#222c34;
+    --ink:#e8eef2; --muted:#8aa0ad; --dim:#5d7180;
+    --green:#2dd47e; --green-dim:#1c7d4d;
+    --red:#ff5d6c; --red-dim:#8e2f38;
+    --amber:#ffc24b; --blue:#4aa8ff; --violet:#9b7bff;
+    --mono:"SF Mono",ui-monospace,"Cascadia Code",Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;
+    background-image:radial-gradient(900px 500px at 80% -10%,rgba(45,212,126,.06),transparent),
+                     radial-gradient(700px 500px at 0% 0%,rgba(74,168,255,.05),transparent);
+    padding:0 0 80px;}
+  .wrap{max-width:1020px;margin:0 auto;padding:0 22px;}
+  header{padding:46px 0 26px;border-bottom:1px solid var(--line);margin-bottom:34px;}
+  .kicker{font:600 12px/1 var(--mono);letter-spacing:.22em;text-transform:uppercase;color:var(--green);margin-bottom:14px;}
+  h1{font-size:34px;font-weight:740;letter-spacing:-.6px;margin-bottom:10px;}
+  h1 .g{color:var(--green)} h1 .r{color:var(--red)} h1 .b{color:var(--blue)}
+  .sub{color:var(--muted);font-size:16px;max-width:680px;}
+  .rule{background:linear-gradient(90deg,rgba(45,212,126,.10),rgba(45,212,126,.02));
+    border:1px solid var(--green-dim);border-radius:12px;padding:16px 20px;margin:26px 0 8px;
+    display:flex;gap:14px;align-items:center;}
+  .rule .big{font:740 22px var(--sans);color:var(--green);white-space:nowrap;}
+  .rule .txt{color:var(--muted);font-size:14.5px;}
+
+  section{margin-top:40px;}
+  .step-head{display:flex;align-items:center;gap:14px;margin-bottom:18px;}
+  .num{width:38px;height:38px;flex:none;border-radius:10px;display:grid;place-items:center;
+    font:740 18px var(--mono);background:var(--panel2);border:1px solid var(--line);color:var(--green);}
+  .step-head h2{font-size:22px;font-weight:680;letter-spacing:-.3px;}
+  .step-head .tag{margin-left:auto;font:600 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;
+    color:var(--dim);border:1px solid var(--line);border-radius:6px;padding:4px 9px;}
+
+  p{color:#c5d2da;font-size:15px;margin:10px 0;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:14px 0;}
+  .panel.tight{padding:16px 20px;}
+
+  .formula{font-family:var(--mono);font-size:15px;background:#0c1114;border:1px solid var(--line);
+    border-left:3px solid var(--blue);border-radius:0 10px 10px 0;padding:14px 18px;margin:14px 0;
+    color:#dfe9ef;overflow-x:auto;white-space:pre;}
+  .formula .c{color:var(--green)} .formula .m{color:var(--dim)} .formula .v{color:var(--amber)}
+
+  .note{font-size:13.5px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);
+    border-radius:10px;padding:12px 16px;margin:12px 0;}
+  .note b{color:var(--ink)}
+  code.k{font-family:var(--mono);font-size:12.5px;background:#0c1114;border:1px solid var(--line);
+    border-radius:5px;padding:1px 6px;color:var(--violet);}
+
+  ul.clean{list-style:none;margin:10px 0;}
+  ul.clean li{position:relative;padding:7px 0 7px 28px;font-size:14.5px;color:#c5d2da;border-bottom:1px dashed #1a232a;}
+  ul.clean li:last-child{border-bottom:none}
+  ul.clean li::before{content:"";position:absolute;left:6px;top:15px;width:7px;height:7px;border-radius:2px;background:var(--green);}
+  ul.clean li b{color:var(--ink)}
+
+  /* price ladder */
+  .ladder-wrap{display:grid;grid-template-columns:1fr 320px;gap:26px;align-items:center;}
+  @media(max-width:760px){.ladder-wrap{grid-template-columns:1fr}}
+  .ladder{position:relative;height:420px;border-radius:14px;background:linear-gradient(180deg,#0e1518,#0c1013);
+    border:1px solid var(--line);padding:18px 18px 18px 70px;}
+  .axis{position:absolute;left:54px;top:18px;bottom:18px;width:2px;background:var(--line);}
+  .lvl{position:absolute;left:54px;right:18px;height:0;border-top:2px dashed;display:flex;align-items:center;}
+  .lvl .dot{position:absolute;left:-7px;top:-6px;width:12px;height:12px;border-radius:50%;border:2px solid var(--bg);}
+  .lvl .lbl{position:absolute;left:14px;top:-26px;font:700 12px var(--mono);letter-spacing:.04em;}
+  .lvl .px{position:absolute;left:-54px;top:-10px;width:46px;text-align:right;font:600 12px var(--mono);color:var(--muted);}
+  .band{position:absolute;left:54px;right:18px;border-radius:6px;}
+  .band.reward{background:linear-gradient(180deg,rgba(45,212,126,.16),rgba(45,212,126,.03));border:1px solid var(--green-dim);}
+  .band.risk{background:linear-gradient(180deg,rgba(255,93,108,.05),rgba(255,93,108,.16));border:1px solid var(--red-dim);}
+  .band .tag{position:absolute;right:10px;top:50%;transform:translateY(-50%);font:700 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;}
+
+  .legend{font-size:14px;}
+  .legend h3{font-size:13px;text-transform:uppercase;letter-spacing:.14em;color:var(--dim);margin-bottom:14px;font-family:var(--mono);}
+  .lrow{display:flex;gap:12px;align-items:flex-start;padding:11px 0;border-bottom:1px solid #161e24;}
+  .lrow:last-child{border-bottom:none}
+  .sw{width:14px;height:14px;border-radius:4px;flex:none;margin-top:3px;}
+  .lrow .t b{display:block;color:var(--ink);font-size:14px;}
+  .lrow .t span{color:var(--muted);font-size:13px;}
+
+  /* worked example table */
+  table{width:100%;border-collapse:collapse;margin:8px 0;font-size:14px;}
+  th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);}
+  th{font:600 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--dim);}
+  td.calc{font-family:var(--mono);color:var(--muted);font-size:13px;}
+  td.val{font-family:var(--mono);font-weight:700;text-align:right;}
+  tr.stop td.val{color:var(--red)} tr.t1 td.val{color:var(--green)} tr.t2 td.val{color:var(--green)}
+  tr.entry td.val{color:var(--blue)} tr.rr td.val{color:var(--amber)}
+  tr.rr td{border-bottom:none;background:rgba(255,194,75,.05)}
+
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  @media(max-width:760px){.two{grid-template-columns:1fr}}
+  .mini h4{font-size:13px;text-transform:uppercase;letter-spacing:.1em;color:var(--green);font-family:var(--mono);margin-bottom:8px;}
+  .mini.alt h4{color:var(--violet)}
+
+  .src-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:8px;}
+  .src{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:11px 13px;font-size:13px;}
+  .src b{display:block;color:var(--ink);font:700 12px var(--mono);margin-bottom:3px;color:var(--violet);}
+  .src span{color:var(--muted);font-size:12.5px;line-height:1.4;}
+
+  .gate{background:linear-gradient(90deg,rgba(255,93,108,.08),transparent);border:1px solid var(--red-dim);
+    border-radius:11px;padding:15px 18px;margin:16px 0;}
+  .gate b{color:var(--red)}
+
+  footer{margin-top:50px;padding-top:22px;border-top:1px solid var(--line);color:var(--dim);font-size:12.5px;font-family:var(--mono);}
+  footer a{color:var(--blue);text-decoration:none}
+  .src-ref{font-family:var(--mono);font-size:11px;color:var(--dim);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">SwingTrade · Trade Plan Mechanics</div>
+  <h1>How <span class="r">Stop</span>, <span class="g">T1</span> &amp; <span class="g">T2</span> Get Calculated</h1>
+  <p class="sub">A plain-English, step-by-step walkthrough of exactly how the engine decides where you get out for a loss, and where you take profit — built for a brand-new trader.</p>
+  <div class="rule">
+    <div class="big">Reward ≥ 3 × Risk</div>
+    <div class="txt">The golden rule baked into everything. No trade is allowed unless the profit target is worth at least 3× what you're risking. That's why the <b>stop is always computed first</b> — it defines your risk, and the target has to beat it 3-to-1.</div>
+  </div>
+</header>
+
+<!-- ATR primer -->
+<div class="panel tight">
+  <p style="margin:0"><b style="color:var(--amber)">First, one word you need: ATR.</b> &nbsp;ATR = <i>Average True Range</i> = how much a stock moves in a typical day. A $50 stock might have an ATR of $1.50. The engine never says "stop 3% away" — it says "stop <b>1.25 ATRs</b> away," so the math automatically adapts to each stock's own volatility. ATR is the universal ruler.</p>
+</div>
+
+<!-- STEP 1 -->
+<section>
+  <div class="step-head">
+    <div class="num">1</div>
+    <h2>Find the Entry zone</h2>
+    <div class="tag">anchor = entry_mid</div>
+  </div>
+  <p>The engine doesn't pick one entry price — it builds a small <b>zone</b> around the current price, then uses the middle of that zone as the anchor for every other number.</p>
+  <div class="formula"><span class="c">entry_low</span>  = price <span class="m">−</span> 0.30 × ATR
+<span class="c">entry_high</span> = price <span class="m">+</span> 0.20 × ATR
+<span class="c">entry_mid</span>  = (entry_low + entry_high) / 2   <span class="m">← the anchor everything else hangs off</span></div>
+  <div class="src-ref">analysis.py · compute_trade_plan() · line 6780</div>
+</section>
+
+<!-- STEP 2 -->
+<section>
+  <div class="step-head">
+    <div class="num">2</div>
+    <h2>Set the <span style="color:var(--red)">Stop</span> — your "I'm wrong" line</h2>
+    <div class="tag">defines 1R</div>
+  </div>
+  <p>The single most important number. Base formula:</p>
+  <div class="formula"><span class="c">stop</span> = entry_mid <span class="m">−</span> (<span class="v">1.25</span> × ATR)</div>
+  <p>That <code class="k">1.25</code> (the <code class="k">stop_atr_multiple</code> in config) is the sweet spot: <b>wide enough that normal daily wiggle won't knock you out, tight enough to cut a real loser fast.</b> Then three real-trader refinements kick in:</p>
+  <ul class="clean">
+    <li><b>Regime check</b> — in a bear market the stop tightens to 1.0× ATR. When the odds are against you, bleed less. <span class="src-ref">(line 6745)</span></li>
+    <li><b>Confluence snap</b> — it nudges the stop onto a nearby Fibonacci level or the EMA50 moving average. Place your stop just under a line the market already respects, not a random price. <span class="src-ref">(line 6794)</span></li>
+    <li><b>Fractal-low check</b> — a "fractal low" is a recent swing bottom the market bounced off. If your stop sits <i>above</i> it, it's too tight (a normal dip stops you out), so the stop widens to just below that swing low. <span class="src-ref">(line 6822)</span></li>
+  </ul>
+  <div class="note"><b>Some setups override this.</b> An <b>EMA21 Pullback</b> uses a tight fixed <b>1.5% stop</b> — the data showed its winners bounce immediately and losers crater, so a tight stop cheaply kills the bad trades. <span class="src-ref">(line 6859)</span></div>
+  <div class="formula" style="border-left-color:var(--red)"><span class="c">risk</span> (a.k.a. <span class="v">1R</span>) = entry_mid <span class="m">−</span> stop    <span class="m">← every target below is measured in multiples of this</span></div>
+</section>
+
+<!-- STEP 3 -->
+<section>
+  <div class="step-head">
+    <div class="num">3</div>
+    <h2>Set the <span style="color:var(--green)">Targets</span> — T1 and T2</h2>
+    <div class="tag">2 engines</div>
+  </div>
+  <p>There are two ways the engine can place targets. Yours currently runs the <b>smart one</b> (<code class="k">use_structural_targets</code> is ON).</p>
+
+  <div class="two">
+    <div class="panel mini">
+      <h4>A · Simple method (fallback)</h4>
+      <p style="font-size:14px;margin:6px 0">Pure risk-multiples:</p>
+      <div class="formula" style="margin:8px 0"><span class="c">T1</span> = entry_mid + <span class="v">3</span> × risk
+<span class="c">T2</span> = entry_mid + <span class="v">5</span> × risk</div>
+      <p style="font-size:13.5px;color:var(--muted);margin:6px 0">One sanity check: if a <b>resistance</b> ceiling sits closer than 3R, T1 is placed just below it — no point aiming past a wall the stock can't break. <span class="src-ref">(line 6836)</span></p>
+    </div>
+    <div class="panel mini alt">
+      <h4>B · Structural engine (live)</h4>
+      <p style="font-size:14px;margin:6px 0">Instead of blind multiples, it finds <b>real overhead price levels</b> where the stock is likely to stall, and aims there. Candidate sources:</p>
+      <div class="src-grid">
+        <div class="src"><b>FRACTAL</b><span>Prior swing-high peaks</span></div>
+        <div class="src"><b>HVN / VAH</b><span>Volume walls &amp; magnets</span></div>
+        <div class="src"><b>AVWAP</b><span>From 52w-high / earnings</span></div>
+        <div class="src"><b>FIB EXT</b><span>1.272× / 1.618× of swing</span></div>
+        <div class="src"><b>ROUND #</b><span>$50, $100 psych levels</span></div>
+        <div class="src"><b>ELLIOTT</b><span>Wave-3 objectives</span></div>
+      </div>
+    </div>
+  </div>
+
+  <p style="margin-top:18px">When several of those levels stack at the same price, that price scores higher <b>confluence</b> = a stronger target. The selector then picks:</p>
+  <ul class="clean">
+    <li><b>T1</b> = highest-confluence level that's at least the minimum R away (so R:R still clears the 3:1 floor)</li>
+    <li><b>T2</b> = the next strong level <i>beyond</i> T1</li>
+    <li><b>T3</b> = optional "bull-stretch" reach target beyond T2</li>
+  </ul>
+  <div class="src-ref">target_engine.py · select_targets() · line 1103</div>
+
+  <div class="gate">
+    <b>⛔ The overhead-supply gate.</b> T1 is <b>never allowed to leapfrog a wall.</b> If there's a clear double-top or supply zone between your entry and a far-away juicy target, T1 gets pinned <i>below</i> that wall. You don't set a target on the other side of a brick wall. <span class="src-ref">(target_engine.py line 173)</span>
+  </div>
+  <p style="font-size:13.5px;color:var(--muted)">If the engine can't find clean structure, it <b>silently falls back</b> to the 3R / 5R math — the trade stays alive.</p>
+</section>
+
+<!-- STEP 4 -->
+<section>
+  <div class="step-head">
+    <div class="num">4</div>
+    <h2>The <span style="color:var(--amber)">R:R gate</span> ties it together</h2>
+    <div class="tag">pass / no-trade</div>
+  </div>
+  <div class="formula" style="border-left-color:var(--amber)"><span class="c">R:R ratio</span> = (T1 <span class="m">−</span> entry_mid) / (entry_mid <span class="m">−</span> stop)</div>
+  <p>If that number is below <b>3:1</b> (4:1 in risk-off regimes), the trade is <b>not tradeable</b>. This is the whole reason stop is computed first: the stop defines 1R, and T1 has to be worth at least 3 of them. <span class="src-ref">(line 6854)</span></p>
+</section>
+
+<!-- LADDER + WORKED EXAMPLE -->
+<section>
+  <div class="step-head">
+    <div class="num">★</div>
+    <h2>Putting it together — a worked example</h2>
+    <div class="tag">$50 stock · ATR $1.50</div>
+  </div>
+
+  <div class="panel">
+  <div class="ladder-wrap">
+    <div class="ladder">
+      <div class="axis"></div>
+
+      <!-- reward band: entry -> T1 -->
+      <div class="band reward" style="top:30px;height:175px"><span class="tag" style="color:var(--green)">REWARD · 3R+</span></div>
+      <!-- risk band: entry -> stop -->
+      <div class="band risk" style="top:240px;height:78px"><span class="tag" style="color:var(--red)">RISK · 1R</span></div>
+
+      <!-- T2 -->
+      <div class="lvl" style="top:30px;border-color:var(--green)">
+        <span class="px">$59.33</span><span class="dot" style="background:var(--green)"></span>
+        <span class="lbl" style="color:var(--green)">T2 · 5R runner</span></div>
+      <!-- T1 -->
+      <div class="lvl" style="top:120px;border-color:var(--green)">
+        <span class="px">$55.57</span><span class="dot" style="background:var(--green)"></span>
+        <span class="lbl" style="color:var(--green)">T1 · 3R target</span></div>
+      <!-- Entry -->
+      <div class="lvl" style="top:240px;border-color:var(--blue)">
+        <span class="px">$49.93</span><span class="dot" style="background:var(--blue)"></span>
+        <span class="lbl" style="color:var(--blue)">ENTRY zone (mid)</span></div>
+      <!-- Stop -->
+      <div class="lvl" style="top:318px;border-color:var(--red)">
+        <span class="px">$48.05</span><span class="dot" style="background:var(--red)"></span>
+        <span class="lbl" style="color:var(--red)">STOP · −1.25 ATR</span></div>
+    </div>
+
+    <div class="legend">
+      <h3>Read it bottom-up</h3>
+      <div class="lrow"><span class="sw" style="background:var(--red)"></span><div class="t"><b>Stop $48.05</b><span>1.25 × $1.50 below entry. Risk = $1.88 per share = 1R.</span></div></div>
+      <div class="lrow"><span class="sw" style="background:var(--blue)"></span><div class="t"><b>Entry $49.93</b><span>Middle of the entry zone — the anchor.</span></div></div>
+      <div class="lrow"><span class="sw" style="background:var(--green)"></span><div class="t"><b>T1 $55.57</b><span>3 × $1.88 above entry → exactly 3:1. (Or nearest real wall.)</span></div></div>
+      <div class="lrow"><span class="sw" style="background:var(--green)"></span><div class="t"><b>T2 $59.33</b><span>5 × risk — the runner you let ride.</span></div></div>
+    </div>
+  </div>
+  </div>
+
+  <div class="panel">
+  <table>
+    <thead><tr><th>Step</th><th>Calculation</th><th style="text-align:right">Value</th></tr></thead>
+    <tbody>
+      <tr class="entry"><td>Entry mid</td><td class="calc">(49.55 + 50.30) / 2</td><td class="val">$49.93</td></tr>
+      <tr class="stop"><td>Stop</td><td class="calc">49.93 − 1.25 × 1.50</td><td class="val">$48.05</td></tr>
+      <tr><td>Risk (1R)</td><td class="calc">49.93 − 48.05</td><td class="val">$1.88</td></tr>
+      <tr class="t1"><td>T1 (3R / nearest wall)</td><td class="calc">49.93 + 3 × 1.88</td><td class="val">$55.57</td></tr>
+      <tr class="t2"><td>T2 (5R / next wall)</td><td class="calc">49.93 + 5 × 1.88</td><td class="val">$59.33</td></tr>
+      <tr class="rr"><td><b>R:R</b></td><td class="calc">5.64 / 1.88</td><td class="val">3 : 1 ✓ tradeable</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:13px;color:var(--muted);margin:8px 0 0">With structural targets ON, T1/T2 shift to the nearest <i>real</i> overhead levels (a fractal high or volume wall near those prices) instead of the exact 3R/5R math — but the <b>stop and the 3:1 minimum stay identical.</b></p>
+  </div>
+</section>
+
+<!-- TLDR -->
+<section>
+  <div class="panel" style="border-color:var(--green-dim);background:linear-gradient(90deg,rgba(45,212,126,.07),transparent)">
+    <h3 style="font:700 13px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--green);margin-bottom:12px">The one-sentence summary</h3>
+    <p style="font-size:16px;color:var(--ink);margin:0">Stop = entry − 1.25 ATR (then snapped to a real support level); that distance is <b style="color:var(--red)">"1R"</b>; <b style="color:var(--green)">T1</b> must be ≥ 3R away (placed at the nearest real overhead level, never past a wall); <b style="color:var(--green)">T2</b> is the next level beyond it.</p>
+  </div>
+</section>
+
+<footer>
+  SwingTrade · Trade Plan Mechanics &nbsp;·&nbsp; source: <span style="color:var(--muted)">analysis.py compute_trade_plan() · target_engine.py select_targets()</span><br>
+  Generated 2026-06-15 &nbsp;·&nbsp; Live engine: <a href="http://localhost:7432/dashboard">localhost:7432/dashboard</a>
+</footer>
+
+</div>
+</body>
+</html>

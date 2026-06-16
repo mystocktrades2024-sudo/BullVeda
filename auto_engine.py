@@ -119,6 +119,42 @@ def _fallback_stop(avg: float, side_long: bool, pct: float = 0.10) -> float:
     return round(avg * (1 - pct), 2) if side_long else round(avg * (1 + pct), 2)
 
 
+def _protective_stop(stop, avg: float, last: float,
+                     side_long: bool, pct: float = 0.10):
+    """Return a broker-valid protective stop price (or None if unplaceable).
+
+    Alpaca requires a sell-stop (protecting a long) to sit strictly BELOW the
+    market and a buy-stop (protecting a short) to sit strictly ABOVE it. A plan
+    stop on the wrong side — e.g. a long-style stop (entry − ATR) stored on a
+    short, which is what rejected NEM ("stop price must be greater than current
+    price") — gets bounced by the broker, leaving the position unprotected.
+
+    So: trust the plan stop only when it is on the correct, placeable side of the
+    live price; otherwise fall back to a side-correct pct-off-anchor stop. The
+    anchor is max(avg, last) for shorts / min(avg, last) for longs so an already
+    underwater position still gets a stop the broker will accept (above the
+    market for a short, below it for a long).
+    """
+    try:
+        stop = float(stop) if stop is not None and float(stop) > 0 else None
+    except (TypeError, ValueError):
+        stop = None
+
+    if not (last and last > 0):
+        # no live price → entry-based side-correct stop is the best we can do
+        return stop if stop is not None else _fallback_stop(avg, side_long)
+
+    if side_long:
+        # sell-stop must be below the market
+        if stop is None or stop >= last:
+            stop = round(min(avg, last) * (1 - pct), 2)
+    else:
+        # buy-stop must be above the market
+        if stop is None or stop <= last:
+            stop = round(max(avg, last) * (1 + pct), 2)
+    return stop if stop and stop > 0 else None
+
+
 def _sharpe_kill_active() -> bool:
     s = _safe_load(_ROOT / "cache" / "sharpe_kill_state.json") or {}
     return bool(s.get("active"))
@@ -229,26 +265,39 @@ def run_exits(client, bundle: dict, cfg: dict, dry_run: bool) -> dict:
                 rec["status"] = "dry_run" if dry_run else "partialled"
                 rec["partial_qty"] = half
             else:
-                # 5. ensure protective stop exists (fixes synthetic / missing stops)
-                #    fall back to a computed 10%-off-entry stop if no plan stop exists,
-                #    so EVERY open position is protected.
-                if not (stop and float(stop) > 0):
-                    stop = _fallback_stop(avg, side_long)
-                    detail = "fallback stop (no plan stop)"
-                if sym not in stops_present and stop and float(stop) > 0:
-                    side = OrderSide.SELL if side_long else OrderSide.BUY
-                    if dry_run:
-                        log.info(f"WOULD PLACE protective stop {sym} ×{qty} @ ${float(stop):.2f} ({'sell' if side_long else 'buy'})")
-                        rec["decision"] = "PLACE_STOP"; rec["status"] = "dry_run"
-                    else:
-                        client.submit_order(StopOrderRequest(
-                            symbol=sym, qty=qty, side=side,
-                            time_in_force=TimeInForce.GTC, stop_price=round(float(stop), 2)))
-                        log.info(f"PLACED protective stop {sym} ×{qty} @ ${float(stop):.2f}")
-                        _slack(f"🛡 AUTO-STOP placed {sym} ×{qty} @ ${float(stop):.2f}")
-                        rec["decision"] = "PLACE_STOP"; rec["status"] = "placed_stop"
+                # 5. ensure a broker-valid protective stop exists (fixes synthetic /
+                #    missing / wrong-sided stops). Validate the plan stop is on the
+                #    placeable side of the market; otherwise fall back to a side-correct
+                #    stop so EVERY open position is protected and no order is rejected.
+                plan_stop = stop
+                stop = _protective_stop(stop, avg, last, side_long)
+                if stop is None:
+                    log.warning(f"no placeable protective stop for {sym} (avg={avg} last={last})")
+                    rec["status"] = "no_stop"
                 else:
-                    rec["status"] = "hold"
+                    try:
+                        plan_ok = (plan_stop is not None and float(plan_stop) > 0
+                                   and abs(float(plan_stop) - stop) < 0.005)
+                    except (TypeError, ValueError):
+                        plan_ok = False
+                    if not plan_ok:
+                        detail = "fallback stop (plan stop missing or wrong-side)"
+                        rec["detail"] = detail
+                    rec["stop"] = stop
+                    if sym not in stops_present:
+                        side = OrderSide.SELL if side_long else OrderSide.BUY
+                        if dry_run:
+                            log.info(f"WOULD PLACE protective stop {sym} ×{qty} @ ${stop:.2f} ({'sell' if side_long else 'buy'})")
+                            rec["decision"] = "PLACE_STOP"; rec["status"] = "dry_run"
+                        else:
+                            client.submit_order(StopOrderRequest(
+                                symbol=sym, qty=qty, side=side,
+                                time_in_force=TimeInForce.GTC, stop_price=round(stop, 2)))
+                            log.info(f"PLACED protective stop {sym} ×{qty} @ ${stop:.2f}")
+                            _slack(f"🛡 AUTO-STOP placed {sym} ×{qty} @ ${stop:.2f}")
+                            rec["decision"] = "PLACE_STOP"; rec["status"] = "placed_stop"
+                    else:
+                        rec["status"] = "hold"
         except Exception as e:
             log.error(f"exit action failed for {sym}: {e}")
             rec["status"] = "error"; rec["error"] = str(e)
