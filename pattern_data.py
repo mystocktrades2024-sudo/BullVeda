@@ -26,6 +26,8 @@ _MODE_CFG = {
     # SWING_4H — intraday entry-refinement for swing trades. Schwab 30-min bars
     # resampled to 4H (EODHD has no intraday). Daily stays the structure/bias TF;
     # this is the lower-timeframe entry view. Schwab-only (no EODHD failover).
+    # SWING_1H — 1-hour intraday (Schwab 30-min resampled to 1H). Schwab-only.
+    "SWING_1H":   {"days": 60,   "rule": None,    "tf": "1H",      "horizon": "1–5d",  "intraday": "1h"},
     "SWING_4H":   {"days": 150,  "rule": None,    "tf": "4H",      "horizon": "2–15d", "intraday": "4h"},
     "POSITION":   {"days": 1150, "rule": "W-FRI", "tf": "Weekly",  "horizon": "1–6mo"},
     "INVESTMENT": {"days": 4500, "rule": "ME",    "tf": "Monthly", "horizon": "1–5yr"},
@@ -34,6 +36,7 @@ _MODE_CFG = {
 _MODE_ALIAS = {
     "swing": "SWING", "position": "POSITION", "invest": "INVESTMENT",
     "investment": "INVESTMENT", "INVEST": "INVESTMENT",
+    "1h": "SWING_1H", "1H": "SWING_1H", "swing_1h": "SWING_1H", "swing1h": "SWING_1H",
     "4h": "SWING_4H", "4H": "SWING_4H", "swing_4h": "SWING_4H", "swing4h": "SWING_4H",
 }
 

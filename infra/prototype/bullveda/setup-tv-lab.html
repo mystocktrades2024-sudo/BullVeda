@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Setup TV Lab</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root{ --bg-0:#0a0e0d; --bg-1:#0f1513; --bg-2:#151d1a; --line:#1e2b27; --line-2:#2a3a35;
+    --ink:#e8f1ed; --ink-2:#9fb3ac; --ink-3:#5f726b; --gn:#34d399; --rd:#f87171; --cy:#5dd6d6; --violet:#a78bfa; --copper:#d97757;
+    --mono:'SF Mono',ui-monospace,Menlo,monospace; --sans:-apple-system,BlinkMacSystemFont,Inter,sans-serif; }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg-0);color:var(--ink);font-family:var(--sans);padding:18px}
+  .wrap{max-width:1180px;margin:0 auto}
+  .panel{background:linear-gradient(180deg,var(--bg-1),var(--bg-0));border:1px solid var(--line);border-radius:14px;overflow:hidden;position:relative}
+  /* fullscreen-expanded state */
+  .panel.expanded{position:fixed;inset:12px;max-width:none;z-index:9999;border-radius:14px}
+  .tb{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .tb .ttl{font-family:var(--mono);font-size:12px;font-weight:800;letter-spacing:.5px}
+  input#tk{background:var(--bg-2);border:1px solid var(--line-2);color:var(--ink);font-family:var(--mono);font-weight:700;
+    padding:6px 10px;border-radius:7px;width:86px;text-transform:uppercase;outline:none;font-size:13px}
+  .seg{display:flex;background:var(--bg-2);border:1px solid var(--line-2);border-radius:7px;overflow:hidden}
+  .seg button{background:transparent;border:0;color:var(--ink-3);font-family:var(--mono);font-size:11px;font-weight:700;padding:6px 10px;cursor:pointer}
+  .seg button.on{background:var(--bg-1);color:var(--gn)}
+  .tbtn{background:var(--bg-2);border:1px solid var(--line-2);color:var(--ink-2);font-family:var(--mono);font-size:11px;font-weight:700;
+    padding:6px 11px;border-radius:7px;cursor:pointer}
+  .tbtn:hover{color:var(--ink);border-color:var(--gn)}
+  .tbtn.on{color:var(--gn);border-color:var(--gn)}
+  .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+  .chartwrap{position:relative;display:flex;flex-direction:column;height:520px}
+  .panel.expanded .chartwrap{height:calc(100vh - 90px)}
+  .mainpane{position:relative;flex:1 1 auto;min-height:0}
+  #main{position:absolute;inset:0}
+  .mcdxpane{position:relative;height:120px;flex:0 0 auto;border-top:1px solid var(--line)}
+  #mcdx{position:absolute;inset:0}
+  .legend{position:absolute;left:12px;top:10px;z-index:5;font-family:var(--mono);font-size:11px;
+    background:rgba(10,14,13,.7);backdrop-filter:blur(4px);border:1px solid var(--line);border-radius:8px;padding:7px 11px;line-height:1.7;pointer-events:none}
+  .legend b{font-weight:700} .legend .o{color:var(--ink-2)}
+  .mlabel{position:absolute;left:12px;top:8px;z-index:5;font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+  .note{font-family:var(--mono);font-size:9.5px;color:var(--ink-3);padding:7px 14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="panel" id="panel">
+  <div class="tb">
+    <span class="ttl">📊 SETUP · TV</span>
+    <input id="tk" value="NVDA" maxlength="6" spellcheck="false"/>
+    <div class="seg" id="ctype">
+      <button data-c="candles" class="on">Candles</button>
+      <button data-c="line">Line</button>
+      <button data-c="area">Area</button>
+    </div>
+    <div class="right">
+      <button class="tbtn" id="b-ema" data-on="1">EMA 9/21</button>
+      <button class="tbtn" id="b-lvl" data-on="1">Levels</button>
+      <button class="tbtn" id="b-vol" data-on="1">Vol</button>
+      <button class="tbtn" id="b-draw" data-on="0">✎ Trendline</button>
+      <button class="tbtn" id="b-expand">⤢ Expand</button>
+    </div>
+  </div>
+  <div class="chartwrap">
+    <div class="mainpane"><div id="main"></div><div class="legend" id="legend"></div></div>
+    <div class="mcdxpane"><div id="mcdx"></div><div class="mlabel">🏦 MCDX · money flow</div></div>
+  </div>
+  <div class="note">Isolated TV-lab · pan/zoom/crosshair · everything anchored in (time,price) → auto-adjusts on Expand. Drawing = click two points.</div>
+</div>
+</div>
+
+<script>
+const LWC=window.LightweightCharts;
+let main=null, mcdx=null, S={}, CT='candles', DRAW=false, bars=[], lvls=null;
+const ON={ema:true,lvl:true,vol:true};
+
+function ema(arr,p){const k=2/(p+1);let pr=arr[0];return arr.map((b,i)=>{pr=i===0?b:b*k+pr*(1-k);return pr;});}
+function computeMcdx(bs){
+  const N=34, rsv=bs.map((b,i)=>{const w=bs.slice(Math.max(0,i-N+1),i+1);let lo=1e9,hi=-1e9;for(const x of w){if(x.low<lo)lo=x.low;if(x.high>hi)hi=x.high;}const r=hi>lo?(b.close-lo)/(hi-lo)*100:50;return Math.max(0,Math.min(100,r));});
+  const hot=ema(rsv,5), bk=ema(rsv,13);
+  return {hist:bs.map((b,i)=>({time:b.time,value:+hot[i].toFixed(2),color:hot[i]>=55?'#16c784':hot[i]<=45?'#f87171':'#e8c170'})),
+          bline:bs.map((b,i)=>({time:b.time,value:+bk[i].toFixed(2)}))};
+}
+const baseOpts=()=>({layout:{background:{color:'transparent'},textColor:'#9fb3ac',fontFamily:"'SF Mono',monospace",fontSize:10},
+  grid:{vertLines:{color:'rgba(30,43,39,.45)'},horzLines:{color:'rgba(30,43,39,.45)'}},
+  rightPriceScale:{borderColor:'#1e2b27'}, timeScale:{borderColor:'#1e2b27',timeVisible:false},
+  crosshair:{mode:1}, handleScroll:true, handleScale:true});
+
+function buildMain(){
+  const box=document.getElementById('main'); box.innerHTML='';
+  main=LWC.createChart(box,{...baseOpts(),width:box.clientWidth,height:box.clientHeight});
+  S={};
+  if(CT==='candles'){ S.price=main.addCandlestickSeries({upColor:'#34d399',downColor:'#f87171',borderUpColor:'#34d399',borderDownColor:'#f87171',wickUpColor:'rgba(52,211,153,.8)',wickDownColor:'rgba(248,113,113,.8)'}); S.price.setData(bars); }
+  else if(CT==='line'){ S.price=main.addLineSeries({color:'#5dd6d6',lineWidth:2}); S.price.setData(bars.map(b=>({time:b.time,value:b.close}))); }
+  else { S.price=main.addAreaSeries({lineColor:'#34d399',topColor:'rgba(52,211,153,.25)',bottomColor:'rgba(52,211,153,0)',lineWidth:2}); S.price.setData(bars.map(b=>({time:b.time,value:b.close}))); }
+  if(ON.vol){ S.vol=main.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'vol'}); main.priceScale('vol').applyOptions({scaleMargins:{top:.85,bottom:0}}); S.vol.setData(bars.map(b=>({time:b.time,value:b.value||0,color:b.close>=b.open?'rgba(52,211,153,.3)':'rgba(248,113,113,.3)'}))); }
+  if(ON.ema){ const c=bars.map(b=>b.close); const e9=ema(c,9),e21=ema(c,21);
+    S.e9=main.addLineSeries({color:'rgba(93,214,214,.7)',lineWidth:1,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false}); S.e9.setData(bars.map((b,i)=>({time:b.time,value:+e9[i].toFixed(2)})));
+    S.e21=main.addLineSeries({color:'rgba(167,139,250,.7)',lineWidth:1,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false}); S.e21.setData(bars.map((b,i)=>({time:b.time,value:+e21[i].toFixed(2)}))); }
+  if(ON.lvl && lvls){ const mk=(p,c,t,st)=>p&&S.price.createPriceLine({price:p,color:c,lineWidth:st?1:2,lineStyle:st||0,axisLabelVisible:true,title:t});
+    mk(lvls.t2,'#34d399','T2',2); mk(lvls.t1,'#34d399','T1'); mk(lvls.entry,'#d97757','TRIGGER'); mk(lvls.stop,'#f87171','STOP'); }
+  main.timeScale().fitContent();
+  // crosshair OHLC legend
+  const lg=document.getElementById('legend');
+  main.subscribeCrosshairMove(prm=>{
+    if(!prm||!prm.time||!prm.seriesData){ lg.innerHTML=''; return; }
+    const d=prm.seriesData.get(S.price); if(!d){ lg.innerHTML=''; return; }
+    const o=d.open!=null?d.open:d.value, c=d.close!=null?d.close:d.value, h=d.high!=null?d.high:d.value, l=d.low!=null?d.low:d.value;
+    const up=c>=o; const col=up?'#34d399':'#f87171';
+    lg.innerHTML=`<b style="color:${col}">${document.getElementById('tk').value.toUpperCase()}</b> `+
+      `<span class="o">O</span> <b>${(+o).toFixed(2)}</b> <span class="o">H</span> <b>${(+h).toFixed(2)}</b> `+
+      `<span class="o">L</span> <b>${(+l).toFixed(2)}</b> <span class="o">C</span> <b style="color:${col}">${(+c).toFixed(2)}</b>`;
+  });
+  setupDraw();
+}
+
+function buildMcdx(){
+  const box=document.getElementById('mcdx'); box.innerHTML='';
+  mcdx=LWC.createChart(box,{...baseOpts(),width:box.clientWidth,height:box.clientHeight,timeScale:{visible:false,borderColor:'#1e2b27'}});
+  const m=computeMcdx(bars);
+  const h=mcdx.addHistogramSeries({priceLineVisible:false,lastValueVisible:false}); h.setData(m.hist);
+  const bl=mcdx.addLineSeries({color:'#5b9bd5',lineWidth:1,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false}); bl.setData(m.bline);
+  mcdx.timeScale().fitContent();
+  // sync pan/zoom both ways
+  let lock=false;
+  const a=main.timeScale(), b=mcdx.timeScale();
+  a.subscribeVisibleLogicalRangeChange(r=>{if(lock||!r)return;lock=true;try{b.setVisibleLogicalRange(r);}catch(e){}lock=false;});
+  b.subscribeVisibleLogicalRangeChange(r=>{if(lock||!r)return;lock=true;try{a.setVisibleLogicalRange(r);}catch(e){}lock=false;});
+}
+
+// ── simple trendline drawing (anchored in time+price → auto-adjusts) ──
+let drawPts=[]; let drawn=[];
+function setupDraw(){
+  const box=document.getElementById('main');
+  box.onclick=(ev)=>{
+    if(!DRAW||!main||!S.price) return;
+    const r=box.getBoundingClientRect();
+    const x=ev.clientX-r.left, y=ev.clientY-r.top;
+    const t=main.timeScale().coordinateToTime(x); const p=S.price.coordinateToPrice(y);
+    if(t==null||p==null) return;
+    drawPts.push({time:t,value:+p.toFixed(2)});
+    if(drawPts.length===2){ const ls=main.addLineSeries({color:'#e8c170',lineWidth:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false}); ls.setData(drawPts.sort((a,b)=>a.time-b.time)); drawn.push(ls); drawPts=[]; }
+  };
+}
+
+async function fetchLvls(sym){
+  try{ const r=await(await fetch(`/api/trade_engine?t=${sym}&mode=swing`,{credentials:'same-origin'})).json();
+    const pn=o=>o&&typeof o==='object'?o.price:o;
+    return {stop:pn(r.stop), entry:(r.entry&&r.entry.price)||pn(r.entry), t1:pn(r.t1), t2:pn(r.t2)};
+  }catch(e){ return null; }
+}
+
+async function load(){
+  const sym=document.getElementById('tk').value.trim().toUpperCase()||'NVDA';
+  const res=await(await fetch(`/api/ohlcv/${sym}`,{credentials:'same-origin'})).json();
+  const cs=(res&&res.candles)||[], vol=(res&&res.volume)||[];
+  if(cs.length<5) return;
+  bars=cs.map((c,i)=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close,value:(vol[i]&&vol[i].value)||0}));
+  lvls=await fetchLvls(sym);
+  buildMain(); buildMcdx();
+}
+
+// resize → auto-adjust both panes (this is the "expand auto-adjusts" guarantee)
+function resizeAll(){
+  const mb=document.getElementById('main'), xb=document.getElementById('mcdx');
+  if(main&&mb) try{ main.resize(mb.clientWidth, mb.clientHeight); main.timeScale().fitContent(); }catch(e){}
+  if(mcdx&&xb) try{ mcdx.resize(xb.clientWidth, xb.clientHeight); mcdx.timeScale().fitContent(); }catch(e){}
+}
+new ResizeObserver(()=>requestAnimationFrame(resizeAll)).observe(document.getElementById('main'));
+window.addEventListener('resize',resizeAll);
+
+// toolbar
+document.getElementById('tk').addEventListener('keydown',e=>{if(e.key==='Enter')load();});
+document.getElementById('ctype').addEventListener('click',e=>{if(e.target.tagName!=='BUTTON')return;[...e.currentTarget.children].forEach(b=>b.classList.remove('on'));e.target.classList.add('on');CT=e.target.dataset.c;buildMain();});
+const tog=(id,key)=>{const b=document.getElementById(id);b.classList.toggle('on',ON[key]);b.onclick=()=>{ON[key]=!ON[key];b.classList.toggle('on',ON[key]);buildMain();};};
+tog('b-ema','ema'); tog('b-lvl','lvl'); tog('b-vol','vol');
+document.getElementById('b-draw').onclick=()=>{DRAW=!DRAW;document.getElementById('b-draw').classList.toggle('on',DRAW);};
+document.getElementById('b-expand').onclick=()=>{document.getElementById('panel').classList.toggle('expanded');requestAnimationFrame(()=>setTimeout(resizeAll,60));};
+load();
+</script>
+</body>
+</html>

@@ -10770,6 +10770,95 @@ async def pattern_api(engine: str, ticker: str, mode: str = "SWING"):
         _PATTERN_CACHE[key] = (now, out)
     return out
 
+
+_BULLALGO_CACHE: dict = {}
+_BULLALGO_TTL = 1800  # 30 min — 4H/1D refresh intraday; cheap recompute
+
+
+@app.get("/api/bullalgo/{ticker}")
+async def bullalgo_api(ticker: str, mode: str = "SWING"):
+    """BullAlgo — transparent Confirmation signal + multi-timeframe screener grid.
+    Ownable, inspectable reproduction of the LuxAlgo Signals & Overlays read.
+    e.g. /api/bullalgo/NVDA?mode=SWING"""
+    import time as _t
+    ticker = ticker.upper().strip()
+    mode = (mode or "SWING").upper().strip()
+    key = f"{ticker}|{mode}"
+    now = _t.time()
+    hit = _BULLALGO_CACHE.get(key)
+    if hit and (now - hit[0]) < _BULLALGO_TTL:
+        return hit[1]
+    try:
+        import bullalgo
+        out = bullalgo.bullalgo_state(ticker, mode)
+    except Exception as e:
+        return {"ticker": ticker, "mode": mode, "ok": False, "message": f"bullalgo error: {e}"}
+    if out.get("confirmation") or any(r.get("available") for r in out.get("screener", [])):
+        _BULLALGO_CACHE[key] = (now, out)
+    return out
+
+
+@app.get("/api/bullalgo/{ticker}/chart")
+async def bullalgo_chart_api(ticker: str, tf: str = "SWING"):
+    """BullAlgo chart series — candles + LuxAlgo-style overlays + markers + stats
+    for one timeframe (4H/SWING_4H · 1D/SWING · 1W/POSITION · 1M/INVEST)."""
+    import time as _t
+    ticker = ticker.upper().strip()
+    tf = (tf or "SWING").upper().strip()
+    key = f"chart|{ticker}|{tf}"
+    now = _t.time()
+    hit = _BULLALGO_CACHE.get(key)
+    if hit and (now - hit[0]) < _BULLALGO_TTL:
+        return hit[1]
+    try:
+        import bullalgo
+        out = bullalgo.chart_series(ticker, tf)
+    except Exception as e:
+        return {"available": False, "ticker": ticker, "tf": tf, "message": f"chart error: {e}"}
+    if out.get("available"):
+        _BULLALGO_CACHE[key] = (now, out)
+    return out
+
+
+@app.get("/api/bullalgo/{ticker}/mcdx")
+async def bullalgo_mcdx_api(ticker: str, tf: str = "SWING"):
+    """BullAlgo MCDX — transparent Banker/Hot-Money/Retail money-flow bands."""
+    import time as _t
+    ticker = ticker.upper().strip(); tf = (tf or "SWING").upper().strip()
+    key = f"mcdx|{ticker}|{tf}"; now = _t.time()
+    hit = _BULLALGO_CACHE.get(key)
+    if hit and (now - hit[0]) < _BULLALGO_TTL:
+        return hit[1]
+    try:
+        import bullalgo
+        out = bullalgo.mcdx_series(ticker, tf)
+    except Exception as e:
+        return {"available": False, "ticker": ticker, "tf": tf, "message": f"mcdx error: {e}"}
+    if out.get("available"):
+        _BULLALGO_CACHE[key] = (now, out)
+    return out
+
+
+@app.get("/api/bullalgo/{ticker}/pac-chart")
+async def bullalgo_pac_chart_api(ticker: str, tf: str = "SWING"):
+    """BullAlgo Price Action chart — candles + order-block boxes + structure
+    labels (HH/HL/LH/LL · BOS/CHoCH) + premium/discount/equilibrium zones."""
+    import time as _t
+    ticker = ticker.upper().strip(); tf = (tf or "SWING").upper().strip()
+    key = f"pacchart|{ticker}|{tf}"; now = _t.time()
+    hit = _BULLALGO_CACHE.get(key)
+    if hit and (now - hit[0]) < _BULLALGO_TTL:
+        return hit[1]
+    try:
+        import bullalgo
+        out = bullalgo.pac_chart_series(ticker, tf)
+    except Exception as e:
+        return {"available": False, "ticker": ticker, "tf": tf, "message": f"pac chart error: {e}"}
+    if out.get("available"):
+        _BULLALGO_CACHE[key] = (now, out)
+    return out
+
+
 @app.get("/api/patterns/engines")
 async def pattern_engines_list():
     """Discoverable engine roster (name → label) for the Patterns lens."""

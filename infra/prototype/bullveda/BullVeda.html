@@ -25782,6 +25782,11 @@ window.LensSummaryBar = LensSummaryBar;
   .dh-chart-toggle button:hover:not(.is-on){ color:var(--ink-1); }
   .dh-chart-svg{ display:block; width:100%; height:auto; max-height:128px; }
   .dh-lw{ width:100%; height:auto; flex:1 1 auto; min-height:300px; }
+  .dh-chart--expanded{ position:fixed; inset:12px; z-index:9999; background:var(--bg-1,#0f1513); border:1px solid var(--glass-line); border-radius:14px; box-shadow:0 24px 70px rgba(0,0,0,.6); }
+  .dh-chart--expanded .dh-lw{ min-height:0; flex:1 1 auto; }
+  .dh-expand-btn{ font-family:var(--mono); font-size:9px; letter-spacing:.04em; padding:3px 8px; background:transparent; color:var(--ink-3); border:1px solid var(--glass-line); border-radius:6px; cursor:pointer; }
+  .dh-expand-btn:hover{ color:var(--ink-1); }
+  .dh-expand-btn.is-on{ color:var(--copper); border-color:var(--copper); }
   .dh-rail-stats{ display:flex; border-top:1px solid var(--glass-line); border-bottom:1px solid var(--glass-line); margin-top:3px; }
   .dh-rs{ flex:1; padding:6px 9px; border-right:1px solid var(--glass-line); display:flex; flex-direction:column; gap:1px; min-width:0; }
   .dh-rs:last-child{ border-right:none; }
@@ -26002,7 +26007,7 @@ function SurfacedBy({ ticker }) {
   };
   return /* @__PURE__ */ React.createElement("div", { className: "sfb" }, /* @__PURE__ */ React.createElement("div", { className: "sfb-hd" }, /* @__PURE__ */ React.createElement("span", { className: "sfb-tag mono" }, "SURFACED BY"), /* @__PURE__ */ React.createElement("span", { className: "sfb-count mono" }, /* @__PURE__ */ React.createElement("b", { className: hits.length >= 4 ? "up" : hits.length >= 3 ? "copper" : "warn" }, hits.length), " of ", engines.length, " engines"), /* @__PURE__ */ React.createElement("span", { className: "sfb-sub mono dim2" }, "independent screens that flagged ", ticker.symbol, " \u2014 more hits = stronger confluence \xB7 click to open the engine")), /* @__PURE__ */ React.createElement("div", { className: "sfb-chips" }, hits.sort((a, b) => (a.rank || 99) - (b.rank || 99)).map((e) => /* @__PURE__ */ React.createElement("button", { key: e.id, className: `sfb-chip sfb-${e.tone}`, onClick: () => go(e), title: `${e.label} \xB7 ${e.sub}` }, /* @__PURE__ */ React.createElement("span", { className: "sfb-chip-l mono" }, e.label), e.rank != null && /* @__PURE__ */ React.createElement("span", { className: "sfb-rank mono" }, "#", e.rank), /* @__PURE__ */ React.createElement("span", { className: "sfb-m mono" }, e.m))), miss.length > 0 && /* @__PURE__ */ React.createElement("span", { className: "sfb-miss mono dim2" }, "not in \xB7 ", miss.map((e) => e.label).join(" \xB7 "))));
 }
-function SetupChart({ L, sym, view = "full" }) {
+function SetupChart({ L, sym, view = "full", sync = null }) {
   const wrap = React.useRef(null);
   const refs = React.useRef({});
   const [real, setReal] = React.useState(null);
@@ -26100,11 +26105,12 @@ function SetupChart({ L, sym, view = "full" }) {
       height: Math.max(10, wrap.current.clientHeight),
       layout: { background: { color: "transparent" }, textColor: cssv("--ink-3", "#7c807c"), fontFamily: "inherit", fontSize: 9 },
       grid: { vertLines: { visible: false }, horzLines: { color: "rgba(255,255,255,0.04)" } },
-      crosshair: { mode: 1, vertLine: { visible: false, labelVisible: false }, horzLine: { labelVisible: false, color: "rgba(255,255,255,0.12)" } },
+      crosshair: { mode: 1, vertLine: { visible: true, labelVisible: true, color: "rgba(255,255,255,0.18)", style: 0 }, horzLine: { visible: true, labelVisible: true, color: "rgba(255,255,255,0.18)" } },
       rightPriceScale: { borderColor: "rgba(255,255,255,0.10)", scaleMargins: { top: 0.08, bottom: 0.22 }, entireTextOnly: true },
-      timeScale: { visible: false, rightOffset: 2 },
-      handleScroll: false,
-      handleScale: false
+      timeScale: { visible: true, rightOffset: 2, borderColor: "rgba(255,255,255,0.10)" },
+      handleScroll: true,
+      handleScale: true
+      // TV-style pan + zoom
     });
     const candle = chart.addCandlestickSeries({
       upColor: "#34d399",
@@ -26130,7 +26136,39 @@ function SetupChart({ L, sym, view = "full" }) {
     svg.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:1;";
     wrap.current.style.position = "relative";
     wrap.current.appendChild(svg);
-    refs.current = { chart, candle, vol, svg, lines: [], ov: [] };
+    const legend = document.createElement("div");
+    legend.className = "dh-lw-legend";
+    legend.style.cssText = "position:absolute;left:8px;top:6px;z-index:3;font-family:var(--mono);font-size:10px;line-height:1.5;color:var(--ink-2);background:rgba(10,14,13,0.6);backdrop-filter:blur(3px);border:1px solid rgba(255,255,255,0.06);border-radius:6px;padding:4px 8px;pointer-events:none;";
+    wrap.current.appendChild(legend);
+    refs.current = { chart, candle, vol, svg, legend, lines: [], ov: [] };
+    chart.subscribeCrosshairMove((prm) => {
+      if (!prm || !prm.time || !prm.seriesData) {
+        legend.style.opacity = 0;
+        return;
+      }
+      const dd = prm.seriesData.get(candle);
+      if (!dd) {
+        legend.style.opacity = 0;
+        return;
+      }
+      const o = dd.open, h = dd.high, l = dd.low, c = dd.close;
+      const up = c >= o, col = up ? "var(--gn)" : "var(--rd)";
+      legend.style.opacity = 1;
+      legend.innerHTML = `<b style="color:${col}">${sym || ""}</b> &nbsp;O <b>${(+o).toFixed(2)}</b> H <b>${(+h).toFixed(2)}</b> L <b>${(+l).toFixed(2)}</b> C <b style="color:${col}">${(+c).toFixed(2)}</b>`;
+    });
+    if (sync) {
+      sync.current.main = chart.timeScale();
+      chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
+        const o = sync.current.mcdx;
+        if (!o || !r || sync.current.lock) return;
+        sync.current.lock = true;
+        try {
+          o.setVisibleLogicalRange(r);
+        } catch (e) {
+        }
+        sync.current.lock = false;
+      });
+    }
     const draw = () => {
       const r = refs.current;
       if (!r.chart || !r.zones) return;
@@ -26266,6 +26304,267 @@ function SetupChart({ L, sym, view = "full" }) {
   return /* @__PURE__ */ React.createElement("div", { ref: wrap, className: "dh-lw" });
 }
 window.SetupChart = SetupChart;
+function OverviewMcdx({ sym, sync = null }) {
+  const wrap = React.useRef(null);
+  const refs = React.useRef({});
+  const [bars, setBars] = React.useState(null);
+  React.useEffect(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.get || !sym) {
+      setBars(null);
+      return;
+    }
+    let alive = true;
+    BV.get("/api/ohlcv/" + encodeURIComponent(sym)).then((res) => {
+      if (!alive) return;
+      const c = res && res.candles || [];
+      if (c.length < 40) {
+        setBars(null);
+        return;
+      }
+      setBars(c.map((x) => ({ time: x.time, high: x.high, low: x.low, close: x.close })));
+    }).catch(() => {
+      if (alive) setBars(null);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [sym]);
+  const data = React.useMemo(() => {
+    if (!bars || bars.length < 40) return null;
+    const N = 34;
+    const rsv = bars.map((b, i) => {
+      const w = bars.slice(Math.max(0, i - N + 1), i + 1);
+      let lo = Infinity, hi = -Infinity;
+      for (const x of w) {
+        if (x.low < lo) lo = x.low;
+        if (x.high > hi) hi = x.high;
+      }
+      const r = hi > lo ? (b.close - lo) / (hi - lo) * 100 : 50;
+      return Math.max(0, Math.min(100, r));
+    });
+    const ema = (a, p) => {
+      const k = 2 / (p + 1);
+      let pr = a[0];
+      return a.map((v, i) => {
+        pr = i === 0 ? v : v * k + pr * (1 - k);
+        return pr;
+      });
+    };
+    const hot = ema(rsv, 5), bk = ema(rsv, 13);
+    return {
+      hist: bars.map((b, i) => ({ time: b.time, value: +hot[i].toFixed(2), color: hot[i] >= 55 ? "#16c784" : hot[i] <= 45 ? "#f87171" : "#e8c170" })),
+      bline: bars.map((b, i) => ({ time: b.time, value: +bk[i].toFixed(2) })),
+      state: hot[hot.length - 1] >= 55 ? "inflow" : hot[hot.length - 1] <= 45 ? "outflow" : "neutral"
+    };
+  }, [bars]);
+  React.useEffect(() => {
+    if (!wrap.current || !window.LightweightCharts || !data) return;
+    const LWC = window.LightweightCharts;
+    if (refs.current.chart) {
+      try {
+        refs.current.chart.remove();
+      } catch (e) {
+      }
+    }
+    const chart = LWC.createChart(wrap.current, {
+      autoSize: false,
+      width: Math.max(10, wrap.current.clientWidth),
+      height: Math.max(10, wrap.current.clientHeight),
+      layout: { background: { color: "transparent" }, textColor: "rgba(255,255,255,.32)", fontFamily: "inherit", fontSize: 9 },
+      grid: { vertLines: { visible: false }, horzLines: { visible: false } },
+      rightPriceScale: { borderColor: "rgba(255,255,255,0.08)", entireTextOnly: true },
+      timeScale: { visible: false, rightOffset: 2 },
+      handleScroll: false,
+      handleScale: false,
+      crosshair: { mode: 0 }
+    });
+    const h = chart.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false });
+    h.setData(data.hist);
+    const bl = chart.addLineSeries({ color: "#5b9bd5", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    bl.setData(data.bline);
+    chart.timeScale().fitContent();
+    refs.current = { chart };
+    if (sync) {
+      sync.current.mcdx = chart.timeScale();
+      chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
+        const o = sync.current.main;
+        if (!o || !r || sync.current.lock) return;
+        sync.current.lock = true;
+        try {
+          o.setVisibleLogicalRange(r);
+        } catch (e) {
+        }
+        sync.current.lock = false;
+      });
+    }
+    const fit = () => {
+      const host = wrap.current;
+      if (!host) return;
+      const r = host.getBoundingClientRect();
+      const w = Math.round(r.width), hh = Math.round(r.height) || 84;
+      if (w < 20) return;
+      try {
+        chart.resize(w, hh, true);
+        chart.timeScale().fitContent();
+      } catch (e) {
+      }
+    };
+    const ro = new ResizeObserver(() => requestAnimationFrame(fit));
+    ro.observe(wrap.current);
+    refs.current.ro = ro;
+    return () => {
+      try {
+        ro.disconnect();
+        chart.remove();
+      } catch (e) {
+      }
+      if (sync) sync.current.mcdx = null;
+      refs.current = {};
+    };
+  }, [data]);
+  if (!data) return null;
+  const sc = data.state === "inflow" ? "#16c784" : data.state === "outflow" ? "#f87171" : "#e8c170";
+  return /* @__PURE__ */ React.createElement("div", { style: { marginTop: 6 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: "var(--mono,monospace)", fontSize: 9.5, color: "var(--ink-3,#7c807c)", padding: "0 2px 3px" } }, /* @__PURE__ */ React.createElement("span", null, "\u{1F3E6} MCDX \xB7 money flow \u2014 ", /* @__PURE__ */ React.createElement("b", { style: { color: sc } }, data.state)), /* @__PURE__ */ React.createElement("span", { style: { opacity: 0.7 } }, "\u{1F7E2} in \xB7 \u{1F7E1} neutral \xB7 \u{1F534} out \xB7 ", /* @__PURE__ */ React.createElement("span", { style: { color: "#5b9bd5" } }, "\u2014"), " banker")), /* @__PURE__ */ React.createElement("div", { ref: wrap, style: { height: 78, width: "100%" } }));
+}
+window.OverviewMcdx = OverviewMcdx;
+function _obBoxPrim(boxes) {
+  let _s = null, _c = null, _req = null, _vis = true;
+  const renderer = { draw(target) {
+    if (!_vis || !boxes || !boxes.length) return;
+    target.useBitmapCoordinateSpace((scope) => {
+      const ctx = scope.context, ts = _c.timeScale(), pr = scope.horizontalPixelRatio, vr = scope.verticalPixelRatio;
+      for (const bx of boxes) {
+        const x1 = ts.timeToCoordinate(bx.time), x2 = ts.timeToCoordinate(bx.time_right);
+        const y1 = _s.priceToCoordinate(bx.top), y2 = _s.priceToCoordinate(bx.bot);
+        if (x1 == null || x2 == null || y1 == null || y2 == null) continue;
+        const bull = bx.kind === "bull";
+        const X = x1 * pr, Y = Math.min(y1, y2) * vr, W = (x2 - x1) * pr, H = Math.abs(y2 - y1) * vr;
+        ctx.fillStyle = bull ? "rgba(52,211,153,0.14)" : "rgba(248,113,113,0.14)";
+        ctx.fillRect(X, Y, W, H);
+        ctx.strokeStyle = bull ? "rgba(52,211,153,0.5)" : "rgba(248,113,113,0.5)";
+        ctx.lineWidth = 1 * vr;
+        ctx.strokeRect(X, Y, W, H);
+        ctx.fillStyle = bull ? "rgba(140,240,200,0.92)" : "rgba(255,160,170,0.92)";
+        ctx.font = `${9 * vr}px monospace`;
+        ctx.textBaseline = "middle";
+        ctx.textAlign = "left";
+        ctx.fillText(bx.vol_label || "", X + 5 * pr, Y + H / 2);
+      }
+    });
+  } };
+  const view = { renderer() {
+    return renderer;
+  } };
+  return { attached(p) {
+    _s = p.series;
+    _c = p.chart;
+    _req = p.requestUpdate;
+  }, updateAllViews() {
+  }, paneViews() {
+    return [view];
+  }, setVisible(v) {
+    _vis = v;
+    if (_req) _req();
+  } };
+}
+function PriceActionChart({ sym, sync = null }) {
+  const wrap = React.useRef(null);
+  const refs = React.useRef({});
+  const [d, setD] = React.useState(null);
+  React.useEffect(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.get || !sym) {
+      setD(null);
+      return;
+    }
+    let alive = true;
+    BV.get("/api/bullalgo/" + encodeURIComponent(sym) + "/pac-chart?tf=SWING").then((r) => {
+      if (!alive) return;
+      setD(r && r.available ? r : null);
+    }).catch(() => {
+      if (alive) setD(null);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [sym]);
+  React.useEffect(() => {
+    if (!wrap.current || !window.LightweightCharts || !d) return;
+    const LWC = window.LightweightCharts;
+    if (refs.current.chart) {
+      try {
+        refs.current.chart.remove();
+      } catch (e) {
+      }
+    }
+    const chart = LWC.createChart(wrap.current, {
+      autoSize: false,
+      width: Math.max(10, wrap.current.clientWidth),
+      height: Math.max(10, wrap.current.clientHeight),
+      layout: { background: { color: "transparent" }, textColor: "#9fb3ac", fontFamily: "inherit", fontSize: 9 },
+      grid: { vertLines: { visible: false }, horzLines: { color: "rgba(255,255,255,0.04)" } },
+      crosshair: { mode: 1, vertLine: { visible: true, labelVisible: true, color: "rgba(255,255,255,0.18)" }, horzLine: { visible: true, labelVisible: true, color: "rgba(255,255,255,0.18)" } },
+      rightPriceScale: { borderColor: "rgba(255,255,255,0.10)", entireTextOnly: true },
+      timeScale: { visible: true, rightOffset: 2, borderColor: "rgba(255,255,255,0.10)" },
+      handleScroll: true,
+      handleScale: true
+    });
+    const candle = chart.addCandlestickSeries({ upColor: "#34d399", downColor: "#f87171", borderUpColor: "#34d399", borderDownColor: "#f87171", wickUpColor: "rgba(52,211,153,.7)", wickDownColor: "rgba(248,113,113,.7)" });
+    candle.setData(d.bars || []);
+    const z = d.zones || {};
+    if (z.high != null) {
+      candle.createPriceLine({ price: z.high, color: "rgba(248,113,113,.5)", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "Premium" });
+      candle.createPriceLine({ price: z.eq, color: "rgba(159,179,172,.6)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "Equilibrium" });
+      candle.createPriceLine({ price: z.low, color: "rgba(52,211,153,.5)", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "Discount" });
+    }
+    const boxes = _obBoxPrim(d.order_blocks || []);
+    candle.attachPrimitive(boxes);
+    if (d.markers && d.markers.length) candle.setMarkers(d.markers);
+    chart.timeScale().fitContent();
+    refs.current = { chart };
+    if (sync) {
+      sync.current.main = chart.timeScale();
+      chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
+        const o = sync.current.mcdx;
+        if (!o || !r || sync.current.lock) return;
+        sync.current.lock = true;
+        try {
+          o.setVisibleLogicalRange(r);
+        } catch (e) {
+        }
+        sync.current.lock = false;
+      });
+    }
+    const fit = () => {
+      const h = wrap.current;
+      if (!h) return;
+      const r = h.getBoundingClientRect();
+      const w = Math.round(r.width), hh = Math.round(r.height) || 300;
+      if (w < 20) return;
+      try {
+        chart.resize(w, hh, true);
+        chart.timeScale().fitContent();
+      } catch (e) {
+      }
+    };
+    const ro = new ResizeObserver(() => requestAnimationFrame(fit));
+    ro.observe(wrap.current);
+    refs.current.ro = ro;
+    return () => {
+      try {
+        ro.disconnect();
+        chart.remove();
+      } catch (e) {
+      }
+      if (sync) sync.current.main = null;
+      refs.current = {};
+    };
+  }, [d]);
+  if (!d) return /* @__PURE__ */ React.createElement("div", { className: "dh-lw", style: { display: "flex", alignItems: "center", justifyContent: "center", color: "var(--ink-3)", fontFamily: "var(--mono)", fontSize: 11 } }, "loading price action\u2026");
+  return /* @__PURE__ */ React.createElement("div", { ref: wrap, className: "dh-lw" });
+}
+window.PriceActionChart = PriceActionChart;
 function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
   const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
   const net = cv ? cv.net : ticker.score || 60;
@@ -26294,6 +26593,9 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
     } catch (e) {
     }
   };
+  const [chartExpanded, setChartExpanded] = React.useState(false);
+  const [paMode, setPaMode] = React.useState(false);
+  const chartSync = React.useRef({ main: null, mcdx: null, lock: false });
   const [wlOn, setWlOn] = React.useState(() => !!(window.WatchStore && window.WatchStore.has(ticker.symbol)));
   React.useEffect(() => {
     const h = () => setWlOn(!!(window.WatchStore && window.WatchStore.has(ticker.symbol)));
@@ -26370,7 +26672,7 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
     const reachCls = reachPct == null ? "" : reachPct >= 60 ? " dh-rung-reach--hi" : reachPct < 45 ? " dh-rung-reach--lo" : "";
     const hasMeta = !!r.src || reachPct != null || r.stretch;
     return /* @__PURE__ */ React.createElement("div", { key: i, className: `dh-rung ${r.cls} mono` }, /* @__PURE__ */ React.createElement("span", { className: "dh-rung-k" }, r.k), /* @__PURE__ */ React.createElement("span", { className: "dh-rung-v", "data-field": r.field, "data-provenance": "comp", title: !L.valid && r.k !== "NOW" ? "estimated from price \u2014 no scan trade plan for this off-universe name" : void 0 }, !L.valid && r.k !== "NOW" ? "~" : "", "$", r.v.toFixed(2)), /* @__PURE__ */ React.createElement("span", { className: "dh-rung-d" }, r.d), hasMeta && /* @__PURE__ */ React.createElement("span", { className: "dh-rung-meta" }, r.stretch && /* @__PURE__ */ React.createElement("span", { className: "dh-rung-badge", title: "Momentum-confirmed bull-stretch extension \u2014 armed only when trend, MACD and budget support a run beyond T2." }, "STRETCH \xB7 armed"), r.src && /* @__PURE__ */ React.createElement("span", { className: "dh-rung-src", title: "Structural confluence behind this target (top sources)." }, r.src), reachPct != null && /* @__PURE__ */ React.createElement("span", { className: `dh-rung-reach${reachCls}`, title: "Modeled probability price reaches this target within the hold window (analog \xD7 Monte-Carlo \xD7 Bayes)." }, reachPct, "% reach")));
-  })), /* @__PURE__ */ React.createElement("div", { className: "dh-rail-stats" }, /* @__PURE__ */ React.createElement("div", { className: "dh-rs" }, /* @__PURE__ */ React.createElement("span", { className: "dh-rs-l mono" }, "R : R"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-v mono copper", "data-field": "canonical_trade_plan.rr_ratio" }, modeRR != null ? modeRR.toFixed(2) + "R" : "\u2014"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-sub mono" }, "reward \xF7 risk")), /* @__PURE__ */ React.createElement("div", { className: "dh-rs" }, /* @__PURE__ */ React.createElement("span", { className: "dh-rs-l mono" }, "SIZE"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-v mono" }, shares ? shares + " sh" : "\u2014"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-sub mono" }, shares ? `$${dollars.toLocaleString()}${navPct != null ? ` \xB7 ${navPct.toFixed(1)}% NAV` : ""}` : "no plan")), /* @__PURE__ */ React.createElement("div", { className: "dh-rs" }, /* @__PURE__ */ React.createElement("span", { className: "dh-rs-l mono" }, "EDGE"), /* @__PURE__ */ React.createElement("span", { className: `dh-rs-v mono ${lb != null ? "up" : "dim2"}` }, lb != null ? (lb * 100).toFixed(0) + "%" : "\u2014"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-sub mono" }, "Wilson LB", ss.pf != null ? ` \xB7 PF ${ss.pf.toFixed(2)}` : ""))), /* @__PURE__ */ React.createElement("div", { className: "dh-fit mono" }, L.valid ? /* @__PURE__ */ React.createElement("span", { className: "dh-fit-chip" }, "size = $", Math.round(navRisk).toLocaleString(), " risk \xF7 $", risk.toFixed(2), " stop") : null, /* @__PURE__ */ React.createElement("span", { className: "dh-fit-chip" }, held ? `in book \xB7 ${Math.abs(held.qty || 0)} sh` : "not held"), ticker.beta != null ? /* @__PURE__ */ React.createElement("span", { className: "dh-fit-chip" }, "\u03B2 ", ticker.beta.toFixed(2), " \u2192 market") : null, Lte ? /* @__PURE__ */ React.createElement("span", { className: "dh-fit-chip", title: "Levels sourced from the per-mode structural target engine (distinct T1/T2/stop/entry for this horizon)." }, "structural \xB7 ", mode.toLowerCase(), " plan") : null, te && te.invest_stub ? /* @__PURE__ */ React.createElement("span", { className: "dh-fit-chip warn", title: te.warnings && te.warnings[0] || "Invest targets are analyst-consensus PT \xD7 1.0/1.3 (interim \u2014 structural IV targets pending)." }, "\u26A0 analyst-PT targets") : null, /* @__PURE__ */ React.createElement("span", null, NAV ? "\xBD-Kelly \xB7 0.5%-NAV risk" : "\xBD-Kelly reference")))), /* @__PURE__ */ React.createElement("div", { className: "dh-chart" }, /* @__PURE__ */ React.createElement("div", { className: "dh-chart-h" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap mono" }, chartView === "action" ? "THE SETUP \xB7 stop \xB7 trigger \xB7 EMA 9/21" : `THE SETUP \xB7 stop \xB7 trigger \xB7 ${L.t2 && L.t2 > 0 ? "T1 / T2" : "T1"} \xB7 EMA 9/21`), /* @__PURE__ */ React.createElement("div", { className: "dh-chart-hr" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim2 dh-ema-leg" }, /* @__PURE__ */ React.createElement("b", { style: { color: "var(--cy)" } }, "\u2501"), " EMA9 ", /* @__PURE__ */ React.createElement("b", { style: { color: "var(--violet)" } }, "\u2501"), " EMA21"), /* @__PURE__ */ React.createElement("div", { className: "dh-chart-toggle mono" }, /* @__PURE__ */ React.createElement("button", { className: chartView === "action" ? "is-on" : "", onClick: () => pickChartView("action"), title: "Tight frame \u2014 bigger candles" }, "Action"), /* @__PURE__ */ React.createElement("button", { className: chartView === "full" ? "is-on" : "", onClick: () => pickChartView("full"), title: "Show the full trade \u2014 targets on chart" }, "Full trade")))), /* @__PURE__ */ React.createElement(SetupChart, { L, sym: ticker.symbol, view: chartView }))), /* @__PURE__ */ React.createElement("div", { className: "dh-actions" }, /* @__PURE__ */ React.createElement("button", { className: "dh-act dh-act--primary", onClick: actTrade, title: "Open Automated Trade to place a bracket order" }, "\u25B2 Place bracket"), /* @__PURE__ */ React.createElement("button", { className: `dh-act ${wlOn ? "dh-act--primary" : ""}`, onClick: actWatch }, wlOn ? "\u2713 Watchlisted" : "\uFF0B Watchlist"), /* @__PURE__ */ React.createElement("button", { className: "dh-act", onClick: actTrade, title: "Open Automated Trade to size the position" }, "\u2699 Adjust size"), /* @__PURE__ */ React.createElement("button", { className: "dh-act", onClick: actAlerts, title: "Open Alerts to arm a price alert" }, "\u{1F514} Alert at $", entry.toFixed(2)), /* @__PURE__ */ React.createElement("button", { className: "dh-act dh-act--rd dh-act--spacer", onClick: actTrade, title: "Open Automated Trade to place a short" }, "\u25BC Place short")));
+  })), /* @__PURE__ */ React.createElement("div", { className: "dh-rail-stats" }, /* @__PURE__ */ React.createElement("div", { className: "dh-rs" }, /* @__PURE__ */ React.createElement("span", { className: "dh-rs-l mono" }, "R : R"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-v mono copper", "data-field": "canonical_trade_plan.rr_ratio" }, modeRR != null ? modeRR.toFixed(2) + "R" : "\u2014"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-sub mono" }, "reward \xF7 risk")), /* @__PURE__ */ React.createElement("div", { className: "dh-rs" }, /* @__PURE__ */ React.createElement("span", { className: "dh-rs-l mono" }, "SIZE"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-v mono" }, shares ? shares + " sh" : "\u2014"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-sub mono" }, shares ? `$${dollars.toLocaleString()}${navPct != null ? ` \xB7 ${navPct.toFixed(1)}% NAV` : ""}` : "no plan")), /* @__PURE__ */ React.createElement("div", { className: "dh-rs" }, /* @__PURE__ */ React.createElement("span", { className: "dh-rs-l mono" }, "EDGE"), /* @__PURE__ */ React.createElement("span", { className: `dh-rs-v mono ${lb != null ? "up" : "dim2"}` }, lb != null ? (lb * 100).toFixed(0) + "%" : "\u2014"), /* @__PURE__ */ React.createElement("span", { className: "dh-rs-sub mono" }, "Wilson LB", ss.pf != null ? ` \xB7 PF ${ss.pf.toFixed(2)}` : ""))), /* @__PURE__ */ React.createElement("div", { className: "dh-fit mono" }, L.valid ? /* @__PURE__ */ React.createElement("span", { className: "dh-fit-chip" }, "size = $", Math.round(navRisk).toLocaleString(), " risk \xF7 $", risk.toFixed(2), " stop") : null, /* @__PURE__ */ React.createElement("span", { className: "dh-fit-chip" }, held ? `in book \xB7 ${Math.abs(held.qty || 0)} sh` : "not held"), ticker.beta != null ? /* @__PURE__ */ React.createElement("span", { className: "dh-fit-chip" }, "\u03B2 ", ticker.beta.toFixed(2), " \u2192 market") : null, Lte ? /* @__PURE__ */ React.createElement("span", { className: "dh-fit-chip", title: "Levels sourced from the per-mode structural target engine (distinct T1/T2/stop/entry for this horizon)." }, "structural \xB7 ", mode.toLowerCase(), " plan") : null, te && te.invest_stub ? /* @__PURE__ */ React.createElement("span", { className: "dh-fit-chip warn", title: te.warnings && te.warnings[0] || "Invest targets are analyst-consensus PT \xD7 1.0/1.3 (interim \u2014 structural IV targets pending)." }, "\u26A0 analyst-PT targets") : null, /* @__PURE__ */ React.createElement("span", null, NAV ? "\xBD-Kelly \xB7 0.5%-NAV risk" : "\xBD-Kelly reference")))), /* @__PURE__ */ React.createElement("div", { className: "dh-chart" + (chartExpanded ? " dh-chart--expanded" : "") }, /* @__PURE__ */ React.createElement("div", { className: "dh-chart-h" }, /* @__PURE__ */ React.createElement("span", { className: "label-cap mono" }, paMode ? "PRICE ACTION \xB7 order blocks \xB7 structure \xB7 premium/discount" : chartView === "action" ? "THE SETUP \xB7 stop \xB7 trigger \xB7 EMA 9/21" : `THE SETUP \xB7 stop \xB7 trigger \xB7 ${L.t2 && L.t2 > 0 ? "T1 / T2" : "T1"} \xB7 EMA 9/21`), /* @__PURE__ */ React.createElement("div", { className: "dh-chart-hr" }, /* @__PURE__ */ React.createElement("div", { className: "dh-chart-toggle mono" }, /* @__PURE__ */ React.createElement("button", { className: !paMode ? "is-on" : "", onClick: () => setPaMode(false), title: "Trade setup \u2014 levels + EMAs" }, "Setup"), /* @__PURE__ */ React.createElement("button", { className: paMode ? "is-on" : "", onClick: () => setPaMode(true), title: "Price Action \u2014 order blocks, structure, premium/discount" }, "Price Action")), !paMode && /* @__PURE__ */ React.createElement("div", { className: "dh-chart-toggle mono" }, /* @__PURE__ */ React.createElement("button", { className: chartView === "action" ? "is-on" : "", onClick: () => pickChartView("action"), title: "Tight frame \u2014 bigger candles" }, "Action"), /* @__PURE__ */ React.createElement("button", { className: chartView === "full" ? "is-on" : "", onClick: () => pickChartView("full"), title: "Show the full trade \u2014 targets on chart" }, "Full trade")), /* @__PURE__ */ React.createElement("button", { className: "dh-expand-btn" + (chartExpanded ? " is-on" : ""), onClick: () => setChartExpanded((e) => !e), title: "Expand chart \u2014 pan/zoom, everything auto-adjusts" }, chartExpanded ? "\u2921 Close" : "\u2922 Expand"))), paMode ? /* @__PURE__ */ React.createElement(PriceActionChart, { sym: ticker.symbol, sync: chartSync }) : /* @__PURE__ */ React.createElement(SetupChart, { L, sym: ticker.symbol, view: chartView, sync: chartSync }), /* @__PURE__ */ React.createElement(OverviewMcdx, { sym: ticker.symbol, sync: chartSync }))), /* @__PURE__ */ React.createElement("div", { className: "dh-actions" }, /* @__PURE__ */ React.createElement("button", { className: "dh-act dh-act--primary", onClick: actTrade, title: "Open Automated Trade to place a bracket order" }, "\u25B2 Place bracket"), /* @__PURE__ */ React.createElement("button", { className: `dh-act ${wlOn ? "dh-act--primary" : ""}`, onClick: actWatch }, wlOn ? "\u2713 Watchlisted" : "\uFF0B Watchlist"), /* @__PURE__ */ React.createElement("button", { className: "dh-act", onClick: actTrade, title: "Open Automated Trade to size the position" }, "\u2699 Adjust size"), /* @__PURE__ */ React.createElement("button", { className: "dh-act", onClick: actAlerts, title: "Open Alerts to arm a price alert" }, "\u{1F514} Alert at $", entry.toFixed(2)), /* @__PURE__ */ React.createElement("button", { className: "dh-act dh-act--rd dh-act--spacer", onClick: actTrade, title: "Open Automated Trade to place a short" }, "\u25BC Place short")));
 }
 window.DecisionHero = DecisionHero;
 (function() {

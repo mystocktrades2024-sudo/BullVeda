@@ -57,6 +57,11 @@
   .dh-chart-toggle button:hover:not(.is-on){ color:var(--ink-1); }
   .dh-chart-svg{ display:block; width:100%; height:auto; max-height:128px; }
   .dh-lw{ width:100%; height:auto; flex:1 1 auto; min-height:300px; }
+  .dh-chart--expanded{ position:fixed; inset:12px; z-index:9999; background:var(--bg-1,#0f1513); border:1px solid var(--glass-line); border-radius:14px; box-shadow:0 24px 70px rgba(0,0,0,.6); }
+  .dh-chart--expanded .dh-lw{ min-height:0; flex:1 1 auto; }
+  .dh-expand-btn{ font-family:var(--mono); font-size:9px; letter-spacing:.04em; padding:3px 8px; background:transparent; color:var(--ink-3); border:1px solid var(--glass-line); border-radius:6px; cursor:pointer; }
+  .dh-expand-btn:hover{ color:var(--ink-1); }
+  .dh-expand-btn.is-on{ color:var(--copper); border-color:var(--copper); }
   .dh-rail-stats{ display:flex; border-top:1px solid var(--glass-line); border-bottom:1px solid var(--glass-line); margin-top:3px; }
   .dh-rs{ flex:1; padding:6px 9px; border-right:1px solid var(--glass-line); display:flex; flex-direction:column; gap:1px; min-width:0; }
   .dh-rs:last-child{ border-right:none; }
@@ -338,7 +343,7 @@ function SurfacedBy({ ticker }) {
 }
 
 // ─── SetupChart — compact TradingView candles w/ plan price-lines on the axis ───
-function SetupChart({ L, sym, view = "full" }) {
+function SetupChart({ L, sym, view = "full", sync = null }) {
   const wrap = React.useRef(null);
   const refs = React.useRef({});
 
@@ -413,10 +418,10 @@ function SetupChart({ L, sym, view = "full" }) {
       width: Math.max(10, wrap.current.clientWidth), height: Math.max(10, wrap.current.clientHeight),
       layout: { background: { color: "transparent" }, textColor: cssv("--ink-3", "#7c807c"), fontFamily: "inherit", fontSize: 9 },
       grid: { vertLines: { visible: false }, horzLines: { color: "rgba(255,255,255,0.04)" } },
-      crosshair: { mode: 1, vertLine: { visible: false, labelVisible: false }, horzLine: { labelVisible: false, color: "rgba(255,255,255,0.12)" } },
+      crosshair: { mode: 1, vertLine: { visible: true, labelVisible: true, color: "rgba(255,255,255,0.18)", style: 0 }, horzLine: { visible: true, labelVisible: true, color: "rgba(255,255,255,0.18)" } },
       rightPriceScale: { borderColor: "rgba(255,255,255,0.10)", scaleMargins: { top: 0.08, bottom: 0.22 }, entireTextOnly: true },
-      timeScale: { visible: false, rightOffset: 2 },
-      handleScroll: false, handleScale: false,
+      timeScale: { visible: true, rightOffset: 2, borderColor: "rgba(255,255,255,0.10)" },
+      handleScroll: true, handleScale: true,   // TV-style pan + zoom
     });
     const candle = chart.addCandlestickSeries({
       upColor: "#34d399", downColor: "#f87171", borderUpColor: "#34d399", borderDownColor: "#f87171",
@@ -432,7 +437,28 @@ function SetupChart({ L, sym, view = "full" }) {
     svg.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:1;";
     wrap.current.style.position = "relative";
     wrap.current.appendChild(svg);
-    refs.current = { chart, candle, vol, svg, lines: [], ov: [] };
+    // TV-style OHLC legend (updates on crosshair move)
+    const legend = document.createElement("div");
+    legend.className = "dh-lw-legend";
+    legend.style.cssText = "position:absolute;left:8px;top:6px;z-index:3;font-family:var(--mono);font-size:10px;line-height:1.5;color:var(--ink-2);background:rgba(10,14,13,0.6);backdrop-filter:blur(3px);border:1px solid rgba(255,255,255,0.06);border-radius:6px;padding:4px 8px;pointer-events:none;";
+    wrap.current.appendChild(legend);
+    refs.current = { chart, candle, vol, svg, legend, lines: [], ov: [] };
+    chart.subscribeCrosshairMove(prm => {
+      if (!prm || !prm.time || !prm.seriesData) { legend.style.opacity = 0; return; }
+      const dd = prm.seriesData.get(candle); if (!dd) { legend.style.opacity = 0; return; }
+      const o = dd.open, h = dd.high, l = dd.low, c = dd.close;
+      const up = c >= o, col = up ? "var(--gn)" : "var(--rd)";
+      legend.style.opacity = 1;
+      legend.innerHTML = `<b style="color:${col}">${sym || ""}</b> &nbsp;O <b>${(+o).toFixed(2)}</b> H <b>${(+h).toFixed(2)}</b> L <b>${(+l).toFixed(2)}</b> C <b style="color:${col}">${(+c).toFixed(2)}</b>`;
+    });
+    // register as the MAIN time-scale for the MCDX pane below to follow (bidirectional)
+    if (sync) {
+      sync.current.main = chart.timeScale();
+      chart.timeScale().subscribeVisibleLogicalRangeChange(r => {
+        const o = sync.current.mcdx; if (!o || !r || sync.current.lock) return;
+        sync.current.lock = true; try { o.setVisibleLogicalRange(r); } catch (e) {} sync.current.lock = false;
+      });
+    }
     const draw = () => {
       const r = refs.current; if (!r.chart || !r.zones) return;
       const host = wrap.current; if (!host) return;
@@ -537,6 +563,168 @@ function SetupChart({ L, sym, view = "full" }) {
 }
 window.SetupChart = SetupChart;
 
+// ─── OverviewMcdx — money-flow strip under the setup chart. Computed from the
+//     SAME /api/ohlcv daily bars as SetupChart so the x-axis aligns exactly.
+//     Honest: stochastic-RSV momentum proxy (green=inflow / red=outflow), NOT
+//     real order flow. Banker line = slow smoothing. ───
+function OverviewMcdx({ sym, sync = null }) {
+  const wrap = React.useRef(null);
+  const refs = React.useRef({});
+  const [bars, setBars] = React.useState(null);
+  React.useEffect(() => {
+    const BV = window.__BV;
+    if (!BV || !BV.get || !sym) { setBars(null); return; }
+    let alive = true;
+    BV.get("/api/ohlcv/" + encodeURIComponent(sym)).then(res => {
+      if (!alive) return;
+      const c = (res && res.candles) || [];
+      if (c.length < 40) { setBars(null); return; }
+      setBars(c.map(x => ({ time: x.time, high: x.high, low: x.low, close: x.close })));
+    }).catch(() => { if (alive) setBars(null); });
+    return () => { alive = false; };
+  }, [sym]);
+  const data = React.useMemo(() => {
+    if (!bars || bars.length < 40) return null;
+    const N = 34;
+    const rsv = bars.map((b, i) => {
+      const w = bars.slice(Math.max(0, i - N + 1), i + 1);
+      let lo = Infinity, hi = -Infinity;
+      for (const x of w) { if (x.low < lo) lo = x.low; if (x.high > hi) hi = x.high; }
+      const r = hi > lo ? (b.close - lo) / (hi - lo) * 100 : 50;
+      return Math.max(0, Math.min(100, r));
+    });
+    const ema = (a, p) => { const k = 2 / (p + 1); let pr = a[0]; return a.map((v, i) => { pr = i === 0 ? v : v * k + pr * (1 - k); return pr; }); };
+    const hot = ema(rsv, 5), bk = ema(rsv, 13);
+    return {
+      hist: bars.map((b, i) => ({ time: b.time, value: +hot[i].toFixed(2), color: hot[i] >= 55 ? "#16c784" : hot[i] <= 45 ? "#f87171" : "#e8c170" })),
+      bline: bars.map((b, i) => ({ time: b.time, value: +bk[i].toFixed(2) })),
+      state: hot[hot.length - 1] >= 55 ? "inflow" : hot[hot.length - 1] <= 45 ? "outflow" : "neutral",
+    };
+  }, [bars]);
+  React.useEffect(() => {
+    if (!wrap.current || !window.LightweightCharts || !data) return;
+    const LWC = window.LightweightCharts;
+    if (refs.current.chart) { try { refs.current.chart.remove(); } catch (e) {} }
+    const chart = LWC.createChart(wrap.current, {
+      autoSize: false, width: Math.max(10, wrap.current.clientWidth), height: Math.max(10, wrap.current.clientHeight),
+      layout: { background: { color: "transparent" }, textColor: "rgba(255,255,255,.32)", fontFamily: "inherit", fontSize: 9 },
+      grid: { vertLines: { visible: false }, horzLines: { visible: false } },
+      rightPriceScale: { borderColor: "rgba(255,255,255,0.08)", entireTextOnly: true },
+      timeScale: { visible: false, rightOffset: 2 }, handleScroll: false, handleScale: false,
+      crosshair: { mode: 0 },
+    });
+    const h = chart.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false }); h.setData(data.hist);
+    const bl = chart.addLineSeries({ color: "#5b9bd5", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }); bl.setData(data.bline);
+    chart.timeScale().fitContent();
+    refs.current = { chart };
+    // follow the setup chart above (bidirectional pan/zoom sync)
+    if (sync) {
+      sync.current.mcdx = chart.timeScale();
+      chart.timeScale().subscribeVisibleLogicalRangeChange(r => {
+        const o = sync.current.main; if (!o || !r || sync.current.lock) return;
+        sync.current.lock = true; try { o.setVisibleLogicalRange(r); } catch (e) {} sync.current.lock = false;
+      });
+    }
+    const fit = () => { const host = wrap.current; if (!host) return; const r = host.getBoundingClientRect(); const w = Math.round(r.width), hh = Math.round(r.height) || 84; if (w < 20) return; try { chart.resize(w, hh, true); chart.timeScale().fitContent(); } catch (e) {} };
+    const ro = new ResizeObserver(() => requestAnimationFrame(fit)); ro.observe(wrap.current); refs.current.ro = ro;
+    return () => { try { ro.disconnect(); chart.remove(); } catch (e) {} if (sync) sync.current.mcdx = null; refs.current = {}; };
+  }, [data]);
+  if (!data) return null;
+  const sc = data.state === "inflow" ? "#16c784" : data.state === "outflow" ? "#f87171" : "#e8c170";
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: "var(--mono,monospace)", fontSize: 9.5, color: "var(--ink-3,#7c807c)", padding: "0 2px 3px" }}>
+        <span>🏦 MCDX · money flow — <b style={{ color: sc }}>{data.state}</b></span>
+        <span style={{ opacity: .7 }}>🟢 in · 🟡 neutral · 🔴 out · <span style={{ color: "#5b9bd5" }}>—</span> banker</span>
+      </div>
+      <div ref={wrap} style={{ height: 78, width: "100%" }} />
+    </div>
+  );
+}
+window.OverviewMcdx = OverviewMcdx;
+
+// box primitive — filled order-block rectangles (extend right) + volume label
+function _obBoxPrim(boxes) {
+  let _s = null, _c = null, _req = null, _vis = true;
+  const renderer = { draw(target) {
+    if (!_vis || !boxes || !boxes.length) return;
+    target.useBitmapCoordinateSpace(scope => {
+      const ctx = scope.context, ts = _c.timeScale(), pr = scope.horizontalPixelRatio, vr = scope.verticalPixelRatio;
+      for (const bx of boxes) {
+        const x1 = ts.timeToCoordinate(bx.time), x2 = ts.timeToCoordinate(bx.time_right);
+        const y1 = _s.priceToCoordinate(bx.top), y2 = _s.priceToCoordinate(bx.bot);
+        if (x1 == null || x2 == null || y1 == null || y2 == null) continue;
+        const bull = bx.kind === "bull";
+        const X = x1 * pr, Y = Math.min(y1, y2) * vr, W = (x2 - x1) * pr, H = Math.abs(y2 - y1) * vr;
+        ctx.fillStyle = bull ? "rgba(52,211,153,0.14)" : "rgba(248,113,113,0.14)";
+        ctx.fillRect(X, Y, W, H);
+        ctx.strokeStyle = bull ? "rgba(52,211,153,0.5)" : "rgba(248,113,113,0.5)";
+        ctx.lineWidth = 1 * vr; ctx.strokeRect(X, Y, W, H);
+        ctx.fillStyle = bull ? "rgba(140,240,200,0.92)" : "rgba(255,160,170,0.92)";
+        ctx.font = `${9 * vr}px monospace`; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+        ctx.fillText(bx.vol_label || "", X + 5 * pr, Y + H / 2);
+      }
+    });
+  } };
+  const view = { renderer() { return renderer; } };
+  return { attached(p) { _s = p.series; _c = p.chart; _req = p.requestUpdate; }, updateAllViews() {}, paneViews() { return [view]; }, setVisible(v) { _vis = v; if (_req) _req(); } };
+}
+
+// ─── PriceActionChart — order blocks + HH/HL/LH/LL + BOS/CHoCH + premium/discount.
+//     Reads /api/bullalgo/{sym}/pac-chart (SWING). Interactive + sync-aware. ───
+function PriceActionChart({ sym, sync = null }) {
+  const wrap = React.useRef(null);
+  const refs = React.useRef({});
+  const [d, setD] = React.useState(null);
+  React.useEffect(() => {
+    const BV = window.__BV; if (!BV || !BV.get || !sym) { setD(null); return; }
+    let alive = true;
+    BV.get("/api/bullalgo/" + encodeURIComponent(sym) + "/pac-chart?tf=SWING").then(r => {
+      if (!alive) return; setD(r && r.available ? r : null);
+    }).catch(() => { if (alive) setD(null); });
+    return () => { alive = false; };
+  }, [sym]);
+  React.useEffect(() => {
+    if (!wrap.current || !window.LightweightCharts || !d) return;
+    const LWC = window.LightweightCharts;
+    if (refs.current.chart) { try { refs.current.chart.remove(); } catch (e) {} }
+    const chart = LWC.createChart(wrap.current, {
+      autoSize: false, width: Math.max(10, wrap.current.clientWidth), height: Math.max(10, wrap.current.clientHeight),
+      layout: { background: { color: "transparent" }, textColor: "#9fb3ac", fontFamily: "inherit", fontSize: 9 },
+      grid: { vertLines: { visible: false }, horzLines: { color: "rgba(255,255,255,0.04)" } },
+      crosshair: { mode: 1, vertLine: { visible: true, labelVisible: true, color: "rgba(255,255,255,0.18)" }, horzLine: { visible: true, labelVisible: true, color: "rgba(255,255,255,0.18)" } },
+      rightPriceScale: { borderColor: "rgba(255,255,255,0.10)", entireTextOnly: true },
+      timeScale: { visible: true, rightOffset: 2, borderColor: "rgba(255,255,255,0.10)" },
+      handleScroll: true, handleScale: true,
+    });
+    const candle = chart.addCandlestickSeries({ upColor: "#34d399", downColor: "#f87171", borderUpColor: "#34d399", borderDownColor: "#f87171", wickUpColor: "rgba(52,211,153,.7)", wickDownColor: "rgba(248,113,113,.7)" });
+    candle.setData(d.bars || []);
+    const z = d.zones || {};
+    if (z.high != null) {
+      candle.createPriceLine({ price: z.high, color: "rgba(248,113,113,.5)", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "Premium" });
+      candle.createPriceLine({ price: z.eq, color: "rgba(159,179,172,.6)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "Equilibrium" });
+      candle.createPriceLine({ price: z.low, color: "rgba(52,211,153,.5)", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "Discount" });
+    }
+    const boxes = _obBoxPrim(d.order_blocks || []); candle.attachPrimitive(boxes);
+    if (d.markers && d.markers.length) candle.setMarkers(d.markers);
+    chart.timeScale().fitContent();
+    refs.current = { chart };
+    if (sync) {
+      sync.current.main = chart.timeScale();
+      chart.timeScale().subscribeVisibleLogicalRangeChange(r => {
+        const o = sync.current.mcdx; if (!o || !r || sync.current.lock) return;
+        sync.current.lock = true; try { o.setVisibleLogicalRange(r); } catch (e) {} sync.current.lock = false;
+      });
+    }
+    const fit = () => { const h = wrap.current; if (!h) return; const r = h.getBoundingClientRect(); const w = Math.round(r.width), hh = Math.round(r.height) || 300; if (w < 20) return; try { chart.resize(w, hh, true); chart.timeScale().fitContent(); } catch (e) {} };
+    const ro = new ResizeObserver(() => requestAnimationFrame(fit)); ro.observe(wrap.current); refs.current.ro = ro;
+    return () => { try { ro.disconnect(); chart.remove(); } catch (e) {} if (sync) sync.current.main = null; refs.current = {}; };
+  }, [d]);
+  if (!d) return <div className="dh-lw" style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "var(--ink-3)", fontFamily: "var(--mono)", fontSize: 11 }}>loading price action…</div>;
+  return <div ref={wrap} className="dh-lw" />;
+}
+window.PriceActionChart = PriceActionChart;
+
 function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
   const cv = window.compositeVerdict ? window.compositeVerdict(ticker, mode) : null;
   const net = cv ? cv.net : (ticker.score || 60);
@@ -563,6 +751,9 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
   const modeRR = teRR != null ? teRR : (dec && typeof dec.rr_ratio === "number" ? dec.rr_ratio : (ticker.rMultiple || null));
   const [chartView, setChartView] = React.useState(() => { try { return localStorage.getItem("dh-chart-view") || "full"; } catch (e) { return "full"; } });
   const pickChartView = v => { setChartView(v); try { localStorage.setItem("dh-chart-view", v); } catch (e) {} };
+  const [chartExpanded, setChartExpanded] = React.useState(false);
+  const [paMode, setPaMode] = React.useState(false);   // Setup ↔ Price Action
+  const chartSync = React.useRef({ main: null, mcdx: null, lock: false });
   // ── live actions (real): watchlist toggle + route to Automated Trade / Alerts ──
   const [wlOn, setWlOn] = React.useState(() => !!(window.WatchStore && window.WatchStore.has(ticker.symbol)));
   React.useEffect(() => {
@@ -758,18 +949,25 @@ function DecisionHero({ ticker, mode, heroStyle, sizeCat, onLens }) {
         </div>
        </div>
 
-       <div className="dh-chart">
+       <div className={"dh-chart" + (chartExpanded ? " dh-chart--expanded" : "")}>
           <div className="dh-chart-h">
-            <span className="label-cap mono">{chartView === "action" ? "THE SETUP · stop · trigger · EMA 9/21" : `THE SETUP · stop · trigger · ${(L.t2 && L.t2 > 0) ? "T1 / T2" : "T1"} · EMA 9/21`}</span>
+            <span className="label-cap mono">{paMode ? "PRICE ACTION · order blocks · structure · premium/discount" : (chartView === "action" ? "THE SETUP · stop · trigger · EMA 9/21" : `THE SETUP · stop · trigger · ${(L.t2 && L.t2 > 0) ? "T1 / T2" : "T1"} · EMA 9/21`)}</span>
             <div className="dh-chart-hr">
-              <span className="mono dim2 dh-ema-leg"><b style={{ color: "var(--cy)" }}>━</b> EMA9 <b style={{ color: "var(--violet)" }}>━</b> EMA21</span>
               <div className="dh-chart-toggle mono">
+                <button className={!paMode ? "is-on" : ""} onClick={() => setPaMode(false)} title="Trade setup — levels + EMAs">Setup</button>
+                <button className={paMode ? "is-on" : ""} onClick={() => setPaMode(true)} title="Price Action — order blocks, structure, premium/discount">Price Action</button>
+              </div>
+              {!paMode && <div className="dh-chart-toggle mono">
                 <button className={chartView === "action" ? "is-on" : ""} onClick={() => pickChartView("action")} title="Tight frame — bigger candles">Action</button>
                 <button className={chartView === "full" ? "is-on" : ""} onClick={() => pickChartView("full")} title="Show the full trade — targets on chart">Full trade</button>
-              </div>
+              </div>}
+              <button className={"dh-expand-btn" + (chartExpanded ? " is-on" : "")} onClick={() => setChartExpanded(e => !e)} title="Expand chart — pan/zoom, everything auto-adjusts">{chartExpanded ? "⤡ Close" : "⤢ Expand"}</button>
             </div>
           </div>
-          <SetupChart L={L} sym={ticker.symbol} view={chartView} />
+          {paMode
+            ? <PriceActionChart sym={ticker.symbol} sync={chartSync} />
+            : <SetupChart L={L} sym={ticker.symbol} view={chartView} sync={chartSync} />}
+          <OverviewMcdx sym={ticker.symbol} sync={chartSync} />
         </div>
       </div>
 
