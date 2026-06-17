@@ -527,7 +527,7 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
     }
     if (tab === "ai-edge") r = [...r].sort((a, b) => b.aiEdge - a.aiEdge); // rank by ML edge
     return r;
-  }, [tab, pills, side, sort, secF, setupF, q, colFilters, wlTick]);
+  }, [tab, pills, side, sort, secF, setupF, q, colFilters, wlTick, window.__tmode]);
 
   const consensusCount = useMemoSS(() => {
     const c = window.buildConsensus ? window.buildConsensus() : { rows: [] };
@@ -584,6 +584,20 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
       </div>
 
       <div className="ss2-toolbar">
+        <div className="ss2-mode" title="Horizon — drives per-mode bias & trade plan (swing / position / invest)">
+          {[["SWING", "SWING"], ["POSITION", "POSITION"], ["INVEST", "INVESTMENT"]].map(([lbl, val]) => {
+            const cur = String(window.__tmode || "swing").toLowerCase();
+            const curKey = cur.indexOf("pos") === 0 ? "POSITION" : cur.indexOf("inv") === 0 ? "INVESTMENT" : "SWING";
+            return (
+              <button key={val} className={`ss2-mode-btn ${curKey === val ? "is-on" : ""}`}
+                      onClick={() => window.__setMode && window.__setMode(val)}
+                      title={`${lbl} horizon`}>{lbl}</button>
+            );
+          })}
+        </div>
+
+        <span className="ss2-tdiv" />
+
         <span className="ss2-count mono"><b className="copper">{rows.length}</b> <span className="dim2">picks</span></span>
 
         <span className="ss2-tdiv" />
@@ -806,7 +820,13 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
                 ))}</span></td>
                 <td className="mono dim2">{t.mechanism}</td>
                 <td className="r"><span className={`ss2-score ss2-score--${t.score >= 75 ? "gn" : t.score >= 60 ? "amb" : "rd"}`}>{t.score}</span></td>
-                <td><Pill tone={secBiasTone(t.verdict)} small>{secBias(t.verdict)}</Pill></td>
+                <td>{(() => {
+                  // MODE-AWARE bias: biasRead() reads t.biasByMode[active horizon] so the
+                  // SWING/POSITION/INVEST toggle actually changes this column (falls back to
+                  // the static verdict bias when a row has no per-mode bias).
+                  const br = window.biasRead ? window.biasRead(t) : { label: secBias(t.verdict), tone: secBiasTone(t.verdict) };
+                  return <Pill tone={br.tone} small>{br.label}</Pill>;
+                })()}</td>
                 <td className="r">{(() => {
                   const n = t.ready;
                   const tn = n >= 6 ? "gn" : n >= 4 ? "amb" : "rd";

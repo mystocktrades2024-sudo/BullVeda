@@ -53,7 +53,8 @@ def main():
             res = compute_final_verdict(r, regime=regime, thresholds=thresholds,
                                          setup_kill_list=setup_kills,
                                          setup_band_kill_list=setup_band_kills,
-                                         system_status=bundle.get("system_status") or {})
+                                         system_status=bundle.get("system_status") or {},
+                                         config=cfg)
             # Task #3 + #14.3: write multiplier and apply it to kelly_size sizing
             setup_name = r.get("setup_family") or r.get("setup") or r.get("setup_type")
             mult = setup_mults.get(setup_name) if setup_name else None

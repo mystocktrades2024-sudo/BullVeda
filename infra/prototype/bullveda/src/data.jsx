@@ -780,7 +780,17 @@ const REASON_CLASS_NOTE = {
   clear:          "All gates clear",
 };
 function biasRead(row) {
-  const b = row && row.bias;
+  let b = row && row.bias;
+  // MODE-AWARE: prefer the per-mode bias for the active horizon (swing/position/
+  // invest) when the row carries it, so the scanner's SWING/POSITION/INVEST toggle
+  // actually changes the BIAS column. Falls back to the static row.bias otherwise.
+  try {
+    if (row && row.biasByMode && typeof window !== "undefined") {
+      const m = String(window.__tmode || "swing").toLowerCase();
+      const key = m.indexOf("pos") === 0 ? "position" : m.indexOf("inv") === 0 ? "investment" : "swing";
+      if (row.biasByMode[key]) b = row.biasByMode[key];
+    }
+  } catch (e) { /* fall through to static bias */ }
   if (b && BIAS_LABEL[b]) return BIAS_LABEL[b];
   const v = row && (row.verdict || row.stage);
   return { label: secBias(v), tone: secBiasTone(v) };   // legacy fallback

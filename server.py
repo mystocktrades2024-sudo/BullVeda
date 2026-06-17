@@ -3686,6 +3686,26 @@ def _news_age_hours(articles):
     except Exception:
         return None
 
+# Free Wikipedia-sourced ticker→company-name map (scripts/build_ticker_names.py).
+# The scan feed sets name = ticker; this joins real names so the scanner NAME
+# column isn't a duplicate of TICKER. Cached by file mtime; empty = honest
+# fallback to the ticker for names outside the S&P 1500 / NDX / Dow lists.
+_TICKER_NAMES_CACHE = {"mtime": None, "names": {}}
+def _ticker_names() -> dict:
+    import os, json
+    p = BASE_DIR / "cache" / "ticker_names.json"
+    try:
+        mt = os.path.getmtime(p)
+    except Exception:
+        return _TICKER_NAMES_CACHE["names"]
+    if _TICKER_NAMES_CACHE["mtime"] != mt:
+        try:
+            _TICKER_NAMES_CACHE["names"] = (json.loads(p.read_text()) or {}).get("names", {}) or {}
+            _TICKER_NAMES_CACHE["mtime"] = mt
+        except Exception:
+            pass
+    return _TICKER_NAMES_CACHE["names"]
+
 @app.get("/api/universe")
 async def universe_api(limit: int = 0):
     """Full scored universe (all ~1832 ranked names) — compact scanner-shaped rows
@@ -3775,7 +3795,8 @@ async def universe_api(limit: int = 0):
         S = r.get("smc") or {}; N = r.get("sentiment") or {}
         _ind = (T.get("indicators") or {})  # 52w high/low live here, not top-level
         return {
-            "ticker": r.get("ticker"), "name": r.get("name") or r.get("ticker"),
+            "ticker": r.get("ticker"),
+            "name": _ticker_names().get(str(r.get("ticker") or "").upper()) or r.get("name") or r.get("ticker"),
             "sector": r.get("sector"), "industry": r.get("industry"),
             "score": r.get("score"), "stage": dec.get("verdict"),
             # Two-axis verdict (2026-06-10): orthogonal direction vs action so the
@@ -9316,7 +9337,7 @@ async def premarket_movers(min_gap_pct: float = 2.0, limit: int = 30):
             if abs(float(gap or 0)) >= min_gap_pct:
                 movers.append({
                     "ticker": r.get("ticker"),
-                    "name": r.get("name") or r.get("ticker"),
+                    "name": _ticker_names().get(str(r.get("ticker") or "").upper()) or r.get("name") or r.get("ticker"),
                     "sector": r.get("sector") or "",
                     "price": r.get("price"),
                     "gap_pct": round(float(gap), 2),

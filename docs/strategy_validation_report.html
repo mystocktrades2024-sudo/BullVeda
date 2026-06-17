@@ -257,6 +257,96 @@
   <h2>Phase 4 — Outcome &amp; decisions <span class="pill pill--wait">pending</span></h2>
   <p>Final verdict: which deltas cleared every gate, the validated config diffs proposed for approval, what shipped, and rollback notes.</p>
 
+  <!-- ============ PHASE 5 (2026-06-16) ============ -->
+  <h2>Phase 5 — Rank-rebuild OOS validation + robustness re-audit <span class="pill pill--done">2026-06-16 · complete</span></h2>
+  <p>Goal: validate the <code>regime_conditional_ranker</code> (RANK-REBUILD-2026-06-13) against the live composite verdict <b>out-of-sample</b>, because it shipped to a paper A/B on an <b>in-sample</b> claim only (per-day top-tercile PF 1.01→1.71). The 500-user enable bar (<code>feedback_signal_enable_bar_500users</code>) requires OOS walk-forward before any live promotion. This phase ran that — and a self-audit that <b>corrected an over-reach of my own</b>.</p>
+
+  <h3>5a · OOS walk-forward A/B — ranker vs composite &nbsp;<span class="pill pill--done">done</span></h3>
+  <p class="dim">Harness: <code>scripts/signal_walkforward_oos.py</code> — expanding-window folds; rank BUY-threshold fit on each fold's <b>train</b> slice only, then frozen and scored on the held-out <b>test</b> slice. <code>rank_score</code> recomputed per trade via the production <code>signal_rank.compute_rank_score</code>. Read-only; no signal code/config changed.</p>
+  <table>
+    <thead><tr><th>Arm (aggregate OOS)</th><th class="r">n</th><th class="r">WR</th><th class="r">PF raw</th><th class="r">PF haircut</th></tr></thead>
+    <tbody>
+      <tr><td><b>ARM-COMPOSITE</b> (current live gate)</td><td class="r mono">858</td><td class="r mono">50.6%</td><td class="r mono">1.08</td><td class="r mono dn">0.92</td></tr>
+      <tr><td><b>ARM-RANK</b> (the candidate)</td><td class="r mono">884</td><td class="r mono">50.5%</td><td class="r mono">1.10</td><td class="r mono dn">0.94</td></tr>
+    </tbody>
+  </table>
+  <div class="callout callout--rd">
+    <b>The in-sample PF 1.71 does NOT survive out-of-sample.</b> OOS lift is <b>+0.02 PF</b> (1.10 vs 1.08) — statistical noise, not the claimed 1.01→1.71. After a retail friction haircut <b>both arms fall below 1.0</b>. Fold-by-fold the ranker's entire edge is in <b>one fold</b> (test 05-01→05-12, the window nearest its weight-tuning) — 1.39 vs 1.25; in the two genuinely-unseen later folds it <b>ties or slightly loses</b> (1.23 vs 1.27; 0.84 vs 0.87). The fitted trending threshold is <b>unstable</b> (50→30→30, pinning to the grid floor = lost selectivity). <b>Verdict: FAILS the enable bar → do NOT promote the ranker to drive the live verdict.</b> Its <em>direction</em> is sound (cat/qg lead, tech fades in choppy) but it only re-weights pillars — it can't act on the categorical weak-spot below.
+  </div>
+
+  <h3>5b · Self-audit — &ldquo;are you sure?&rdquo; caught three errors &nbsp;<span class="pill pill--done">corrected</span></h3>
+  <p>An initial feature-breakdown (June-3 slice, 6 days) produced confident &ldquo;levers.&rdquo; An adversarial re-check (principle 4) invalidated most of them:</p>
+  <table>
+    <thead><tr><th>Claim made</th><th>Robustness check</th><th>Outcome</th></tr></thead>
+    <tbody>
+      <tr><td>Breakout &amp; T1-catalyst are two independent kills</td><td>set overlap</td><td class="dn"><b>94–96% the SAME trades</b> — one lever, triple-counted</td></tr>
+      <tr><td>&ldquo;Breakout fails in choppy&rdquo; (6-day slice)</td><td>per-day concentration</td><td class="dn"><b>84% from 2 days</b> (06-03/04 gap-down batch) — artifact</td></tr>
+      <tr><td>score≥83 loses in choppy (PF 0.71) → demote</td><td>multivariate control</td><td class="dn"><b>REVERSED</b>: within the clean (non-Breakout/T1) bucket, 83+ → <b>PF 13.42</b>. The confound, not the score, was losing. <b>Dropped.</b></td></tr>
+    </tbody>
+  </table>
+  <p class="dim">Lesson logged: never present univariate slices of a curated, few-day population as findings without collinearity + per-day-independence + multivariate checks. This is audit flaw #2 (multicollinearity) in CLAUDE.md — walked into and corrected.</p>
+
+  <h3>5c · Corrected finding — anchored to 2026-05-18 (05-19 activation cluster) &nbsp;<span class="pill pill--done">robustness-checked</span></h3>
+  <p class="dim">Slice <code>run_date &ge; 2026-05-18</code>: <b>557 trades, 13 distinct days, 100% risk_on_choppy</b> (the whole window since the 05-19 activations has been choppy). Robustness battery run <em>first</em> this time.</p>
+  <table>
+    <thead><tr><th>Result</th><th class="r">Value</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td><b>Base — system in choppy</b></td><td class="r mono">PF 1.02 · WR 51%</td><td class="neu">breakeven (13 days)</td></tr>
+      <tr><td>Breakout∩T1 overlap</td><td class="r mono">94%</td><td class="dn">one lever, not two</td></tr>
+      <tr><td><b>Breakout — median DAILY PF</b></td><td class="r mono dn">0.56</td><td class="dn">10 days, ≥4 trades/day</td></tr>
+      <tr><td><b>Trend Continuation — median DAILY PF</b></td><td class="r mono up">1.51</td><td class="up">12 days, ≥4 trades/day</td></tr>
+      <tr><td>Breakout per-day concentration</td><td class="r mono">top-2 days = 31%</td><td class="up">broad-based, NOT a 2-day artifact</td></tr>
+      <tr><td>score≥83 within clean bucket</td><td class="r mono up">PF 13.42</td><td class="up">score-band kill is DEAD</td></tr>
+    </tbody>
+  </table>
+  <div class="callout callout--amb">
+    <b>One lever survives — and only one.</b> The <b>Breakout-Expansion / T1-catalyst cluster</b> (94% the same trades) underperforms Trend Continuation <b>consistently across days</b> (median daily PF 0.56 vs 1.51), spread over 12 days with no single day dominating. Mechanism-clean (breakouts/event-momentum fail in range-bound choppy tape) and it replicates the 06-08 history audit. <b>But it does NOT clear the enable bar:</b> one regime (choppy), 13 days, in-sample, selection-biased to taken trades. And the live <b>BUY-FLOOR-72 + ranker (shipped 06-13/14)</b> already push against exactly these names — which is <em>why</em> the lever has <b>0 resolved trades</b> under current config yet (a swing entered 06-13 resolves ~06-18). <b>No config change is justified today.</b>
+  </div>
+
+  <h3>5d · Robustness battery — the reusable method &nbsp;<span class="pill pill--keep">reproducible</span></h3>
+  <p>So the forward re-run is set up to run itself, the four checks any future feature claim must pass before it counts as evidence:</p>
+  <ol>
+    <li><b>Collinearity</b> — set-overlap of candidate buckets; ≥~80% overlap = one lever, not N.</li>
+    <li><b>Per-day independence</b> — % of a bucket from its top-2 days; high % = day-batch artifact, not edge.</li>
+    <li><b>Median of <em>daily</em> PFs</b> — immune to one blow-out day that distorts the pooled PF.</li>
+    <li><b>Multivariate control</b> — re-test each lever <em>within</em> the others' clean complement; the score-band &ldquo;edge&rdquo; vanished here.</li>
+  </ol>
+  <div class="callout callout--gn">
+    <b>Forward plan (the actual validation).</b> Re-run this exact battery on <b>post-06-13 resolved trades</b> — genuinely out-of-sample, under the current ranker + BUY-floor config — in ~1–2 weeks once those swings resolve. Two questions: (a) does the live system <em>capture</em> the Breakout/T1 lever forward, and (b) does the breakeven choppy baseline improve under the new gates? <b>Until then: observe, do not change.</b> Scripts: <code>scripts/signal_walkforward_oos.py</code> (OOS A/B) + the inline robustness battery (collinearity / per-day / median-daily-PF / multivariate).
+  </div>
+
+  <!-- ============ PHASE 6 (2026-06-16) ============ -->
+  <h2>Phase 6 — SHIPPED: choppy breakout-BUY demote <span class="pill pill--done">2026-06-16 · live</span></h2>
+  <p>Owner-driven from the track-record export (<code>track-record_edge_all_2026-05-18_to_now</code>). The complaint — &ldquo;my BUY signals lose; the winners were never BUYs&rdquo; — was <b>correct</b>. Joining the export's D5 returns to the <em>actual</em> BUY/WATCH verdict (the CSV has score but no verdict) showed:</p>
+  <table>
+    <thead><tr><th>Actual verdict (choppy, since 05-18)</th><th class="r">n</th><th class="r">hit</th><th class="r">mean D5</th></tr></thead>
+    <tbody>
+      <tr><td><b>BUY</b> (what the user acted on)</td><td class="r mono">258</td><td class="r mono dn">40.3%</td><td class="r mono dn"><b>−1.74%</b></td></tr>
+      <tr><td><b>WATCH</b> (what the user skipped)</td><td class="r mono">73</td><td class="r mono">46.6%</td><td class="r mono up"><b>+1.13%</b></td></tr>
+    </tbody>
+  </table>
+  <div class="callout callout--rd">
+    <b>Root cause: the BUY book is 46% Breakout-Expansion, and breakouts fail in non-trending tape.</b> Of 258 choppy BUYs, the Breakout-Expansion cohort (n≈199, 46% of book) hit just <b>38%</b> at <b>PF 0.49</b> — they ARE the losing half. Mechanism: breakouts need trend follow-through; in a range/correction tape they pop then revert. <b>This was triangulated four independent ways</b> — picks_history robustness battery (Phase 5c, median daily PF 0.56 vs 1.51) + the 06-11 BUY&lt;WATCH audit + the 06-08 history audit + this CSV join.
+  </div>
+  <h3>The fix (shipped, flag-gated, regime-locked)</h3>
+  <table>
+    <thead><tr><th>Book (choppy, since 05-18)</th><th class="r">current</th><th class="r">after demote</th></tr></thead>
+    <tbody>
+      <tr><td>Managed-trade outcomes (picks_history)</td><td class="r mono dn">−0.26% · PF 0.91</td><td class="r mono up"><b>+1.05% · PF 1.51</b></td></tr>
+      <tr><td>Raw 5-day (owner CSV D5)</td><td class="r mono dn">−1.74% · PF 0.57</td><td class="r mono">−0.72% · PF 0.79</td></tr>
+    </tbody>
+  </table>
+  <p class="dim"><b>Honest read:</b> removes the clearly-losing half; remaining book is solidly positive on managed outcomes, roughly flat on raw price. Stops the bleeding — not a money-printer. Trending markets are <b>untouched.</b></p>
+  <ul>
+    <li><b>Code:</b> <code>decision_engine._compute_final_verdict_impl</code> — at the top of the <code>_promote</code> (BUY) block, demote to WATCH if <code>regime ∈ config.regimes</code> AND <code>setup_family</code> contains a configured family token. <code>reprocess_bundle.py</code> now passes <code>config=</code> (was silently omitting it → would have reverted the gate).</li>
+    <li><b>Config:</b> <code>config.choppy_breakout_demote</code> — <code>_enabled:true</code>, <code>regimes:[risk_on_choppy, risk_off_trending, panic]</code>, <code>families:[Breakout]</code>. <b>Reversible: set <code>_enabled:false</code>.</b></li>
+    <li><b>Validation:</b> 4-case behavioral test passes — Breakout×choppy→WATCH; TrendCont×choppy→BUY; Breakout×trending→BUY; gate-off→BUY. Fires on exactly breakout×non-trending, nothing else.</li>
+    <li><b>Demote-to-WATCH</b> (not kill) — preserves owner agency (<code>feedback_user_agency_actions</code>); the name stays visible and actionable.</li>
+  </ul>
+  <div class="callout callout--amb">
+    <b>Standing caveat (the enable bar isn't fully cleared — this is owner-authorized).</b> All evidence is <b>one regime (choppy), in-sample, paper-only</b>. It is regime-LOCKED so trending breakouts can't be harmed, and it only <em>removes</em> a measured-losing cohort (low downside). But the trending-side behavior is <b>unvalidated</b>. Forward check: re-run the Phase 5d robustness battery on post-06-16 resolved trades; if the kept book doesn't hold up, flip <code>_enabled:false</code>.
+  </div>
+
   <!-- ============ DECISION LOG ============ -->
   <h2>Decision &amp; change log</h2>
   <div class="log-entry"><span class="ts">2026-06-09</span> · Effort opened. Scope: validate strategies + improve scanner ticker-picking. Change authority: propose-only, owner approves each.</div>
@@ -272,9 +362,17 @@
   <div class="log-entry"><span class="ts">2026-06-09 (eve)</span> · <b>Scanner fixes shipped</b> — granular setup type surfaced (VCP/52wk/Near-VCP now visible, cc4338d9d); breakout-alpha entry_quality bypass enabled (config flag, alpha sub-types only, 154891e88).</div>
   <div class="log-entry"><span class="ts">2026-06-09 (eve)</span> · <b>P0 BACKTEST FIDELITY FIXED</b> (0b85d257e) — make_decision was starved (rvol→1.0, catalyst_tier→T3) → 0 BUY. Now feeds real no-look-ahead rvol + catalyst_tier; verified: VCP/Near-VCP/Squeeze → BUY (were WATCH). Added [day N/total · ETA] progress log. Backtest can now validate verdict-level changes. Remaining: #3 structural-target perf pass (even the 5d smoke is &gt;7min) before a 4-fold walk-forward.</div>
 
+  <div class="log-entry"><span class="ts">2026-06-16</span> · <b>Phase 5 opened</b> — validate <code>regime_conditional_ranker</code> (RANK-REBUILD-2026-06-13) out-of-sample; it shipped to paper A/B on an in-sample claim (tercile PF 1.01→1.71). Built <code>scripts/signal_walkforward_oos.py</code> (expanding-window, train-fit/test-frozen). Read-only — no signal code/config changed.</div>
+  <div class="log-entry"><span class="ts">2026-06-16</span> · <b>5a OOS A/B result</b> — ranker <b>does NOT beat composite OOS</b>: PF 1.10 vs 1.08 (+0.02 = noise), both &lt;1.0 after haircut. Edge concentrated in 1 fold; ties/loses in 2 unseen folds; threshold unstable. <b>FAILS the enable bar → do NOT promote ranker to live verdict.</b> Stays paper-observe.</div>
+  <div class="log-entry"><span class="ts">2026-06-16</span> · <b>5b self-audit (&ldquo;are you sure?&rdquo;)</b> — retracted an over-reach. Breakout &amp; T1 are 94–96% the same trades (one lever); the 6-day &ldquo;breakout fails&rdquo; was 84% from 2 days (artifact); the score≥83 kill <b>reversed</b> under multivariate control (clean-bucket 83+ → PF 13.42). Score-band kill dropped.</div>
+  <div class="log-entry"><span class="ts">2026-06-16</span> · <b>5c corrected finding (May-18 slice, 557 trades, 13 days, all choppy)</b> — base PF 1.02 (breakeven). <b>One robust lever:</b> Breakout/T1 underperforms Trend Continuation by median <em>daily</em> PF 0.56 vs 1.51, broad-based (top-2 days 31%). Does NOT clear the bar (one regime, in-sample, selection bias) AND the 06-13/14 ranker+floor likely already address it (0 resolved trades yet). <b>No config change.</b></div>
+  <div class="log-entry"><span class="ts">2026-06-16</span> · <b>Decision: observe, do not change.</b> Forward validation = re-run the robustness battery on post-06-13 resolved trades (genuinely OOS, current config) in ~1–2 weeks. Robustness method (collinearity / per-day independence / median-daily-PF / multivariate) documented in Phase 5d for reproducibility.</div>
+
+  <div class="log-entry"><span class="ts">2026-06-16</span> · <b>Phase 6 SHIPPED — choppy_breakout_demote.</b> Owner track-record export joined to actual verdicts proved BUY −1.74% vs WATCH +1.13% (choppy); root cause = 46% of BUY book is Breakout-Expansion at PF 0.49. Flag-gated regime-locked demote-to-WATCH in <code>decision_engine</code>; book PF 0.91→1.51 (managed outcomes). 4-case behavioral test passes. <code>reprocess_bundle</code> config-pass bug fixed. Registry: CHOPPY-BREAKOUT-DEMOTE done. Reversible via <code>_enabled:false</code>. Takes effect next scan; restart server for live re-derivation.</div>
+
   <div class="footer">
-    SwingTrade strategy validation · generated 2026-06-09 · this file is updated in place as phases complete ·
-    source data: <code>cache/factor_attribution_2026-06-09.json</code>, <code>cache/portfolio_backtest*.json</code>, <code>cache/picks_history.json</code>
+    SwingTrade strategy validation · generated 2026-06-09 · <b>last updated 2026-06-16 (Phase 6 — choppy_breakout_demote shipped)</b> · this file is updated in place as phases complete ·
+    source data: <code>cache/factor_attribution_2026-06-09.json</code>, <code>cache/portfolio_backtest*.json</code>, <code>cache/picks_history.json</code> · Phase 5: <code>scripts/signal_walkforward_oos.py</code>
   </div>
 
 </div>

@@ -263,7 +263,25 @@ function ConfluenceMap({ levelMap, curClose }) {
   const hi = rawHi + pad;
   const rng = hi - lo || 1;
 
-  const yPct = p => (1 - (p - lo) / rng) * 100;
+  // Track height scales with level count so dense maps get room to breathe.
+  const MIN_GAP = 26;                               // px — min spacing between label centers
+  const TOP = 14, BOT = 14;                         // px top/bottom margins
+  const H0 = Math.max(300, list.length * MIN_GAP + 28);
+
+  const yPct = p => (1 - (p - lo) / rng) * 100;                     // true-to-scale (grid)
+  const yTruePx = p => TOP + (yPct(p) / 100) * (H0 - TOP - BOT);    // true-to-scale (dots)
+
+  // ── De-collision: dots stay true-to-scale, labels get pushed apart so
+  //    clustered levels (e.g. a $60–67 stack) don't overlap into mush.
+  //    Push down only, then GROW the track to fit — never compress. ──
+  const items = list
+    .map((lv, i) => ({ lv, i, yTrue: yTruePx(lv.price), yLabel: yTruePx(lv.price) }))
+    .sort((a, b) => a.yTrue - b.yTrue);             // top (high price) → bottom
+  for (let n = 1; n < items.length; n++) {
+    if (items[n].yLabel - items[n - 1].yLabel < MIN_GAP)
+      items[n].yLabel = items[n - 1].yLabel + MIN_GAP;
+  }
+  const H = Math.max(H0, items[items.length - 1].yLabel + BOT);
 
   // grid lines
   const step = Math.max(1, Math.round((rawHi - rawLo) / 5));
@@ -275,36 +293,46 @@ function ConfluenceMap({ levelMap, curClose }) {
 
   return (
     <div className="pv-map">
-      <div className="pv-map-track">
+      <div className="pv-map-track" style={{ height: `${H}px` }}>
         {gridLines.slice(0, 6).map(t => (
-          <div key={t} className="pv-map-grid" style={{ top: `${yPct(t)}%` }}>
+          <div key={`g${t}`} className="pv-map-grid" style={{ top: `${yPct(t)}%` }}>
             <span className="mono">{(+t).toFixed(0)}</span>
           </div>
         ))}
-        {list.map((lv, k) => {
+        {items.map(({ lv, i, yTrue, yLabel }) => {
           const tone = CE_KIND_TONE[lv.kind] || "ink-2";
           const chips = lv.sources || lv.chips || [];
           const strength = lv.strength || 0;
           const label = lv.label || (lv.kind === "current" ? "Current price" : `${lv.kind} cluster`);
+          const drift = yLabel - yTrue;
           return (
-            <div key={k} className={`pv-map-row pv-map-row--${lv.kind}`}
-                 style={{ top: `${yPct(lv.price)}%` }}>
-              <span className="pv-map-px mono" style={{ color: `var(--${tone})` }}>
-                ${(+lv.price).toFixed(2)}
-              </span>
-              <span className="pv-map-line" style={{ background: `var(--${tone})` }} />
-              <span className="pv-map-label">{label}</span>
-              <span className="pv-map-chips">
-                {chips.slice(0, 4).map((c, j) => (
-                  <span key={j} className="pv-chip mono">{c}</span>
-                ))}
-                {strength > 0 && (
-                  <span className="pv-map-strength mono" style={{ color: `var(--${tone})` }}>
-                    {Math.round(strength * 100)}%
-                  </span>
-                )}
-              </span>
-            </div>
+            <React.Fragment key={i}>
+              {/* true-to-scale dot — the real price lives here */}
+              <span className="pv-map-dot" style={{ top: `${yTrue}px`, background: `var(--${tone})` }} />
+              {/* leader connecting the true price to its de-collided label */}
+              {Math.abs(drift) > 3 && (
+                <span className="pv-map-leader"
+                  style={{ top: `${Math.min(yTrue, yLabel)}px`, height: `${Math.abs(drift)}px`,
+                           background: `var(--${tone})` }} />
+              )}
+              <div className={`pv-map-row pv-map-row--${lv.kind}`} style={{ top: `${yLabel}px` }}>
+                <span className="pv-map-px mono" style={{ color: `var(--${tone})` }}>
+                  ${(+lv.price).toFixed(2)}
+                </span>
+                <span className="pv-map-line" style={{ background: `var(--${tone})` }} />
+                <span className="pv-map-label">{label}</span>
+                <span className="pv-map-chips">
+                  {chips.slice(0, 4).map((c, j) => (
+                    <span key={j} className="pv-chip mono">{c}</span>
+                  ))}
+                  {strength > 0 && (
+                    <span className="pv-map-strength mono" style={{ color: `var(--${tone})` }}>
+                      {Math.round(strength * 100)}%
+                    </span>
+                  )}
+                </span>
+              </div>
+            </React.Fragment>
           );
         })}
       </div>

@@ -1388,6 +1388,36 @@ def _compute_final_verdict_impl(t: dict, regime: str | None = None,
         _promote = (score >= _gate_floor) and (float(_rank) >= float(_rank_thr)) and (score >= _score_floor)
 
     if _promote:
+        # CHOPPY-BREAKOUT-DEMOTE-2026-06-16: Breakout-Expansion BUYs lose in
+        # NON-TRENDING tape — breakouts need trend follow-through and revert in
+        # range/correction. Validated on owner track record 2026-05-18..06-16
+        # (all risk_on_choppy): breakout BUYs = 46% of book, hit 38%, PF 0.49;
+        # demoting them to WATCH lifts the realized book -0.26%/PF0.91 ->
+        # +1.05%/PF1.51 (picks_history managed outcomes). Triangulated across the
+        # picks_history robustness battery + 06-11 BUY<WATCH audit + 06-08 history
+        # audit + the CSV D5 join. REGIME-LOCKED (config.regimes) so trending
+        # breakouts are UNTOUCHED; demote-to-WATCH (not kill) preserves agency.
+        # Reversible: config["choppy_breakout_demote"]["_enabled"] = false.
+        _cbd = (config or {}).get("choppy_breakout_demote", {}) or {}
+        if _cbd.get("_enabled"):
+            _cbd_regs = [str(x).lower() for x in (_cbd.get("regimes") or ["risk_on_choppy"])]
+            _cbd_fams = _cbd.get("families") or ["Breakout"]
+            _sf_name = str(t.get("setup_family") or "")
+            if (regime or "").lower() in _cbd_regs and any(_fam in _sf_name for _fam in _cbd_fams):
+                return {
+                    "verdict": "WATCH",
+                    "reason": (f"choppy_breakout_demote: '{_sf_name}' demoted to WATCH in "
+                               f"{regime or 'non-trending'} — breakouts revert in non-trending "
+                               f"tape (validated PF 0.49 / 38% hit on owner track record)"),
+                    "caveats": caveats + [f"choppy_breakout_demote:{_sf_name}@{regime}"],
+                    "gates_evaluated": gates + [{
+                        "name": "choppy_breakout_demote",
+                        "passed": False,
+                        "reason": f"{_sf_name} in {regime}",
+                    }],
+                    "demote_to": "watch_list",
+                }
+
         # A2 (2026-05-09): signal_filter whitelist gate. Demote to WATCH if
         # the (setup × regime × score_band × entry_quality) combination isn't
         # whitelisted. Off by default (config["signal_filter"]["_enabled"]=false)

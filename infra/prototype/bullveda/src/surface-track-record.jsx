@@ -350,7 +350,7 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker, initialTick
         <div className="trk-full-wrap">
           <table className="trk-full">
             <thead><tr>
-              <Sh col="age" label="Date" cls="trk-full-sticky" /><Sh col="sym" label="Sym" cls="trk-full-sticky2" /><Sh col="label" label="Src" /><Sh col="dir" label="Dir" />
+              <Sh col="age" label="Date" cls="trk-full-sticky" /><Sh col="sym" label="Sym" cls="trk-full-sticky2" /><Sh col="label" label="Src" /><Sh col="dir" label="Dir" /><Sh col="score" label="Score" r />
               {SL.HZ.map(h => <Sh key={h.id} col={h.id} label={h.label} cls="trk-full-hz" />)}
             </tr></thead>
             <tbody>{pageRows.map(r => {
@@ -361,6 +361,7 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker, initialTick
                   <td className="trk-full-sticky2"><b>{r.sym}</b></td>
                   <td className="dim2" style={{ fontSize: 10 }}>{r.label}</td>
                   <td><span className={`mono ${r.dir === "long" ? "up" : "dn"}`} style={{ fontSize: 10 }}>{r.dir === "long" ? "L" : "S"}</span></td>
+                  <td className="r tabular" style={{ fontSize: 10 }}><b>{r.score != null ? r.score : "—"}</b></td>
                   {r.path.map((p, i) => (
                     <td key={i} className="trk-full-cell" style={{ background: p.mature ? heatColor(p.v, 6) : "var(--bg-2)" }} title={p.mature ? `${SL.HZ[i].label}: ${trPct(p.v)}` : "maturing"}>
                       {p.mature ? (p.v >= 0 ? "+" : "−") + Math.abs(p.v).toFixed(1) : "·"}

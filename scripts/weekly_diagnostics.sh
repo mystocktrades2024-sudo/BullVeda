@@ -65,6 +65,16 @@ LOG_DIR="cache/logs"
 mkdir -p "$LOG_DIR"
 python3 momentum_snapshot.py 2>&1 | tee -a "$LOG_DIR/momentum_snapshot_weekly.log" >> "$LOG"
 
+# 9b. Refresh the free Wikipedia ticker→company-name map (scanner NAME column).
+#     Names rarely change; weekly is plenty. No paid data / no EODHD quota.
+python3 scripts/build_ticker_names.py 2>>"$LOG" >>"$LOG" || true
+
+# 9d. Heartbeat — launchd fleet completeness + ML close-loop liveness.
+#     Detects the "silent unload" class (e.g. ml-close-loop parked for 7d with no
+#     alert, 2026-06-17): any com.swingtrade.*.plist not in `launchctl list`, plus
+#     a close-loop feedback ledger that has gone stale. WARN-only; always exit 0.
+python3 scripts/heartbeat_check.py 2>&1 >> "$LOG" || true
+
 # 10. Post FINISH status to Slack — # EODHD calls (run-window delta), run time,
 #     and which diagnostic snapshots were updated vs still pending.
 python3 scripts/_diag_report.py finish "$START_EPOCH" "$EODHD_START" 2>>"$LOG" >>"$LOG" || true

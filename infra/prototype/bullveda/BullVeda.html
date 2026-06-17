@@ -3429,9 +3429,14 @@ body { overflow: hidden; }
 .pv-map-line { height: 2px; width: 26px; flex: 0 0 auto; border-radius: 2px; }
 .pv-map-row--current .pv-map-line { width: 40px; height: 2.5px; }
 .pv-map-label { font-size: 11.5px; font-weight: 600; color: var(--ink-1); flex: 0 0 auto; }
-.pv-map-chips { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.pv-map-chips { display: flex; align-items: center; gap: 5px; flex-wrap: nowrap; }
 .pv-map-strength { font-size: 11px; font-weight: 700; margin-left: 4px; }
 .pv-map-row--current .pv-map-label { color: var(--copper); }
+/* true-to-scale dot (real price) + leader to the de-collided label */
+.pv-map-dot { position: absolute; left: 62px; width: 7px; height: 7px; border-radius: 50%;
+  transform: translate(-50%, -50%); z-index: 3; box-shadow: 0 0 0 2px var(--bg-1); }
+.pv-map-leader { position: absolute; left: 62px; width: 2px; transform: translateX(-50%);
+  opacity: 0.4; border-radius: 2px; z-index: 1; pointer-events: none; }
 
 /* ── Wyckoff real-data source badge + honest empty state ─────────── */
 .pv-srcbar { display: flex; justify-content: flex-end; margin-bottom: 6px; }
@@ -7582,6 +7587,21 @@ body {
   cursor: pointer;
 }
 .ss2-sel:focus { outline: none; border-color: var(--copper); }
+.ss2-mode { display: inline-flex; gap: 1px; border-radius: var(--r-2); background: var(--glass-line); padding: 1px; height: 30px; overflow: hidden; }
+.ss2-mode-btn {
+  height: 100%; padding: 0 13px;
+  display: inline-flex; align-items: center;
+  background: var(--glass-bg-1);
+  border: none;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.09em;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: color .12s, background .12s;
+}
+.ss2-mode-btn:hover { color: var(--ink); }
+.ss2-mode-btn.is-on { background: var(--gn-bg); color: var(--gn); font-weight: 600; }
 .ss2-side { display: inline-flex; gap: 1px; border-radius: var(--r-2); background: var(--glass-line); padding: 1px; height: 30px; overflow: hidden; }
 .ss2-side-btn {
   height: 100%; padding: 0 13px;
@@ -13242,7 +13262,15 @@ const REASON_CLASS_NOTE = {
   clear: "All gates clear"
 };
 function biasRead(row) {
-  const b = row && row.bias;
+  let b = row && row.bias;
+  try {
+    if (row && row.biasByMode && typeof window !== "undefined") {
+      const m = String(window.__tmode || "swing").toLowerCase();
+      const key = m.indexOf("pos") === 0 ? "position" : m.indexOf("inv") === 0 ? "investment" : "swing";
+      if (row.biasByMode[key]) b = row.biasByMode[key];
+    }
+  } catch (e) {
+  }
   if (b && BIAS_LABEL[b]) return BIAS_LABEL[b];
   const v = row && (row.verdict || row.stage);
   return { label: secBias(v), tone: secBiasTone(v) };
@@ -20386,30 +20414,40 @@ function ConfluenceMap({ levelMap, curClose }) {
   const lo = rawLo - pad;
   const hi = rawHi + pad;
   const rng = hi - lo || 1;
+  const MIN_GAP = 26;
+  const TOP = 14, BOT = 14;
+  const H0 = Math.max(300, list.length * MIN_GAP + 28);
   const yPct = (p) => (1 - (p - lo) / rng) * 100;
+  const yTruePx = (p) => TOP + yPct(p) / 100 * (H0 - TOP - BOT);
+  const items = list.map((lv, i) => ({ lv, i, yTrue: yTruePx(lv.price), yLabel: yTruePx(lv.price) })).sort((a, b) => a.yTrue - b.yTrue);
+  for (let n = 1; n < items.length; n++) {
+    if (items[n].yLabel - items[n - 1].yLabel < MIN_GAP)
+      items[n].yLabel = items[n - 1].yLabel + MIN_GAP;
+  }
+  const H = Math.max(H0, items[items.length - 1].yLabel + BOT);
   const step = Math.max(1, Math.round((rawHi - rawLo) / 5));
   const gridBase = Math.round(rawLo / step) * step;
   const gridLines = [];
   for (let g = gridBase; g <= rawHi + step; g += step) {
     if (g > lo && g < hi) gridLines.push(g);
   }
-  return /* @__PURE__ */ React.createElement("div", { className: "pv-map" }, /* @__PURE__ */ React.createElement("div", { className: "pv-map-track" }, gridLines.slice(0, 6).map((t) => /* @__PURE__ */ React.createElement("div", { key: t, className: "pv-map-grid", style: { top: `${yPct(t)}%` } }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, (+t).toFixed(0)))), list.map((lv, k) => {
+  return /* @__PURE__ */ React.createElement("div", { className: "pv-map" }, /* @__PURE__ */ React.createElement("div", { className: "pv-map-track", style: { height: `${H}px` } }, gridLines.slice(0, 6).map((t) => /* @__PURE__ */ React.createElement("div", { key: `g${t}`, className: "pv-map-grid", style: { top: `${yPct(t)}%` } }, /* @__PURE__ */ React.createElement("span", { className: "mono" }, (+t).toFixed(0)))), items.map(({ lv, i, yTrue, yLabel }) => {
     const tone = CE_KIND_TONE[lv.kind] || "ink-2";
     const chips = lv.sources || lv.chips || [];
     const strength = lv.strength || 0;
     const label = lv.label || (lv.kind === "current" ? "Current price" : `${lv.kind} cluster`);
-    return /* @__PURE__ */ React.createElement(
-      "div",
+    const drift = yLabel - yTrue;
+    return /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("span", { className: "pv-map-dot", style: { top: `${yTrue}px`, background: `var(--${tone})` } }), Math.abs(drift) > 3 && /* @__PURE__ */ React.createElement(
+      "span",
       {
-        key: k,
-        className: `pv-map-row pv-map-row--${lv.kind}`,
-        style: { top: `${yPct(lv.price)}%` }
-      },
-      /* @__PURE__ */ React.createElement("span", { className: "pv-map-px mono", style: { color: `var(--${tone})` } }, "$", (+lv.price).toFixed(2)),
-      /* @__PURE__ */ React.createElement("span", { className: "pv-map-line", style: { background: `var(--${tone})` } }),
-      /* @__PURE__ */ React.createElement("span", { className: "pv-map-label" }, label),
-      /* @__PURE__ */ React.createElement("span", { className: "pv-map-chips" }, chips.slice(0, 4).map((c, j) => /* @__PURE__ */ React.createElement("span", { key: j, className: "pv-chip mono" }, c)), strength > 0 && /* @__PURE__ */ React.createElement("span", { className: "pv-map-strength mono", style: { color: `var(--${tone})` } }, Math.round(strength * 100), "%"))
-    );
+        className: "pv-map-leader",
+        style: {
+          top: `${Math.min(yTrue, yLabel)}px`,
+          height: `${Math.abs(drift)}px`,
+          background: `var(--${tone})`
+        }
+      }
+    ), /* @__PURE__ */ React.createElement("div", { className: `pv-map-row pv-map-row--${lv.kind}`, style: { top: `${yLabel}px` } }, /* @__PURE__ */ React.createElement("span", { className: "pv-map-px mono", style: { color: `var(--${tone})` } }, "$", (+lv.price).toFixed(2)), /* @__PURE__ */ React.createElement("span", { className: "pv-map-line", style: { background: `var(--${tone})` } }), /* @__PURE__ */ React.createElement("span", { className: "pv-map-label" }, label), /* @__PURE__ */ React.createElement("span", { className: "pv-map-chips" }, chips.slice(0, 4).map((c, j) => /* @__PURE__ */ React.createElement("span", { key: j, className: "pv-chip mono" }, c)), strength > 0 && /* @__PURE__ */ React.createElement("span", { className: "pv-map-strength mono", style: { color: `var(--${tone})` } }, Math.round(strength * 100), "%"))));
   })));
 }
 function PatternMatrix({ methods }) {
@@ -33242,7 +33280,7 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
     }
     if (tab === "ai-edge") r = [...r].sort((a, b) => b.aiEdge - a.aiEdge);
     return r;
-  }, [tab, pills, side, sort, secF, setupF, q, colFilters, wlTick]);
+  }, [tab, pills, side, sort, secF, setupF, q, colFilters, wlTick, window.__tmode]);
   const consensusCount = useMemoSS(() => {
     const c = window.buildConsensus ? window.buildConsensus() : { rows: [] };
     return c.rows.filter((r) => r.count >= 2).length;
@@ -33283,7 +33321,20 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
       title: "Clear all filters"
     },
     "\u21BA RESET"
-  )), /* @__PURE__ */ React.createElement("div", { className: "ss2-toolbar" }, /* @__PURE__ */ React.createElement("span", { className: "ss2-count mono" }, /* @__PURE__ */ React.createElement("b", { className: "copper" }, rows.length), " ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "picks")), /* @__PURE__ */ React.createElement("span", { className: "ss2-tdiv" }), /* @__PURE__ */ React.createElement("div", { className: "ss2-side", title: "Directional bias" }, ["BUY", "WATCH", "SHORT", "ALL"].map((s) => /* @__PURE__ */ React.createElement(
+  )), /* @__PURE__ */ React.createElement("div", { className: "ss2-toolbar" }, /* @__PURE__ */ React.createElement("div", { className: "ss2-mode", title: "Horizon \u2014 drives per-mode bias & trade plan (swing / position / invest)" }, [["SWING", "SWING"], ["POSITION", "POSITION"], ["INVEST", "INVESTMENT"]].map(([lbl, val]) => {
+    const cur = String(window.__tmode || "swing").toLowerCase();
+    const curKey = cur.indexOf("pos") === 0 ? "POSITION" : cur.indexOf("inv") === 0 ? "INVESTMENT" : "SWING";
+    return /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: val,
+        className: `ss2-mode-btn ${curKey === val ? "is-on" : ""}`,
+        onClick: () => window.__setMode && window.__setMode(val),
+        title: `${lbl} horizon`
+      },
+      lbl
+    );
+  })), /* @__PURE__ */ React.createElement("span", { className: "ss2-tdiv" }), /* @__PURE__ */ React.createElement("span", { className: "ss2-count mono" }, /* @__PURE__ */ React.createElement("b", { className: "copper" }, rows.length), " ", /* @__PURE__ */ React.createElement("span", { className: "dim2" }, "picks")), /* @__PURE__ */ React.createElement("span", { className: "ss2-tdiv" }), /* @__PURE__ */ React.createElement("div", { className: "ss2-side", title: "Directional bias" }, ["BUY", "WATCH", "SHORT", "ALL"].map((s) => /* @__PURE__ */ React.createElement(
     "button",
     {
       key: s,
@@ -33349,7 +33400,10 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
       onChange: () => toggleSel(t.sym),
       onClick: (e) => e.stopPropagation()
     }
-  )), /* @__PURE__ */ React.createElement("td", { className: "mono ss2-sym" }, /* @__PURE__ */ React.createElement("span", { className: "ss2-star" }, "\u2605"), /* @__PURE__ */ React.createElement("b", null, t.sym), /* @__PURE__ */ React.createElement(SeenChip, { seen: t.seen, sym: t.sym })), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, t.name), /* @__PURE__ */ React.createElement("td", { className: "dim2 mono" }, t.sector), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, /* @__PURE__ */ React.createElement("span", { className: "ss2-tfsn" }, (t.tfsn || []).map((v, k) => /* @__PURE__ */ React.createElement("span", { key: k, className: `ss2-tfsn-dot ss2-tfsn--${v === 2 ? "pass" : v === 1 ? "neut" : "fail"}`, title: ["Tech", "Fund", "SMC", "News"][k] })))), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, t.mechanism), /* @__PURE__ */ React.createElement("td", { className: "r" }, /* @__PURE__ */ React.createElement("span", { className: `ss2-score ss2-score--${t.score >= 75 ? "gn" : t.score >= 60 ? "amb" : "rd"}` }, t.score)), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(Pill, { tone: secBiasTone(t.verdict), small: true }, secBias(t.verdict))), /* @__PURE__ */ React.createElement("td", { className: "r" }, (() => {
+  )), /* @__PURE__ */ React.createElement("td", { className: "mono ss2-sym" }, /* @__PURE__ */ React.createElement("span", { className: "ss2-star" }, "\u2605"), /* @__PURE__ */ React.createElement("b", null, t.sym), /* @__PURE__ */ React.createElement(SeenChip, { seen: t.seen, sym: t.sym })), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, t.name), /* @__PURE__ */ React.createElement("td", { className: "dim2 mono" }, t.sector), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, /* @__PURE__ */ React.createElement("span", { className: "ss2-tfsn" }, (t.tfsn || []).map((v, k) => /* @__PURE__ */ React.createElement("span", { key: k, className: `ss2-tfsn-dot ss2-tfsn--${v === 2 ? "pass" : v === 1 ? "neut" : "fail"}`, title: ["Tech", "Fund", "SMC", "News"][k] })))), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, t.mechanism), /* @__PURE__ */ React.createElement("td", { className: "r" }, /* @__PURE__ */ React.createElement("span", { className: `ss2-score ss2-score--${t.score >= 75 ? "gn" : t.score >= 60 ? "amb" : "rd"}` }, t.score)), /* @__PURE__ */ React.createElement("td", null, (() => {
+    const br = window.biasRead ? window.biasRead(t) : { label: secBias(t.verdict), tone: secBiasTone(t.verdict) };
+    return /* @__PURE__ */ React.createElement(Pill, { tone: br.tone, small: true }, br.label);
+  })()), /* @__PURE__ */ React.createElement("td", { className: "r" }, (() => {
     const n = t.ready;
     const tn = n >= 6 ? "gn" : n >= 4 ? "amb" : "rd";
     return /* @__PURE__ */ React.createElement("span", { className: `ss2-ready ss2-ready--${tn}`, title: `${n} of 6 entry criteria met` }, n, "/6");
@@ -37619,9 +37673,9 @@ function LedgerView({ SL, metric, srcFilter, setSrcFilter, onTicker, initialTick
     const dStr = d.toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "2-digit" });
     const sn = scoreNow(r);
     return /* @__PURE__ */ React.createElement("tr", { key: r.id, onClick: () => onTicker && onTicker(r.sym) }, /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, r.age, "d ago"), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, dStr), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("b", null, r.sym)), /* @__PURE__ */ React.createElement("td", { className: "dim2" }, r.label), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: r.dir === "long" ? "up" : "dn" }, r.dir === "long" ? "LONG" : "SHORT")), /* @__PURE__ */ React.createElement("td", { className: "r tabular dim" }, "$", r.refPrice.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: "r tabular" }, /* @__PURE__ */ React.createElement("b", null, r.score != null ? r.score : "\u2014")), /* @__PURE__ */ React.createElement("td", null, scoreSpark(r.scoreSeries) || (sn ? /* @__PURE__ */ React.createElement("span", { className: "mono dim2", title: "single reading" }, sn.last) : /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, "\u2014")), sn && sn.last !== sn.first ? /* @__PURE__ */ React.createElement("span", { className: `mono ${sn.last >= sn.first ? "up" : "dn"}`, style: { fontSize: 9, marginLeft: 4 } }, sn.last >= sn.first ? "+" : "", sn.last - sn.first) : null), /* @__PURE__ */ React.createElement("td", null, spark(r.path) || /* @__PURE__ */ React.createElement("span", { className: "trk-mat-lbl mono dim2" }, "maturing\u2026")), /* @__PURE__ */ React.createElement("td", { className: `r tabular ${r.last && r.last.v >= 0 ? "up" : "dn"}` }, r.last ? /* @__PURE__ */ React.createElement("b", null, trPct(r.last.v)) : "\u2014", /* @__PURE__ */ React.createElement("span", { className: "dim2 mono", style: { fontSize: 9 } }, " ", r.last ? r.last.hz || "" : "")), /* @__PURE__ */ React.createElement("td", { className: "r tabular dim2" }, r.maturedN, "/", NH), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `trk-status trk-status--${r.status}`, title: `${r.maturedN}/${NH} horizons matured` }, r.statusLabel || r.status)));
-  }))) : /* @__PURE__ */ React.createElement("div", { className: "trk-full-wrap" }, /* @__PURE__ */ React.createElement("table", { className: "trk-full" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement(Sh, { col: "age", label: "Date", cls: "trk-full-sticky" }), /* @__PURE__ */ React.createElement(Sh, { col: "sym", label: "Sym", cls: "trk-full-sticky2" }), /* @__PURE__ */ React.createElement(Sh, { col: "label", label: "Src" }), /* @__PURE__ */ React.createElement(Sh, { col: "dir", label: "Dir" }), SL.HZ.map((h) => /* @__PURE__ */ React.createElement(Sh, { key: h.id, col: h.id, label: h.label, cls: "trk-full-hz" })))), /* @__PURE__ */ React.createElement("tbody", null, pageRows.map((r) => {
+  }))) : /* @__PURE__ */ React.createElement("div", { className: "trk-full-wrap" }, /* @__PURE__ */ React.createElement("table", { className: "trk-full" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement(Sh, { col: "age", label: "Date", cls: "trk-full-sticky" }), /* @__PURE__ */ React.createElement(Sh, { col: "sym", label: "Sym", cls: "trk-full-sticky2" }), /* @__PURE__ */ React.createElement(Sh, { col: "label", label: "Src" }), /* @__PURE__ */ React.createElement(Sh, { col: "dir", label: "Dir" }), /* @__PURE__ */ React.createElement(Sh, { col: "score", label: "Score", r: true }), SL.HZ.map((h) => /* @__PURE__ */ React.createElement(Sh, { key: h.id, col: h.id, label: h.label, cls: "trk-full-hz" })))), /* @__PURE__ */ React.createElement("tbody", null, pageRows.map((r) => {
     const dStr = new Date(Date.now() - r.age * 864e5).toLocaleDateString("en-US", { day: "2-digit", month: "short" });
-    return /* @__PURE__ */ React.createElement("tr", { key: r.id, onClick: () => onTicker && onTicker(r.sym) }, /* @__PURE__ */ React.createElement("td", { className: "trk-full-sticky mono dim2" }, dStr), /* @__PURE__ */ React.createElement("td", { className: "trk-full-sticky2" }, /* @__PURE__ */ React.createElement("b", null, r.sym)), /* @__PURE__ */ React.createElement("td", { className: "dim2", style: { fontSize: 10 } }, r.label), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `mono ${r.dir === "long" ? "up" : "dn"}`, style: { fontSize: 10 } }, r.dir === "long" ? "L" : "S")), r.path.map((p, i) => /* @__PURE__ */ React.createElement("td", { key: i, className: "trk-full-cell", style: { background: p.mature ? heatColor(p.v, 6) : "var(--bg-2)" }, title: p.mature ? `${SL.HZ[i].label}: ${trPct(p.v)}` : "maturing" }, p.mature ? (p.v >= 0 ? "+" : "\u2212") + Math.abs(p.v).toFixed(1) : "\xB7")));
+    return /* @__PURE__ */ React.createElement("tr", { key: r.id, onClick: () => onTicker && onTicker(r.sym) }, /* @__PURE__ */ React.createElement("td", { className: "trk-full-sticky mono dim2" }, dStr), /* @__PURE__ */ React.createElement("td", { className: "trk-full-sticky2" }, /* @__PURE__ */ React.createElement("b", null, r.sym)), /* @__PURE__ */ React.createElement("td", { className: "dim2", style: { fontSize: 10 } }, r.label), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `mono ${r.dir === "long" ? "up" : "dn"}`, style: { fontSize: 10 } }, r.dir === "long" ? "L" : "S")), /* @__PURE__ */ React.createElement("td", { className: "r tabular", style: { fontSize: 10 } }, /* @__PURE__ */ React.createElement("b", null, r.score != null ? r.score : "\u2014")), r.path.map((p, i) => /* @__PURE__ */ React.createElement("td", { key: i, className: "trk-full-cell", style: { background: p.mature ? heatColor(p.v, 6) : "var(--bg-2)" }, title: p.mature ? `${SL.HZ[i].label}: ${trPct(p.v)}` : "maturing" }, p.mature ? (p.v >= 0 ? "+" : "\u2212") + Math.abs(p.v).toFixed(1) : "\xB7")));
   })))), /* @__PURE__ */ React.createElement("div", { className: "trk-pager" }, /* @__PURE__ */ React.createElement("button", { className: "trk-page-btn", disabled: pg <= 0, onClick: () => setPage(pg - 1) }, "\u2039 Prev"), /* @__PURE__ */ React.createElement("span", { className: "mono dim2" }, rows.length === 0 ? "0 calls" : `${pg * PAGE + 1}\u2013${Math.min(rows.length, pg * PAGE + PAGE)} of ${rows.length}`, " \xB7 page ", pg + 1, "/", pages), /* @__PURE__ */ React.createElement("button", { className: "trk-page-btn", disabled: pg >= pages - 1, onClick: () => setPage(pg + 1) }, "Next \u203A")), /* @__PURE__ */ React.createElement("div", { className: "lab-verdict mono dim2" }, rows.length, " calls", tickerTokens.length ? ` \xB7 ${tickerTokens.join(", ")}` : "", srcFilter ? ` \xB7 ${SL.SOURCE_BY[srcFilter].label}` : "", " \xB7 ", dateFrom || dateTo ? `${dateFrom || "\u2026"} \u2192 ${dateTo || "\u2026"}` : period === "all" ? "all history (\u22641y)" : period === "ytd" ? "year-to-date" : "last " + period.toUpperCase(), " \xB7 ", metric === "edge" ? "edge vs SPY" : "raw return", ". ", /* @__PURE__ */ React.createElement("b", null, "\u2913 Export CSV"), " downloads the filtered set across all ", NH, " horizons. Click a row \u2192 ticker detail."));
 }
 function CalibrationView({ SL, metric }) {
