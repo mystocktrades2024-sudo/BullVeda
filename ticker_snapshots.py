@@ -254,7 +254,17 @@ def capture_scan(tickers: dict | list, run_id: str | None = None,
         conn.executemany(insert_sql, rows)
         conn.commit()
         log.info(f"ticker_snapshots: captured {inserted} ticker rows for run_id={run_id}")
-        purge_old(conn)  # trim to the rolling RETENTION_DAYS window
+        purge_old(conn)  # trim the LOCAL hot store to the rolling window
+        # Best-effort push to the NAS deep store (FULL retention). rows are already
+        # in nas_pg.SYNC_COLS order; raw_gz bytes adapt to bytea. NAS down → no-op.
+        try:
+            import nas_pg
+            if nas_pg.enabled():
+                nas_pg.init_schema()
+                n_nas = nas_pg.upsert_snapshots(rows)
+                log.info(f"ticker_snapshots: pushed {n_nas} rows to NAS deep store")
+        except Exception as _ne:
+            log.debug(f"ticker_snapshots: NAS push skipped (non-fatal): {_ne}")
     else:
         log.debug(f"ticker_snapshots: nothing to capture for run_id={run_id} (already exists or empty)")
 
