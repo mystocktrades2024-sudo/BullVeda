@@ -319,6 +319,10 @@
       revGrowth: num(H.QuarterlyRevenueGrowthYOY), targetPrice: num(H.WallStreetTargetPrice),
       earnings: { days: sr.er, date: "" },
       setupFamily: sr.setup, pivot: entry, stop: num(r.stop, 0) || 0, t1: num(r.t1, 0) || 0, t2: num(r.t2, 0) || 0,
+      // Phase 1 · STRUCT-LADDER-UNIFY — per-mode structural ladders (target_engine,
+      // the Overview source) so mode-switching surfaces (chat) render the exact
+      // T1/T2/stop the Overview shows for the active horizon, with no cache dependency.
+      structByMode: r.struct_by_mode || null,
       trail: "ATR(14)-based", holdDays: ({ "Impulse Catalyst": 6, "Breakout Expansion": 14, "Trend Continuation": 14, "Special Situation": 10 })[sr.setup] || 10,
       rMultiple: num(r.rr, 0) || 0,
       pillars: {

@@ -3706,6 +3706,43 @@ def _ticker_names() -> dict:
             pass
     return _TICKER_NAMES_CACHE["names"]
 
+_TE_CACHE_DIR = BASE_DIR / "cache" / "target_engine"
+
+
+def _structural_ladder(ticker: str, mode: str):
+    """Phase 1 · STRUCT-LADDER-UNIFY — read the precomputed STRUCTURAL target_engine
+    ladder (cache/target_engine/{TICKER}_{MODE}.json), the SAME source /api/trade_engine
+    and the Overview lens render. Surfaced to the scanner / chat / chart rows so every
+    surface shows the identical T1/T2/stop the Overview shows.
+
+    Was: the scanner row carried the canonical_trade_plan ladder, which diverged from
+    Overview and — on split-contaminated names — produced poisoned targets (NOW swing
+    rendered t1=35.33 / t2=-8.95 / rr=-3.21). target_engine has the overhead-supply +
+    poison-ceiling guards canonical_trade_plan lacks, so it is the honest canonical.
+
+    DISPLAY-ONLY: does NOT feed the BUY/AVOID verdict gate — decisions_by_mode stays
+    authoritative for gating (Phase 2 = migrate the R:R gate too, after walk-forward).
+    Returns normalized {entry,stop,t1,t2,t3,rr,basis,session_date} or None.
+    """
+    import json as _json
+    try:
+        d = _json.loads((_TE_CACHE_DIR / f"{str(ticker).upper()}_{mode}.json").read_text())
+    except Exception:
+        return None
+    def _px(o):
+        return (o or {}).get("price") if isinstance(o, dict) else None
+    stop = _px(d.get("stop")); t1 = _px(d.get("t1"))
+    if not (stop and t1):  # need at least stop + T1 to be a usable ladder
+        return None
+    rr = (d.get("t1") or {}).get("r_multiple")
+    return {
+        "entry": _px(d.get("entry")) or d.get("price_at_analysis"),
+        "stop": stop, "t1": t1, "t2": _px(d.get("t2")), "t3": _px(d.get("t3")),
+        "rr": (round(rr, 2) if isinstance(rr, (int, float)) else None),
+        "basis": "structural", "session_date": d.get("session_date"),
+    }
+
+
 @app.get("/api/universe")
 async def universe_api(limit: int = 0):
     """Full scored universe (all ~1832 ranked names) — compact scanner-shaped rows
@@ -3794,6 +3831,23 @@ async def universe_api(limit: int = 0):
         T = r.get("technicals") or {}; F = r.get("fundamentals") or {}
         S = r.get("smc") or {}; N = r.get("sentiment") or {}
         _ind = (T.get("indicators") or {})  # 52w high/low live here, not top-level
+        # ── Phase 1 · STRUCT-LADDER-UNIFY ───────────────────────────────────────
+        # Overlay the precomputed STRUCTURAL ladder (target_engine — the Overview /
+        # trade_engine source) so the scanner, chat and chart surfaces show the SAME
+        # T1/T2/stop the Overview lens shows. swing = the scanner's primary ladder;
+        # struct_by_mode carries all three horizons for the mode-switching surfaces.
+        # Display-only: the BUY/AVOID verdict + R:R gate keep decisions_by_mode.
+        _struct_by_mode = {}
+        for _m in ("swing", "position", "invest"):
+            _sl = _structural_ladder(r.get("ticker"), _m)
+            if _sl:
+                _struct_by_mode[_m] = _sl
+        _sw = _struct_by_mode.get("swing")
+        if _sw:
+            stop = _sw["stop"]; elo = _sw["entry"]; t1 = _sw["t1"]
+            t2 = _sw["t2"]; t3 = _sw["t3"]
+            if _sw["rr"] is not None:
+                rr = _sw["rr"]
         return {
             "ticker": r.get("ticker"),
             "name": _ticker_names().get(str(r.get("ticker") or "").upper()) or r.get("name") or r.get("ticker"),
@@ -3825,6 +3879,10 @@ async def universe_api(limit: int = 0):
             "edge_tier": r.get("edge_tier"), "edge_warning": r.get("edge_warning"),
             "price": r.get("price"), "pct_chg": r.get("perf_1d"),
             "rr": rr, "stop": stop, "entry_lo": elo, "t1": t1, "t2": t2, "t3": t3,
+            # Phase 1 · STRUCT-LADDER-UNIFY: per-mode structural ladders (same source
+            # as Overview/trade_engine) so mode-switching surfaces (chat, detail) can
+            # render the exact T1/T2/stop the Overview shows for the active horizon.
+            "struct_by_mode": _struct_by_mode or None,
             "rvol": r.get("rvol"), "rs_rank": r.get("rs_rank"), "rsi": r.get("rsi"),
             "beta": r.get("beta"), "market_cap": r.get("market_cap"),
             "iv_rank": ok.get("iv_rank") if ok.get("iv_rank") is not None else r.get("iv_rank"),

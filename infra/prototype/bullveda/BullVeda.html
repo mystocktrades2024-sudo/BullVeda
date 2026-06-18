@@ -11449,6 +11449,10 @@ body.light .trk-date-input { color-scheme: light; }
       revGrowth: num(H.QuarterlyRevenueGrowthYOY), targetPrice: num(H.WallStreetTargetPrice),
       earnings: { days: sr.er, date: "" },
       setupFamily: sr.setup, pivot: entry, stop: num(r.stop, 0) || 0, t1: num(r.t1, 0) || 0, t2: num(r.t2, 0) || 0,
+      // Phase 1 · STRUCT-LADDER-UNIFY — per-mode structural ladders (target_engine,
+      // the Overview source) so mode-switching surfaces (chat) render the exact
+      // T1/T2/stop the Overview shows for the active horizon, with no cache dependency.
+      structByMode: r.struct_by_mode || null,
       trail: "ATR(14)-based", holdDays: ({ "Impulse Catalyst": 6, "Breakout Expansion": 14, "Trend Continuation": 14, "Special Situation": 10 })[sr.setup] || 10,
       rMultiple: num(r.rr, 0) || 0,
       pillars: {
@@ -38100,6 +38104,39 @@ function tickerDossier(ctx) {
   d.t1 = t.t1;
   d.t2 = t.t2;
   d.pivot = t.pivot;
+  try {
+    const moKey = mode === "POSITION" ? "position" : mode === "INVESTMENT" || mode === "INVEST" ? "invest" : "swing";
+    const px = (o) => o && typeof o.price === "number" ? o.price : null;
+    let lad = null;
+    const sbm = t.structByMode;
+    if (sbm && sbm[moKey] && sbm[moKey].stop && sbm[moKey].t1) {
+      const s = sbm[moKey];
+      lad = { stop: s.stop, t1: s.t1, t2: s.t2, entry: s.entry, rr: s.rr };
+    } else {
+      const BVx = window.__BV || window.BV;
+      const te = BVx && BVx.tradeEngineCached ? BVx.tradeEngineCached(t.symbol, mode) : null;
+      if (te && px(te.stop) && px(te.t1)) {
+        lad = {
+          stop: px(te.stop),
+          t1: px(te.t1),
+          t2: px(te.t2),
+          entry: px(te.entry),
+          rr: te.t1 && te.t1.r_multiple != null ? te.t1.r_multiple : null
+        };
+      } else if (BVx && BVx.fetchTradeEngine) {
+        BVx.fetchTradeEngine(t.symbol, mode);
+      }
+    }
+    if (lad) {
+      d.stop = lad.stop;
+      d.t1 = lad.t1;
+      d.t2 = lad.t2;
+      d.entryPx = lad.entry;
+      if (lad.rr != null) d.rMultiple = lad.rr;
+      d.ladderSrc = "structural";
+    }
+  } catch (e) {
+  }
   return d;
 }
 function fallbackAnswer(q, ctx) {
@@ -38134,14 +38171,15 @@ ${cv.dissenters.length ? `\u26A0 **Dissenting:** ${cv.dissenters.map((x) => x.k)
 ML (${pj.horizon}): P(up) **${Math.round(pj.pUp * 100)}%**, entry $${pj.entry.toFixed(2)} \xB7 stop $${pj.stop.toFixed(2)} \xB7 T1 $${pj.t1.toFixed(2)} \xB7 T2 $${pj.t2.toFixed(2)}, R:R ${pj.rr}.` : ""}`;
     }
     if (/plan|trade|entry|target|stop|size|r:r|level/.test(ql)) {
-      const entry = D.pivot ? D.pivot * 1.002 : pj ? pj.entry : null;
+      const entry = D.entryPx ? D.entryPx : D.pivot ? D.pivot * 1.002 : null;
       return `**${D.sym} \u2014 ${D.mode} trade plan**
 
 - **Entry** \u2014 $${entry ? entry.toFixed(2) : "\u2014"} (close above pivot, RVOL \u2265 1.3\xD7)
-- **Stop** \u2014 $${D.stop ? D.stop.toFixed(2) : pj ? pj.stop.toFixed(2) : "\u2014"}
+- **Stop** \u2014 $${D.stop ? D.stop.toFixed(2) : "\u2014"}
 - **T1 \xB7 T2** \u2014 $${D.t1 ? D.t1.toFixed(2) : "\u2014"} \xB7 $${D.t2 ? D.t2.toFixed(2) : "\u2014"}
 - **R-multiple** \u2014 ${D.rMultiple ? D.rMultiple.toFixed(2) : "\u2014"}R \xB7 hold ~${(_a = D.holdDays) != null ? _a : "\u2014"}d${pj ? ` \xB7 EV ${pj.ev >= 0 ? "+" : ""}${pj.ev}%` : ""}
-- **Setup** \u2014 ${D.setupFamily || "\u2014"}${D.setupStats ? ` \xB7 win ${(D.setupStats.winRate * 100).toFixed(0)}% \xB7 Wilson LB ${(D.setupStats.wilsonLB * 100).toFixed(0)}% \xB7 n=${D.setupStats.n}` : ""}
+- **Setup** \u2014 ${D.setupFamily || "\u2014"}${D.setupStats ? ` \xB7 win ${(D.setupStats.winRate * 100).toFixed(0)}% \xB7 Wilson LB ${(D.setupStats.wilsonLB * 100).toFixed(0)}% \xB7 n=${D.setupStats.n}` : ""}${pj ? `
+- _ML forecast (${pj.horizon}): stop $${pj.stop.toFixed(2)} (q10) \xB7 T1 $${pj.t1.toFixed(2)} (q75) \xB7 T2 $${pj.t2.toFixed(2)} (q90) \u2014 a distribution, not the plan._` : ""}
 
 _Plan \xB7 Ticket lens has the exact order + sizing cascade._`;
     }

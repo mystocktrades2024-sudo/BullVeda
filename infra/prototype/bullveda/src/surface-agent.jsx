@@ -82,6 +82,36 @@ function tickerDossier(ctx) {
   d.pillars = t.pillars; d.setupStats = t.setupStats; d.earnings = t.earnings;
   d.setupFamily = t.setupFamily; d.rMultiple = t.rMultiple; d.holdDays = t.holdDays;
   d.stop = t.stop; d.t1 = t.t1; d.t2 = t.t2; d.pivot = t.pivot;
+  // Phase 1 · STRUCT-LADDER-UNIFY — bind the trade plan to the SAME structural ladder
+  // the Overview lens shows, for the ACTIVE mode. Was: the chat read the scan-row ladder
+  // and could substitute ML q-levels as the plan. Prefer the per-mode ladder threaded
+  // onto the ticker (synchronous, no cache dependency); fall back to the trade_engine
+  // cache, warming it for the next turn if cold.
+  try {
+    const moKey = mode === "POSITION" ? "position" : (mode === "INVESTMENT" || mode === "INVEST") ? "invest" : "swing";
+    const px = o => (o && typeof o.price === "number" ? o.price : null);
+    let lad = null;
+    const sbm = t.structByMode;
+    if (sbm && sbm[moKey] && sbm[moKey].stop && sbm[moKey].t1) {
+      const s = sbm[moKey];
+      lad = { stop: s.stop, t1: s.t1, t2: s.t2, entry: s.entry, rr: s.rr };
+    } else {
+      const BVx = window.__BV || window.BV;
+      const te = BVx && BVx.tradeEngineCached ? BVx.tradeEngineCached(t.symbol, mode) : null;
+      if (te && px(te.stop) && px(te.t1)) {
+        lad = { stop: px(te.stop), t1: px(te.t1), t2: px(te.t2), entry: px(te.entry),
+                rr: (te.t1 && te.t1.r_multiple != null ? te.t1.r_multiple : null) };
+      } else if (BVx && BVx.fetchTradeEngine) {
+        BVx.fetchTradeEngine(t.symbol, mode);  // warm the cache for the next turn
+      }
+    }
+    if (lad) {
+      d.stop = lad.stop; d.t1 = lad.t1; d.t2 = lad.t2;
+      d.entryPx = lad.entry;
+      if (lad.rr != null) d.rMultiple = lad.rr;
+      d.ladderSrc = "structural";
+    }
+  } catch (e) {}
   return d;
 }
 
@@ -114,8 +144,11 @@ function fallbackAnswer(q, ctx) {
     }
     // plan / entry / target / stop → from projection + plan
     if (/plan|trade|entry|target|stop|size|r:r|level/.test(ql)) {
-      const entry = D.pivot ? D.pivot * 1.002 : (pj ? pj.entry : null);
-      return `**${D.sym} — ${D.mode} trade plan**\n\n- **Entry** — $${entry ? entry.toFixed(2) : "—"} (close above pivot, RVOL ≥ 1.3×)\n- **Stop** — $${D.stop ? D.stop.toFixed(2) : (pj ? pj.stop.toFixed(2) : "—")}\n- **T1 · T2** — $${D.t1 ? D.t1.toFixed(2) : "—"} · $${D.t2 ? D.t2.toFixed(2) : "—"}\n- **R-multiple** — ${D.rMultiple ? D.rMultiple.toFixed(2) : "—"}R · hold ~${D.holdDays ?? "—"}d${pj ? ` · EV ${pj.ev >= 0 ? "+" : ""}${pj.ev}%` : ""}\n- **Setup** — ${D.setupFamily || "—"}${D.setupStats ? ` · win ${(D.setupStats.winRate * 100).toFixed(0)}% · Wilson LB ${(D.setupStats.wilsonLB * 100).toFixed(0)}% · n=${D.setupStats.n}` : ""}\n\n_Plan · Ticket lens has the exact order + sizing cascade._`;
+      // Plan binds to the structural ladder (Overview source). Entry prefers the
+      // structural entry; never substitute ML q-levels as the plan stop — ML is shown
+      // separately as a labelled forecast below, not as the trade plan.
+      const entry = D.entryPx ? D.entryPx : (D.pivot ? D.pivot * 1.002 : null);
+      return `**${D.sym} — ${D.mode} trade plan**\n\n- **Entry** — $${entry ? entry.toFixed(2) : "—"} (close above pivot, RVOL ≥ 1.3×)\n- **Stop** — $${D.stop ? D.stop.toFixed(2) : "—"}\n- **T1 · T2** — $${D.t1 ? D.t1.toFixed(2) : "—"} · $${D.t2 ? D.t2.toFixed(2) : "—"}\n- **R-multiple** — ${D.rMultiple ? D.rMultiple.toFixed(2) : "—"}R · hold ~${D.holdDays ?? "—"}d${pj ? ` · EV ${pj.ev >= 0 ? "+" : ""}${pj.ev}%` : ""}\n- **Setup** — ${D.setupFamily || "—"}${D.setupStats ? ` · win ${(D.setupStats.winRate * 100).toFixed(0)}% · Wilson LB ${(D.setupStats.wilsonLB * 100).toFixed(0)}% · n=${D.setupStats.n}` : ""}${pj ? `\n- _ML forecast (${pj.horizon}): stop $${pj.stop.toFixed(2)} (q10) · T1 $${pj.t1.toFixed(2)} (q75) · T2 $${pj.t2.toFixed(2)} (q90) — a distribution, not the plan._` : ""}\n\n_Plan · Ticket lens has the exact order + sizing cascade._`;
     }
     // risk → pillars + stop
     if (/risk|var|kelly|downside|exposure|drawdown/.test(ql)) {
