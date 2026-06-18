@@ -43,10 +43,11 @@ Query helpers:
 """
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -57,22 +58,33 @@ BASE_DIR = Path(__file__).resolve().parent
 
 # ── Flat columns we extract for fast queries / dashboard sparklines ─────
 _FLAT_COLS = [
-    ("verdict",       "TEXT"),
-    ("stage",         "TEXT"),
-    ("score",         "REAL"),
-    ("rs_rank",       "INTEGER"),
-    ("regime",        "TEXT"),
-    ("setup_family",  "TEXT"),
-    ("setup",         "TEXT"),
-    ("entry_quality", "TEXT"),
-    ("catalyst_tier", "INTEGER"),
-    ("rvol",          "REAL"),
-    ("price",         "REAL"),
-    ("stop",          "REAL"),
-    ("target1",       "REAL"),
-    ("rr_ratio",      "REAL"),
-    ("alloc_pct",     "REAL"),
+    ("verdict",         "TEXT"),
+    ("stage",           "TEXT"),
+    ("score",           "REAL"),
+    ("rs_rank",         "INTEGER"),
+    ("regime",          "TEXT"),
+    ("setup_family",    "TEXT"),
+    ("setup",           "TEXT"),
+    ("entry_quality",   "TEXT"),
+    ("catalyst_tier",   "INTEGER"),
+    ("rvol",            "REAL"),
+    ("price",           "REAL"),
+    ("stop",            "REAL"),
+    ("target1",         "REAL"),
+    ("rr_ratio",        "REAL"),
+    ("alloc_pct",       "REAL"),
+    # Added 2026-06-18 — the fields the owner queries most (conviction tier, T2,
+    # day change, ML p_up, mode). Flat so they don't require decompressing raw_gz.
+    ("conviction_tier", "TEXT"),
+    ("target2",         "REAL"),
+    ("pct_chg",         "REAL"),
+    ("p_up",            "REAL"),
+    ("mode",            "TEXT"),
 ]
+
+# Retain the heavy full-payload snapshots for this many days, then purge whole
+# rows (owner decision 2026-06-18: "all the runs for last 3 months only").
+RETENTION_DAYS = 90
 
 
 def _coerce(v, kind: str):
@@ -104,13 +116,21 @@ def init_snapshot_table(conn: sqlite3.Connection | None = None) -> None:
             run_date     TEXT NOT NULL,
             ticker       TEXT NOT NULL,
             {cols_sql},
-            raw_json     TEXT
+            raw_json     TEXT,
+            raw_gz       BLOB
         )
     """
     conn.execute(ddl)
+    # Idempotent migration: the table predates the extra flat columns + raw_gz, so
+    # ADD COLUMN any that are missing (SQLite has no ADD COLUMN IF NOT EXISTS).
+    have = {r[1] for r in conn.execute("PRAGMA table_info(ticker_snapshots)").fetchall()}
+    for name, kind in _FLAT_COLS + [("raw_gz", "BLOB")]:
+        if name not in have:
+            conn.execute(f"ALTER TABLE ticker_snapshots ADD COLUMN {name} {kind}")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tsnap_ticker_date ON ticker_snapshots(ticker, run_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tsnap_run_id       ON ticker_snapshots(run_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tsnap_captured_at  ON ticker_snapshots(captured_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tsnap_run_date     ON ticker_snapshots(run_date)")
     conn.commit()
     if own:
         log.debug("ticker_snapshots table initialized")
@@ -144,6 +164,11 @@ def _extract_flat(t: dict) -> dict:
         "target1":       first("target1", "t1", "trade_plan.target1"),
         "rr_ratio":      first("rr_ratio", "rr", "trade_plan.rr_ratio"),
         "alloc_pct":     first("alloc_pct", "kelly_size.final_alloc_pct"),
+        "conviction_tier": first("conviction_tier", "conviction.label", "conviction_label"),
+        "target2":       first("target2", "t2", "trade_plan.target2"),
+        "pct_chg":       first("pct_chg", "perf_1d", "change"),
+        "p_up":          first("p_up", "ml.direction.p_up"),
+        "mode":          first("mode", "_mode"),
     }
 
 
@@ -177,7 +202,7 @@ def capture_scan(tickers: dict | list, run_id: str | None = None,
         ).fetchall()
     }
 
-    col_names = ["captured_at", "run_id", "run_date", "ticker"] + [c for c, _ in _FLAT_COLS] + ["raw_json"]
+    col_names = ["captured_at", "run_id", "run_date", "ticker"] + [c for c, _ in _FLAT_COLS] + ["raw_json", "raw_gz"]
     placeholders = ",".join(["?"] * len(col_names))
     insert_sql = f"INSERT INTO ticker_snapshots ({','.join(col_names)}) VALUES ({placeholders})"
 
@@ -193,9 +218,7 @@ def capture_scan(tickers: dict | list, run_id: str | None = None,
         row = [now_iso, run_id, run_date, sym]
         for col, kind in _FLAT_COLS:
             row.append(_coerce(flat.get(col), kind))
-        # Drop large nested objects from raw_json to keep DB size sane.
-        # Field-history audit reads from the flat cols; raw_json is for
-        # forensic depth (catalyst_tags, gates_evaluated, audit_trail).
+        # raw_json: the lightweight queryable subset (kept for back-compat readers).
         SAFE_RAW = {
             k: v for k, v in payload.items()
             if k in {
@@ -211,6 +234,11 @@ def capture_scan(tickers: dict | list, run_id: str | None = None,
             }
         }
         row.append(json.dumps(SAFE_RAW, default=str))
+        # raw_gz: the FULL payload (every field the scanner produced), gzipped.
+        # ~34 KB/row vs 130 KB raw → ~4×. This is "all the details" the owner asked
+        # for; RETENTION_DAYS purge keeps the rolling window from filling the disk.
+        full = json.dumps(payload, default=str).encode("utf-8")
+        row.append(gzip.compress(full, compresslevel=6))
         rows.append(tuple(row))
         inserted += 1
 
@@ -218,10 +246,48 @@ def capture_scan(tickers: dict | list, run_id: str | None = None,
         conn.executemany(insert_sql, rows)
         conn.commit()
         log.info(f"ticker_snapshots: captured {inserted} ticker rows for run_id={run_id}")
+        purge_old(conn)  # trim to the rolling RETENTION_DAYS window
     else:
         log.debug(f"ticker_snapshots: nothing to capture for run_id={run_id} (already exists or empty)")
 
     return inserted
+
+
+def purge_old(conn: sqlite3.Connection | None = None, days: int = RETENTION_DAYS) -> int:
+    """Delete whole snapshot rows older than `days` (rolling retention window).
+
+    Owner decision 2026-06-18: keep all runs for the last 3 months only. Returns
+    rows deleted. Best-effort — a purge failure never blocks scan completion.
+    """
+    own = conn is None
+    if own:
+        conn = db.get_conn()
+    try:
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        cur = conn.execute("DELETE FROM ticker_snapshots WHERE run_date < ?", (cutoff,))
+        n = cur.rowcount or 0
+        conn.commit()
+        if n:
+            log.info(f"ticker_snapshots: purged {n} rows older than {cutoff} ({days}d retention)")
+        return n
+    except Exception as e:
+        log.warning(f"ticker_snapshots purge failed (non-fatal): {e}")
+        return 0
+
+
+def get_full(run_id: str, ticker: str) -> dict | None:
+    """Decompress and return the FULL captured payload for (run_id, ticker)."""
+    conn = db.get_conn()
+    r = conn.execute(
+        "SELECT raw_gz FROM ticker_snapshots WHERE run_id = ? AND ticker = ?",
+        (run_id, ticker.upper()),
+    ).fetchone()
+    if not r or r[0] is None:
+        return None
+    try:
+        return json.loads(gzip.decompress(r[0]).decode("utf-8"))
+    except Exception:
+        return None
 
 
 def history_for(ticker: str, limit: int = 100) -> list[dict]:

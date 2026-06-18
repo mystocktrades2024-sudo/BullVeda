@@ -138,6 +138,16 @@ def _merge_pick_sources():
                     "target2": s.get("target2"),
                     "rr_ratio": s.get("rr"),
                     "rs_rank": s.get("rs_rank"),
+                    # signal_log DOES carry these — map them (was dropped, so every
+                    # swing/signal_log row logged tier/EQ/Cat as null). NB the field is
+                    # `conviction_label` in signal_log, not `conviction_tier`.
+                    "conviction_tier": s.get("conviction_label"),
+                    "entry_quality": s.get("entry_quality"),
+                    "catalyst_tier": s.get("catalyst_tier"),
+                    "regime4": s.get("regime4"),
+                    "rvol": s.get("rvol"),
+                    "rsi": s.get("rsi"),
+                    "weekly_bull": s.get("weekly_bull"),
                     "mode": "swing",  # signal_log defaults to swing
                     "mae_pct": None,
                     "mfe_pct": None,
@@ -158,6 +168,15 @@ def _merge_pick_sources():
             if s.get("actual_pnl_pct") is not None: rec["signal_pnl_pct"] = s.get("actual_pnl_pct")
             # stars
             if s.get("stars") is not None:   rec["stars"] = s.get("stars")
+            # Backfill tier/EQ/Cat from signal_log when the existing record (e.g. a
+            # picks_history row) is missing them — signal_log is the richer source for
+            # swing names. conviction_label → conviction_tier (name differs).
+            if rec.get("conviction_tier") is None and s.get("conviction_label"):
+                rec["conviction_tier"] = s.get("conviction_label")
+            if rec.get("entry_quality") is None and s.get("entry_quality"):
+                rec["entry_quality"] = s.get("entry_quality")
+            if rec.get("catalyst_tier") is None and s.get("catalyst_tier") is not None:
+                rec["catalyst_tier"] = s.get("catalyst_tier")
     return out
 
 
