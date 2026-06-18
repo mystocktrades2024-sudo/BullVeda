@@ -82,9 +82,17 @@ _FLAT_COLS = [
     ("mode",            "TEXT"),
 ]
 
-# Retain the heavy full-payload snapshots for this many days, then purge whole
-# rows (owner decision 2026-06-18: "all the runs for last 3 months only").
-RETENTION_DAYS = 90
+# Split retention (owner decision 2026-06-18, audit use-case):
+#   • BLOB_RETENTION_DAYS — keep the heavy full-payload blob (raw_gz, ~34KB/row)
+#     for the forensic window, then NULL it (row + flat audit columns survive).
+#   • FLAT_RETENTION_DAYS — keep the lightweight flat audit row (score/verdict/
+#     tier/EQ/cat/conviction/RR/p_up/entry…) for a full year so position/invest
+#     outcome horizons can be audited signal→outcome, then delete the whole row.
+# Rationale: the flat fields ARE the audit dataset and are cheap (~17 GB/yr); the
+# heavy blob is forensic depth only and 6mo of it would crowd the 89%-full disk.
+BLOB_RETENTION_DAYS = 90
+FLAT_RETENTION_DAYS = 365
+RETENTION_DAYS = BLOB_RETENTION_DAYS  # back-compat alias
 
 
 def _coerce(v, kind: str):
@@ -253,26 +261,41 @@ def capture_scan(tickers: dict | list, run_id: str | None = None,
     return inserted
 
 
-def purge_old(conn: sqlite3.Connection | None = None, days: int = RETENTION_DAYS) -> int:
-    """Delete whole snapshot rows older than `days` (rolling retention window).
+def purge_old(conn: sqlite3.Connection | None = None,
+              blob_days: int = BLOB_RETENTION_DAYS,
+              flat_days: int = FLAT_RETENTION_DAYS) -> dict:
+    """Two-tier rolling retention for the audit use-case.
 
-    Owner decision 2026-06-18: keep all runs for the last 3 months only. Returns
-    rows deleted. Best-effort — a purge failure never blocks scan completion.
+    Stage 1: NULL the heavy raw_gz blob older than `blob_days` (the flat audit row
+             survives — score/verdict/tier/EQ/cat/conviction/RR/p_up/entry…).
+    Stage 2: DELETE whole rows older than `flat_days`.
+
+    Returns {"blobs_cleared": int, "rows_deleted": int}. Best-effort — a purge
+    failure never blocks scan completion.
     """
     own = conn is None
     if own:
         conn = db.get_conn()
+    out = {"blobs_cleared": 0, "rows_deleted": 0}
     try:
-        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-        cur = conn.execute("DELETE FROM ticker_snapshots WHERE run_date < ?", (cutoff,))
-        n = cur.rowcount or 0
+        blob_cut = (datetime.now() - timedelta(days=blob_days)).strftime("%Y-%m-%d")
+        cur = conn.execute(
+            "UPDATE ticker_snapshots SET raw_gz = NULL WHERE run_date < ? AND raw_gz IS NOT NULL",
+            (blob_cut,),
+        )
+        out["blobs_cleared"] = cur.rowcount or 0
+
+        flat_cut = (datetime.now() - timedelta(days=flat_days)).strftime("%Y-%m-%d")
+        cur = conn.execute("DELETE FROM ticker_snapshots WHERE run_date < ?", (flat_cut,))
+        out["rows_deleted"] = cur.rowcount or 0
         conn.commit()
-        if n:
-            log.info(f"ticker_snapshots: purged {n} rows older than {cutoff} ({days}d retention)")
-        return n
+        if out["blobs_cleared"] or out["rows_deleted"]:
+            log.info(f"ticker_snapshots retention: cleared {out['blobs_cleared']} blobs "
+                     f"(<{blob_cut}), deleted {out['rows_deleted']} rows (<{flat_cut})")
+        return out
     except Exception as e:
         log.warning(f"ticker_snapshots purge failed (non-fatal): {e}")
-        return 0
+        return out
 
 
 def get_full(run_id: str, ticker: str) -> dict | None:
