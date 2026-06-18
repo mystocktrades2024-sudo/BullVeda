@@ -160,6 +160,63 @@ def upsert_snapshots(rows: list[tuple]) -> int:
         conn.close()
 
 
+def archive_json(table: str, records: list[dict], key_fields: list[str]) -> int:
+    """Back up a list of JSON records to a NAS table as (key cols + full JSONB).
+
+    Schema-flexible: each record is stored whole in a `data` JSONB column (query any
+    field later via data->>'field'), with the key_fields promoted to indexed TEXT
+    columns + a composite PK so re-syncs are idempotent. Used to mirror the precious
+    history files (signal_log, audit_ledger, picks_history) to the NAS deep store.
+    Best-effort. Returns rows upserted.
+    """
+    if not records:
+        return 0
+    conn = get_conn()
+    if not conn:
+        return 0
+    try:
+        import json as _json
+        import math as _math
+        from psycopg2.extras import execute_values
+
+        def _san(o):  # JSONB rejects NaN/Inf — coerce to null
+            if isinstance(o, float):
+                return None if (_math.isnan(o) or _math.isinf(o)) else o
+            if isinstance(o, dict):
+                return {k: _san(v) for k, v in o.items()}
+            if isinstance(o, list):
+                return [_san(v) for v in o]
+            return o
+
+        safe = "".join(c for c in table if c.isalnum() or c == "_")
+        kcols = ", ".join(f"{k} TEXT" for k in key_fields)
+        pk = ", ".join(key_fields)
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                f"CREATE TABLE IF NOT EXISTS {safe} ("
+                f"  {kcols}, data JSONB, synced_at TIMESTAMPTZ DEFAULT now(),"
+                f"  PRIMARY KEY ({pk}))"
+            )
+            cols = key_fields + ["data"]
+            # Dedup by key within the batch (last-wins) — execute_values + ON CONFLICT
+            # cannot update the same key twice in one statement.
+            by_key = {}
+            for r in records:
+                key_vals = tuple(str(r.get(k, "")) for k in key_fields)
+                by_key[key_vals] = key_vals + (_json.dumps(_san(r), default=str),)
+            rows = list(by_key.values())
+            ph = "(" + ",".join(["%s"] * (len(key_fields) + 1)) + ")"
+            sql = (f"INSERT INTO {safe} ({','.join(cols)}) VALUES %s "
+                   f"ON CONFLICT ({pk}) DO UPDATE SET data = EXCLUDED.data, synced_at = now()")
+            execute_values(cur, sql, rows, template=ph, page_size=500)
+        return len(rows)
+    except Exception as e:
+        log.warning(f"nas_pg archive_json({table}) failed (non-fatal): {e}")
+        return 0
+    finally:
+        conn.close()
+
+
 def count() -> int | None:
     conn = get_conn()
     if not conn:
