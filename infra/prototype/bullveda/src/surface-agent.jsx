@@ -36,9 +36,24 @@ function buildContext(ctx) {
     const FMT = { price: v => `price $${(+v).toFixed(2)}`, verdict: v => `verdict ${v}`, score: v => `score ${v}`,
       chg: v => `day change ${v >= 0 ? "+" : ""}${v}%`, sector: v => `sector ${v}`, industry: v => `industry ${v}`,
       mcap: v => `market cap $${(v / 1e9).toFixed(1)}B`, setup: v => `setup ${v}`, setupFamily: v => `setup ${v}`,
-      rs: v => `RS rank ${v}`, beta: v => `beta ${v}`, pivot: v => `pivot $${v}`, stop: v => `stop $${v}`, target: v => `target $${v}` };
+      rs: v => `RS rank ${v}`, beta: v => `beta ${v}` };
+    // NB: no generic `stop`/`target` here — the authoritative ladder is the per-mode
+    // STRUCTURAL line below (the ticker's top-level stop is swing-default and would
+    // leak a wrong stop into POSITION/INVEST answers).
     Object.keys(t).forEach(k => { if (t[k] != null && FMT[k]) facts.push(FMT[k](t[k])); });
     if (facts.length) lines.push("Known facts: " + facts.join(", ") + ".");
+    // Phase 1 · STRUCT-LADDER-UNIFY — explicit per-mode STRUCTURAL plan (the Overview
+    // ladder) so the LLM grounds the trade plan on the same T1/T2/stop the Overview
+    // shows for the ACTIVE mode, not the swing-default stop on the ticker row.
+    try {
+      const moKey = mode === "POSITION" ? "position" : (mode === "INVESTMENT" || mode === "INVEST") ? "invest" : "swing";
+      const s = t.structByMode && t.structByMode[moKey];
+      if (s && s.stop && s.t1) {
+        lines.push(`Trade plan (${mode}, structural — authoritative, matches the Overview lens): `
+          + `entry $${(+s.entry).toFixed(2)}, stop $${(+s.stop).toFixed(2)}, T1 $${(+s.t1).toFixed(2)}`
+          + `${s.t2 ? ", T2 $" + (+s.t2).toFixed(2) : ""}, R:R ${s.rr != null ? s.rr : "—"}.`);
+      }
+    } catch (e) {}
     // ── full cross-lens dossier from the live engines (so Kairos answers about
     //    ANY lens, not just what's on screen) ──
     if (t.pillars) lines.push("Pillars (0-100): " + Object.entries(t.pillars).map(([k, v]) => `${k} ${v}`).join(", ") + ".");
