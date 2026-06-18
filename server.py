@@ -8663,6 +8663,31 @@ async def portfolio_update_notes(req: Request, _: HTTPBasicCredentials = Depends
 # /v2/{path:path} catch-all that serves prototype static files — it would
 # intercept /v2/trade_engine before this handler could match.
 # ──────────────────────────────────────────────────────────────────────────
+@app.get("/api/audit")
+async def audit_api(
+    by_regime: int = 0,
+    auth: HTTPBasicCredentials = Depends(_check_auth),
+):
+    """Signal audit: LIVE realized edge (audit_ledger) vs BASELINE expectation
+    (setup_stats haircut, or walk-forward backtest if cache/backtest_baseline.json
+    is present) per setup family. by_regime=1 splits each family by regime4.
+
+    Verdicts: CONFIRMED (live ≥ raw baseline) / SOFT (within haircut band) /
+    ERODING (below haircut) / THIN (n<30) / NO-BASE (no baseline for that setup).
+    """
+    if isinstance(auth, Response):
+        return auth
+    try:
+        import sys as _sys
+        _scripts = str(BASE_DIR / "scripts")
+        if _scripts not in _sys.path:
+            _sys.path.insert(0, _scripts)
+        import audit_live_vs_backtest as _audit
+        return JSONResponse(_audit.build(by_regime=bool(by_regime)))
+    except Exception as e:
+        raise HTTPException(500, f"audit build failed: {e}")
+
+
 @app.get("/api/trade_engine")
 async def trade_engine(
     t: str,

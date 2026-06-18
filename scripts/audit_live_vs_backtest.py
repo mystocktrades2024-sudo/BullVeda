@@ -58,8 +58,8 @@ def _pf(rs: list[float]) -> float | None:
     gains = sum(r for r in rs if r > 0)
     losses = -sum(r for r in rs if r < 0)
     if losses == 0:
-        return float("inf") if gains > 0 else None
-    return gains / losses
+        return None  # undefined (no losing trades) — JSON-safe; these are tiny-n
+    return round(gains / losses, 3)
 
 
 def _stats(rs: list[float]) -> dict:
@@ -69,7 +69,7 @@ def _stats(rs: list[float]) -> dict:
         "n": n,
         "wr": round(wins / n, 4) if n else None,
         "wilson_lb": round(wilson_lb(wins, n), 4) if n else None,
-        "pf": (round(_pf(rs), 3) if _pf(rs) not in (None, float("inf")) else _pf(rs)),
+        "pf": _pf(rs),
         "avg_r": round(sum(rs) / n, 3) if n else None,
         "sum_r": round(sum(rs), 1) if n else None,
     }
@@ -116,8 +116,6 @@ def verdict(live: dict, base: dict | None) -> str:
     lpf = live.get("pf")
     if lpf is None:
         return "THIN"
-    if lpf == float("inf"):
-        return "CONFIRMED"
     if not base:
         return "NO-BASE"
     raw = base.get("pf")               # the actual expected edge
