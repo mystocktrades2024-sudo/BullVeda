@@ -136,6 +136,35 @@ function ScanList({ activeSurface, activeTicker, onTicker, widthCat, collapsed }
   );
 }
 
+// BUY-QUALITY TRAFFIC LIGHT (2026-06-20). Grades how "ideal to buy" a BUY row is,
+// from the EMPIRICAL edge of the true canonical BUYs (ticker_snapshots, May18→now):
+//   score 70–89 = sweet spot (PF 2.5+) · 60–69 = decent (PF 1.86) ·
+//   90+ = exhaustion (PF 0.74) · Impulse Catalyst setup = weak in chop (PF 0.33).
+// Raw composite score is NOT monotonic (90+ reverts), so the light keys on the
+// empirical band + setup, not the score number alone. Only grades verdict==BUY.
+function buyLight(it) {
+  const v = String((it && it.verdict) || "").toUpperCase();
+  if (v !== "BUY") return null;
+  const s = (it.score == null || !isFinite(it.score)) ? null : it.score;
+  const setup = String(it.setup || "");
+  if (s != null && s >= 90)        return { c: "rd",  t: "Caution — 90+ score tends to exhaust (hist. PF 0.74). Wait for a pullback." };
+  if (/impulse/i.test(setup))      return { c: "rd",  t: "Caution — Impulse Catalyst is weak in choppy tape (hist. PF 0.33)." };
+  if (s != null && s >= 70)        return { c: "gn",  t: "Ideal buy — 70–89 sweet spot (hist. PF 2.5+)." };
+  if (s != null && s >= 60)        return { c: "amb", t: "OK buy — 60–69 band (hist. PF 1.86)." };
+  return { c: "amb", t: "Buy" };
+}
+function BuyDot({ item, mini }) {
+  const bl = buyLight(item);
+  if (!bl) return null;
+  const d = mini ? 6 : 7;
+  return (
+    <span className="sc-buylight" title={bl.t}
+      style={{ display: "inline-block", width: d + "px", height: d + "px", borderRadius: "50%",
+               marginRight: "5px", verticalAlign: "middle", flex: "0 0 auto",
+               background: `var(--${bl.c})`, boxShadow: `0 0 4px var(--${bl.c})` }} />
+  );
+}
+
 function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
   const verdictTone = item.verdict === "BUY" ? "gn" : item.verdict === "AVOID" ? "rd" : "amb";
   // KILL->LABEL / honest edge tier (2026-06-11 audit). Read from the live scan
@@ -155,6 +184,7 @@ function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
         onClick={onClick}
         title={`${item.name} · ${window.biasRead ? window.biasRead(item).label : (window.secBias ? window.secBias(item.verdict) : item.verdict)} · score ${item.score}`}
       >
+        <BuyDot item={item} mini />
         <span className={`sc-row-sym mono ${active ? "copper" : ""}`}>{item.sym}</span>
         <span className={`sc-row-chg mono ${item.chg >= 0 ? "up" : "dn"}`}>
           {item.chg == null || !isFinite(item.chg) ? "—" : (item.chg >= 0 ? "+" : "") + item.chg.toFixed(1)}
@@ -169,6 +199,7 @@ function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
     >
       <div className="sc-row-head">
         <span className="sc-row-rank mono dim">{String(rank).padStart(2, "0")}</span>
+        <BuyDot item={item} />
         <span className={`sc-row-sym mono ${active ? "copper" : ""}`}><b>{item.sym}</b></span>
         <span className={`sc-row-chg mono ${item.chg >= 0 ? "up" : "dn"}`}>
           {item.chg == null || !isFinite(item.chg) ? "—" : (item.chg >= 0 ? "+" : "") + item.chg.toFixed(2) + "%"}
