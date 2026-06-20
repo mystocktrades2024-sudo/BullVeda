@@ -3776,27 +3776,23 @@ def run_daily_scan(force_fresh: bool = False):
             cl = (conv.get("label") if isinstance(conv, dict) else None) or c.get("conviction_label") or ""
             return "WATCH" if str(cl).upper() == "WATCH" else default_label
 
-        _signal_payload = (
-            [_flatten_for_signal_log(c, _resolve_verdict(c, "BUY"),   "Swing") for c in buy_candidates] +
-            [_flatten_for_signal_log(c, _resolve_verdict(c, "WATCH"), "Swing") for c in (watch_list or [])] +
-            [_flatten_for_signal_log(c, _resolve_verdict(c, "SHORT"), "Swing") for c in (sell_candidates or [])]
-        )
-        # 2026-05-04: log Position + Invest BUYs from medium-/long-term re-scoring.
-        # These come from analysis.score_medium_term and analysis.score_long_term — both
-        # are computed after the swing pipeline and held on the candidate. If they exist
-        # AND verdict is BUY at that horizon, log them as separate entries.
-        for c in buy_candidates + (watch_list or []):
-            _mt = c.get("medium_term") or {}
-            _lt = c.get("long_term")   or {}
-            _mt_v = (_mt.get("verdict") or "").upper()
-            _lt_v = (_lt.get("verdict") or "").upper()
-            if _mt_v == "BUY":
-                _signal_payload.append(_flatten_for_signal_log(c, "BUY", "Position"))
-            if _lt_v == "BUY":
-                _signal_payload.append(_flatten_for_signal_log(c, "BUY", "Invest"))
-        log_signals(_signal_payload, run_date=run_date)
+        # SIGNAL-LOG-ORDERING-FIX (2026-06-20): the signal_log write is DEFERRED to
+        # AFTER the canonical compute_final_verdict pass (~line 4555). Previously it
+        # ran here — BEFORE the ranker / gate_floor / kill-list verdict pass — so it
+        # recorded the PRE-ranker buy_candidates as verdict=BUY even though the engine
+        # then demoted most of them to WATCH/WAIT/AVOID. That contaminated signal_log
+        # (and every downstream consumer: tracker win-rate, rolling_sharpe_kill, audit
+        # ledger). The helper closures (_flatten_for_signal_log, _resolve_verdict) and
+        # _scan_ctx remain defined above; the deferred write below reuses them against
+        # the rerouted (post-ranker) bundle["buy_candidates"]/["watch_list"].
+        _signal_log_deferred = {
+            "flatten": _flatten_for_signal_log,
+            "resolve": _resolve_verdict,
+            "run_date": run_date,
+        }
     except Exception as e:
-        log.warning(f"signal_tracker.log_signals failed: {e}")
+        log.warning(f"signal_tracker.log_signals setup failed: {e}")
+        _signal_log_deferred = None
 
     # Refresh MTM / MAE / MFE for older open picks
     try:
@@ -4554,6 +4550,34 @@ def run_daily_scan(force_fresh: bool = False):
                      f"({', '.join(r.get('ticker') for r in _promoted)})")
         bundle["buy_candidates"] = _new_buy
         bundle["decision_engine_version"] = "1.0"
+
+        # SIGNAL-LOG-ORDERING-FIX (2026-06-20): write signal_log NOW — after the
+        # canonical verdict pass + reroute — so it records POST-ranker verdicts.
+        # bundle["buy_candidates"] is already filtered to verdict==BUY (line above),
+        # watch_list holds the demoted/WATCH names. We log BUYs as BUY, only genuine
+        # WATCH rows as WATCH, and sells as SHORT — AVOID/WAIT rejects are NOT signals.
+        try:
+            if _signal_log_deferred:
+                _flat = _signal_log_deferred["flatten"]
+                _rd   = _signal_log_deferred["run_date"]
+                _f_buy   = bundle.get("buy_candidates") or []
+                _f_watch = bundle.get("watch_list") or []
+                _f_sell  = bundle.get("sell_candidates") or []
+                _payload = [_flat(c, "BUY", "Swing") for c in _f_buy if (c.get("verdict") or "").upper() == "BUY"]
+                _payload += [_flat(c, "WATCH", "Swing") for c in _f_watch if (c.get("verdict") or "").upper() == "WATCH"]
+                _payload += [_flat(c, "SHORT", "Swing") for c in _f_sell]
+                for c in _f_buy + _f_watch:
+                    _mt_v = ((c.get("medium_term") or {}).get("verdict") or "").upper()
+                    _lt_v = ((c.get("long_term") or {}).get("verdict") or "").upper()
+                    if _mt_v == "BUY": _payload.append(_flat(c, "BUY", "Position"))
+                    if _lt_v == "BUY": _payload.append(_flat(c, "BUY", "Invest"))
+                from signal_tracker import log_signals as _log_signals
+                _n_logged = _log_signals(_payload, run_date=_rd)
+                log.info(f"  signal_log: wrote {_n_logged} canonical-verdict rows "
+                         f"(BUY={sum(1 for p in _payload if p.get('verdict')=='BUY')}, post-ranker)")
+        except Exception as _sl_e:
+            log.warning(f"deferred signal_log write failed: {_sl_e}")
+
         log.info(f"  Decision engine: scored {_de_count} tickers, "
                  f"buy_candidates {len(_bc_orig)}→{len(_new_buy)} "
                  f"(rerouted {len(_demoted)} BUY→WATCH for failed gates) — survived: "
