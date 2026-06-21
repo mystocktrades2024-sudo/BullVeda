@@ -318,11 +318,11 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
       window.__scanFilter = null;
     }
   }, []);
-  const [sort, setSort] = useStateSS(() => SS_SORT_MAP[_sf.sortSel] || { col: "score", dir: -1 });
+  const [sort, setSort] = useStateSS(() => SS_SORT_MAP[_sf.sortSel] || { col: "buylight", dir: -1 });
   const [selected, setSelected] = useStateSS(() => new Set());
   const [secF, setSecF] = useStateSS(() => _sf.secF || "all");
   const [setupF, setSetupF] = useStateSS(() => _sf.setupF || "all");
-  const [sortSel, setSortSel] = useStateSS(() => _sf.sortSel || "Score ↓");
+  const [sortSel, setSortSel] = useStateSS(() => _sf.sortSel || "Buy Quality");
   const [q, setQ] = useStateSS(() => _sf.q || "");
   // per-field filters: { colId: {min,max} | {sel:[...]} } — auto-saved
   const [colFilters, setColFilters] = useStateSS(() => _sf.colFilters || {});
