@@ -285,7 +285,7 @@ function ssSaveFilters(obj) {
   try { localStorage.setItem(SS_FILTERS_KEY, JSON.stringify(obj)); } catch (e) {}
 }
 // Sort presets (module-level so a persisted sort restores at init).
-const SS_SORT_MAP = { "Top Buys": { col: "topbuy", dir: -1 }, "Ticker A→Z": { col: "sym", dir: 1 }, "EDGE ↓": { col: "edgePct", dir: -1 }, "Score ↓": { col: "score", dir: -1 }, "R:R ↓": { col: "rr", dir: -1 }, "RVOL ↓": { col: "rvol", dir: -1 } };
+const SS_SORT_MAP = { "Buy Quality": { col: "buylight", dir: -1 }, "Top Buys": { col: "topbuy", dir: -1 }, "Ticker A→Z": { col: "sym", dir: 1 }, "EDGE ↓": { col: "edgePct", dir: -1 }, "Score ↓": { col: "score", dir: -1 }, "R:R ↓": { col: "rr", dir: -1 }, "RVOL ↓": { col: "rvol", dir: -1 } };
 // Which columns get a numeric range filter vs a categorical select.
 const SS_NUMERIC_COLS = new Set(["score","ready","off52","vwap","rr","atr","rvol","adx","beta","dvol","si","spread","regWR","rs","r1m","r3m","wlb","n","pf","iv","sent","tgt","newsAge","insUsd","er","price","chg","edge","aiEdge"]);
 const SS_CATEG_COLS = new Set(["sector","verdict","tier","setup","eq","cat","sq"]);
@@ -402,7 +402,7 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
   }, []);
   // wire the Sort dropdown → sort state
   const SORT_MAP = SS_SORT_MAP;
-  const onSortSel = (label) => { setSortSel(label); if (SORT_MAP[label]) setSort(SORT_MAP[label]); };
+  const onSortSel = (label) => { setSortSel(label); if (SS_SORT_MAP[label]) setSort(SS_SORT_MAP[label]); };
   const sectorOpts = useMemoSS(() => ["all", ...Array.from(new Set(SS_UNIVERSE.map(r => r.sector))).sort()], []);
   const setupOpts = useMemoSS(() => ["all", ...Array.from(new Set(SS_UNIVERSE.map(r => r.setup).filter(Boolean))).sort()], []);
   const toggleSel = (sym) => setSelected(s => {
@@ -517,6 +517,20 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
         (num(b.score) - num(a.score)) ||
         (num(b.rr) - num(a.rr)) ||
         String(a.sym).localeCompare(String(b.sym)));
+    } else if (sort.col === "buylight") {
+      // Rank by the buy-quality traffic light: ideal BUY → ok BUY → caution BUY →
+      // strong watch → watch → dim watch → ungraded; score-desc within each tier.
+      const lr = (t) => {
+        const bl = window.bvBuyLight ? window.bvBuyLight(t) : null;
+        if (!bl) return 6;
+        if (bl.fill) return bl.c === "gn" ? 0 : bl.c === "amb" ? 1 : 2;
+        return bl.c === "gn" ? 3 : bl.c === "amb" ? 4 : 5;
+      };
+      const num = (x) => { const n = parseFloat(x); return isNaN(n) ? -Infinity : n; };
+      r = [...r].sort((a, b) =>
+        (lr(a) - lr(b)) ||
+        (num(b.score) - num(a.score)) ||
+        String(a.sym).localeCompare(String(b.sym)));
     } else {
       r = [...r].sort((a, b) => {
         const av = a[sort.col], bv = b[sort.col];
@@ -614,7 +628,7 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
         <label className="ss2-field">
           <span className="ss2-field-l mono">SORT</span>
           <select className="ss2-sel mono" value={sortSel} onChange={e => onSortSel(e.target.value)}>
-            {["Top Buys","Ticker A→Z","EDGE ↓","Score ↓","R:R ↓","RVOL ↓"].map((o, i) => <option key={i} value={o}>{o}</option>)}
+            {["Buy Quality","Top Buys","Ticker A→Z","EDGE ↓","Score ↓","R:R ↓","RVOL ↓"].map((o, i) => <option key={i} value={o}>{o}</option>)}
           </select>
         </label>
         <label className="ss2-field">
