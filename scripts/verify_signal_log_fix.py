@@ -35,14 +35,25 @@ def main() -> int:
         return 1
 
     run_date = bundle.get("run_date")
+    # log_signals snaps weekend run-dates forward to the next trading day
+    # (Sat→+2, Sun→+1), so signal_log keys on the snapped date. Mirror that here
+    # or a weekend test run would compare mismatched dates and false-WARN.
+    sl_date = run_date
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+        _dow = _dt.strptime(run_date, "%Y-%m-%d").weekday()  # Mon=0..Sun=6
+        if _dow == 5:   sl_date = (_dt.strptime(run_date, "%Y-%m-%d") + _td(days=2)).strftime("%Y-%m-%d")
+        elif _dow == 6: sl_date = (_dt.strptime(run_date, "%Y-%m-%d") + _td(days=1)).strftime("%Y-%m-%d")
+    except Exception:
+        pass
     # Canonical engine BUYs (post-ranker): bundle buy_candidates with verdict==BUY
     bc = bundle.get("buy_candidates") or []
     eng_buys = [r for r in bc if str((r.get("verdict")
                 or (r.get("decision") or {}).get("verdict") or "")).upper() == "BUY"]
     eng_syms = sorted({r.get("ticker") for r in eng_buys})
 
-    # signal_log BUYs logged for the bundle's run_date (Swing, long)
-    sl_buys = [x for x in sig if x.get("date") == run_date
+    # signal_log BUYs logged for the (snapped) run_date (Swing, long)
+    sl_buys = [x for x in sig if x.get("date") == sl_date
                and str(x.get("verdict", "")).upper() == "BUY"
                and x.get("direction", "long") == "long"
                and x.get("mode", "Swing") == "Swing"]
