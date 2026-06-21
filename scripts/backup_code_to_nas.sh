@@ -1,49 +1,44 @@
 #!/bin/bash
-# backup_code_to_nas.sh — fast, correct code backup to the NAS CodeBackup share.
+# backup_code_to_nas.sh — robust SSH-based code backup to the NAS.
 # ============================================================================
-# Two channels, each using the right tool:
-#   A) GIT HISTORY  → a bare mirror repo on the NAS (git push --mirror). Git packs
-#      objects and streams them — fast, vs rsync copying thousands of loose objects
-#      over SMB one-by-one (which crawls).
-#   B) WORKING FILES → rsync (EXCLUDING .git — git handles that). Source, config,
-#      data/ (DB + state) and .env, minus regenerable bulk (cache/, node_modules…).
+# Mount-proof: backs up the whole repo (source + config + data + FULL .git history)
+# in one rsync OVER SSH — no SMB mount to go stale, no git binary needed on the NAS.
+# .git is packed, so it transfers as a few big files (fast); rsync sends only deltas
+# on later runs. Excludes the regenerable bulk (cache/, node_modules/, data/ohlcv…).
 #
-# Prereq: mount the share — Finder → ⌘K → smb://192.168.1.25 → CodeBackup
-#         (appears at /Volumes/CodeBackup).
+# Auth: passwordless SSH key (gamphaniraj@192.168.1.25). Set up once via ssh-copy-id
+# + Synology home-perm fix. Falls back with a CLEAR error (never a silent no-op).
 #
 #   bash scripts/backup_code_to_nas.sh
 #
-# NOTE: includes .env (API keys + NAS password) so a restore is complete. Add
-#       --exclude '.env' to channel B if you don't want secrets on the NAS.
+# Restore:  git clone ssh://gamphaniraj@192.168.1.25/volume1/CodeBackup/SwingTrade/.git
+# NOTE: includes .env (API keys + NAS pw) so a restore is complete.
 set -uo pipefail
 
 SRC="/Volumes/MyMacDisk/Claude Skills/SwingTrade"
-NAS="${1:-/Volumes/CodeBackup}"
-[ -d "$NAS" ] || NAS="$(ls -d /Volumes/CodeBackup* 2>/dev/null | head -1)"
-if [ -z "${NAS:-}" ] || [ ! -d "$NAS" ]; then
-  echo "✗ CodeBackup share not mounted. Finder → ⌘K → smb://192.168.1.25 → CodeBackup, then re-run."
-  exit 1
-fi
-
-GITMIRROR="$NAS/SwingTrade.git"
-FILES="$NAS/SwingTrade"
+NAS_USER="gamphaniraj"
+NAS_HOST="192.168.1.25"
+DEST="/volume1/CodeBackup/SwingTrade"
+SSH="ssh -o BatchMode=yes -o ConnectTimeout=10"
+# macOS ships `openrsync` (protocol 29) at /usr/bin/rsync, which is INCOMPATIBLE
+# with the NAS's rsync 3.x (protocol 31/32) — "unexpected end of file". Use the
+# Homebrew rsync 3.x explicitly (it's PATH-shadowed by /usr/bin/rsync).
+RSYNC="/opt/homebrew/bin/rsync"; [ -x "$RSYNC" ] || RSYNC="rsync"
 ts() { date '+%H:%M:%S'; }
 
-echo "[$( ts )] === A) git history → $GITMIRROR ==="
-if [ ! -d "$GITMIRROR" ]; then
-  git init --bare "$GITMIRROR" >/dev/null && echo "  created bare mirror repo"
+# ── Pre-check: SSH reachable + target share present (fail loud, not silent) ──
+if ! $SSH "$NAS_USER@$NAS_HOST" "test -d /volume1/CodeBackup" 2>/dev/null; then
+  echo "[$(ts)] ✗ ABORT — NAS unreachable over SSH or /volume1/CodeBackup missing."
+  echo "        (check: ssh $NAS_USER@$NAS_HOST · key auth · CodeBackup shared folder)"
+  exit 1
 fi
-# --mirror keeps the NAS repo an exact replica of all local refs (branches+tags).
-if git -C "$SRC" push --mirror "$GITMIRROR" 2>&1 | sed 's/^/  /'; then
-  echo "  ✓ git history mirrored"
-else
-  echo "  ⚠ git push had issues (see above)"
-fi
+$SSH "$NAS_USER@$NAS_HOST" "mkdir -p '$DEST'" 2>/dev/null
 
-echo "[$( ts )] === B) working files → $FILES (rsync, no .git) ==="
-mkdir -p "$FILES"
-rsync -a --delete --human-readable \
-  --exclude '.git/' \
+echo "[$(ts)] === rsync ($($RSYNC --version | head -1)) over SSH → $NAS_HOST:$DEST ==="
+# --rsync-path=/bin/rsync: the NAS's default `rsync` is a Synology wrapper that
+# refuses ("rsync service is no running", code 43) unless the rsync DAEMON service
+# is enabled. /bin/rsync is the real binary and works over plain ssh.
+"$RSYNC" -az --delete --human-readable -e "$SSH" --rsync-path=/bin/rsync \
   --exclude 'cache/' \
   --exclude 'node_modules/' \
   --exclude '.git.bak-*' \
@@ -54,10 +49,17 @@ rsync -a --delete --human-readable \
   --exclude 'infra/prototype/data.json' \
   --exclude 'infra/build/node_modules/' \
   --exclude 'data/ohlcv/' \
-  --exclude 'CON.*' --exclude 'PRN.*' --exclude 'AUX.*' --exclude 'NUL.*' \
-  "$SRC/" "$FILES/" 2>&1 | tail -3
+  "$SRC/" "$NAS_USER@$NAS_HOST:$DEST/" 2>&1 | tail -4
 
-echo "[$( ts )] === DONE ==="
-echo "  git mirror : $(du -sh "$GITMIRROR" 2>/dev/null | cut -f1)  ($GITMIRROR)"
-echo "  files      : $(du -sh "$FILES" 2>/dev/null | cut -f1)  ($FILES)"
-echo "  restore code: git clone \"$GITMIRROR\" SwingTrade"
+rc=${PIPESTATUS[0]}
+if [ "$rc" -ne 0 ]; then
+  echo "[$(ts)] ✗ rsync exited $rc — backup may be incomplete"; exit "$rc"
+fi
+echo "[$(ts)] === DONE ==="
+echo "  size on NAS: $($SSH "$NAS_USER@$NAS_HOST" "du -sh '$DEST' 2>/dev/null" | cut -f1)"
+# Restore (NAS has no git, so NOT `git clone ssh://`):
+#   1) pull the tree back:  rsync -az -e ssh --rsync-path=/bin/rsync \
+#        gamphaniraj@192.168.1.25:/volume1/CodeBackup/SwingTrade/ ./SwingTrade/
+#      → ./SwingTrade is then a complete working repo (.git intact).
+#   2) or via SMB mount:    git clone /Volumes/CodeBackup/SwingTrade/.git SwingTrade
+echo "  restore: rsync -az -e ssh --rsync-path=/bin/rsync $NAS_USER@$NAS_HOST:$DEST/ ./SwingTrade/"
