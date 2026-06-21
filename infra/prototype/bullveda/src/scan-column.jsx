@@ -142,27 +142,39 @@ function ScanList({ activeSurface, activeTicker, onTicker, widthCat, collapsed }
 //   90+ = exhaustion (PF 0.74) · Impulse Catalyst setup = weak in chop (PF 0.33).
 // Raw composite score is NOT monotonic (90+ reverts), so the light keys on the
 // empirical band + setup, not the score number alone. Only grades verdict==BUY.
-function buyLight(it) {
+// Exposed as window.bvBuyLight so every surface (scan rail + Signal scanner)
+// grades from ONE source of truth.
+window.bvBuyLight = function buyLight(it) {
+  if (!it) return null;
   const v = String((it && it.verdict) || "").toUpperCase();
-  if (v !== "BUY") return null;
   const s = (it.score == null || !isFinite(it.score)) ? null : it.score;
-  const setup = String(it.setup || "");
-  if (s != null && s >= 90)        return { c: "rd",  t: "Caution — 90+ score tends to exhaust (hist. PF 0.74). Wait for a pullback." };
-  if (/impulse/i.test(setup))      return { c: "rd",  t: "Caution — Impulse Catalyst is weak in choppy tape (hist. PF 0.33)." };
-  if (s != null && s >= 70)        return { c: "gn",  t: "Ideal buy — 70–89 sweet spot (hist. PF 2.5+)." };
-  if (s != null && s >= 60)        return { c: "amb", t: "OK buy — 60–69 band (hist. PF 1.86)." };
-  return { c: "amb", t: "Buy" };
-}
+  const setup = String(it.setup || it.setup_family || "");
+  // FILLED dot = an actual BUY, graded by empirical buy edge (true BUYs, May18→now).
+  if (v === "BUY") {
+    if (s != null && s >= 90)   return { c: "rd",  fill: true, t: "Caution — 90+ score tends to exhaust (hist. PF 0.74). Wait for a pullback." };
+    if (/impulse/i.test(setup)) return { c: "rd",  fill: true, t: "Caution — Impulse Catalyst is weak in choppy tape (hist. PF 0.33)." };
+    if (s != null && s >= 70)   return { c: "gn",  fill: true, t: "Ideal buy — 70–89 sweet spot (hist. PF 2.5+)." };
+    if (s != null && s >= 60)   return { c: "amb", fill: true, t: "OK buy — 60–69 band (hist. PF 1.86)." };
+    return { c: "amb", fill: true, t: "Buy" };
+  }
+  // HOLLOW ring = on the radar (WATCH), not a buy yet — graded by quality band.
+  if (v === "WATCH") {
+    if (s != null && s >= 80)   return { c: "gn",   fill: false, t: "Strong watch — 80+ quality, not a buy yet. Wait for the engine to confirm." };
+    if (s != null && s >= 70)   return { c: "amb",  fill: false, t: "Watch — 70–79 quality, monitoring for an entry trigger." };
+    return { c: "dim2", fill: false, t: "Low-priority watch." };
+  }
+  return null;  // AVOID / WAIT → no indicator
+};
 function BuyDot({ item, mini }) {
-  const bl = buyLight(item);
+  const bl = window.bvBuyLight(item);
   if (!bl) return null;
   const d = mini ? 6 : 7;
-  return (
-    <span className="sc-buylight" title={bl.t}
-      style={{ display: "inline-block", width: d + "px", height: d + "px", borderRadius: "50%",
-               marginRight: "5px", verticalAlign: "middle", flex: "0 0 auto",
-               background: `var(--${bl.c})`, boxShadow: `0 0 4px var(--${bl.c})` }} />
-  );
+  const base = { display: "inline-block", width: d + "px", height: d + "px", borderRadius: "50%",
+                 marginRight: "5px", verticalAlign: "middle", flex: "0 0 auto" };
+  const style = bl.fill
+    ? { ...base, background: `var(--${bl.c})`, boxShadow: `0 0 4px var(--${bl.c})` }
+    : { ...base, background: "transparent", border: `1.5px solid var(--${bl.c})` };
+  return <span className={`sc-buylight ${bl.fill ? "is-buy" : "is-watch"}`} title={bl.t} style={style} />;
 }
 
 function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {

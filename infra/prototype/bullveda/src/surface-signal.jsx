@@ -812,7 +812,15 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
                   checked={selected.has(t.sym)}
                   onChange={() => toggleSel(t.sym)}
                   onClick={(e) => e.stopPropagation()} /></td>
-                <td className="mono ss2-sym"><span className="ss2-star">★</span><b>{t.sym}</b><SeenChip seen={t.seen} sym={t.sym} /></td>
+                <td className="mono ss2-sym">{(() => {
+                  const bl = window.bvBuyLight ? window.bvBuyLight(t) : null;
+                  if (!bl) return null;
+                  const st = { display: "inline-block", width: "7px", height: "7px", borderRadius: "50%",
+                    marginRight: "5px", verticalAlign: "middle",
+                    ...(bl.fill ? { background: `var(--${bl.c})`, boxShadow: `0 0 4px var(--${bl.c})` }
+                                : { background: "transparent", border: `1.5px solid var(--${bl.c})` }) };
+                  return <span className="ss2-buylight" title={bl.t} style={st} />;
+                })()}<span className="ss2-star">★</span><b>{t.sym}</b><SeenChip seen={t.seen} sym={t.sym} /></td>
                 <td className="mono dim">{t.name}</td>
                 <td className="dim2 mono">{t.sector}</td>
                 <td className="mono dim"><span className="ss2-tfsn">{(t.tfsn||[]).map((v,k)=>(

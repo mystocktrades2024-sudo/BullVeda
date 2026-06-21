@@ -30057,39 +30057,40 @@ function ScanList({ activeSurface, activeTicker, onTicker, widthCat, collapsed }
     }
   )), items.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "sc-empty" }, /* @__PURE__ */ React.createElement("div", { className: "state-msg-em" }, "No candidates in this scan."), /* @__PURE__ */ React.createElement("div", { className: "state-msg mono dim" }, "Check filters \xB7 or wait for next bundle.")));
 }
-function buyLight(it) {
+window.bvBuyLight = function buyLight(it) {
+  if (!it) return null;
   const v = String(it && it.verdict || "").toUpperCase();
-  if (v !== "BUY") return null;
   const s = it.score == null || !isFinite(it.score) ? null : it.score;
-  const setup = String(it.setup || "");
-  if (s != null && s >= 90) return { c: "rd", t: "Caution \u2014 90+ score tends to exhaust (hist. PF 0.74). Wait for a pullback." };
-  if (/impulse/i.test(setup)) return { c: "rd", t: "Caution \u2014 Impulse Catalyst is weak in choppy tape (hist. PF 0.33)." };
-  if (s != null && s >= 70) return { c: "gn", t: "Ideal buy \u2014 70\u201389 sweet spot (hist. PF 2.5+)." };
-  if (s != null && s >= 60) return { c: "amb", t: "OK buy \u2014 60\u201369 band (hist. PF 1.86)." };
-  return { c: "amb", t: "Buy" };
-}
+  const setup = String(it.setup || it.setup_family || "");
+  if (v === "BUY") {
+    if (s != null && s >= 90) return { c: "rd", fill: true, t: "Caution \u2014 90+ score tends to exhaust (hist. PF 0.74). Wait for a pullback." };
+    if (/impulse/i.test(setup)) return { c: "rd", fill: true, t: "Caution \u2014 Impulse Catalyst is weak in choppy tape (hist. PF 0.33)." };
+    if (s != null && s >= 70) return { c: "gn", fill: true, t: "Ideal buy \u2014 70\u201389 sweet spot (hist. PF 2.5+)." };
+    if (s != null && s >= 60) return { c: "amb", fill: true, t: "OK buy \u2014 60\u201369 band (hist. PF 1.86)." };
+    return { c: "amb", fill: true, t: "Buy" };
+  }
+  if (v === "WATCH") {
+    if (s != null && s >= 80) return { c: "gn", fill: false, t: "Strong watch \u2014 80+ quality, not a buy yet. Wait for the engine to confirm." };
+    if (s != null && s >= 70) return { c: "amb", fill: false, t: "Watch \u2014 70\u201379 quality, monitoring for an entry trigger." };
+    return { c: "dim2", fill: false, t: "Low-priority watch." };
+  }
+  return null;
+};
 function BuyDot({ item, mini }) {
-  const bl = buyLight(item);
+  const bl = window.bvBuyLight(item);
   if (!bl) return null;
   const d = mini ? 6 : 7;
-  return /* @__PURE__ */ React.createElement(
-    "span",
-    {
-      className: "sc-buylight",
-      title: bl.t,
-      style: {
-        display: "inline-block",
-        width: d + "px",
-        height: d + "px",
-        borderRadius: "50%",
-        marginRight: "5px",
-        verticalAlign: "middle",
-        flex: "0 0 auto",
-        background: `var(--${bl.c})`,
-        boxShadow: `0 0 4px var(--${bl.c})`
-      }
-    }
-  );
+  const base = {
+    display: "inline-block",
+    width: d + "px",
+    height: d + "px",
+    borderRadius: "50%",
+    marginRight: "5px",
+    verticalAlign: "middle",
+    flex: "0 0 auto"
+  };
+  const style = bl.fill ? { ...base, background: `var(--${bl.c})`, boxShadow: `0 0 4px var(--${bl.c})` } : { ...base, background: "transparent", border: `1.5px solid var(--${bl.c})` };
+  return /* @__PURE__ */ React.createElement("span", { className: `sc-buylight ${bl.fill ? "is-buy" : "is-watch"}`, title: bl.t, style });
 }
 function ScanRow({ item, active, onClick, widthCat, collapsed, rank }) {
   const verdictTone = item.verdict === "BUY" ? "gn" : item.verdict === "AVOID" ? "rd" : "amb";
@@ -33439,7 +33440,20 @@ function SurfaceSignalScanner({ onTicker, onSurface }) {
       onChange: () => toggleSel(t.sym),
       onClick: (e) => e.stopPropagation()
     }
-  )), /* @__PURE__ */ React.createElement("td", { className: "mono ss2-sym" }, /* @__PURE__ */ React.createElement("span", { className: "ss2-star" }, "\u2605"), /* @__PURE__ */ React.createElement("b", null, t.sym), /* @__PURE__ */ React.createElement(SeenChip, { seen: t.seen, sym: t.sym })), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, t.name), /* @__PURE__ */ React.createElement("td", { className: "dim2 mono" }, t.sector), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, /* @__PURE__ */ React.createElement("span", { className: "ss2-tfsn" }, (t.tfsn || []).map((v, k) => /* @__PURE__ */ React.createElement("span", { key: k, className: `ss2-tfsn-dot ss2-tfsn--${v === 2 ? "pass" : v === 1 ? "neut" : "fail"}`, title: ["Tech", "Fund", "SMC", "News"][k] })))), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, t.mechanism), /* @__PURE__ */ React.createElement("td", { className: "r" }, /* @__PURE__ */ React.createElement("span", { className: `ss2-score ss2-score--${t.score >= 75 ? "gn" : t.score >= 60 ? "amb" : "rd"}` }, t.score)), /* @__PURE__ */ React.createElement("td", null, (() => {
+  )), /* @__PURE__ */ React.createElement("td", { className: "mono ss2-sym" }, (() => {
+    const bl = window.bvBuyLight ? window.bvBuyLight(t) : null;
+    if (!bl) return null;
+    const st = {
+      display: "inline-block",
+      width: "7px",
+      height: "7px",
+      borderRadius: "50%",
+      marginRight: "5px",
+      verticalAlign: "middle",
+      ...bl.fill ? { background: `var(--${bl.c})`, boxShadow: `0 0 4px var(--${bl.c})` } : { background: "transparent", border: `1.5px solid var(--${bl.c})` }
+    };
+    return /* @__PURE__ */ React.createElement("span", { className: "ss2-buylight", title: bl.t, style: st });
+  })(), /* @__PURE__ */ React.createElement("span", { className: "ss2-star" }, "\u2605"), /* @__PURE__ */ React.createElement("b", null, t.sym), /* @__PURE__ */ React.createElement(SeenChip, { seen: t.seen, sym: t.sym })), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, t.name), /* @__PURE__ */ React.createElement("td", { className: "dim2 mono" }, t.sector), /* @__PURE__ */ React.createElement("td", { className: "mono dim" }, /* @__PURE__ */ React.createElement("span", { className: "ss2-tfsn" }, (t.tfsn || []).map((v, k) => /* @__PURE__ */ React.createElement("span", { key: k, className: `ss2-tfsn-dot ss2-tfsn--${v === 2 ? "pass" : v === 1 ? "neut" : "fail"}`, title: ["Tech", "Fund", "SMC", "News"][k] })))), /* @__PURE__ */ React.createElement("td", { className: "mono dim2" }, t.mechanism), /* @__PURE__ */ React.createElement("td", { className: "r" }, /* @__PURE__ */ React.createElement("span", { className: `ss2-score ss2-score--${t.score >= 75 ? "gn" : t.score >= 60 ? "amb" : "rd"}` }, t.score)), /* @__PURE__ */ React.createElement("td", null, (() => {
     const br = window.biasRead ? window.biasRead(t) : { label: secBias(t.verdict), tone: secBiasTone(t.verdict) };
     return /* @__PURE__ */ React.createElement(Pill, { tone: br.tone, small: true }, br.label);
   })()), /* @__PURE__ */ React.createElement("td", { className: "r" }, (() => {
