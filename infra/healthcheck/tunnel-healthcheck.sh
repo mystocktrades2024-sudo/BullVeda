@@ -38,6 +38,18 @@ fi
 # Failure path
 echo "$ts  FAIL  ($code)" >> "$LOG_FILE"
 
+# ── Self-heal: force-restart the origin server BEFORE alerting. KeepAlive only
+#    restarts a DEAD process; this also catches a HUNG server (alive but not
+#    answering → 530/timeout/gateway). No sudo — com.swingtrade.server is a user
+#    LaunchAgent. Skipped for 1033 (pure cloudflared/tunnel issue — KeepAlive on the
+#    system daemon handles a crash; a hang there needs sudo, see docs/tunnel-recovery.md).
+case "$code" in
+  530|000|502|503|504)
+    if launchctl kickstart -k "gui/$(id -u)/com.swingtrade.server" 2>>"$LOG_FILE"; then
+      echo "$ts  RECOVER  kickstarted com.swingtrade.server (was $code)" >> "$LOG_FILE"
+    fi ;;
+esac
+
 # Read prior state
 failures=0
 last_alert=0
@@ -66,7 +78,7 @@ if (( should_alert == 1 )) && [[ -n "$SLACK_WEBHOOK" ]]; then
     *)    reason="Unexpected status code" ;;
   esac
   curl -s -X POST "$SLACK_WEBHOOK" -H "Content-Type: application/json" \
-    -d "{\"text\":\":rotating_light: trade.mystockholding.com is DOWN — HTTP $code\\n${reason}\\nFailed ${failures}× in a row at $ts\\nRecovery: see CLAUDE.md → Cloudflare tunnel section\"}" \
+    -d "{\"text\":\":rotating_light: trade.mystockholding.com STILL DOWN after auto-heal — HTTP $code\\n${reason}\\nFailed ${failures}× in a row at $ts\\nThe watchdog already force-restarted the server and it did NOT recover — needs a human. Recovery: docs/tunnel-recovery.md (cloudflared restart needs sudo).\"}" \
     >> "$LOG_FILE" 2>&1
   printf 'state=alerted\nfailures=%d\nlast_alert=%d\n' "$failures" "$now" > "$STATE_FILE"
 else
