@@ -60,6 +60,13 @@ EXCLUDE: set[str] = set()
 
 CLOSE_LOOP_MAX_AGE_H = 48     # close-loop runs daily; >48h ⇒ it stopped running
 LEDGER_STALL_H = 120          # 5d: weekend + maturation can't explain past this
+NAS_SYNC_MAX_AGE_H = 26       # nas-sync + code-backup run nightly; >26h ⇒ stale/failed
+# Success markers written ONLY on a genuine completion (catches the exit=0-but-0s
+# silent-failure class). Mtime = last good sync.
+NAS_MARKERS = {
+    "NAS data sync (Postgres)": ROOT / "cache" / "logs" / ".nas_data_sync_ok",
+    "NAS code backup (SSH)":    ROOT / "cache" / "logs" / ".nas_code_backup_ok",
+}
 
 
 def _now() -> datetime:
@@ -156,6 +163,25 @@ def check_close_loop(now: datetime) -> tuple[list[str], datetime | None, datetim
     return problems, log_dt, resolved_dt
 
 
+def check_nas_sync(now: datetime) -> tuple[list[str], dict]:
+    """Each NAS sync must have written its success marker within NAS_SYNC_MAX_AGE_H.
+    A missing/stale marker means the nightly sync hasn't genuinely succeeded — even
+    if its launchd job reported exit=0 (the 0s-do-nothing failure we hit on the
+    stale SMB mount). Returns (problems, {name: marker_dt|None})."""
+    problems, ages = [], {}
+    for name, path in NAS_MARKERS.items():
+        dt = None
+        if path.exists():
+            dt = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+        ages[name] = dt
+        if dt is None:
+            problems.append(f"{name}: no success marker — has it ever completed?")
+        elif (now - dt) > timedelta(hours=NAS_SYNC_MAX_AGE_H):
+            problems.append(f"{name}: last success {_fmt_age(dt, now)} "
+                            f"— exceeds {NAS_SYNC_MAX_AGE_H}h (sync stale/failed)")
+    return problems, ages
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="heartbeat_check.py")
     ap.add_argument("--dry-run", action="store_true",
@@ -165,6 +191,7 @@ def main(argv=None) -> int:
     now = _now()
     missing, n_expected = check_fleet()
     cl_problems, log_dt, resolved_dt = check_close_loop(now)
+    nas_problems, nas_ages = check_nas_sync(now)
 
     # ── report (always) ──
     print(f"heartbeat @ {now.astimezone().strftime('%Y-%m-%d %H:%M %Z')}")
@@ -172,7 +199,9 @@ def main(argv=None) -> int:
           + (f"  ⚠ MISSING: {', '.join(missing)}" if missing else "  ✓"))
     print(f"  close-loop log: {_fmt_age(log_dt, now)}")
     print(f"  ledger resolved_at: {_fmt_age(resolved_dt, now)}")
-    for p in cl_problems:
+    for name, dt in nas_ages.items():
+        print(f"  {name}: {_fmt_age(dt, now)}")
+    for p in cl_problems + nas_problems:
         print(f"    ⚠ {p}")
 
     problems: list[str] = []
@@ -182,13 +211,16 @@ def main(argv=None) -> int:
             + ", ".join(missing)
         )
     problems.extend(cl_problems)
+    problems.extend(nas_problems)
 
     if not problems:
         print("✓ heartbeat OK — fleet fully loaded, close-loop fresh")
         return 0
 
     title = "Heartbeat: " + (
-        f"{len(missing)} job(s) unloaded" if missing else "ML close-loop stalled"
+        f"{len(missing)} job(s) unloaded" if missing
+        else "NAS sync stale" if nas_problems
+        else "ML close-loop stalled"
     )
     body = "\n".join(f"• {p}" for p in problems) + (
         "\n\nReload: launchctl load -w infra/launchd/<label>.plist"

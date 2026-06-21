@@ -5,3 +5,5 @@ set -uo pipefail
 cd "/Volumes/MyMacDisk/Claude Skills/SwingTrade"
 /usr/bin/python3 scripts/sync_snapshots_to_nas.py
 /usr/bin/python3 scripts/sync_history_to_nas.py
+# Success marker for the freshness watchdog (mtime = last good data sync).
+mkdir -p cache/logs && touch cache/logs/.nas_data_sync_ok

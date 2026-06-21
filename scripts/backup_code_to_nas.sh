@@ -56,6 +56,10 @@ if [ "$rc" -ne 0 ]; then
   echo "[$(ts)] ✗ rsync exited $rc — backup may be incomplete"; exit "$rc"
 fi
 echo "[$(ts)] === DONE ==="
+# Success marker — written ONLY on a genuine completion (a 0s/aborted run never
+# reaches here). The freshness watchdog reads this file's mtime, so an exit=0 but
+# do-nothing run can't masquerade as a healthy backup.
+mkdir -p cache/logs && touch cache/logs/.nas_code_backup_ok
 echo "  size on NAS: $($SSH "$NAS_USER@$NAS_HOST" "du -sh '$DEST' 2>/dev/null" | cut -f1)"
 # Restore (NAS has no git, so NOT `git clone ssh://`):
 #   1) pull the tree back:  rsync -az -e ssh --rsync-path=/bin/rsync \
