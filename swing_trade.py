@@ -639,23 +639,39 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception as _cve:
         log.debug(f"Config validation skipped: {_cve}")
 
-    # Data freshness guard — SPY bar age (market hours check removed with Schwab decommission)
+    # Data freshness guard — HOLIDAY-AWARE (was a fixed 96h, which false-aborted on
+    # holiday-extended weekends: e.g. Juneteenth-Fri makes Thu-close → Mon = 104h>96h,
+    # and Fri-close → Tue after a Mon holiday = 96h>48h). Instead of an hour threshold,
+    # compare the SPY last-bar DATE to the most-recent EXPECTED trading session
+    # (skipping weekends + NYSE holidays). Passes whenever data is as fresh as the
+    # market allows; aborts only on genuinely stale data (a real feed outage).
     try:
-        _market_open = None  # Could be derived from PST time if needed; for now scan runs whenever
+        import datetime as _dtmod
         from data_fetcher import fetch_market_data as _fmd
         _spy_check = _fmd(["SPY"])
         _spy_df_check = _spy_check.get("SPY") if isinstance(_spy_check, dict) else None
         if _spy_df_check is not None and not _spy_df_check.empty:
-            _last_bar = _spy_df_check.index[-1]
-            _hours_stale = (datetime.now(_last_bar.tz) - _last_bar).total_seconds() / 3600 if getattr(_last_bar, "tz", None) else (datetime.now() - _last_bar.to_pydatetime()).total_seconds() / 3600
-            _wd = datetime.now().weekday()  # 0=Mon..6=Sun
-            # Max acceptable staleness: weekends/Mon allow 96h (Fri close → Mon pre-market)
-            _max_stale = 96 if _wd in (0, 5, 6) else (96 if _market_open is False else 48)
-            if _hours_stale > _max_stale:
-                log.error(f"  🔴 DATA FRESHNESS: SPY last bar is {_hours_stale:.0f}h old (max {_max_stale}h) — aborting scan, check Polygon")
-                raise RuntimeError(f"Data >{_max_stale}h stale")
+            # NYSE full-day closes. ⚠ EXTEND each year (or wire pandas_market_calendars).
+            _NYSE_HOLIDAYS = {
+                "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25",
+                "2026-06-19", "2026-07-03", "2026-09-07", "2026-11-26", "2026-12-25",
+                "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31",
+                "2027-06-18", "2027-07-05", "2027-09-06", "2027-11-25", "2027-12-24",
+            }
+            def _is_session(d):
+                return d.weekday() < 5 and d.strftime("%Y-%m-%d") not in _NYSE_HOLIDAYS
+            def _prev_session(d):
+                while not _is_session(d):
+                    d -= _dtmod.timedelta(days=1)
+                return d
+            # latest completed session = prev trading day before today (pre-market view)
+            _expected = _prev_session(_dtmod.date.today() - _dtmod.timedelta(days=1))
+            _last_bar_date = _spy_df_check.index[-1].date()
+            if _last_bar_date >= _expected:
+                log.info(f"  Data freshness: SPY last bar {_last_bar_date} ≥ expected session {_expected} ✓ (holiday-aware)")
             else:
-                log.info(f"  Data freshness: SPY last bar {_hours_stale:.1f}h old ✓")
+                log.error(f"  🔴 DATA FRESHNESS: SPY last bar {_last_bar_date} < expected last session {_expected} — aborting (genuinely stale feed)")
+                raise RuntimeError(f"SPY stale: {_last_bar_date} < {_expected}")
     except RuntimeError:
         raise
     except Exception as _dfe:
