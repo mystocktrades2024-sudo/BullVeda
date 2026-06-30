@@ -37,6 +37,12 @@ log = logging.getLogger(__name__)
 
 TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
 
+# Validity marker for the heartbeat watchdog: touched ONLY on a genuine probe
+# success, removed on rejection. Its mtime = the last time the token actually
+# WORKED — which catches a revoked/invalid token even while its local issue-age
+# still looks fresh (the 2026-06-29 gap: age said 0.5d but Schwab returned 400).
+OK_MARKER = BASE / "cache" / "logs" / ".schwab_token_ok"
+
 
 def _load_env() -> dict[str, str]:
     env: dict[str, str] = {}
@@ -151,6 +157,10 @@ def main() -> int:
             ),
             level="CRITICAL",
         )
+        try:  # token is rejected → drop the validity marker so the heartbeat alerts now
+            OK_MARKER.unlink(missing_ok=True)
+        except Exception:
+            pass
         return 2
     except Exception as e:
         log.error(f"Schwab refresh request error: {e}")
@@ -169,6 +179,12 @@ def main() -> int:
         "SCHWAB_REFRESH_ISSUED_AT": str(int(time.time())),
     }
     _write_env(updates)
+
+    try:  # probe genuinely succeeded → stamp the validity marker for the heartbeat
+        OK_MARKER.parent.mkdir(parents=True, exist_ok=True)
+        OK_MARKER.touch()
+    except Exception:
+        pass
 
     log.info(f"✓ Refresh OK — access_token rotated, refresh_token age reset to 0d. "
              f"Next forced refresh: in 24h.")

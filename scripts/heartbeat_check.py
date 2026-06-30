@@ -68,11 +68,13 @@ NAS_MARKERS = {
     "NAS code backup (SSH)":    ROOT / "cache" / "logs" / ".nas_code_backup_ok",
 }
 
-# Schwab refresh token dies a hard 7 days after issue (only manual `schwab_auth.py
-# oauth` renews it). Warn at 5d so there's ~2 days' runway to re-auth before the
-# data silently degrades (4H/intraday/options/IV go dark, like 2026-06-22).
-SCHWAB_REFRESH_WARN_DAYS = 5.0
-ENV_PATH = ROOT / ".env"
+# Schwab token health is VALIDITY-based, not age-based. check_schwab_token.py probes
+# the live refresh endpoint daily and touches .schwab_token_ok ONLY when the token
+# actually works (removes it on a 400 rejection). An age-based check is a trap: the
+# 2026-06-29 token was rejected while its local issue-age still read 0.5d "fresh".
+# So we watch the validity marker — missing/stale ⇒ the last real probe failed.
+SCHWAB_OK_MARKER = ROOT / "cache" / "logs" / ".schwab_token_ok"
+SCHWAB_OK_MAX_AGE_H = 26      # probe runs daily; >26h ⇒ no recent SUCCESS (rejected/not-run)
 
 
 def _now() -> datetime:
@@ -188,25 +190,23 @@ def check_nas_sync(now: datetime) -> tuple[list[str], dict]:
     return problems, ages
 
 
-def check_schwab_token(now: datetime) -> tuple[list[str], float | None]:
-    """Warn before the Schwab refresh token's hard 7-day expiry. Reads the issue
-    timestamp from .env (SCHWAB_REFRESH_ISSUED_AT). Returns (problems, age_days)."""
-    issued = None
-    if ENV_PATH.exists():
-        for line in ENV_PATH.read_text().splitlines():
-            if line.startswith("SCHWAB_REFRESH_ISSUED_AT="):
-                try:
-                    issued = float(line.split("=", 1)[1].strip())
-                except Exception:
-                    pass
-    if issued is None:
-        return [], None
-    age = (now.timestamp() - issued) / 86400.0
+def check_schwab_token(now: datetime) -> tuple[list[str], datetime | None]:
+    """Detect a non-working Schwab token via the validity marker that
+    check_schwab_token.py touches on a real probe success (and removes on a 400
+    rejection). Missing/stale ⇒ the last live probe didn't succeed — re-auth needed.
+    Returns (problems, marker_dt|None)."""
+    dt = None
+    if SCHWAB_OK_MARKER.exists():
+        dt = datetime.fromtimestamp(SCHWAB_OK_MARKER.stat().st_mtime, tz=timezone.utc)
     probs = []
-    if age > SCHWAB_REFRESH_WARN_DAYS:
-        probs.append(f"Schwab refresh token {age:.1f}d old — expires at 7d. "
-                     f"Re-auth NOW: python3 schwab_auth.py oauth")
-    return probs, age
+    if dt is None:
+        probs.append("Schwab token: no success marker — token rejected or probe never ran. "
+                     "Re-auth: python3 schwab_auth.py oauth")
+    elif (now - dt) > timedelta(hours=SCHWAB_OK_MAX_AGE_H):
+        probs.append(f"Schwab token: last successful probe {_fmt_age(dt, now)} "
+                     f"— exceeds {SCHWAB_OK_MAX_AGE_H}h (token rejected / probe not running). "
+                     f"Re-auth: python3 schwab_auth.py oauth")
+    return probs, dt
 
 
 def main(argv=None) -> int:
@@ -219,7 +219,7 @@ def main(argv=None) -> int:
     missing, n_expected = check_fleet()
     cl_problems, log_dt, resolved_dt = check_close_loop(now)
     nas_problems, nas_ages = check_nas_sync(now)
-    schwab_problems, schwab_age = check_schwab_token(now)
+    schwab_problems, schwab_dt = check_schwab_token(now)
 
     # ── report (always) ──
     print(f"heartbeat @ {now.astimezone().strftime('%Y-%m-%d %H:%M %Z')}")
@@ -229,7 +229,7 @@ def main(argv=None) -> int:
     print(f"  ledger resolved_at: {_fmt_age(resolved_dt, now)}")
     for name, dt in nas_ages.items():
         print(f"  {name}: {_fmt_age(dt, now)}")
-    print(f"  Schwab refresh token: {f'{schwab_age:.1f}d old' if schwab_age is not None else 'unknown'}")
+    print(f"  Schwab token (last good probe): {_fmt_age(schwab_dt, now)}")
     for p in cl_problems + nas_problems + schwab_problems:
         print(f"    ⚠ {p}")
 
@@ -250,7 +250,7 @@ def main(argv=None) -> int:
     title = "Heartbeat: " + (
         f"{len(missing)} job(s) unloaded" if missing
         else "NAS sync stale" if nas_problems
-        else "Schwab token expiring" if schwab_problems
+        else "Schwab token invalid" if schwab_problems
         else "ML close-loop stalled"
     )
     body = "\n".join(f"• {p}" for p in problems) + (
