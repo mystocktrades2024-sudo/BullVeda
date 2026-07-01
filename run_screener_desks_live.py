@@ -46,7 +46,33 @@ def main() -> None:
         print("no desk tickers")
         return
 
-    quotes = _get_schwab_batch(tickers)
+    # Richer extraction than _get_schwab_batch: also grab totalVolume so the desks
+    # can compute a time-adjusted LIVE RVOL (Breakout/Momentum volume checks).
+    quotes = {}
+    try:
+        import schwab_client as _sc
+        raw = _sc.get_quotes_batch(tickers[:500]) or {}
+        for sym, blob in raw.items():
+            if not isinstance(blob, dict):
+                continue
+            qb = blob.get("quote") or {}
+            last = qb.get("lastPrice")
+            if last is None:
+                continue
+            try:
+                rec = {"price": round(float(last), 2)}
+                pc = qb.get("closePrice")
+                if pc is not None:
+                    rec["prev_close"] = round(float(pc), 2)
+                tv = qb.get("totalVolume")
+                if tv is not None:
+                    rec["volume"] = float(tv)
+                quotes[sym.upper()] = rec
+            except (TypeError, ValueError):
+                continue
+    except Exception as e:
+        print(f"schwab fetch failed ({e}); falling back to price-only")
+        quotes = _get_schwab_batch(tickers) or {}
     if not quotes:
         print("no Schwab quotes (market closed / token?)")
         return

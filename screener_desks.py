@@ -36,37 +36,37 @@ DLBL = {"mom": "Momentum", "bo": "Breakout", "pb": "Pullback", "qf": "Quant",
 # stats from setup_stats.json; otherwise `edge_fallback` is used verbatim.
 DESK_META = [
     ("pb",   "SWING · PULLBACK",     "Swing trader — strong stock dipping into a buy zone",
-     "Rank by entry location: at-zone / fresh beats extended. 3:1 R:R.",           "var(--pb)",
+     "Rank by entry location: at-zone / fresh beats extended. 3:1 R:R.",           "var(--dk-pb)",
      "Trend Continuation", None),
     ("qf",   "QUANT · FACTOR",       "Hedge fund — multi-factor cross-sectional rank",
-     "Blend momentum + quality + trend + value + catalyst, ranked vs peers.",       "var(--qf)",
+     "Blend momentum + quality + trend + value + catalyst, ranked vs peers.",       "var(--dk-qf)",
      None, {"class": "e-unp", "text": "BLEND · IC validation pending · gate ≥60 composite"}),
     ("cat",  "CATALYST · EVENT",     "Event desk — PEAD · UOA · insider · ESP",
-     "Post-earnings / options-flow drift. Regime-independent.",                     "var(--cat)",
+     "Post-earnings / options-flow drift. Regime-independent.",                     "var(--dk-cat)",
      "Impulse Catalyst", None),
     ("mom",  "MOMENTUM",             "Momentum trader — buys the strongest names",
-     "Rank by relative strength + risk-adjusted trend. New highs welcome.",         "var(--mom)",
+     "Rank by relative strength + risk-adjusted trend. New highs welcome.",         "var(--dk-mom)",
      None, {"class": "e-unp", "text": "PAPER · momentum sleeve n<10 · edge pending"}),
     ("bo",   "BREAKOUT",             "Breakout trader — coil firing through a pivot",
-     "Volatility contraction → rank by volume expansion at the trigger.",           "var(--bo)",
+     "Volatility contraction → rank by volume expansion at the trigger.",           "var(--dk-bo)",
      "Breakout Expansion", None),
     ("mr",   "MEAN-REVERSION",       "Reversion — oversold bounce, uptrend intact",
-     "RSI<38 + quality-gated. Own eligibility (full universe).",                    "var(--mr)",
+     "RSI<38 + quality-gated. Own eligibility (full universe).",                    "var(--dk-mr)",
      None, {"class": "e-unp", "text": "PAPER · RSI<30 + >EMA200 · edge pending"}),
     ("val",  "VALUE · CONTRARIAN",   "Value investor — cheap on P/E · EV/EBITDA · FCF",
-     "Cheap-decile, quality-gated. Reversion to fair value.",                       "var(--val)",
+     "Cheap-decile, quality-gated. Reversion to fair value.",                       "var(--dk-val)",
      None, {"class": "e-unp", "text": "BLEND · cheap-decile, quality-gated"}),
     ("smart", "SMART MONEY",         "Coattail — insider clusters + Congress buys",
-     "Follow ≥3-insider $200K clusters + congressional buys.",                      "var(--smart)",
+     "Follow ≥3-insider $200K clusters + congressional buys.",                      "var(--dk-smart)",
      "Insider Cluster", None),
     ("qual", "QUALITY · COMPOUNDER", "GARP — high ROIC, durable margins",
-     "ROE + gross-margin blend. Invest-horizon anchor.",                            "var(--qual)",
+     "ROE + gross-margin blend. Invest-horizon anchor.",                            "var(--dk-qual)",
      None, {"class": "e-unp", "text": "BLEND · quality factor · Invest anchor"}),
     ("def",  "DEFENSIVE",            "Rotation — XLU/GLD/staples when breadth breaks",
-     "Whitelist, beta≤1. Arms when SPY<50EMA.",                                     "var(--def)",
+     "Whitelist, beta≤1. Arms when SPY<50EMA.",                                     "var(--dk-def)",
      None, {"class": "e-unp", "text": "Arms when SPY<50EMA"}),
     ("short", "SHORT · BREAKDOWN",   "Down book — distribution / RS-worst",
-     "Bearish structure. Needs VIX>25 + bear regime.",                             "var(--short)",
+     "Bearish structure. Needs VIX>25 + bear regime.",                             "var(--dk-short)",
      None, {"class": "e-unp", "text": "Shorts need VIX>25 + bear regime"}),
 ]
 
@@ -145,6 +145,13 @@ def _enrich(r, live=None):
     o["cat_tags"] = r.get("catalyst_tags") or []
     o["est_rev"] = xf.get("estimate_revision")
     o["avg_volume"] = r.get("avg_volume")
+    # horizon signals — weekly/monthly lookbacks so Position/Invest mean something
+    o["perf_m"] = fe.get("perf_month_pct")
+    o["perf_q"] = fe.get("perf_quarter_pct")
+    o["perf_h"] = fe.get("perf_half_pct")
+    o["perf_y"] = fe.get("perf_year_pct")
+    o["weekly_bull"] = ind.get("weekly_ema_bullish")
+    o["rs63"] = ind.get("rs_63d_pct")
     o["_mom"] = _n(o["rs"])
     o["_qual"] = VGM.get(o["vgm"], 50)
     o["_trend"] = _shp(o["sharpe"])
@@ -170,6 +177,10 @@ def _enrich(r, live=None):
         pc = q.get("prev_close")
         if pc:
             o["_chg"] = round((lp - _n(pc)) / _n(pc) * 100, 2)
+        lv = q.get("volume")
+        if lv is not None and _n(o.get("avg_volume")) > 0:
+            frac = _n((live or {}).get("_dayfrac")) or 1.0
+            o["_live_rvol"] = round(_n(lv) / (_n(o["avg_volume"]) * frac), 2)
         lo, hi = _n(o["entry_lo"]), _n(o["entry_hi"])
         if lo and hi:
             if lo <= lp <= hi:
@@ -207,109 +218,179 @@ def _pct_threshold(vals, p):
     return xs[idx]
 
 
-def _desk_verdict(desk, r, ctx):
-    """Each desk's OWN BUY call, computed from raw signals (NOT the scanner's
-    composite verdict). px is the live Schwab price when present, else scan close —
-    so structural checks (price vs EMA / pivot / zone) re-evaluate intraday."""
+def _day_fraction():
+    """Fraction of the 9:30-16:00 ET session elapsed (for time-adjusted live RVOL).
+    Returns 1.0 pre-open / after-close / weekend so RVOL isn't over-inflated."""
+    from datetime import datetime
+    try:
+        import zoneinfo
+        now = datetime.now(zoneinfo.ZoneInfo("America/New_York"))
+    except Exception:
+        return 1.0
+    if now.weekday() >= 5:
+        return 1.0
+    mins = (now.hour * 60 + now.minute) - (9 * 60 + 30)
+    total = 6 * 60 + 30
+    if mins <= 0 or mins >= total:
+        return 1.0
+    return max(0.05, mins / total)
+
+
+def _eff_rvol(r):
+    """Live time-adjusted RVOL when Schwab volume is present, else the scan's RVOL."""
+    lr = r.get("_live_rvol")
+    return _n(lr) if lr is not None else _n(r.get("rvol"))
+
+
+def _hmom(r, hz):
+    """Horizon-appropriate momentum: RS-rank (swing), 3-mo perf (position), 12-mo (invest)."""
+    if hz == "position":
+        return _n(r.get("perf_q"))
+    if hz == "invest":
+        return _n(r.get("perf_y"))
+    return _n(r.get("rs"))
+
+
+def _ck(cond, label):
+    return ("✓ " if cond else "✗ ") + label
+
+
+def _desk_verdict(desk, r, ctx, hz="swing"):
+    """Each desk's OWN BUY call from raw signals (NOT the scanner's composite verdict),
+    horizon-aware. Returns (verdict, why) where `why` lists the checklist conditions.
+    px is the live Schwab price when present, so structural checks re-evaluate intraday."""
     px = _n(r.get("price"))
     rs = _n(r.get("rs"))
     adx = _n(r.get("adx"))
     sharpe = _n(r.get("sharpe"))
-    rvol = _n(r.get("rvol"))
+    rvol = _eff_rvol(r)
+    rsi = _n(r.get("rsi"))
     ema8 = _n(r.get("ema8"))
+    extended = r.get("state") in ("EXTENDED", "MISSED") or r.get("_livestate") == "EXTENDED"
 
-    if desk == "mom":  # Minervini/O'Neil trend leadership
+    if desk == "mom":  # Minervini/O'Neil trend leadership (horizon-scaled)
         px_ok = (not px or not ema8 or px > ema8)
-        if rs >= 90 and r.get("bull_stack") and adx >= 25 and sharpe >= 1.5 and rvol >= 1.2 and px_ok:
-            return "BUY"
-        if rs >= 85 and r.get("bull_stack") and (adx >= 20 or sharpe >= 1.0):
-            return "WATCH"
-        return "PASS"
+        if hz == "swing":
+            c = [rs >= 90, r.get("bull_stack"), adx >= 25, sharpe >= 1.5, rvol >= 1.2, px_ok]
+            why = [_ck(c[0], f"RS{int(rs)}≥90"), _ck(c[1], "EMA stack"), _ck(c[2], f"ADX{adx:.0f}≥25"),
+                   _ck(c[3], f"Sharpe{sharpe:.1f}≥1.5"), _ck(c[4], f"RVOL{rvol:.1f}≥1.2"), _ck(c[5], "px>EMA8")]
+            watch = rs >= 85 and r.get("bull_stack")
+        elif hz == "position":
+            pq = _n(r.get("perf_q"))
+            c = [r.get("weekly_bull"), pq >= 15, r.get("above50"), adx >= 20]
+            why = [_ck(c[0], "weekly EMA↑"), _ck(c[1], f"3mo{pq:+.0f}%≥15"), _ck(c[2], ">EMA50"), _ck(c[3], f"ADX{adx:.0f}≥20")]
+            watch = r.get("weekly_bull") and pq >= 8
+        else:  # invest
+            py, ph = _n(r.get("perf_y")), _n(r.get("perf_h"))
+            c = [r.get("above200"), py >= 20, ph >= 0]
+            why = [_ck(c[0], ">200EMA"), _ck(c[1], f"12mo{py:+.0f}%≥20"), _ck(c[2], f"6mo{ph:+.0f}%>0")]
+            watch = r.get("above200") and py >= 10
+        return ("BUY", why) if all(c) else ("WATCH", why) if watch else ("PASS", why)
 
     if desk == "bo":  # VCP / squeeze breakout through pivot on volume
         trig = _n(r.get("vcp_pivot")) or _n(r.get("resistance"))
         at_trigger = bool(r.get("at_52wbo")) or (px and trig and px >= trig * 0.99)
         setup = r.get("vcp") or r.get("squeeze_fired") or r.get("at_52wbo") or r.get("pocket_pivot")
         volx = _n(r.get("bo_vol")) >= 1.3 or rvol >= 1.5
+        why = [_ck(setup, "VCP/squeeze/pivot"), _ck(at_trigger, "at trigger"), _ck(volx, f"vol {rvol:.1f}×")]
         if setup and at_trigger and volx:
-            return "BUY"
+            return "BUY", why
         if r.get("near_vcp") or r.get("squeeze_on") or r.get("near52h"):
-            return "WATCH"
-        return "PASS"
+            return "WATCH", why
+        return "PASS", why
 
     if desk == "pb":  # pullback to value zone in an uptrend, 3:1 R:R
         lo, hi = _n(r.get("entry_lo")), _n(r.get("entry_hi"))
-        inzone = (px and lo and hi and lo <= px <= hi) or r.get("state") == "AT_ZONE" or r.get("eq") == "FRESH"
-        if r.get("above50") and inzone and _n(r.get("_rr")) >= 3:
-            return "BUY"
-        if r.get("above50") and r.get("state") in ("APPROACHING", "AT_ZONE", "PULLBACK"):
-            return "WATCH"
-        return "PASS"
+        inzone = (px and lo and hi and lo <= px <= hi) or r.get("_livestate") == "AT_ZONE" or r.get("state") == "AT_ZONE" or r.get("eq") == "FRESH"
+        rr = _n(r.get("_rr"))
+        up = r.get("above50") if hz != "invest" else r.get("above200")
+        why = [_ck(up, ">EMA50" if hz != "invest" else ">200EMA"), _ck(inzone, "in buy-zone"), _ck(rr >= 3, f"R:R {rr:.1f}≥3")]
+        if up and inzone and rr >= 3:
+            return "BUY", why
+        if up and r.get("state") in ("APPROACHING", "AT_ZONE", "PULLBACK"):
+            return "WATCH", why
+        return "PASS", why
 
-    if desk == "qf":  # top-decile cross-sectional factor blend
+    if desk == "qf":  # top-decile factor blend + TIMING confirmation
         f = r.get("_factor")
-        if ctx.get("factor_p90") is not None and f is not None and f >= ctx["factor_p90"] and _n(r.get("_qual")) >= 60:
-            return "BUY"
-        if ctx.get("factor_p75") is not None and f is not None and f >= ctx["factor_p75"]:
-            return "WATCH"
-        return "PASS"
+        p90 = ctx.get("factor_p90")
+        p75 = ctx.get("factor_p75")
+        top = p90 is not None and f is not None and f >= p90 and _n(r.get("_qual")) >= 60
+        timing_ok = (rsi < 70) and (not extended)
+        why = [_ck(top, f"factor {f:.0f}≥p90 {(_n(p90)):.0f}"), _ck(rsi < 70, f"RSI{rsi:.0f}<70"), _ck(not extended, "not extended")]
+        if top and timing_ok:
+            return "BUY", why
+        if top or (p75 is not None and f is not None and f >= p75):
+            return "WATCH", why  # ranks high but timing unconfirmed
+        return "PASS", why
 
     if desk == "cat":  # confirmed catalyst (PEAD/UOA/pivot), holding above EMA21
         tags = set(r.get("cat_tags") or [])
         t1 = bool(tags & {"PEAD", "UOA", "VCP", "POCKET_PIVOT"}) or r.get("cat") == 1 or r.get("_pcr") is not None
         ema21 = _n(r.get("ema21"))
-        if t1 and (not px or not ema21 or px > ema21):
-            return "BUY"
+        above = (not px or not ema21 or px > ema21)
+        why = [_ck(t1, "T1 catalyst"), _ck(above, "holding >EMA21")]
+        if t1 and above:
+            return "BUY", why
         if tags:
-            return "WATCH"
-        return "PASS"
+            return "WATCH", why
+        return "PASS", why
 
     if desk == "mr":  # oversold bounce with the long-term trend intact
-        rsi = _n(r.get("rsi"))
+        why = [_ck(rsi and rsi < 30, f"RSI{rsi:.0f}<30"), _ck(r.get("above200"), ">200EMA")]
         if rsi and rsi < 30 and r.get("above200"):
-            return "BUY"
+            return "BUY", why
         if rsi and rsi < 38 and r.get("above200"):
-            return "WATCH"
-        return "PASS"
+            return "WATCH", why
+        return "PASS", why
 
     if desk == "val":  # cheap-decile, quality-gated, revisions not falling
-        cheap = _n(r.get("_val")) >= 70
+        vv = _n(r.get("_val"))
         quality = _n(r.get("roe")) > 0
         not_down = r.get("est_rev") != "down"
-        if cheap and quality and not_down:
-            return "BUY"
-        if _n(r.get("_val")) >= 60 and quality:
-            return "WATCH"
-        return "PASS"
+        why = [_ck(vv >= 70, f"cheap {vv:.0f}≥70"), _ck(quality, "ROE>0"), _ck(not_down, "revisions not falling")]
+        if vv >= 70 and quality and not_down:
+            return "BUY", why
+        if vv >= 60 and quality:
+            return "WATCH", why
+        return "PASS", why
 
     if desk == "qual":  # GARP — high ROE + durable margins
-        if _n(r.get("_qc")) >= 70 and _n(r.get("roe")) >= 15 and _n(r.get("gm")) >= 40:
-            return "BUY"
-        if _n(r.get("_qc")) >= 55:
-            return "WATCH"
-        return "PASS"
+        qc, roe, gm = _n(r.get("_qc")), _n(r.get("roe")), _n(r.get("gm"))
+        why = [_ck(qc >= 70, f"qual {qc:.0f}≥70"), _ck(roe >= 15, f"ROE{roe:.0f}≥15"), _ck(gm >= 40, f"GM{gm:.0f}≥40")]
+        if qc >= 70 and roe >= 15 and gm >= 40:
+            return "BUY", why
+        if qc >= 55:
+            return "WATCH", why
+        return "PASS", why
 
     if desk == "smart":  # membership = a cluster / congressional buy fired
-        return "BUY"
+        return "BUY", [_ck(True, "insider/congress cluster")]
 
     if desk == "def":  # only a BUY when the regime actually calls for defense
-        if ctx.get("regime") in ("risk_off_trending", "risk_off", "panic") and rs >= 50:
-            return "BUY"
-        return "WATCH"
+        armed = ctx.get("regime") in ("risk_off_trending", "risk_off", "panic")
+        why = [_ck(armed, "regime risk-off"), _ck(rs >= 50, f"RS{int(rs)}≥50")]
+        if armed and rs >= 50:
+            return "BUY", why
+        return "WATCH", why
 
     if desk == "short":  # bearish structure + relative weakness
         ema50 = _n(r.get("ema50i"))
-        if px and ema50 and px < ema50 and adx >= 20 and rs <= 30:
-            return "SHORT"
-        return "AVOID"
+        c = [px and ema50 and px < ema50, adx >= 20, rs <= 30]
+        why = [_ck(c[0], "px<EMA50"), _ck(c[1], f"ADX{adx:.0f}≥20"), _ck(c[2], f"RS{int(rs)}≤30")]
+        return ("SHORT", why) if all(c) else ("AVOID", why)
 
-    return "PASS"
+    return "PASS", []
 
 
-def _tag(desk, rows, ctx):
-    """Attach each desk's own verdict as `_dv` on shallow row copies (a ticker can
-    be BUY on one desk and PASS on another — the verdict is per-desk)."""
-    return [dict(r, _dv=_desk_verdict(desk, r, ctx)) for r in rows]
+def _tag(desk, rows, ctx, hz):
+    """Attach each desk's own verdict (`_dv`) + reasons (`_why`) on shallow row copies
+    (a ticker can be BUY on one desk and PASS on another — the verdict is per-desk)."""
+    out = []
+    for r in rows:
+        v, why = _desk_verdict(desk, r, ctx, hz)
+        out.append(dict(r, _dv=v, _why=" · ".join(why)))
+    return out
 
 
 def _edge(setup_stats, family, fallback):
@@ -344,54 +425,98 @@ def _desk_states(regime4):
     return out
 
 
-def _build_pool(rows, fullrows, flow, short_rows, byt, insider, congress, ctx):
-    """Return {desk_key: [rows]} for one horizon pool, each row tagged with its
-    desk-native verdict (`_dv`)."""
-    mom = _top(rows, lambda r: (r["_mom"], r["_trend"], _n(r["score"])))
-    bo = _top([r for r in rows if r["setup"] == "Breakout Expansion"],
-              lambda r: (_n(r["rvol"]), r["_mom"]))
-    pb = _top([r for r in rows if r["eq"] in ("PULLBACK", "VALID", "FRESH")
-               or r["state"] in ("AT_ZONE", "APPROACHING", "AT_SHALLOW_ZONE")],
-              lambda r: (STATE_RANK.get(r["state"], 0) + STATE_RANK.get(r["eq"], 0), r["_mom"]))
-    qf = _top(rows, lambda r: r["_factor"])
-    cat_pool = [r for r in rows if r["cat"] == 1 or r["t"] in flow]
-    for r in cat_pool:
-        f = flow.get(r["t"]) or {}
-        r["_pcr"] = f.get("put_call_ratio")
-    cat = _top(cat_pool, lambda r: (1 if r["t"] in flow else 0, r["_cat"], r["_mom"]))
-    mr = _top([r for r in fullrows if (r["rsi"] is not None and _n(r["rsi"]) < 38 and r["_qual"] >= 45)],
-              lambda r: (-(_n(r["rsi"])), r["_qual"]))
-    val = _top([r for r in fullrows if r["_val"] is not None and r["_qual"] >= 45],
-               lambda r: r["_val"])
-    qual = _top([r for r in fullrows if (r["roe"] or r["gm"])], lambda r: r["_qc"])
-    dfd = [r for r in fullrows if r["t"] in DEFENSIVE_WL][:7]
+SHOW_N = 12  # per-desk display cap (surfaced honestly as "N of M")
+
+
+def _book(desk, cands, key, ctx, hz, n=SHOW_N):
+    """Rank a desk's candidate pool, tag the top-N with the desk-native verdict,
+    and report the full candidate count so the UI can show 'N of M scanned'."""
+    ranked = sorted(cands, key=key, reverse=True)
+    return {"rows": _tag(desk, ranked[:n], ctx, hz), "n": len(cands)}
+
+
+def _build_pool(universe, flow, ctx, hz, insider, congress):
+    """Build all 11 desk books for one horizon from the FULL universe only (no
+    old-scanner buy/watch buckets). Each desk applies its own domain filter +
+    horizon-aware ranking; the verdict engine then calls BUY/WATCH/PASS."""
+    for r in universe:
+        if r["t"] in flow:
+            r["_pcr"] = (flow.get(r["t"]) or {}).get("put_call_ratio")
+    umap = {r["t"]: r for r in universe}
+    hm = lambda r: _hmom(r, hz)
+    n_ = _n
+
+    mom_c = [r for r in universe if r.get("bull_stack") or r.get("weekly_bull") or r.get("above200")]
+    bo_c = [r for r in universe if r.get("vcp") or r.get("near_vcp") or r.get("squeeze_on")
+            or r.get("squeeze_fired") or r.get("at_52wbo") or r.get("near52h") or r.get("pocket_pivot")]
+    pb_c = [r for r in universe if r.get("above50") and (r.get("eq") in ("PULLBACK", "VALID", "FRESH")
+            or r.get("state") in ("AT_ZONE", "APPROACHING", "AT_SHALLOW_ZONE", "PULLBACK"))]
+    qf_c = list(universe)
+    cat_c = [r for r in universe if r.get("cat") == 1 or r["t"] in flow
+             or (set(r.get("cat_tags") or []) & {"PEAD", "UOA", "VCP", "POCKET_PIVOT"})]
+    mr_c = [r for r in universe if r.get("rsi") is not None and n_(r.get("rsi")) < 38 and r.get("above200")]
+    val_c = [r for r in universe if r.get("_val") is not None and n_(r.get("_val")) >= 60 and n_(r.get("roe")) > 0]
+    qual_c = [r for r in universe if (n_(r.get("roe")) > 0 or n_(r.get("gm")) > 0) and n_(r.get("_qc")) >= 55]
+    def_c = [r for r in universe if r["t"] in DEFENSIVE_WL]
     smart_syms = [c.get("ticker") for c in (insider or [])] + [c.get("ticker") for c in (congress or [])]
-    smart = [(byt.get(s) or {"t": s}) for s in smart_syms if s][:7]
-    sh = []
-    for r in short_rows:
-        o = byt.get(r.get("ticker")) or {
-            "t": r.get("ticker"), "price": r.get("price"), "score": r.get("score"),
-            "sector": r.get("sector"), "rs": r.get("rs_rank"), "rsi": r.get("rsi")}
-        o = dict(o)
-        bt = r.get("bear_type")
-        o["_bear"] = bt if isinstance(bt, str) and bt else "breakdown"
-        sh.append(o)
-    raw = {"mom": mom, "bo": bo, "pb": pb, "qf": qf, "cat": cat, "mr": mr,
-           "val": val, "smart": smart, "qual": qual, "def": dfd, "short": sh}
-    return {k: _tag(k, v, ctx) for k, v in raw.items()}
+    smart_c = [umap.get(s) or {"t": s} for s in smart_syms if s]
+    short_c = [r for r in universe if n_(r.get("price")) > 0 and n_(r.get("ema50i")) > 0
+               and n_(r.get("price")) < n_(r.get("ema50i")) and n_(r.get("rs")) <= 40]
+
+    S = STATE_RANK
+    return {
+        "mom":   _book("mom", mom_c, lambda r: (hm(r), n_(r.get("_trend"))), ctx, hz),
+        "bo":    _book("bo", bo_c, lambda r: (_eff_rvol(r), hm(r)), ctx, hz),
+        "pb":    _book("pb", pb_c, lambda r: (S.get(r.get("state"), 0) + S.get(r.get("eq"), 0), hm(r)), ctx, hz),
+        "qf":    _book("qf", qf_c, lambda r: n_(r.get("_factor")), ctx, hz),
+        "cat":   _book("cat", cat_c, lambda r: (1 if r["t"] in flow else 0, n_(r.get("_cat")), hm(r)), ctx, hz),
+        "mr":    _book("mr", mr_c, lambda r: -n_(r.get("rsi")), ctx, hz),
+        "val":   _book("val", val_c, lambda r: n_(r.get("_val")), ctx, hz),
+        "qual":  _book("qual", qual_c, lambda r: n_(r.get("_qc")), ctx, hz),
+        "def":   _book("def", def_c, lambda r: n_(r.get("rs")), ctx, hz),
+        "smart": _book("smart", smart_c, lambda r: 0, ctx, hz),
+        "short": _book("short", short_c, lambda r: -n_(r.get("rs")), ctx, hz),
+    }
 
 
-def _confluence(desks):
+def _confluence(books):
+    """Internal cross-desk agreement only (never an input to any desk's pick)."""
     membership = defaultdict(set)
-    for k, lst in desks.items():
-        for r in lst:
+    for k, bk in books.items():
+        for r in bk["rows"]:
             if r.get("t"):
                 membership[r["t"]].add(k)
-    for k, lst in desks.items():
-        for r in lst:
+    for k, bk in books.items():
+        for r in bk["rows"]:
             ks = sorted(membership.get(r.get("t"), []))
             r["_across"] = len(ks)
             r["_acrosslbls"] = " · ".join(DLBL[x] for x in ks)
+
+
+def _best_ideas(books, states):
+    """Self-contained shortlist: names the desks' OWN engines call BUY, ranked by how
+    many (non-dormant) desks agree, then leading-desk presence, then factor strength."""
+    buys = defaultdict(list)
+    meta = {}
+    for dk, bk in books.items():
+        if states.get(dk) == "dorm":
+            continue
+        for r in bk["rows"]:
+            if r.get("_dv") == "BUY":
+                buys[r["t"]].append(dk)
+                meta[r["t"]] = r
+    out = []
+    for t, dks in buys.items():
+        r = meta[t]
+        out.append({
+            "t": t, "price": r.get("price"), "sector": r.get("sector"),
+            "desks": [DLBL[d] for d in dks], "n": len(dks),
+            "factor": r.get("_factor"), "rr": r.get("_rr"),
+            "chg": r.get("_chg"), "livepx": r.get("_livepx"),
+            "lead": any(states.get(d) == "lead" for d in dks),
+        })
+    out.sort(key=lambda x: (x["n"], 1 if x["lead"] else 0, _n(x["factor"])), reverse=True)
+    return out[:8]
 
 
 def build(bundle, setup_stats=None, live=None, insider=None, congress=None):
@@ -407,30 +532,31 @@ def build(bundle, setup_stats=None, live=None, insider=None, congress=None):
     regime4 = reg.get("regime4") or "risk_on_choppy"
     states = _desk_states(regime4)
 
+    # stamp session day-fraction so _enrich can time-adjust live RVOL
+    if isinstance(live, dict) and "_dayfrac" not in live:
+        try:
+            live["_dayfrac"] = _day_fraction()
+        except Exception:
+            pass
+
     flow = {r.get("ticker"): r for r in (bundle.get("options_flow_top30") or [])}
     all_scored = bundle.get("all_scored") or []
     fullrows = [_enrich(r, live) for r in all_scored if r.get("ticker")]
 
-    # cross-sectional context for the quant desk + regime for the defensive desk
     ctx = {
         "regime": regime4,
         "factor_p90": _pct_threshold([r["_factor"] for r in fullrows], 90),
         "factor_p75": _pct_threshold([r["_factor"] for r in fullrows], 75),
     }
 
-    # per-horizon actionable pools
-    swing_src = (bundle.get("buy_candidates") or []) + (bundle.get("watch_list") or [])
-    pos_src = bundle.get("medium_term_picks") or []
-    inv_src = bundle.get("extended_leaders") or []
-    short_rows = bundle.get("near_short_blocked") or []
-
+    # Every horizon scans the SAME full universe (self-sustained — no old-scanner
+    # buy/watch/medium/extended buckets). The horizon changes only each desk's
+    # lookback + ranking, never the universe it may pick from.
     horizons = {}
-    for hz, src in (("swing", swing_src), ("position", pos_src), ("invest", inv_src)):
-        rows = [_enrich(r, live) for r in src if r.get("ticker")]
-        byt = {r["t"]: r for r in rows}
-        desks = _build_pool(rows, fullrows, flow, short_rows, byt, insider, congress, ctx)
-        _confluence(desks)
-        horizons[hz] = desks
+    for hz in ("swing", "position", "invest"):
+        books = _build_pool(fullrows, flow, ctx, hz, insider, congress)
+        _confluence(books)
+        horizons[hz] = {"books": books, "best": _best_ideas(books, states)}
 
     # assemble ordered desk descriptors with edge + state (shared across horizons)
     desk_descriptors = []
@@ -477,9 +603,9 @@ def build_from_disk(live=None):
 def desk_tickers(payload):
     """Every ticker shown across all desks/horizons — for the Schwab batch."""
     syms = set()
-    for desks in (payload.get("horizons") or {}).values():
-        for lst in desks.values():
-            for r in lst:
+    for hz in (payload.get("horizons") or {}).values():
+        for bk in (hz.get("books") or {}).values():
+            for r in bk.get("rows") or []:
                 if r.get("t"):
                     syms.add(r["t"])
     return sorted(syms)
@@ -488,8 +614,12 @@ def desk_tickers(payload):
 if __name__ == "__main__":
     import sys
     p = build_from_disk()
-    counts = {k: len(v) for k, v in (p["horizons"]["swing"]).items()}
-    print("regime:", p["regime"]["regime4"], "| swing desk counts:", counts)
+    sw = p["horizons"]["swing"]["books"]
+    counts = {k: f"{len(v['rows'])}/{v['n']}" for k, v in sw.items()}
+    print("regime:", p["regime"]["regime4"], "| swing desks (shown/scanned):", counts)
+    print("best ideas:", [(b["t"], b["n"], b["desks"]) for b in p["horizons"]["swing"]["best"][:6]])
     print("total distinct tickers:", len(desk_tickers(p)))
+    if "--json" in sys.argv:
+        print(json.dumps(p, default=str)[:1500])
     if "--json" in sys.argv:
         print(json.dumps(p, default=str)[:2000])
