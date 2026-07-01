@@ -47,6 +47,7 @@
   .dk-vc.buy{color:#08120d;background:var(--dk-good)}
   .dk-vc.watch{color:var(--dk-warn);border:1px solid #3a3016}
   .dk-vc.avoid{color:var(--dk-faint);border:1px solid var(--dk-line)}
+  .dk-vc.pass{color:var(--dk-faint);border:1px dashed var(--dk-line)}
   .dk-vc.short{color:#120a08;background:var(--dk-bad)}
   .dk-acc{font-family:'SF Mono',monospace;font-size:9px;font-weight:800;color:var(--dk-gold);background:#1a160c;border:1px solid #3a3016;border-radius:5px;padding:0 4px;margin-left:3px}
   .dk-live{font-size:8px;color:var(--dk-good);margin-left:3px}
@@ -122,10 +123,11 @@
   }
 
   function verdictChip(r, ck) {
-    const vd = (ck === "short") ? "SHORT" : String(r.verdict || "").toUpperCase();
+    const vd = String(r._dv || "").toUpperCase();  // this desk's OWN verdict, not the scanner's
     if (!vd) return null;
-    const cls = vd === "BUY" ? "buy" : (vd === "WATCH" || vd === "WAIT") ? "watch" : vd === "SHORT" ? "short" : "avoid";
-    return React.createElement("span", { className: "dk-vc " + cls, key: "vc", title: "Scan verdict — click card for the full trade ticket" }, vd);
+    const cls = vd === "BUY" ? "buy" : vd === "WATCH" ? "watch" : vd === "SHORT" ? "short"
+      : vd === "PASS" ? "pass" : "avoid";
+    return React.createElement("span", { className: "dk-vc " + cls, key: "vc", title: "This desk's own call from raw signals — click card for the full deep-dive" }, vd);
   }
 
   function Card({ r, i, ck, onTicker }) {

@@ -119,8 +119,32 @@ def _enrich(r, live=None):
         t1=ctp.get("target1"),
         fwd_pe=xf.get("fwd_pe"), ps=xf.get("ps"),
         roe=(fe.get("roe_pct") or xf.get("roe")), gm=fe.get("gross_margin_pct"),
-        short_float=fe.get("short_float_pct"), above200=tech.get("above_sma200"),
+        short_float=fe.get("short_float_pct"),
     )
+    # --- raw structural signals for the per-desk BUY checklists (from the scan) ---
+    ind = tech.get("indicators") or {}
+    sr = tech.get("sr") or {}
+    o["adx"] = ind.get("adx")
+    o["bull_stack"] = ind.get("bullish_stack")
+    o["ema8"] = ind.get("ema8")
+    o["ema21"] = ind.get("ema21")
+    o["ema50i"] = ind.get("ema50")
+    o["above50"] = ind.get("above_50ema")
+    o["above200"] = ind.get("above_200sma")
+    o["vcp"] = ind.get("vcp")
+    o["near_vcp"] = ind.get("near_vcp")
+    o["squeeze_on"] = ind.get("squeeze_on")
+    o["squeeze_fired"] = ind.get("squeeze_fired")
+    o["at_52wbo"] = ind.get("at_52w_breakout")
+    o["near52h"] = ind.get("near_52w_high")
+    o["vcp_pivot"] = ind.get("vcp_pivot")
+    o["pocket_pivot"] = ind.get("pocket_pivot")
+    o["bo_vol"] = ind.get("breakout_vol_ratio")
+    o["resistance"] = ind.get("resistance") or sr.get("resistance")
+    o["stoch_os"] = ind.get("stoch_oversold")
+    o["cat_tags"] = r.get("catalyst_tags") or []
+    o["est_rev"] = xf.get("estimate_revision")
+    o["avg_volume"] = r.get("avg_volume")
     o["_mom"] = _n(o["rs"])
     o["_qual"] = VGM.get(o["vgm"], 50)
     o["_trend"] = _shp(o["sharpe"])
@@ -175,6 +199,119 @@ def _top(pool, key, k=7):
     return sorted(pool, key=key, reverse=True)[:k]
 
 
+def _pct_threshold(vals, p):
+    xs = sorted(v for v in vals if v is not None)
+    if not xs:
+        return None
+    idx = min(len(xs) - 1, max(0, int(math.ceil(p / 100.0 * len(xs))) - 1))
+    return xs[idx]
+
+
+def _desk_verdict(desk, r, ctx):
+    """Each desk's OWN BUY call, computed from raw signals (NOT the scanner's
+    composite verdict). px is the live Schwab price when present, else scan close —
+    so structural checks (price vs EMA / pivot / zone) re-evaluate intraday."""
+    px = _n(r.get("price"))
+    rs = _n(r.get("rs"))
+    adx = _n(r.get("adx"))
+    sharpe = _n(r.get("sharpe"))
+    rvol = _n(r.get("rvol"))
+    ema8 = _n(r.get("ema8"))
+
+    if desk == "mom":  # Minervini/O'Neil trend leadership
+        px_ok = (not px or not ema8 or px > ema8)
+        if rs >= 90 and r.get("bull_stack") and adx >= 25 and sharpe >= 1.5 and rvol >= 1.2 and px_ok:
+            return "BUY"
+        if rs >= 85 and r.get("bull_stack") and (adx >= 20 or sharpe >= 1.0):
+            return "WATCH"
+        return "PASS"
+
+    if desk == "bo":  # VCP / squeeze breakout through pivot on volume
+        trig = _n(r.get("vcp_pivot")) or _n(r.get("resistance"))
+        at_trigger = bool(r.get("at_52wbo")) or (px and trig and px >= trig * 0.99)
+        setup = r.get("vcp") or r.get("squeeze_fired") or r.get("at_52wbo") or r.get("pocket_pivot")
+        volx = _n(r.get("bo_vol")) >= 1.3 or rvol >= 1.5
+        if setup and at_trigger and volx:
+            return "BUY"
+        if r.get("near_vcp") or r.get("squeeze_on") or r.get("near52h"):
+            return "WATCH"
+        return "PASS"
+
+    if desk == "pb":  # pullback to value zone in an uptrend, 3:1 R:R
+        lo, hi = _n(r.get("entry_lo")), _n(r.get("entry_hi"))
+        inzone = (px and lo and hi and lo <= px <= hi) or r.get("state") == "AT_ZONE" or r.get("eq") == "FRESH"
+        if r.get("above50") and inzone and _n(r.get("_rr")) >= 3:
+            return "BUY"
+        if r.get("above50") and r.get("state") in ("APPROACHING", "AT_ZONE", "PULLBACK"):
+            return "WATCH"
+        return "PASS"
+
+    if desk == "qf":  # top-decile cross-sectional factor blend
+        f = r.get("_factor")
+        if ctx.get("factor_p90") is not None and f is not None and f >= ctx["factor_p90"] and _n(r.get("_qual")) >= 60:
+            return "BUY"
+        if ctx.get("factor_p75") is not None and f is not None and f >= ctx["factor_p75"]:
+            return "WATCH"
+        return "PASS"
+
+    if desk == "cat":  # confirmed catalyst (PEAD/UOA/pivot), holding above EMA21
+        tags = set(r.get("cat_tags") or [])
+        t1 = bool(tags & {"PEAD", "UOA", "VCP", "POCKET_PIVOT"}) or r.get("cat") == 1 or r.get("_pcr") is not None
+        ema21 = _n(r.get("ema21"))
+        if t1 and (not px or not ema21 or px > ema21):
+            return "BUY"
+        if tags:
+            return "WATCH"
+        return "PASS"
+
+    if desk == "mr":  # oversold bounce with the long-term trend intact
+        rsi = _n(r.get("rsi"))
+        if rsi and rsi < 30 and r.get("above200"):
+            return "BUY"
+        if rsi and rsi < 38 and r.get("above200"):
+            return "WATCH"
+        return "PASS"
+
+    if desk == "val":  # cheap-decile, quality-gated, revisions not falling
+        cheap = _n(r.get("_val")) >= 70
+        quality = _n(r.get("roe")) > 0
+        not_down = r.get("est_rev") != "down"
+        if cheap and quality and not_down:
+            return "BUY"
+        if _n(r.get("_val")) >= 60 and quality:
+            return "WATCH"
+        return "PASS"
+
+    if desk == "qual":  # GARP — high ROE + durable margins
+        if _n(r.get("_qc")) >= 70 and _n(r.get("roe")) >= 15 and _n(r.get("gm")) >= 40:
+            return "BUY"
+        if _n(r.get("_qc")) >= 55:
+            return "WATCH"
+        return "PASS"
+
+    if desk == "smart":  # membership = a cluster / congressional buy fired
+        return "BUY"
+
+    if desk == "def":  # only a BUY when the regime actually calls for defense
+        if ctx.get("regime") in ("risk_off_trending", "risk_off", "panic") and rs >= 50:
+            return "BUY"
+        return "WATCH"
+
+    if desk == "short":  # bearish structure + relative weakness
+        ema50 = _n(r.get("ema50i"))
+        if px and ema50 and px < ema50 and adx >= 20 and rs <= 30:
+            return "SHORT"
+        return "AVOID"
+
+    return "PASS"
+
+
+def _tag(desk, rows, ctx):
+    """Attach each desk's own verdict as `_dv` on shallow row copies (a ticker can
+    be BUY on one desk and PASS on another — the verdict is per-desk)."""
+    return [dict(r, _dv=_desk_verdict(desk, r, ctx)) for r in rows]
+
+
 def _edge(setup_stats, family, fallback):
     s = ((setup_stats or {}).get("setups") or {}).get(family or "")
     if not s or not s.get("n"):
@@ -207,8 +344,9 @@ def _desk_states(regime4):
     return out
 
 
-def _build_pool(rows, fullrows, flow, short_rows, byt, insider, congress):
-    """Return {desk_key: [rows]} for one horizon pool."""
+def _build_pool(rows, fullrows, flow, short_rows, byt, insider, congress, ctx):
+    """Return {desk_key: [rows]} for one horizon pool, each row tagged with its
+    desk-native verdict (`_dv`)."""
     mom = _top(rows, lambda r: (r["_mom"], r["_trend"], _n(r["score"])))
     bo = _top([r for r in rows if r["setup"] == "Breakout Expansion"],
               lambda r: (_n(r["rvol"]), r["_mom"]))
@@ -238,8 +376,9 @@ def _build_pool(rows, fullrows, flow, short_rows, byt, insider, congress):
         bt = r.get("bear_type")
         o["_bear"] = bt if isinstance(bt, str) and bt else "breakdown"
         sh.append(o)
-    return {"mom": mom, "bo": bo, "pb": pb, "qf": qf, "cat": cat, "mr": mr,
-            "val": val, "smart": smart, "qual": qual, "def": dfd, "short": sh}
+    raw = {"mom": mom, "bo": bo, "pb": pb, "qf": qf, "cat": cat, "mr": mr,
+           "val": val, "smart": smart, "qual": qual, "def": dfd, "short": sh}
+    return {k: _tag(k, v, ctx) for k, v in raw.items()}
 
 
 def _confluence(desks):
@@ -272,6 +411,13 @@ def build(bundle, setup_stats=None, live=None, insider=None, congress=None):
     all_scored = bundle.get("all_scored") or []
     fullrows = [_enrich(r, live) for r in all_scored if r.get("ticker")]
 
+    # cross-sectional context for the quant desk + regime for the defensive desk
+    ctx = {
+        "regime": regime4,
+        "factor_p90": _pct_threshold([r["_factor"] for r in fullrows], 90),
+        "factor_p75": _pct_threshold([r["_factor"] for r in fullrows], 75),
+    }
+
     # per-horizon actionable pools
     swing_src = (bundle.get("buy_candidates") or []) + (bundle.get("watch_list") or [])
     pos_src = bundle.get("medium_term_picks") or []
@@ -282,7 +428,7 @@ def build(bundle, setup_stats=None, live=None, insider=None, congress=None):
     for hz, src in (("swing", swing_src), ("position", pos_src), ("invest", inv_src)):
         rows = [_enrich(r, live) for r in src if r.get("ticker")]
         byt = {r["t"]: r for r in rows}
-        desks = _build_pool(rows, fullrows, flow, short_rows, byt, insider, congress)
+        desks = _build_pool(rows, fullrows, flow, short_rows, byt, insider, congress, ctx)
         _confluence(desks)
         horizons[hz] = desks
 
