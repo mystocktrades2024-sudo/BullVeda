@@ -57,6 +57,7 @@ const RAIL_GROUPS = [
     { id: "news",          icon: "news",      label: "News · Sentiment",count: 24, tone: "blue" },
   ]},
   { group: "Discover", items: [
+    { id: "screener-desks",icon: "strategy",  label: "Screener Desks",  count: 11, tone: "gn" },
     { id: "momentum",      icon: "momentum",  label: "Momentum",        count: 22, tone: "copper" },
     { id: "earnings-ai",   icon: "epred",     label: "Earnings AI",      count: 22, tone: "gn" },
     { id: "ai-predict",    icon: "ai",        label: "ML Predictions",  count: 5,  tone: "violet" },

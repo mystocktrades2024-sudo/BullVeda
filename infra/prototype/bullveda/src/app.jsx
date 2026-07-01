@@ -309,6 +309,10 @@ function App() {
             <div className="main-home">
               <SurfaceLab onTicker={handleTickerClick} />
             </div>
+          ) : surface === "screener-desks" ? (
+            <div className="main-home">
+              <SurfaceDesks onTicker={handleTickerClick} />
+            </div>
           ) : surface === "momentum" ? (
             <div className="main-home">
               <SurfaceMomentum onTicker={handleTickerClick} />

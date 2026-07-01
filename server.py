@@ -669,6 +669,69 @@ async def spark_api(syms: str = "", auth: HTTPBasicCredentials = Depends(_check_
     return {"sparks": await _sparks_cached(wanted)}
 
 
+# ── Screener Desks (11 archetype books, regime-aware), mtime-cached ──
+# Re-presents the daily scan into eleven trader-archetype books (momentum / breakout /
+# pullback / quant-factor / catalyst / mean-reversion / value / smart-money / quality /
+# defensive / short). DISPLAY LAYER — adds no signal, mutates no score. The heavy build
+# lives in screener_desks.py; the Schwab live overlay (price/zone, 0 EODHD) is written
+# every 5 min by run_screener_desks_live.py and merged here via its file mtime.
+_DESKS_CACHE = {"key": None, "data": None}
+
+def _read_desks_live():
+    import json as _j
+    try:
+        d = _j.loads((_PROTOTYPE_DIR / "screener_desks_live.json").read_text())
+        return d if isinstance(d, dict) else None
+    except Exception:
+        return None
+
+def _build_desks_payload():
+    import json as _j, screener_desks as _sd
+    bundle = _j.loads((BASE_DIR / "cache" / "last_bundle.json").read_text())
+    def _load(rel, key=None):
+        try:
+            d = _j.loads((BASE_DIR / rel).read_text())
+            return (d.get(key) or []) if key else d
+        except Exception:
+            return [] if key else {}
+    stats = _load("cache/setup_stats.json")
+    ins = _load("cache/insider_cluster.json", "candidates")
+    con = _load("cache/congressional_picks.json", "candidates")
+    live = _read_desks_live()
+    quotes = (live or {}).get("quotes") if isinstance(live, dict) else None
+    payload = _sd.build(bundle, stats, live=quotes, insider=ins, congress=con)
+    if isinstance(live, dict):
+        payload["live_at"] = live.get("refreshed_at")
+    return payload
+
+@app.get("/api/screener_desks")
+async def screener_desks_api(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """11 archetype 'desk' books from the daily scan bundle + per-setup Wilson edge,
+    regime-aware LEADING/ACTIVE/DORMANT states, cross-desk confluence. Live price/zone
+    overlay from Schwab (0 EODHD) merged when the 5-min refresher has written it."""
+    if isinstance(auth, Response):
+        return auth
+    import os as _os
+    try:
+        mt = _os.path.getmtime(BASE_DIR / "cache" / "last_bundle.json")
+    except Exception as e:
+        raise HTTPException(500, str(e))
+    try:
+        live_mt = _os.path.getmtime(_PROTOTYPE_DIR / "screener_desks_live.json")
+    except Exception:
+        live_mt = 0
+    key = (mt, live_mt)
+    if _DESKS_CACHE["key"] == key and _DESKS_CACHE["data"] is not None:
+        return _DESKS_CACHE["data"]
+    try:
+        data = await _asyncio.get_event_loop().run_in_executor(None, _build_desks_payload)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+    _DESKS_CACHE["key"] = key
+    _DESKS_CACHE["data"] = data
+    return data
+
+
 # ── Per-ticker decision history (for the Overview "what changed in 24h" panel) ──
 # Index data/decision_log.jsonl by ticker, mtime-cached (the log appends once/scan).
 _DLOG_CACHE = {"mtime": 0.0, "by_ticker": None}
