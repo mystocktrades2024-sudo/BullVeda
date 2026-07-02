@@ -721,7 +721,11 @@ async def screener_desks_api(auth: HTTPBasicCredentials = Depends(_check_auth)):
         live_mt = _os.path.getmtime(_PROTOTYPE_DIR / "screener_desks_live.json")
     except Exception:
         live_mt = 0
-    key = (mt, live_mt)
+    try:
+        edge_mt = _os.path.getmtime(BASE_DIR / "cache" / "desk_edge_stats.json")
+    except Exception:
+        edge_mt = 0
+    key = (mt, live_mt, edge_mt)
     if _DESKS_CACHE["key"] == key and _DESKS_CACHE["data"] is not None:
         return _DESKS_CACHE["data"]
     try:
