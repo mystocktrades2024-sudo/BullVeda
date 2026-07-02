@@ -142,6 +142,8 @@ def _enrich(r, live=None):
     o["bo_vol"] = ind.get("breakout_vol_ratio")
     o["resistance"] = ind.get("resistance") or sr.get("resistance")
     o["stoch_os"] = ind.get("stoch_oversold")
+    o["bb_pct_b"] = ind.get("bb_pct_b")           # Bollinger position (top-of-band = stretched)
+    o["stoch_ob"] = ind.get("stoch_overbought")   # StochRSI overbought
     o["cat_tags"] = r.get("catalyst_tags") or []
     o["est_rev"] = xf.get("estimate_revision")
     o["avg_volume"] = r.get("avg_volume")
@@ -256,6 +258,31 @@ def _hmom(r, hz):
     return _n(r.get("rs"))
 
 
+def _extended(r):
+    """Technical chase gate — is the stock a bad entry RIGHT NOW (current bars only,
+    no history)? Returns (is_extended, reasons). Two 'strong' disqualifiers or two
+    'minor' ones flag it. This is what would demote CGNX/GTX from BUY to WATCH."""
+    px = _n(r.get("price")); ema21 = _n(r.get("ema21")); atrp = _n(r.get("atr"))
+    strong, minor = [], []
+    if px and ema21 and atrp > 0:
+        ea = (px - ema21) / px * 100 / atrp     # extension above EMA21 in ATR units
+        if ea > 1.5:
+            strong.append(f"{ea:.1f}ATR>EMA21")   # clear blow-off extension
+        elif ea > 1.0:
+            minor.append(f"{ea:.1f}ATR>EMA21")
+    if r.get("near52h") and not r.get("at_52wbo"):
+        minor.append("52w-high, no breakout")     # consolidating-at-high alone is OK
+    bbb = _n(r.get("bb_pct_b"))
+    if bbb and bbb > 0.92:
+        minor.append("%b>0.92")
+    if r.get("stoch_ob"):
+        minor.append("StochRSI OB")
+    if _n(r.get("rsi")) >= 72:
+        minor.append(f"RSI{_n(r.get('rsi')):.0f}")
+    ext = len(strong) >= 1 or len(minor) >= 2      # a blow-off, or 2+ warning signs
+    return ext, (strong + minor)
+
+
 def _ck(cond, label):
     return ("✓ " if cond else "✗ ") + label
 
@@ -290,7 +317,12 @@ def _desk_verdict(desk, r, ctx, hz="swing"):
             c = [r.get("above200"), py >= 20, ph >= 0]
             why = [_ck(c[0], ">200EMA"), _ck(c[1], f"12mo{py:+.0f}%≥20"), _ck(c[2], f"6mo{ph:+.0f}%>0")]
             watch = r.get("above200") and py >= 10
-        return ("BUY", why) if all(c) else ("WATCH", why) if watch else ("PASS", why)
+        # even momentum shouldn't chase a blow-off extension — demote to WATCH
+        ext, exr = _extended(r) if hz == "swing" else (False, [])
+        why.append(_ck(not ext, "not extended" + ((" — " + ", ".join(exr)) if ext else "")))
+        if all(c) and not ext:
+            return "BUY", why
+        return ("WATCH", why) if (watch or all(c)) else ("PASS", why)
 
     if desk == "bo":  # VCP / squeeze breakout through pivot on volume
         trig = _n(r.get("vcp_pivot")) or _n(r.get("resistance"))
@@ -321,24 +353,27 @@ def _desk_verdict(desk, r, ctx, hz="swing"):
         p90 = ctx.get("factor_p90")
         p75 = ctx.get("factor_p75")
         top = p90 is not None and f is not None and f >= p90 and _n(r.get("_qual")) >= 60
-        timing_ok = (rsi < 70) and (not extended)
-        why = [_ck(top, f"factor {f:.0f}≥p90 {(_n(p90)):.0f}"), _ck(rsi < 70, f"RSI{rsi:.0f}<70"), _ck(not extended, "not extended")]
-        if top and timing_ok:
+        ext, exr = _extended(r)
+        why = [_ck(top, f"factor {f:.0f}≥p90 {(_n(p90)):.0f}"),
+               _ck(not ext, "not extended" + ((" — " + ", ".join(exr)) if ext else ""))]
+        if top and not ext:
             return "BUY", why
         if top or (p75 is not None and f is not None and f >= p75):
             return "WATCH", why  # ranks high but timing unconfirmed
         return "PASS", why
 
-    if desk == "cat":  # confirmed catalyst (PEAD/UOA/pivot), holding above EMA21
+    if desk == "cat":  # catalyst present + holding above EMA21 + NOT a chase entry
         tags = set(r.get("cat_tags") or [])
-        t1 = bool(tags & {"PEAD", "UOA", "VCP", "POCKET_PIVOT"}) or r.get("cat") == 1 or r.get("_pcr") is not None
+        cat_present = bool(tags & {"PEAD", "UOA", "VCP", "POCKET_PIVOT"}) or r.get("cat") == 1 or r.get("_pcr") is not None
         ema21 = _n(r.get("ema21"))
         above = (not px or not ema21 or px > ema21)
-        why = [_ck(t1, "T1 catalyst"), _ck(above, "holding >EMA21")]
-        if t1 and above:
+        ext, exr = _extended(r)
+        why = [_ck(cat_present, "catalyst present"), _ck(above, ">EMA21"),
+               _ck(not ext, "not extended" + ((" — " + ", ".join(exr)) if ext else ""))]
+        if cat_present and above and not ext:
             return "BUY", why
-        if tags:
-            return "WATCH", why
+        if cat_present or tags:
+            return "WATCH", why    # good name, but chasing → wait for pullback
         return "PASS", why
 
     if desk == "mr":  # oversold bounce with the long-term trend intact
