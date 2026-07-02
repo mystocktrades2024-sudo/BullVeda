@@ -39237,6 +39237,14 @@ window.SurfacePlaybook = SurfacePlaybook;
   .dk-empty{color:var(--dk-faint);font-size:10.5px;padding:14px 10px;text-align:center;font-style:italic}
   .dk-foot{color:var(--dk-faint);font-size:11px;margin-top:18px;border-top:1px solid var(--dk-line);padding-top:11px;max-width:960px}
   .dk-load{color:var(--dk-dim);padding:40px;text-align:center}
+  .dk-fresh{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-family:'SF Mono',monospace;font-size:10.5px;color:var(--dk-faint);margin:0 0 10px}
+  .dk-fresh .f{color:var(--dk-dim)}
+  .dk-fresh b{color:var(--dk-txt);font-weight:700}
+  .dk-fresh .dot{width:6px;height:6px;border-radius:50%;background:var(--dk-good);display:inline-block;margin-right:4px}
+  .dk-fresh .stale{background:var(--dk-warn)}
+  .dk-fresh button{background:var(--bg-2);border:1px solid var(--dk-line);border-radius:7px;color:var(--dk-dim);cursor:pointer;font:inherit;font-size:10.5px;padding:3px 9px}
+  .dk-fresh button:hover{color:var(--dk-txt);border-color:var(--line-2)}
+  .dk-fresh .cad{color:var(--dk-faint)}
   .dk-ctrls{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
   .dk-ctrls input{background:var(--bg-2);border:1px solid var(--dk-line);border-radius:8px;color:var(--dk-txt);padding:6px 10px;font:inherit;font-size:12px;width:150px}
   .dk-ctrls select{background:var(--bg-2);border:1px solid var(--dk-line);border-radius:8px;color:var(--dk-txt);padding:6px 8px;font:inherit;font-size:12px}
@@ -39278,6 +39286,16 @@ window.SurfacePlaybook = SurfacePlaybook;
   };
   function n(x) {
     return x === null || x === void 0 || isNaN(x) ? null : +x;
+  }
+  function agoStr(ts) {
+    if (!ts) return null;
+    let ms = Date.parse(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(ts) ? ts.replace(" ", "T") : ts);
+    if (isNaN(ms)) return null;
+    const s = Math.max(0, Math.floor((Date.now() - ms) / 1e3));
+    if (s < 90) return s + "s ago";
+    if (s < 5400) return Math.round(s / 60) + "m ago";
+    if (s < 172800) return Math.round(s / 3600) + "h ago";
+    return Math.round(s / 86400) + "d ago";
   }
   function pill(r) {
     const s = r._livestate || r.state, e = r.eq;
@@ -39384,14 +39402,29 @@ window.SurfacePlaybook = SurfacePlaybook;
     const [q, setQ] = React.useState("");
     const [buyOnly, setBuyOnly] = React.useState(false);
     const [sortBy, setSortBy] = React.useState("rank");
-    React.useEffect(() => {
+    const [fetchedAt, setFetchedAt] = React.useState(0);
+    const [, setTick] = React.useState(0);
+    const load = React.useCallback(() => {
       const BV = window.__BV;
       if (BV && BV.get) {
-        BV.get("/api/screener_desks").then((d) => setData(d)).catch((e) => setErr(String(e)));
+        BV.get("/api/screener_desks").then((d) => {
+          setData(d);
+          setErr(null);
+          setFetchedAt(Date.now());
+        }).catch((e) => setErr(String(e)));
       } else {
         setErr("boot adapter not ready");
       }
     }, []);
+    React.useEffect(() => {
+      load();
+      const iv = setInterval(load, 9e4);
+      const tk = setInterval(() => setTick((t) => t + 1), 5e3);
+      return () => {
+        clearInterval(iv);
+        clearInterval(tk);
+      };
+    }, [load]);
     if (err) return React.createElement("div", { className: "dk-wrap" }, React.createElement("div", { className: "dk-load" }, "Screener Desks unavailable: " + err));
     if (!data) return React.createElement("div", { className: "dk-wrap" }, React.createElement("div", { className: "dk-load" }, "Loading desks\u2026"));
     const reg = data.regime || {};
@@ -39476,12 +39509,30 @@ window.SurfacePlaybook = SurfacePlaybook;
         React.createElement("div", { className: "dk-cards", key: "c" }, body)
       ]);
     });
+    const fetchedAgo = fetchedAt ? Math.floor((Date.now() - fetchedAt) / 1e3) : null;
+    const liveAge = agoStr(data.live_at);
+    const liveStale = (() => {
+      const ms = data.live_at ? Date.parse(data.live_at) : 0;
+      return ms ? Date.now() - ms > 20 * 60 * 1e3 : true;
+    })();
+    const freshBar = React.createElement("div", { className: "dk-fresh" }, [
+      React.createElement("span", { className: "f", key: "b" }, [
+        React.createElement("span", { className: "dot" + (liveStale ? " stale" : ""), key: "d" }),
+        "Books re-ranked ",
+        React.createElement("b", { key: "g" }, data.generated_at || "\u2014")
+      ]),
+      data.live_at ? React.createElement("span", { className: "f", key: "l" }, ["\xB7 Live prices ", React.createElement("b", { key: "la" }, liveAge || "\u2014")]) : React.createElement("span", { className: "f", key: "l" }, "\xB7 Live prices: off-hours (close-anchored)"),
+      React.createElement("span", { className: "cad", key: "c" }, "\xB7 updates: scan ~5\xD7/day (mkt hrs) \xB7 live prices every 5 min \xB7 edge on backtest rerun"),
+      fetchedAgo != null ? React.createElement("span", { className: "cad", key: "p" }, "\xB7 tab auto-refreshes 90s (pulled " + (fetchedAgo < 90 ? fetchedAgo + "s" : Math.round(fetchedAgo / 60) + "m") + " ago)") : null,
+      React.createElement("button", { key: "r", onClick: load }, "\u21BB refresh now")
+    ]);
     return React.createElement("div", { className: "dk-wrap" }, [
       React.createElement(
         "div",
-        { key: "sub", style: { color: "var(--dk-dim)", fontSize: "12px", margin: "0 0 10px" } },
-        "Self-contained scanner \xB7 11 desks each decide BUY on their own raw-signal checklist over the FULL universe \xB7 " + (data.live_at ? "Schwab live " + data.live_at : "close-anchored") + " \xB7 hover a verdict for its why."
+        { key: "sub", style: { color: "var(--dk-dim)", fontSize: "12px", margin: "0 0 8px" } },
+        "Self-contained scanner \xB7 11 desks each decide BUY on their own raw-signal checklist over the FULL universe \xB7 hover a verdict for its why."
       ),
+      freshBar,
       regimeStrip,
       hzToggle,
       ctrls,
