@@ -232,6 +232,7 @@
     const [err, setErr] = React.useState(null);
     const [q, setQ] = React.useState("");
     const [buyOnly, setBuyOnly] = React.useState(false);
+    const [showOverflow, setShowOverflow] = React.useState(false);
     const [sortBy, setSortBy] = React.useState("rank");
     const [fetchedAt, setFetchedAt] = React.useState(0);
     const [, setTick] = React.useState(0);
@@ -265,6 +266,7 @@
       let out = (rows || []).slice();
       if (qlc) out = out.filter((r) => (r.t || "").toUpperCase().indexOf(qlc) >= 0);
       if (buyOnly) out = out.filter((r) => r._dv === "BUY" || r._dv === "SHORT");
+      else if (!showOverflow) out = out.filter((r) => r._dv === "BUY" || r._dv === "WATCH" || r._dv === "SHORT");  // hide PASS/AVOID overflow
       if (sortBy === "rr") out.sort((a, b) => (+b._rr || 0) - (+a._rr || 0));
       else if (sortBy === "chg") out.sort((a, b) => (b._chg == null ? -999 : +b._chg) - (a._chg == null ? -999 : +a._chg));
       else if (sortBy === "conf") out.sort((a, b) => (b._across || 0) - (a._across || 0));
@@ -287,6 +289,7 @@
     const ctrls = React.createElement("div", { className: "dk-ctrls" }, [
       React.createElement("input", { key: "q", placeholder: "search ticker…", value: q, onChange: (e) => setQ(e.target.value) }),
       React.createElement("button", { key: "bo", className: "tg" + (buyOnly ? " on" : ""), onClick: () => setBuyOnly(!buyOnly) }, buyOnly ? "✓ BUY only" : "BUY only"),
+      React.createElement("button", { key: "ov", className: "tg" + (showOverflow ? " on" : ""), onClick: () => setShowOverflow(!showOverflow), title: "also show names that rank high but don't clear the desk's buy bar" }, showOverflow ? "✓ show overflow" : "show overflow"),
       React.createElement("span", { className: "lbl", key: "sl" }, "sort"),
       React.createElement("select", { key: "s", value: sortBy, onChange: (e) => setSortBy(e.target.value) }, [
         React.createElement("option", { key: "rank", value: "rank" }, "desk rank"),
@@ -318,7 +321,7 @@
       let body;
       if (!rows.length) {
         body = React.createElement("div", { className: "dk-empty" },
-          (bk.rows && bk.rows.length) ? "No names match the current filter."
+          (bk.rows && bk.rows.length) ? ("No BUY/WATCH today — " + bk.rows.length + " ranked. Toggle 'show overflow' to see them.")
             : dorm ? "Regime does not call for this desk today. Auto-arms when conditions flip."
               : (d.emptymsg || "No qualifying names today."));
       } else {
