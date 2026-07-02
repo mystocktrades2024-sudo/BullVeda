@@ -368,7 +368,7 @@
         "Ticker lists updated ", React.createElement("b", { key: "g" }, data.generated_at || "—")]),
       React.createElement("span", { className: "cad", key: "sch" }, "· desks re-rank 5×/day (5:15 · 7:00 · 9:30 · 11:30 · 13:30 PT) — names can change at each"),
       data.live_at
-        ? React.createElement("span", { className: "f", key: "l" }, ["· Live prices ", React.createElement("b", { key: "la" }, liveAge || "—"), " (every 5 min)"])
+        ? React.createElement("span", { className: "f", key: "l" }, ["· Live prices ", React.createElement("b", { key: "la" }, liveAge || "—"), " (every 2 min)"])
         : React.createElement("span", { className: "f", key: "l" }, "· Live prices: off-hours (close-anchored)"),
       (data.live_track && data.live_track.n_resolved != null) ? React.createElement("span", { className: "cad", key: "lt" },
         "· desk track record: " + (data.live_track.n_resolved || 0) + " resolved / " + (data.live_track.n_open || 0) + " open (forward outcomes accruing daily)") : null,
