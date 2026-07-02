@@ -33,7 +33,7 @@ function SurfaceTrackRecord({ onTicker }) {
         <div className="wsx-hdr-l">
           <div className="wsx-eyebrow mono">TRACK RECORD · SIGNAL ACCOUNTABILITY</div>
           <h1 className="wsx-title mono">Track Record</h1>
-          <div className="wsx-sub mono dim2">did our calls work? · {SL.totalCalls} signals · 8 sources · forward returns D1–M12 · direction-aligned</div>
+          <div className="wsx-sub mono dim2">did our calls work? · {SL.totalCalls} signals · {SL.SOURCES.length} sources · forward returns D1–M12 · direction-aligned</div>
         </div>
         <div className="wsx-hdr-r">
           <div className="trk-toggle">

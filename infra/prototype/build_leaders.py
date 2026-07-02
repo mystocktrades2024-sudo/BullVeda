@@ -34,7 +34,14 @@ ROOT = Path(__file__).resolve().parents[2]          # SwingTrade/
 AUDIT_LEDGER = ROOT / "cache" / "audit_ledger.json"
 SIGNAL_LOG   = ROOT / "data"  / "signal_log.json"
 SCORE_HIST   = ROOT / "cache" / "score_history.json"
+DESK_LOG     = ROOT / "data"  / "desk_signal_log.jsonl"   # Screener Desk engine calls
+OHLCV_DIR    = ROOT / "data"  / "ohlcv"                    # cached bars (0 EODHD grid scoring)
 OUT          = Path(__file__).resolve().parent / "data_leaders.json"
+
+DESK_LABELS = {"mom": "Momentum Desk", "bo": "Breakout Desk", "pb": "Pullback Desk",
+               "qf": "Quant Desk", "cat": "Catalyst Desk", "mr": "Mean-Rev Desk",
+               "val": "Value Desk", "smart": "Smart-Money Desk", "qual": "Quality Desk",
+               "def": "Defensive Desk", "short": "Short Desk"}
 
 # ── horizons: the REAL grid audit_ledger carries (D1-D7 / W1-W8 / M1-M12) ──────
 def _build_horizons() -> list[dict]:
@@ -60,6 +67,7 @@ SOURCES = [
     {"id": "momentum",  "label": "Momentum"},
     {"id": "smc",       "label": "SMC / Patterns"},
     {"id": "verdict",   "label": "Overall Verdict"},
+    {"id": "desks",     "label": "Screener Desks"},
 ]
 
 # setup → engine. audit_ledger setups seen: pullback, momentum, bounce, breakout,
@@ -132,6 +140,87 @@ def _grid(r: dict) -> dict:
         v = r.get(h["id"].lower())
         out[h["id"]] = float(v) if isinstance(v, (int, float)) else None
     return out
+
+
+# ── Screener Desk engine calls → same ledger schema (forward grid from cached bars) ──
+_BARS_CACHE: dict = {}
+
+def _bars_close(ticker: str):
+    if ticker in _BARS_CACHE:
+        return _BARS_CACHE[ticker]
+    df = None
+    p = OHLCV_DIR / f"{ticker}.parquet"
+    if p.exists():
+        try:
+            import pandas as pd
+            df = pd.read_parquet(p)[["Close"]].copy()
+            df.index = pd.to_datetime(df.index)
+        except Exception:
+            df = None
+    _BARS_CACHE[ticker] = df
+    return df
+
+
+def _desk_grid(ticker: str, date_str: str, entry: float, short: bool) -> dict:
+    """Direction-aligned forward-return grid for a desk call, from cached daily bars
+    (0 EODHD). None where not enough forward bars yet (maturing)."""
+    df = _bars_close(ticker)
+    if df is None or not entry or entry <= 0:
+        return {h["id"]: None for h in HORIZONS}
+    import pandas as pd
+    fwd = df[df.index > pd.to_datetime(date_str)]
+    out: dict = {}
+    for h in HORIZONS:
+        nd = h["days"]
+        if len(fwd) >= nd:
+            c = float(fwd["Close"].iloc[nd - 1])
+            ret = (c - entry) / entry * 100.0
+            out[h["id"]] = round(-ret if short else ret, 3)
+        else:
+            out[h["id"]] = None
+    return out
+
+
+def _desk_signals(today: _dt.date, start_sid: int):
+    """Every Screener Desk BUY/SHORT call → ledger signals under source='desks'."""
+    if not DESK_LOG.exists():
+        return [], 0
+    out: list[dict] = []
+    sid = start_sid
+    for line in DESK_LOG.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            e = json.loads(line)
+        except Exception:
+            continue
+        ds = (e.get("date") or "")[:10]
+        if not ds:
+            continue
+        age = _age_days(ds, today)
+        if age is None:
+            continue
+        entry = float(e.get("entry") or 0)
+        short = (e.get("dir") == "short")
+        out.append({
+            "id":        f"s{sid}",
+            "source":    "desks",
+            "sym":       e.get("ticker"),
+            "dir":       "short" if short else "long",
+            "regime":    _regime_bucket(e.get("regime")),
+            "age":       age,
+            "date":      ds,
+            "refPrice":  entry or None,
+            "predProb":  None,
+            "verdict":   e.get("verdict"),
+            "setup":     DESK_LABELS.get(e.get("desk"), e.get("desk")),
+            "score":     None,
+            "scoreSeries": [],
+            "ret":       _desk_grid(e.get("ticker"), ds, entry, short),
+        })
+        sid += 1
+    return out, len(out)
 
 
 # ── score history (per-ticker daily composite score) ─────────────────────────
@@ -216,6 +305,14 @@ def build(today: _dt.date | None = None) -> dict:
             sid += 1
             month_hist[ds[:7]] = month_hist.get(ds[:7], 0) + 1
             src_hist[src] = src_hist.get(src, 0) + 1
+
+    # ── Screener Desk engine calls (source='desks') — its own forward track record ──
+    desk_sigs, n_desk = _desk_signals(today, sid)
+    signals.extend(desk_sigs)
+    for s in desk_sigs:
+        month_hist[s["date"][:7]] = month_hist.get(s["date"][:7], 0) + 1
+    if n_desk:
+        src_hist["desks"] = src_hist.get("desks", 0) + n_desk
 
     payload = {
         "generated_at":   _dt.datetime.now().isoformat(timespec="seconds"),
