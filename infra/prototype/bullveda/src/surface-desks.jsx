@@ -301,6 +301,8 @@
       React.createElement("input", { key: "pmin", className: "px", type: "number", placeholder: "min", value: pMin, onChange: (e) => setPMin(e.target.value) }),
       React.createElement("span", { className: "lbl", key: "pd" }, "–"),
       React.createElement("input", { key: "pmax", className: "px", type: "number", placeholder: "max", value: pMax, onChange: (e) => setPMax(e.target.value) }),
+      [["<$100", "", "100"], ["$100–250", "100", "250"], [">$250", "250", ""]].map(([lbl, mn, mx]) =>
+        React.createElement("button", { key: lbl, className: "tg" + ((pMin === mn && pMax === mx) ? " on" : ""), onClick: () => { setPMin(mn); setPMax(mx); } }, lbl)),
       React.createElement("button", { key: "bo", className: "tg" + (buyOnly ? " on" : ""), onClick: () => setBuyOnly(!buyOnly) }, buyOnly ? "✓ BUY only" : "BUY only"),
       React.createElement("button", { key: "ov", className: "tg" + (showOverflow ? " on" : ""), onClick: () => setShowOverflow(!showOverflow), title: "also show names that rank high but don't clear the desk's buy bar" }, showOverflow ? "✓ show overflow" : "show overflow"),
       React.createElement("span", { className: "lbl", key: "sl" }, "sort"),
