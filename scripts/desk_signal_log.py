@@ -92,6 +92,7 @@ def log_today():
                 if stop <= 0 and entry > 0 and atrp > 0:  # ATR fallback stop
                     stop = round(entry * (1 - ATR_STOP * atrp / 100), 4)
                 new.append({
+                    "source": "screener_desk_engine",
                     "date": date, "horizon": hz, "desk": desk, "ticker": r.get("t"),
                     "dir": "short" if r.get("_dv") == "SHORT" else "long",
                     "verdict": r.get("_dv"), "entry": entry, "stop": stop,

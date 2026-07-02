@@ -65,6 +65,7 @@
   .dk-empty{color:var(--dk-faint);font-size:10.5px;padding:14px 10px;text-align:center;font-style:italic}
   .dk-foot{color:var(--dk-faint);font-size:11px;margin-top:18px;border-top:1px solid var(--dk-line);padding-top:11px;max-width:960px}
   .dk-load{color:var(--dk-dim);padding:40px;text-align:center}
+  .dk-src{display:inline-block;font-family:'SF Mono',monospace;font-size:10px;font-weight:800;letter-spacing:.5px;color:var(--dk-gold);background:var(--amb-bg);border:1px solid transparent;border-radius:6px;padding:3px 10px;margin:0 0 8px}
   .dk-fresh{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-family:'SF Mono',monospace;font-size:10.5px;color:var(--dk-faint);margin:0 0 10px}
   .dk-fresh .f{color:var(--dk-dim)}
   .dk-fresh b{color:var(--dk-txt);font-weight:700}
@@ -362,11 +363,11 @@
     const freshBar = React.createElement("div", { className: "dk-fresh" }, [
       React.createElement("span", { className: "f", key: "b" }, [
         React.createElement("span", { className: "dot" + (liveStale ? " stale" : ""), key: "d" }),
-        "Books re-ranked ", React.createElement("b", { key: "g" }, data.generated_at || "—")]),
+        "Ticker lists updated ", React.createElement("b", { key: "g" }, data.generated_at || "—")]),
+      React.createElement("span", { className: "cad", key: "sch" }, "· desks re-rank 5×/day (5:15 · 7:00 · 9:30 · 11:30 · 13:30 PT) — names can change at each"),
       data.live_at
-        ? React.createElement("span", { className: "f", key: "l" }, ["· Live prices ", React.createElement("b", { key: "la" }, liveAge || "—")])
+        ? React.createElement("span", { className: "f", key: "l" }, ["· Live prices ", React.createElement("b", { key: "la" }, liveAge || "—"), " (every 5 min)"])
         : React.createElement("span", { className: "f", key: "l" }, "· Live prices: off-hours (close-anchored)"),
-      React.createElement("span", { className: "cad", key: "c" }, "· updates: scan ~5×/day (mkt hrs) · live prices every 5 min · edge on backtest rerun"),
       (data.live_track && data.live_track.n_resolved != null) ? React.createElement("span", { className: "cad", key: "lt" },
         "· desk track record: " + (data.live_track.n_resolved || 0) + " resolved / " + (data.live_track.n_open || 0) + " open (forward outcomes accruing daily)") : null,
       fetchedAgo != null ? React.createElement("span", { className: "cad", key: "p" }, "· tab auto-refreshes 90s (pulled " + (fetchedAgo < 90 ? fetchedAgo + "s" : Math.round(fetchedAgo / 60) + "m") + " ago)") : null,
@@ -374,8 +375,10 @@
     ]);
 
     return React.createElement("div", { className: "dk-wrap" }, [
+      React.createElement("div", { key: "src", className: "dk-src", title: "Every ticker + verdict on this tab is produced by the Screener Desk engine — not the signal scanner." },
+        "◆ SOURCE · SCREENER DESK ENGINE — self-contained, independent of the signal scanner"),
       React.createElement("div", { key: "sub", style: { color: "var(--dk-dim)", fontSize: "12px", margin: "0 0 8px" } },
-        "Self-contained scanner · 11 desks each decide BUY on their own raw-signal checklist over the FULL universe · hover a verdict for its why."),
+        "11 desks each decide BUY on their own raw-signal checklist over the FULL universe · hover a verdict for its why."),
       freshBar,
       regimeStrip, hzToggle, ctrls, bestStrip,
       React.createElement("div", { className: "dk-grid", key: "g" }, cols),
