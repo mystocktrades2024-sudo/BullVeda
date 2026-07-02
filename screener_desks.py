@@ -283,6 +283,34 @@ def _extended(r):
     return ext, (strong + minor)
 
 
+def _extended_breakout(r):
+    """Breakout-specific: a fresh trigger is fine, but if price has already run >1.5 ATR
+    PAST the pivot you're buying it late. Returns (is_late, reason)."""
+    px = _n(r.get("price")); atrp = _n(r.get("atr"))
+    trig = _n(r.get("vcp_pivot")) or _n(r.get("resistance"))
+    if px and trig and atrp > 0 and px > trig:
+        past = (px - trig) / px * 100 / atrp
+        if past > 1.5:
+            return True, f"{past:.1f}ATR past pivot"
+    return False, ""
+
+
+def _over_bounced(r):
+    """Short-specific (inverse extension): don't short a name that's already oversold /
+    bouncing / stretched to the downside. Returns (bad_short, reasons)."""
+    px = _n(r.get("price")); ema21 = _n(r.get("ema21")); atrp = _n(r.get("atr")); rsi = _n(r.get("rsi"))
+    reasons = []
+    if rsi and rsi < 35:
+        reasons.append(f"RSI{rsi:.0f}<35 oversold")
+    if r.get("stoch_os"):
+        reasons.append("StochRSI oversold")
+    if px and ema21 and atrp > 0:
+        below = (ema21 - px) / px * 100 / atrp
+        if below > 1.5:
+            reasons.append(f"{below:.1f}ATR<EMA21 stretched-down")
+    return (len(reasons) >= 1, reasons)
+
+
 def _ck(cond, label):
     return ("✓ " if cond else "✗ ") + label
 
@@ -298,7 +326,6 @@ def _desk_verdict(desk, r, ctx, hz="swing"):
     rvol = _eff_rvol(r)
     rsi = _n(r.get("rsi"))
     ema8 = _n(r.get("ema8"))
-    extended = r.get("state") in ("EXTENDED", "MISSED") or r.get("_livestate") == "EXTENDED"
 
     if desk == "mom":  # Minervini/O'Neil trend leadership (horizon-scaled)
         px_ok = (not px or not ema8 or px > ema8)
@@ -329,8 +356,10 @@ def _desk_verdict(desk, r, ctx, hz="swing"):
         at_trigger = bool(r.get("at_52wbo")) or (px and trig and px >= trig * 0.99)
         setup = r.get("vcp") or r.get("squeeze_fired") or r.get("at_52wbo") or r.get("pocket_pivot")
         volx = _n(r.get("bo_vol")) >= 1.3 or rvol >= 1.5
-        why = [_ck(setup, "VCP/squeeze/pivot"), _ck(at_trigger, "at trigger"), _ck(volx, f"vol {rvol:.1f}×")]
-        if setup and at_trigger and volx:
+        late, lr = _extended_breakout(r)   # already run past the pivot = buying late
+        why = [_ck(setup, "VCP/squeeze/pivot"), _ck(at_trigger, "at trigger"),
+               _ck(volx, f"vol {rvol:.1f}×"), _ck(not late, "fresh trigger" + ((" — " + lr) if late else ""))]
+        if setup and at_trigger and volx and not late:
             return "BUY", why
         if r.get("near_vcp") or r.get("squeeze_on") or r.get("near52h"):
             return "WATCH", why
@@ -395,10 +424,12 @@ def _desk_verdict(desk, r, ctx, hz="swing"):
             return "WATCH", why
         return "PASS", why
 
-    if desk == "qual":  # GARP — high ROE + durable margins
+    if desk == "qual":  # GARP — high ROE + durable margins + not a chase entry
         qc, roe, gm = _n(r.get("_qc")), _n(r.get("roe")), _n(r.get("gm"))
-        why = [_ck(qc >= 70, f"qual {qc:.0f}≥70"), _ck(roe >= 15, f"ROE{roe:.0f}≥15"), _ck(gm >= 40, f"GM{gm:.0f}≥40")]
-        if qc >= 70 and roe >= 15 and gm >= 40:
+        ext, exr = _extended(r)
+        why = [_ck(qc >= 70, f"qual {qc:.0f}≥70"), _ck(roe >= 15, f"ROE{roe:.0f}≥15"),
+               _ck(gm >= 40, f"GM{gm:.0f}≥40"), _ck(not ext, "not extended" + ((" — " + ", ".join(exr)) if ext else ""))]
+        if qc >= 70 and roe >= 15 and gm >= 40 and not ext:
             return "BUY", why
         if qc >= 55:
             return "WATCH", why
@@ -414,11 +445,13 @@ def _desk_verdict(desk, r, ctx, hz="swing"):
             return "BUY", why
         return "WATCH", why
 
-    if desk == "short":  # bearish structure + relative weakness
+    if desk == "short":  # bearish structure + relative weakness — but not into a bounce
         ema50 = _n(r.get("ema50i"))
         c = [px and ema50 and px < ema50, adx >= 20, rs <= 30]
-        why = [_ck(c[0], "px<EMA50"), _ck(c[1], f"ADX{adx:.0f}≥20"), _ck(c[2], f"RS{int(rs)}≤30")]
-        return ("SHORT", why) if all(c) else ("AVOID", why)
+        bounce, br = _over_bounced(r)   # inverse extension: don't short an oversold bounce
+        why = [_ck(c[0], "px<EMA50"), _ck(c[1], f"ADX{adx:.0f}≥20"), _ck(c[2], f"RS{int(rs)}≤30"),
+               _ck(not bounce, "not over-bounced" + ((" — " + ", ".join(br)) if bounce else ""))]
+        return ("SHORT", why) if (all(c) and not bounce) else ("AVOID", why)
 
     return "PASS", []
 
