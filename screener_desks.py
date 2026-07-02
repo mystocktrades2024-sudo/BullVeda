@@ -188,6 +188,13 @@ def _enrich(r, live=None):
         if lv is not None and _n(o.get("avg_volume")) > 0:
             frac = _n((live or {}).get("_dayfrac")) or 1.0
             o["_live_rvol"] = round(_n(lv) / (_n(o["avg_volume"]) * frac), 2)
+        # intraday technicals (RSI/EMA/ADX recomputed from Schwab live bar) override
+        # the scan's daily values so the extension/momentum/short gates run live
+        for src, dst in (("rsi", "rsi"), ("ema8", "ema8"), ("ema21", "ema21"),
+                         ("ema50", "ema50i"), ("adx", "adx")):
+            if q.get(src) is not None:
+                o[dst] = q[src]
+                o["_livetech"] = True
         lo, hi = _n(o["entry_lo"]), _n(o["entry_hi"])
         if lo and hi:
             if lo <= lp <= hi:
