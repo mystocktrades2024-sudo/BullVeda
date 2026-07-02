@@ -574,7 +574,7 @@ def _concentration(rows):
     return None
 
 
-def build(bundle, setup_stats=None, live=None, insider=None, congress=None, desk_edge=None):
+def build(bundle, setup_stats=None, live=None, insider=None, congress=None, desk_edge=None, desk_live=None):
     """Build the full /api/screener_desks payload from a scan bundle.
 
     bundle       : parsed cache/last_bundle.json
@@ -619,9 +619,13 @@ def build(bundle, setup_stats=None, live=None, insider=None, congress=None, desk
 
     # assemble ordered desk descriptors with edge + state (shared across horizons)
     desk_descriptors = []
+    dl_desks = (desk_live or {}).get("desks") or {}
     for key, name, who, how, color, fam, fb in DESK_META:
         d = {"key": key, "name": name, "who": who, "how": how, "color": color,
              "state": states.get(key, "act"), "edge": _edge(desk_edge, key, fb)}
+        lv = dl_desks.get(key)
+        if lv and lv.get("n"):
+            d["live"] = {"n": lv["n"], "wr": lv.get("wr"), "pf": lv.get("pf"), "er": lv.get("expectancy_R")}
         if key == "smart":
             d["emptymsg"] = SMART_EMPTY
         desk_descriptors.append(d)
@@ -640,6 +644,11 @@ def build(bundle, setup_stats=None, live=None, insider=None, congress=None, desk
         },
         "desks": desk_descriptors,
         "horizons": horizons,
+        "live_track": {
+            "n_resolved": ((desk_live or {}).get("_meta") or {}).get("n_resolved"),
+            "n_open": ((desk_live or {}).get("_meta") or {}).get("n_open"),
+            "updated": ((desk_live or {}).get("_meta") or {}).get("updated"),
+        },
     })
 
 
@@ -657,7 +666,8 @@ def build_from_disk(live=None):
     ins = (_load_json("cache/insider_cluster.json") or {}).get("candidates") or []
     con = (_load_json("cache/congressional_picks.json") or {}).get("candidates") or []
     de = (_load_json("cache/desk_edge_stats.json") or {}).get("desks") or {}
-    return build(bundle, stats, live=live, insider=ins, congress=con, desk_edge=de)
+    dl = _load_json("cache/desk_track_record.json") or {}
+    return build(bundle, stats, live=live, insider=ins, congress=con, desk_edge=de, desk_live=dl)
 
 
 def desk_tickers(payload):

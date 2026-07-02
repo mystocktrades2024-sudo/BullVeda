@@ -698,9 +698,10 @@ def _build_desks_payload():
     ins = _load("cache/insider_cluster.json", "candidates")
     con = _load("cache/congressional_picks.json", "candidates")
     de = _load("cache/desk_edge_stats.json", "desks")
+    dl = _load("cache/desk_track_record.json")
     live = _read_desks_live()
     quotes = (live or {}).get("quotes") if isinstance(live, dict) else None
-    payload = _sd.build(bundle, stats, live=quotes, insider=ins, congress=con, desk_edge=de)
+    payload = _sd.build(bundle, stats, live=quotes, insider=ins, congress=con, desk_edge=de, desk_live=dl)
     if isinstance(live, dict):
         payload["live_at"] = live.get("refreshed_at")
     return payload
@@ -725,7 +726,11 @@ async def screener_desks_api(auth: HTTPBasicCredentials = Depends(_check_auth)):
         edge_mt = _os.path.getmtime(BASE_DIR / "cache" / "desk_edge_stats.json")
     except Exception:
         edge_mt = 0
-    key = (mt, live_mt, edge_mt)
+    try:
+        tr_mt = _os.path.getmtime(BASE_DIR / "cache" / "desk_track_record.json")
+    except Exception:
+        tr_mt = 0
+    key = (mt, live_mt, edge_mt, tr_mt)
     if _DESKS_CACHE["key"] == key and _DESKS_CACHE["data"] is not None:
         return _DESKS_CACHE["data"]
     try:

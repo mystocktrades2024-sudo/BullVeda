@@ -90,6 +90,8 @@
   .dk-bi .d{font-size:9.5px;color:var(--dk-dim);margin-top:3px}
   .dk-cnt{font-size:9px;color:var(--dk-faint);font-family:'SF Mono',monospace;margin-top:6px}
   .dk-conc{font-size:9px;color:var(--dk-warn);font-family:'SF Mono',monospace;margin-top:3px}
+  .dk-livetr{font-size:9px;font-family:'SF Mono',monospace;margin-top:4px;color:var(--dk-good)}
+  .dk-livetr.neg{color:var(--dk-bad)}
   .dk-tkt{margin:6px 0 0 20px;font-family:'SF Mono',monospace;font-size:10px;display:flex;flex-direction:column;gap:4px;
     border-top:1px dashed var(--dk-line);padding-top:5px}
   .dk-tkt .ev{color:var(--dk-good)}
@@ -345,6 +347,8 @@
             React.createElement("span", { key: "n" }, d.name)]),
           React.createElement("div", { className: "who", key: "w" }, d.who),
           React.createElement("div", { className: "dk-edge " + ((d.edge && d.edge.class) || "e-unp"), key: "e" }, (d.edge && d.edge.text) || ""),
+          d.live ? React.createElement("div", { className: "dk-livetr" + ((d.live.er != null && d.live.er < 0) ? " neg" : ""), key: "lt", title: "forward outcomes of this desk's own live BUY calls" },
+            "◉ LIVE · n=" + d.live.n + " · WR " + Math.round((d.live.wr || 0) * 100) + "% · PF " + (d.live.pf != null ? (+d.live.pf).toFixed(2) : "—") + " · E[R] " + ((d.live.er >= 0 ? "+" : "") + d.live.er)) : null,
           React.createElement("div", { className: "dk-cnt", key: "c" }, rows.length + " shown · " + bk.n + " scanned"),
           bk.conc ? React.createElement("div", { className: "dk-conc", key: "cc" }, "⚠ concentrated · " + bk.conc.n + " of " + bk.conc.of + " " + bk.conc.sector) : null,
         ]),
@@ -363,6 +367,8 @@
         ? React.createElement("span", { className: "f", key: "l" }, ["· Live prices ", React.createElement("b", { key: "la" }, liveAge || "—")])
         : React.createElement("span", { className: "f", key: "l" }, "· Live prices: off-hours (close-anchored)"),
       React.createElement("span", { className: "cad", key: "c" }, "· updates: scan ~5×/day (mkt hrs) · live prices every 5 min · edge on backtest rerun"),
+      (data.live_track && data.live_track.n_resolved != null) ? React.createElement("span", { className: "cad", key: "lt" },
+        "· desk track record: " + (data.live_track.n_resolved || 0) + " resolved / " + (data.live_track.n_open || 0) + " open (forward outcomes accruing daily)") : null,
       fetchedAgo != null ? React.createElement("span", { className: "cad", key: "p" }, "· tab auto-refreshes 90s (pulled " + (fetchedAgo < 90 ? fetchedAgo + "s" : Math.round(fetchedAgo / 60) + "m") + " ago)") : null,
       React.createElement("button", { key: "r", onClick: load }, "↻ refresh now"),
     ]);
