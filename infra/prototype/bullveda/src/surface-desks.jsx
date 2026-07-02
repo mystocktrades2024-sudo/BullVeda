@@ -80,6 +80,14 @@
   .dk-bi .px{font-family:'SF Mono',monospace;font-size:11px;color:var(--dk-dim);margin-left:6px}
   .dk-bi .d{font-size:9.5px;color:var(--dk-dim);margin-top:3px}
   .dk-cnt{font-size:9px;color:var(--dk-faint);font-family:'SF Mono',monospace;margin-top:6px}
+  .dk-conc{font-size:9px;color:var(--dk-warn);font-family:'SF Mono',monospace;margin-top:3px}
+  .dk-tkt{margin:6px 0 0 20px;font-family:'SF Mono',monospace;font-size:10px;display:flex;flex-direction:column;gap:4px;
+    border-top:1px dashed var(--dk-line);padding-top:5px}
+  .dk-tkt .ev{color:var(--dk-good)}
+  .dk-tkt .chips{display:flex;flex-wrap:wrap;gap:4px}
+  .dk-tkt .c{font-size:8.5px;border:1px solid var(--dk-line);border-radius:5px;padding:1px 5px;color:var(--dk-faint)}
+  .dk-tkt .c.warn{color:var(--dk-warn);border-color:var(--dk-warn)}
+  .dk-tkt .c.bad{color:var(--dk-bad);border-color:var(--dk-bad)}
   `;
 
   function ensureStyle() {
@@ -147,6 +155,31 @@
     return React.createElement("span", { className: "dk-vc " + cls, key: "vc", title: why }, vd);
   }
 
+  function fmtUsd(v) {
+    if (v == null) return "—";
+    if (v >= 1e9) return "$" + (v / 1e9).toFixed(1) + "B";
+    if (v >= 1e6) return "$" + Math.round(v / 1e6) + "M";
+    return "$" + Math.round(v / 1e3) + "K";
+  }
+
+  function ticket(r) {
+    const t = r._tkt;
+    if (!t) return null;
+    const line = "P " + Math.round((t.p || 0) * 100) + "% · E[R] " + ((t.ev >= 0 ? "+" : "") + t.ev)
+      + (t.size ? " · size " + t.size + "% (risk " + t.risk + "%)" : "") + (t.measured ? "" : " · edge est");
+    const chips = [];
+    if (t.adv != null) chips.push(["$ADV " + fmtUsd(t.adv) + (t.thin ? " ⚠thin" : ""), t.thin ? "warn" : ""]);
+    if (t.ear_days != null && t.ear_days >= 0 && t.ear_days <= 10) chips.push(["⚠ earnings " + t.ear_days + "d", "bad"]);
+    else if (t.ear_days != null && t.ear_days >= 0) chips.push(["earnings " + t.ear_days + "d", ""]);
+    if (t.short_float != null && +t.short_float >= 10) chips.push(["short " + (+t.short_float).toFixed(0) + "% ⚠squeeze", "warn"]);
+    if (t.beta != null) chips.push(["β " + (+t.beta).toFixed(2), ""]);
+    return React.createElement("div", { className: "dk-tkt", key: "tkt" }, [
+      React.createElement("div", { className: "ev", key: "l" }, line),
+      chips.length ? React.createElement("div", { className: "chips", key: "c" },
+        chips.map((c, i) => React.createElement("span", { className: "c " + c[1], key: i }, c[0]))) : null,
+    ]);
+  }
+
   function Card({ r, i, ck, onTicker, maxSize }) {
     const conf = (r._across || 1) >= 2;
     const kids = [
@@ -166,11 +199,9 @@
         "entry ", React.createElement("b", { key: "b" }, "$" + (+r.entry_lo).toFixed(2) + "–" + (+r.entry_hi).toFixed(2)),
         " · stop $" + (+r.stop).toFixed(2) + (r.t1 != null ? " · T1 $" + (+r.t1).toFixed(2) : "")]));
     }
-    if (r._dv === "BUY" && maxSize) {
-      // per-position size = base 10% × regime multiplier × conviction (confluence)
-      const sz = Math.max(1, Math.round(10 * (maxSize / 100) * ((r._across || 1) >= 2 ? 1 : 0.6)));
-      kids.push(React.createElement("div", { className: "dk-plan", key: "sz", style: { color: "var(--dk-good)" } },
-        "suggested size ≈ " + sz + "% (base × regime × conviction)"));
+    if (r._dv === "BUY" || r._dv === "SHORT") {
+      const tk = ticket(r);
+      if (tk) kids.push(tk);
     }
     return React.createElement("div", { className: "dk-card" + (conf ? " conf" : ""), onClick: () => r.t && onTicker && onTicker(r.t) }, kids);
   }
@@ -275,6 +306,7 @@
           React.createElement("div", { className: "who", key: "w" }, d.who),
           React.createElement("div", { className: "dk-edge " + ((d.edge && d.edge.class) || "e-unp"), key: "e" }, (d.edge && d.edge.text) || ""),
           React.createElement("div", { className: "dk-cnt", key: "c" }, rows.length + " shown · " + bk.n + " scanned"),
+          bk.conc ? React.createElement("div", { className: "dk-conc", key: "cc" }, "⚠ concentrated · " + bk.conc.n + " of " + bk.conc.of + " " + bk.conc.sector) : null,
         ]),
         React.createElement("div", { className: "dk-cards", key: "c" }, body),
       ]);

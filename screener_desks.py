@@ -152,6 +152,11 @@ def _enrich(r, live=None):
     o["perf_y"] = fe.get("perf_year_pct")
     o["weekly_bull"] = ind.get("weekly_ema_bullish")
     o["rs63"] = ind.get("rs_63d_pct")
+    # pre-trade decision fields (trade ticket)
+    o["beta"] = r.get("beta")
+    earn = r.get("earnings") if isinstance(r.get("earnings"), dict) else {}
+    o["ear_days"] = earn.get("days_to_earnings")
+    o["ear_risk"] = earn.get("earnings_risk")
     o["_mom"] = _n(o["rs"])
     o["_qual"] = VGM.get(o["vgm"], 50)
     o["_trend"] = _shp(o["sharpe"])
@@ -383,30 +388,64 @@ def _desk_verdict(desk, r, ctx, hz="swing"):
     return "PASS", []
 
 
+def _ticket(desk, r, ctx):
+    """Pro pre-trade layer, all SELF-COMPUTED (never the old scanner's kelly/mc):
+    probability + expectancy from the desk's OWN R:R × its measured win-rate,
+    vol-targeted size from a fixed risk budget ÷ ATR-stop, plus $ADV / earnings /
+    short-float / beta straight from market data."""
+    de = (ctx.get("desk_edge") or {}).get(desk) or {}
+    wr = de.get("wilson_lb") or de.get("wr")          # conservative: Wilson lower bound
+    wr = _n(wr) if wr else 0.45                        # neutral prior when unmeasured
+    rr = _n(r.get("_rr")) or 2.4                       # ATR-implied 3:1.25 fallback
+    ev = round(wr * rr - (1 - wr) * 1.0, 2)            # expectancy in R
+    atrp = _n(r.get("atr"))
+    stop_dist = max(2.0, 1.25 * atrp) if atrp else None
+    RISK_BUDGET = 0.75                                 # % of account risked per trade
+    size = maxloss = None
+    if stop_dist:
+        size = round(RISK_BUDGET / (stop_dist / 100.0), 1)
+        size = min(size, 15.0, _n(ctx.get("max_size")) or 100.0)  # vol + regime capped
+        maxloss = round(size * stop_dist / 100.0, 2)
+    adv = None
+    if _n(r.get("price")) > 0 and _n(r.get("avg_volume")) > 0:
+        adv = _n(r.get("price")) * _n(r.get("avg_volume"))
+    return {
+        "ev": ev, "p": round(wr, 2), "rr": round(rr, 1),
+        "size": size, "maxloss": maxloss, "risk": RISK_BUDGET,
+        "adv": adv, "thin": (adv is not None and adv < 20e6),
+        "ear_days": r.get("ear_days"), "ear_risk": r.get("ear_risk"),
+        "short_float": r.get("short_float"), "beta": r.get("beta"),
+        "measured": bool(de.get("n") and not de.get("pending")),
+    }
+
+
 def _tag(desk, rows, ctx, hz):
-    """Attach each desk's own verdict (`_dv`) + reasons (`_why`) on shallow row copies
-    (a ticker can be BUY on one desk and PASS on another — the verdict is per-desk)."""
+    """Attach each desk's own verdict (`_dv`), reasons (`_why`), and trade-ticket
+    (`_tkt`) on shallow row copies (verdict + ticket are per-desk)."""
     out = []
     for r in rows:
         v, why = _desk_verdict(desk, r, ctx, hz)
-        out.append(dict(r, _dv=v, _why=" · ".join(why)))
+        out.append(dict(r, _dv=v, _why=" · ".join(why), _tkt=_ticket(desk, r, ctx)))
     return out
 
 
-def _edge(setup_stats, family, fallback):
-    s = ((setup_stats or {}).get("setups") or {}).get(family or "")
-    if not s or not s.get("n"):
-        return fallback or {"class": "e-unp", "text": "edge pending"}
-    nn = s.get("n"); wr = _n(s.get("wr")); pf = _n(s.get("pf")); pfh = _n(s.get("pf_haircut"))
-    if nn < 30:
-        cls, lab = "e-unp", "UNPROVEN"
+def _edge(desk_edge, key, fallback):
+    """Edge header from the desk's OWN measured stats (cache/desk_edge_stats.json —
+    ground-truth R-multiple attribution), not the old scanner's setup families."""
+    s = (desk_edge or {}).get(key)
+    if not s or s.get("pending") or not s.get("n"):
+        return fallback or {"class": "e-unp", "text": "edge pending — needs signal-replay"}
+    nn = s["n"]; wr = _n(s.get("wr")); pf = _n(s.get("pf")); pfh = _n(s.get("pf_haircut")); er = _n(s.get("expectancy_R"))
+    if s.get("low_sample") or nn < 20:
+        cls, lab = "e-unp", "LOW-N"
     elif pfh >= 1.10:
         cls, lab = "e-good", "EDGE ✓"
     elif pfh >= 1.0:
         cls, lab = "e-mid", "MARGINAL"
     else:
         cls, lab = "e-bad", "NO EDGE"
-    txt = f"{lab} · {family} n={nn} · WR {wr*100:.0f}% · PF {pf:.2f}→{pfh:.2f}"
+    approx = " ~approx" if s.get("approximate") else ""
+    txt = f"{lab}{approx} · n={nn} · WR {wr*100:.0f}% · PF {pf:.2f}→{pfh:.2f} · E[R] {er:+.2f}"
     return {"class": cls, "text": txt}
 
 
@@ -519,7 +558,23 @@ def _best_ideas(books, states):
     return out[:8]
 
 
-def build(bundle, setup_stats=None, live=None, insider=None, congress=None):
+def _concentration(rows):
+    """Self-contained list concentration: if one sector dominates a desk's shown names,
+    flag it (e.g., '5 of 12 Technology'). Uses only the desk's own rows."""
+    secs = defaultdict(int)
+    for r in rows:
+        if r.get("sector"):
+            secs[r["sector"]] += 1
+    if not secs:
+        return None
+    sector, cnt = max(secs.items(), key=lambda kv: kv[1])
+    total = len(rows)
+    if total and cnt >= 3 and cnt / total >= 0.4:
+        return {"sector": sector, "n": cnt, "of": total}
+    return None
+
+
+def build(bundle, setup_stats=None, live=None, insider=None, congress=None, desk_edge=None):
     """Build the full /api/screener_desks payload from a scan bundle.
 
     bundle       : parsed cache/last_bundle.json
@@ -545,6 +600,8 @@ def build(bundle, setup_stats=None, live=None, insider=None, congress=None):
 
     ctx = {
         "regime": regime4,
+        "desk_edge": desk_edge or {},
+        "max_size": reg.get("max_size_pct"),
         "factor_p90": _pct_threshold([r["_factor"] for r in fullrows], 90),
         "factor_p75": _pct_threshold([r["_factor"] for r in fullrows], 75),
     }
@@ -556,13 +613,15 @@ def build(bundle, setup_stats=None, live=None, insider=None, congress=None):
     for hz in ("swing", "position", "invest"):
         books = _build_pool(fullrows, flow, ctx, hz, insider, congress)
         _confluence(books)
+        for bk in books.values():
+            bk["conc"] = _concentration(bk["rows"])
         horizons[hz] = {"books": books, "best": _best_ideas(books, states)}
 
     # assemble ordered desk descriptors with edge + state (shared across horizons)
     desk_descriptors = []
     for key, name, who, how, color, fam, fb in DESK_META:
         d = {"key": key, "name": name, "who": who, "how": how, "color": color,
-             "state": states.get(key, "act"), "edge": _edge(setup_stats, fam, fb)}
+             "state": states.get(key, "act"), "edge": _edge(desk_edge, key, fb)}
         if key == "smart":
             d["emptymsg"] = SMART_EMPTY
         desk_descriptors.append(d)
@@ -597,7 +656,8 @@ def build_from_disk(live=None):
     stats = _load_json("cache/setup_stats.json") or {}
     ins = (_load_json("cache/insider_cluster.json") or {}).get("candidates") or []
     con = (_load_json("cache/congressional_picks.json") or {}).get("candidates") or []
-    return build(bundle, stats, live=live, insider=ins, congress=con)
+    de = (_load_json("cache/desk_edge_stats.json") or {}).get("desks") or {}
+    return build(bundle, stats, live=live, insider=ins, congress=con, desk_edge=de)
 
 
 def desk_tickers(payload):

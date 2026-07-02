@@ -697,9 +697,10 @@ def _build_desks_payload():
     stats = _load("cache/setup_stats.json")
     ins = _load("cache/insider_cluster.json", "candidates")
     con = _load("cache/congressional_picks.json", "candidates")
+    de = _load("cache/desk_edge_stats.json", "desks")
     live = _read_desks_live()
     quotes = (live or {}).get("quotes") if isinstance(live, dict) else None
-    payload = _sd.build(bundle, stats, live=quotes, insider=ins, congress=con)
+    payload = _sd.build(bundle, stats, live=quotes, insider=ins, congress=con, desk_edge=de)
     if isinstance(live, dict):
         payload["live_at"] = live.get("refreshed_at")
     return payload
