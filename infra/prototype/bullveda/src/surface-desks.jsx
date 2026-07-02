@@ -75,6 +75,7 @@
   .dk-fresh .cad{color:var(--dk-faint)}
   .dk-ctrls{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
   .dk-ctrls input{background:var(--bg-2);border:1px solid var(--dk-line);border-radius:8px;color:var(--dk-txt);padding:6px 10px;font:inherit;font-size:12px;width:150px}
+  .dk-ctrls input.px{width:62px}
   .dk-ctrls select{background:var(--bg-2);border:1px solid var(--dk-line);border-radius:8px;color:var(--dk-txt);padding:6px 8px;font:inherit;font-size:12px}
   .dk-ctrls .tg{cursor:pointer;border:1px solid var(--dk-line);border-radius:8px;padding:6px 11px;font-size:12px;color:var(--dk-dim);background:none}
   .dk-ctrls .tg.on{background:var(--gn-bg);color:var(--dk-good);border-color:transparent}
@@ -234,6 +235,8 @@
     const [buyOnly, setBuyOnly] = React.useState(false);
     const [showOverflow, setShowOverflow] = React.useState(false);
     const [sortBy, setSortBy] = React.useState("rank");
+    const [pMin, setPMin] = React.useState("");
+    const [pMax, setPMax] = React.useState("");
     const [fetchedAt, setFetchedAt] = React.useState(0);
     const [, setTick] = React.useState(0);
     const load = React.useCallback(() => {
@@ -262,9 +265,12 @@
     const maxSize = reg.max_size_pct || null;
 
     const qlc = q.trim().toUpperCase();
+    const pmin = parseFloat(pMin), pmax = parseFloat(pMax);
     function prep(rows) {
       let out = (rows || []).slice();
       if (qlc) out = out.filter((r) => (r.t || "").toUpperCase().indexOf(qlc) >= 0);
+      if (!isNaN(pmin)) out = out.filter((r) => r.price != null && +r.price >= pmin);
+      if (!isNaN(pmax)) out = out.filter((r) => r.price != null && +r.price <= pmax);
       if (buyOnly) out = out.filter((r) => r._dv === "BUY" || r._dv === "SHORT");
       else if (!showOverflow) out = out.filter((r) => r._dv === "BUY" || r._dv === "WATCH" || r._dv === "SHORT");  // hide PASS/AVOID overflow
       if (sortBy === "rr") out.sort((a, b) => (+b._rr || 0) - (+a._rr || 0));
@@ -288,6 +294,10 @@
 
     const ctrls = React.createElement("div", { className: "dk-ctrls" }, [
       React.createElement("input", { key: "q", placeholder: "search ticker…", value: q, onChange: (e) => setQ(e.target.value) }),
+      React.createElement("span", { className: "lbl", key: "pl" }, "$"),
+      React.createElement("input", { key: "pmin", className: "px", type: "number", placeholder: "min", value: pMin, onChange: (e) => setPMin(e.target.value) }),
+      React.createElement("span", { className: "lbl", key: "pd" }, "–"),
+      React.createElement("input", { key: "pmax", className: "px", type: "number", placeholder: "max", value: pMax, onChange: (e) => setPMax(e.target.value) }),
       React.createElement("button", { key: "bo", className: "tg" + (buyOnly ? " on" : ""), onClick: () => setBuyOnly(!buyOnly) }, buyOnly ? "✓ BUY only" : "BUY only"),
       React.createElement("button", { key: "ov", className: "tg" + (showOverflow ? " on" : ""), onClick: () => setShowOverflow(!showOverflow), title: "also show names that rank high but don't clear the desk's buy bar" }, showOverflow ? "✓ show overflow" : "show overflow"),
       React.createElement("span", { className: "lbl", key: "sl" }, "sort"),
