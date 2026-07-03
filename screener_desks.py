@@ -520,7 +520,8 @@ def _edge(desk_edge, key, fallback):
     else:
         cls, lab = "e-bad", "NO EDGE"
     approx = " ~approx" if s.get("approximate") else ""
-    txt = f"{lab}{approx} · n={nn} · WR {wr*100:.0f}% · PF {pf:.2f}→{pfh:.2f} · E[R] {er:+.2f}"
+    src = " ·◉LIVE" if s.get("_src") == "live" else ""
+    txt = f"{lab}{approx} · n={nn} · WR {wr*100:.0f}% · PF {pf:.2f}→{pfh:.2f} · E[R] {er:+.2f}{src}"
     return {"class": cls, "text": txt}
 
 
@@ -539,7 +540,26 @@ def _desk_states(regime4):
     return out
 
 
-SHOW_N = 12  # per-desk display cap (surfaced honestly as "N of M")
+SHOW_N = 12       # per-desk display cap (surfaced honestly as "N of M")
+MIN_LIVE_N = 20   # once a desk has this many resolved LIVE outcomes, prefer them over
+                  # the signal-log-attributed backtest (which is not truly independent)
+
+
+def _merge_edge(desk_edge, desk_live):
+    """Prefer each desk's OWN live forward track record when it has ≥MIN_LIVE_N resolved
+    outcomes; otherwise fall back to the (approximate, signal-log-attributed) backtest.
+    Tags each entry with _src so the header/ticket can show which it used."""
+    de = desk_edge or {}
+    dl = (desk_live or {}).get("desks") or {}
+    out = {}
+    for k in set(de) | set(dl):
+        live = dl.get(k)
+        if live and live.get("n", 0) >= MIN_LIVE_N and not live.get("pending"):
+            e = dict(live); e["_src"] = "live"
+        else:
+            e = dict(de.get(k) or {}); e["_src"] = "backtest"
+        out[k] = e
+    return out
 
 
 def _book(desk, cands, key, ctx, hz, n=SHOW_N):
@@ -673,9 +693,10 @@ def build(bundle, setup_stats=None, live=None, insider=None, congress=None, desk
     all_scored = bundle.get("all_scored") or []
     fullrows = [_enrich(r, live) for r in all_scored if r.get("ticker")]
 
+    merged_edge = _merge_edge(desk_edge, desk_live)   # live track record preferred at n≥20
     ctx = {
         "regime": regime4,
-        "desk_edge": desk_edge or {},
+        "desk_edge": merged_edge,
         "max_size": reg.get("max_size_pct"),
         "factor_p90": _pct_threshold([r["_factor"] for r in fullrows], 90),
         "factor_p75": _pct_threshold([r["_factor"] for r in fullrows], 75),
@@ -697,7 +718,7 @@ def build(bundle, setup_stats=None, live=None, insider=None, congress=None, desk
     dl_desks = (desk_live or {}).get("desks") or {}
     for key, name, who, how, color, fam, fb in DESK_META:
         d = {"key": key, "name": name, "who": who, "how": how, "color": color,
-             "state": states.get(key, "act"), "edge": _edge(desk_edge, key, fb)}
+             "state": states.get(key, "act"), "edge": _edge(merged_edge, key, fb)}
         lv = dl_desks.get(key)
         if lv and lv.get("n"):
             d["live"] = {"n": lv["n"], "wr": lv.get("wr"), "pf": lv.get("pf"), "er": lv.get("expectancy_R")}
