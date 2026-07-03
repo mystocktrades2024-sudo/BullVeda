@@ -100,6 +100,15 @@
   .dk-tkt .c{font-size:8.5px;border:1px solid var(--dk-line);border-radius:5px;padding:1px 5px;color:var(--dk-faint)}
   .dk-tkt .c.warn{color:var(--dk-warn);border-color:var(--dk-warn)}
   .dk-tkt .c.bad{color:var(--dk-bad);border-color:var(--dk-bad)}
+  .dk-ddbtn{margin:6px 0 0 20px;font-size:9.5px;color:var(--dk-dim);background:none;border:1px solid var(--dk-line);border-radius:6px;padding:2px 8px;cursor:pointer;font-family:'SF Mono',monospace}
+  .dk-ddbtn:hover{color:var(--dk-txt);border-color:var(--line-2)}
+  .dk-dd{margin:7px 0 2px 20px;border-top:1px solid var(--dk-line);padding-top:7px;display:flex;flex-direction:column;gap:7px}
+  .dk-dd .thesis{font-size:10px;color:var(--dk-dim);font-style:italic;line-height:1.4}
+  .dk-dd .sh{font-size:8px;font-weight:800;letter-spacing:.6px;color:var(--dk-faint);margin-bottom:3px}
+  .dk-dd .kv{display:flex;flex-wrap:wrap;gap:2px 14px;font-family:'SF Mono',monospace;font-size:9.5px;color:var(--dk-txt)}
+  .dk-dd .kv .k{color:var(--dk-faint)}
+  .dk-dd .chk{font-family:'SF Mono',monospace;font-size:9.5px;color:var(--dk-dim);margin-right:10px}
+  .dk-dd .inval{font-family:'SF Mono',monospace;font-size:9.5px;color:var(--dk-warn)}
   `;
 
   function ensureStyle() {
@@ -203,7 +212,51 @@
     ]);
   }
 
-  function Card({ r, i, ck, onTicker, maxSize }) {
+  const MECH = {
+    pb: "Pullback to value — institutions re-add on the dip in an uptrend; buy the retrace at 3:1 R:R.",
+    mom: "Relative-strength leadership — the strongest names keep leading (Jegadeesh-Titman).",
+    bo: "Volatility contraction → expansion — supply dries up, then breaks out on volume (Minervini VCP).",
+    qf: "Cross-sectional multi-factor — top-decile blend of momentum/quality/value/trend vs peers.",
+    cat: "Post-event drift — the market under-reacts to catalysts (Bernard-Thomas PEAD).",
+    mr: "Short-term mean reversion — oversold bounce with the long-term trend intact (Connors).",
+    val: "Cheap + improving — buy the cheap decile while quality holds and revisions aren't falling.",
+    qual: "Quality compounder — durable high-ROIC businesses at a reasonable price (GARP).",
+    smart: "Information edge — follow insider clusters / congressional buying (Bettis-Coles).",
+    def: "Defensive rotation — low-beta / staples / gold when breadth breaks (flight to safety).",
+    short: "Relative-weakness breakdown — short the RS-worst names below key moving averages.",
+  };
+
+  function deepDive(r, d) {
+    const t = r._tkt || {};
+    const CE = React.createElement;
+    const kv = (k, v) => CE("span", { key: k }, [CE("span", { className: "k", key: "k" }, k + " "), v == null ? "—" : v]);
+    const sec = (title, kids) => CE("div", { key: title }, [CE("div", { className: "sh", key: "h" }, title), CE("div", { className: "kv", key: "b" }, kids)]);
+    const usd = (v) => v == null ? "—" : "$" + (+v).toFixed(2);
+    const inval = [];
+    if (r.stop != null) inval.push("close < stop " + usd(r.stop));
+    if (r.ema50i != null) inval.push("loses EMA50 " + usd(r.ema50i));
+    if (t.ear_days != null && t.ear_days >= 0 && t.ear_days <= 14) inval.push("earnings in " + t.ear_days + "d");
+    const kids = [
+      CE("div", { className: "thesis", key: "th" }, "◆ " + (MECH[d.key] || d.who || "")),
+      sec("DESK EDGE", [CE("span", { key: "e" }, (d.edge && d.edge.text) || "—"), d.live ? kv("· live", "n=" + d.live.n + " WR " + Math.round((d.live.wr || 0) * 100) + "%") : null]),
+      sec("WHY IT FIRED", (r._why || "").split(" · ").map((w, i) => CE("span", { key: i, className: "chk" }, w))),
+      sec("LIVE TECHNICALS", [kv("RSI", r.rsi != null ? (+r.rsi).toFixed(0) : null), kv("ADX", r.adx != null ? (+r.adx).toFixed(0) : null),
+        kv("EMA8", r.ema8 != null ? usd(r.ema8) : null), kv("EMA21", r.ema21 != null ? usd(r.ema21) : null), kv("EMA50", r.ema50i != null ? usd(r.ema50i) : null),
+        kv("ATR%", r.atr != null ? (+r.atr).toFixed(1) : null), kv("RVOL", r.rvol != null ? (+r.rvol).toFixed(1) : null), kv("RS", r.rs)]),
+      sec("TRADE PLAN", [kv("entry", r.entry_lo != null ? usd(r.entry_lo) + "–" + (+r.entry_hi).toFixed(2) : null), kv("stop", usd(r.stop)), kv("T1", usd(r.t1)), kv("R:R", r._rr)]),
+      sec("RISK & PROBABILITY", [kv("P", Math.round((t.p || 0) * 100) + "%"), kv("E[R]", t.ev), kv("size", t.size != null ? t.size + "%" : null),
+        kv("max-loss", t.maxloss != null ? t.maxloss + "%" : null), kv("$ADV", t.adv != null ? fmtUsd(t.adv) : null), kv("β", t.beta != null ? (+t.beta).toFixed(2) : null)]),
+    ];
+    if (r.fwd_pe != null || r.roe != null || r.gm != null) {
+      kids.push(sec("FUNDAMENTALS", [kv("fwd P/E", r.fwd_pe != null ? (+r.fwd_pe).toFixed(1) : null), kv("P/S", r.ps != null ? (+r.ps).toFixed(1) : null),
+        kv("ROE", r.roe != null ? (+r.roe).toFixed(0) + "%" : null), kv("GM", r.gm != null ? (+r.gm).toFixed(0) + "%" : null)]));
+    }
+    if ((r._across || 1) >= 2) kids.push(sec("CONFLUENCE", [CE("span", { key: "c", className: "chk" }, "⋈ also flagged by " + (r._acrosslbls || ""))]));
+    kids.push(CE("div", { key: "inv" }, [CE("div", { className: "sh", key: "h" }, "INVALIDATION · PRE-MORTEM"), CE("div", { className: "inval", key: "b" }, "✗ " + inval.join("  ·  "))]));
+    return CE("div", { className: "dk-dd", key: "dd" }, kids);
+  }
+
+  function Card({ r, i, ck, onTicker, maxSize, desk, open, onToggle }) {
     const conf = (r._across || 1) >= 2;
     const kids = [
       React.createElement("div", { className: "dk-top", key: "t" }, [
@@ -225,6 +278,11 @@
     if (r._dv === "BUY" || r._dv === "SHORT") {
       const tk = ticket(r);
       if (tk) kids.push(tk);
+      if (desk) {
+        kids.push(React.createElement("button", { className: "dk-ddbtn", key: "ddb", onClick: (e) => { e.stopPropagation(); onToggle && onToggle(); } },
+          open ? "▲ hide deep dive" : "▾ deep dive"));
+        if (open) kids.push(deepDive(r, desk));
+      }
     }
     return React.createElement("div", { className: "dk-card" + (conf ? " conf" : ""), onClick: () => r.t && onTicker && onTicker(r.t) }, kids);
   }
@@ -240,6 +298,7 @@
     const [sortBy, setSortBy] = React.useState("rank");
     const [pMin, setPMin] = React.useState("");
     const [pMax, setPMax] = React.useState("");
+    const [ddOpen, setDdOpen] = React.useState({});
     const [fetchedAt, setFetchedAt] = React.useState(0);
     const [, setTick] = React.useState(0);
     const load = React.useCallback(() => {
@@ -340,7 +399,11 @@
             : dorm ? "Regime does not call for this desk today. Auto-arms when conditions flip."
               : (d.emptymsg || "No qualifying names today."));
       } else {
-        body = rows.map((r, i) => React.createElement(Card, { key: r.t + i, r, i, ck: d.key, onTicker, maxSize }));
+        body = rows.map((r, i) => {
+          const kk = d.key + "|" + r.t;
+          return React.createElement(Card, { key: r.t + i, r, i, ck: d.key, onTicker, maxSize, desk: d,
+            open: !!ddOpen[kk], onToggle: () => setDdOpen((o) => Object.assign({}, o, { [kk]: !o[kk] })) });
+        });
       }
       return React.createElement("div", { className: "dk-col " + (d.state === "lead" ? "lead" : dorm ? "dorm" : ""), key: d.key }, [
         React.createElement("div", { className: "dk-chead", key: "h" }, [
