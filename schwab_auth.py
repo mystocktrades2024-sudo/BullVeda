@@ -246,16 +246,21 @@ def _refresh_access_token() -> str:
     exp_in = int(tok.get("expires_in", 1800))
     exp_at = int(time.time()) + exp_in - 60
 
-    # Schwab may also rotate the refresh token. When they do, reset
-    # SCHWAB_REFRESH_ISSUED_AT so check_token_health() tracks the freshest
-    # 7-day window from the actual rotation, not the original OAuth.
+    # Schwab returns a refresh_token on refresh, but its 7-day expiry is
+    # anchored to the ORIGINAL browser OAuth — a programmatic refresh does
+    # NOT extend it (empirically HTTP 400 every ~7d regardless of refresh
+    # frequency: failure cadence 05-15/23/31, 06-15/22/29, 07-07). So we
+    # persist the rotated token STRING (Schwab may change it) but must NOT
+    # reset SCHWAB_REFRESH_ISSUED_AT here — resetting it masked the true age,
+    # left check_token_health() perpetually reading ~0d, so the day-5 warn
+    # never fired and the token always died unannounced. ISSUED_AT is set
+    # ONLY by oauth_interactive() (the real 7-day anchor).
     updates = {
         "SCHWAB_ACCESS_TOKEN":     access,
         "SCHWAB_TOKEN_EXPIRES_AT": str(exp_at),
     }
     if tok.get("refresh_token"):
-        updates["SCHWAB_REFRESH_TOKEN"]    = tok["refresh_token"]
-        updates["SCHWAB_REFRESH_ISSUED_AT"] = str(int(time.time()))
+        updates["SCHWAB_REFRESH_TOKEN"] = tok["refresh_token"]
     _write_env(updates)
     return access
 

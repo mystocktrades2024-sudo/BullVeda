@@ -2,16 +2,20 @@
 """
 check_schwab_token.py — daily Schwab refresh-token health check.
 
-Schwab refresh tokens expire 7 days after issue. This script:
+Schwab refresh tokens have a HARD 7-day lifetime anchored to the browser
+OAuth — a programmatic refresh does NOT extend it (Schwab Individual Trader
+API limitation). This script:
   1. Reads the current refresh_token from .env
   2. Calls Schwab's /oauth/token endpoint with grant_type=refresh_token
-  3. On success: rotates the refresh_token (extending life by another 7 days),
-     writes the new token to .env
-  4. On failure: posts a Slack alert telling the user to re-OAuth before
-     options data goes dark
+  3. On success: writes the new access token (and rotated refresh-token
+     string) to .env. It does NOT touch SCHWAB_REFRESH_ISSUED_AT — that is
+     the true 7-day anchor, owned by schwab_auth.oauth_interactive().
+  4. At age >= 5d (still working): posts a proactive WARN to re-auth soon.
+  5. On HTTP 400 (token dead): posts a CRITICAL alert to re-OAuth now.
 
-Run daily via launchd. Side benefit: the daily refresh keeps the token
-alive indefinitely as long as the user doesn't ignore failure alerts.
+Run daily via launchd. The token CANNOT be kept alive indefinitely — the
+user must re-run `python3 schwab_auth.py oauth` in a browser-capable
+terminal every ~7 days. This script's job is to warn early, not to renew.
 """
 from __future__ import annotations
 import base64
@@ -166,7 +170,14 @@ def main() -> int:
         log.error(f"Schwab refresh request error: {e}")
         return 3
 
-    # Success — write back the rotated tokens
+    # Success — write back the rotated access token. NOTE: Schwab's refresh
+    # token has a HARD 7-day lifetime anchored to the browser OAuth; a
+    # programmatic refresh does NOT extend it (HTTP 400 every ~7d regardless).
+    # So we persist the rotated refresh-token STRING but must NOT reset
+    # SCHWAB_REFRESH_ISSUED_AT — that timestamp is the true 7-day anchor and
+    # is owned solely by schwab_auth.oauth_interactive(). Resetting it here
+    # masked the countdown (age always read ~0d) so the day-5 warning never
+    # fired and the token died unannounced every week.
     new_access = tok.get("access_token")
     new_refresh = tok.get("refresh_token") or refresh  # fallback if Schwab didn't rotate
     expires_in = int(tok.get("expires_in", 1800))
@@ -176,7 +187,6 @@ def main() -> int:
         "SCHWAB_ACCESS_TOKEN":     new_access,
         "SCHWAB_REFRESH_TOKEN":    new_refresh,
         "SCHWAB_TOKEN_EXPIRES_AT": str(expires_at),
-        "SCHWAB_REFRESH_ISSUED_AT": str(int(time.time())),
     }
     _write_env(updates)
 
@@ -186,8 +196,27 @@ def main() -> int:
     except Exception:
         pass
 
-    log.info(f"✓ Refresh OK — access_token rotated, refresh_token age reset to 0d. "
-             f"Next forced refresh: in 24h.")
+    # Proactive heads-up: the refresh token dies 7d after the last browser
+    # OAuth and CANNOT be renewed programmatically. Warn ~2 days ahead so the
+    # user can re-auth on their schedule instead of waking to dark options.
+    if age_days is not None and age_days >= 5.0:
+        _slack_alert(
+            "🟡 Schwab re-auth due soon",
+            (
+                f"Schwab refresh token is {age_days:.1f} days old (hard 7-day limit). "
+                f"It still works today but will be rejected within ~{max(0.0, 7.0 - age_days):.1f} "
+                f"day(s), taking options data dark. Re-auth proactively:\n"
+                f"```\n"
+                f"cd /Volumes/MyMacDisk/Claude\\ Skills/SwingTrade\n"
+                f"python3 schwab_auth.py oauth\n"
+                f"```"
+            ),
+            level="WARN",
+        )
+
+    age_str = f"{age_days:.1f}d" if age_days is not None else "unknown"
+    log.info(f"✓ Refresh OK — access_token rotated (refresh-token age {age_str}, "
+             f"7-day OAuth clock unchanged). Next probe: in 24h.")
     return 0
 
 
