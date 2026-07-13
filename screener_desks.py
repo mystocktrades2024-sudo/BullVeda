@@ -159,6 +159,13 @@ def _enrich(r, live=None):
     earn = r.get("earnings") if isinstance(r.get("earnings"), dict) else {}
     o["ear_days"] = earn.get("days_to_earnings")
     o["ear_risk"] = earn.get("earnings_risk")
+    # scan bias / bear-score / action — consumed by the live real_buy_gate (bear_setup
+    # is a {score,max} sub-score dict, NOT a boolean flag)
+    o["bias"] = r.get("bias")
+    o["action"] = r.get("action")
+    o["reason_class"] = r.get("reason_class")
+    _bs = r.get("bear_setup")
+    o["bear_ratio"] = (_n(_bs.get("score")) / max(_n(_bs.get("max")) or 15, 1)) if isinstance(_bs, dict) else None
     o["_mom"] = _n(o["rs"])
     o["_qual"] = VGM.get(o["vgm"], 50)
     o["_trend"] = _shp(o["sharpe"])
@@ -495,13 +502,41 @@ def _ticket(desk, r, ctx):
 
 
 def _tag(desk, rows, ctx, hz):
-    """Attach each desk's own verdict (`_dv`), reasons (`_why`), and trade-ticket
-    (`_tkt`) on shallow row copies (verdict + ticket are per-desk)."""
+    """Attach each desk's own verdict (`_dv`), reasons (`_why`), trade-ticket (`_tkt`),
+    and — for BUY rows — the LIVE real-buy verdict (`_realbuy`) on shallow row copies."""
     out = []
     for r in rows:
         v, why = _desk_verdict(desk, r, ctx, hz)
-        out.append(dict(r, _dv=v, _why=" · ".join(why), _tkt=_ticket(desk, r, ctx)))
+        rc = dict(r, _dv=v, _why=" · ".join(why), _tkt=_ticket(desk, r, ctx))
+        if v == "BUY":
+            rc["_realbuy"] = _real_buy(desk, rc)
+        out.append(rc)
     return out
+
+
+def _real_buy(desk, o):
+    """Live 'real buy' re-validation of a desk BUY via the shared gate (0 extra API —
+    consumes the Schwab overlay fields already merged by _enrich). Returns a compact
+    verdict dict {verdict, tier, why, fails, warns} or None if the gate is unavailable."""
+    try:
+        import real_buy_gate as _rbg
+    except Exception:
+        return None
+    sig = {
+        "desk": desk, "price": o.get("price"),
+        "ema8": o.get("ema8"), "ema21": o.get("ema21"), "ema50": o.get("ema50i"),
+        "rsi": o.get("rsi"), "adx": o.get("adx"), "live_rvol": o.get("_live_rvol"),
+        "atr_pct": o.get("atr"), "net_pct": o.get("_chg"),
+        "bias": o.get("bias"), "bear_ratio": o.get("bear_ratio"),
+        "scan_action": o.get("action"), "reason_class": o.get("reason_class"),
+        "entry_quality": o.get("eq"), "rs": o.get("rs"), "sharpe": o.get("sharpe"),
+        "ema_stack_bull": o.get("bull_stack"),
+    }
+    res = _rbg.evaluate(sig, _rbg.DESK_EDGE_TIER.get(desk))
+    why = (res.get("fails") or res.get("warns") or [None])[0]
+    return {"verdict": res["verdict"], "tier": res["tier"], "why": why,
+            "edge_tier": res["edge_tier"], "fails": res["fails"], "warns": res["warns"],
+            "live": bool(o.get("_livetech"))}
 
 
 def _edge(desk_edge, key, fallback):
@@ -648,6 +683,7 @@ def _best_ideas(books, states):
             "factor": r.get("_factor"), "rr": r.get("_rr"),
             "chg": r.get("_chg"), "livepx": r.get("_livepx"),
             "lead": any(states.get(d) == "lead" for d in dks),
+            "_realbuy": r.get("_realbuy"),
         })
     out.sort(key=lambda x: (x["n"], 1 if x["lead"] else 0, _n(x["factor"])), reverse=True)
     return out[:8]

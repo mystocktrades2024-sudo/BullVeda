@@ -52,6 +52,12 @@
   .dk-vc.short{color:var(--bg-0);background:var(--dk-bad)}
   .dk-acc{font-family:'SF Mono',monospace;font-size:9px;font-weight:800;color:var(--dk-gold);background:var(--amb-bg);border:1px solid transparent;border-radius:5px;padding:0 4px;margin-left:3px}
   .dk-live{font-size:8px;color:var(--dk-good);margin-left:3px}
+  .dk-rb{font-size:8.5px;font-weight:800;letter-spacing:.2px;border-radius:5px;padding:1px 5px;margin-left:4px;cursor:help;white-space:nowrap}
+  .dk-rb.real{color:var(--bg-0);background:var(--dk-good)}
+  .dk-rb.marg{color:var(--dk-warn);background:var(--amb-bg);border:1px solid var(--dk-warn)}
+  .dk-rb.unv{color:var(--dk-faint);border:1px dashed var(--dk-line)}
+  .dk-rb.notreal{color:var(--dk-bad);border:1px solid var(--dk-bad)}
+  .dk-dd .chk.warn{color:var(--dk-warn)}
   .dk-px{margin-left:auto;font-family:'SF Mono',monospace;color:var(--dk-dim);font-size:11.5px}
   .dk-px .up{color:var(--dk-good)}.dk-px .dn{color:var(--dk-bad)}
   .dk-sect{color:var(--dk-faint);font-size:10px;margin:2px 0 5px 20px}
@@ -109,6 +115,34 @@
   .dk-dd .kv .k{color:var(--dk-faint)}
   .dk-dd .chk{font-family:'SF Mono',monospace;font-size:9.5px;color:var(--dk-dim);margin-right:10px}
   .dk-dd .inval{font-family:'SF Mono',monospace;font-size:9.5px;color:var(--dk-warn)}
+  /* ── master leaderboard table (top-of-page, all desks) ── */
+  .dk-mt{background:var(--dk-panel);border:1px solid var(--dk-line);border-radius:12px;margin-bottom:12px;overflow:hidden}
+  .dk-mt-h{display:flex;align-items:center;gap:10px;padding:10px 13px;cursor:pointer;user-select:none;background:var(--dk-panel2);border-bottom:1px solid var(--dk-line)}
+  .dk-mt-h .cv{font-size:11px;color:var(--dk-faint)}
+  .dk-mt-h .t{font-size:11px;font-weight:800;letter-spacing:.5px;color:var(--dk-gold)}
+  .dk-mt-h .c{font-size:10.5px;color:var(--dk-faint);font-family:'SF Mono',monospace}
+  .dk-mt-h .hint{margin-left:auto;font-size:10px;color:var(--dk-faint);font-family:'SF Mono',monospace}
+  .dk-mt-scroll{overflow-x:auto;max-height:560px;overflow-y:auto}
+  table.dk-mtbl{border-collapse:collapse;width:100%;font-size:11.5px;min-width:1120px}
+  .dk-mtbl th{position:sticky;top:0;z-index:2;background:var(--dk-panel2);color:var(--dk-faint);font-size:9px;font-weight:800;letter-spacing:.5px;text-align:left;padding:7px 9px;border-bottom:1px solid var(--dk-line);white-space:nowrap;cursor:pointer;user-select:none}
+  .dk-mtbl th.num{text-align:right}
+  .dk-mtbl th:hover{color:var(--dk-txt)}
+  .dk-mtbl th .ar{color:var(--dk-gold);margin-left:2px}
+  .dk-mtbl td{padding:6px 9px;border-bottom:1px solid var(--dk-line);white-space:nowrap;vertical-align:middle}
+  .dk-mtbl td.num{text-align:right;font-family:'SF Mono',monospace}
+  .dk-mtbl tbody tr{cursor:pointer}
+  .dk-mtbl tbody tr:hover{background:var(--dk-panel2)}
+  .dk-mt-rk{font-family:'SF Mono',monospace;font-size:10px;color:var(--dk-faint)}
+  .dk-mt-sym{font-weight:800;font-size:12.5px}
+  .dk-mt-desks{display:flex;flex-wrap:wrap;gap:3px;max-width:190px}
+  .dk-mt-db{font-size:8.5px;font-weight:700;letter-spacing:.2px;border-radius:4px;padding:1px 5px;border:1px solid var(--dk-line);white-space:nowrap}
+  .dk-mt-up{color:var(--dk-good)}.dk-mt-dn{color:var(--dk-bad)}
+  .dk-mt-rr.good{color:var(--dk-good);font-weight:700}.dk-mt-rr.bad{color:var(--dk-bad)}
+  .dk-mt-stk{font-size:8.5px;font-family:'SF Mono',monospace;color:var(--dk-faint)}
+  .dk-mt-risk{font-family:'SF Mono',monospace;font-size:9px;color:var(--dk-faint);display:flex;gap:6px}
+  .dk-mt-risk .w{color:var(--dk-warn)}.dk-mt-risk .b{color:var(--dk-bad)}
+  .dk-mt-empty{padding:18px;text-align:center;color:var(--dk-faint);font-style:italic;font-size:11px}
+  .dk-mt-live{font-size:8px;color:var(--dk-good);margin-left:3px}
   `;
 
   function ensureStyle() {
@@ -187,6 +221,25 @@
     return React.createElement("span", { className: "dk-vc " + cls, key: "vc", title: why }, vd);
   }
 
+  // LIVE 'real buy' re-check (Schwab) — shown next to the desk verdict on BUY cards.
+  // Green REAL BUY / amber MARGINAL / grey UNVERIFIED / red NOT REAL, with the failing
+  // reasons in the tooltip. This is the honest live confirmation over the desk's raw call.
+  function realBuyBadge(r) {
+    const rb = r._realbuy;
+    if (!rb || !rb.verdict) return null;
+    const map = {
+      "REAL BUY": ["real", "✓ REAL BUY" + (rb.tier ? " " + rb.tier : "")],
+      "MARGINAL": ["marg", "⚠ MARGINAL"],
+      "UNVERIFIED": ["unv", "? UNVERIFIED"],
+      "NOT REAL": ["notreal", "✗ NOT REAL"],
+    };
+    const m = map[rb.verdict] || ["unv", rb.verdict];
+    const reasons = [].concat(rb.fails || [], rb.warns || []).map((x) => "• " + x).join("\n");
+    const title = "LIVE real-buy check (" + (rb.live ? "live Schwab intraday" : "daily fallback") + ")\n"
+      + rb.verdict + (rb.tier ? " · " + rb.tier : "") + "\n" + reasons;
+    return React.createElement("span", { className: "dk-rb " + m[0], key: "rb", title: title }, m[1]);
+  }
+
   function fmtUsd(v) {
     if (v == null) return "—";
     if (v >= 1e9) return "$" + (v / 1e9).toFixed(1) + "B";
@@ -240,6 +293,12 @@
       CE("div", { className: "thesis", key: "th" }, "◆ " + (MECH[d.key] || d.who || "")),
       sec("DESK EDGE", [CE("span", { key: "e" }, (d.edge && d.edge.text) || "—"), d.live ? kv("· live", "n=" + d.live.n + " WR " + Math.round((d.live.wr || 0) * 100) + "%") : null]),
       sec("WHY IT FIRED", (r._why || "").split(" · ").map((w, i) => CE("span", { key: i, className: "chk" }, w))),
+      r._realbuy ? sec("● LIVE REAL-BUY CHECK", [].concat(
+        [CE("span", { key: "v", className: "chk " + (r._realbuy.verdict === "REAL BUY" ? "" : r._realbuy.verdict === "NOT REAL" ? "bad" : "warn") },
+          r._realbuy.verdict + (r._realbuy.tier ? " · " + r._realbuy.tier : "") + (r._realbuy.live ? " (live)" : " (daily)"))],
+        (r._realbuy.fails || []).map((f, i) => CE("span", { key: "f" + i, className: "chk bad" }, "✗ " + f)),
+        (r._realbuy.warns || []).map((w, i) => CE("span", { key: "w" + i, className: "chk" }, "· " + w))
+      )) : null,
       sec("LIVE TECHNICALS", [kv("RSI", r.rsi != null ? (+r.rsi).toFixed(0) : null), kv("ADX", r.adx != null ? (+r.adx).toFixed(0) : null),
         kv("EMA8", r.ema8 != null ? usd(r.ema8) : null), kv("EMA21", r.ema21 != null ? usd(r.ema21) : null), kv("EMA50", r.ema50i != null ? usd(r.ema50i) : null),
         kv("ATR%", r.atr != null ? (+r.atr).toFixed(1) : null), kv("RVOL", r.rvol != null ? (+r.rvol).toFixed(1) : null), kv("RS", r.rs)]),
@@ -256,13 +315,36 @@
     return CE("div", { className: "dk-dd", key: "dd" }, kids);
   }
 
-  function Card({ r, i, ck, onTicker, maxSize, desk, open, onToggle }) {
+  // Open a ticker on the user's logged-in TradingView Desktop chart via the CDP
+  // bridge (/api/tv/open sets the symbol on the active chart, preserving their
+  // saved PHSwing + LuxAlgo layout). Honest-fail: any bridge error → open the TV
+  // web chart in a new tab. Visual layer only — never touches scoring.
+  function openInTV(sym, mode) {
+    sym = (sym || "").toUpperCase();
+    var web = "https://www.tradingview.com/chart/?symbol=" + encodeURIComponent(sym);
+    try {
+      fetch("/api/tv/open?t=" + encodeURIComponent(sym) + "&mode=" + encodeURIComponent(mode || "swing"),
+            { method: "POST", credentials: "same-origin" })
+        .then(function (r) { return r.json().catch(function () { return { ok: false, web: web }; }); })
+        .then(function (d) { if (!d || !d.ok) window.open((d && d.web) || web, "_blank"); })
+        .catch(function () { window.open(web, "_blank"); });
+    } catch (e) { window.open(web, "_blank"); }
+  }
+
+  function Card({ r, i, ck, onTicker, maxSize, desk, open, onToggle, mode }) {
     const conf = (r._across || 1) >= 2;
     const kids = [
       React.createElement("div", { className: "dk-top", key: "t" }, [
         React.createElement("span", { className: "dk-rk", key: "r" }, i + 1),
         React.createElement("span", { className: "dk-sym", key: "s" }, r.t),
+        React.createElement("button", {
+          className: "dk-tvbtn", key: "tv",
+          title: "Open " + r.t + " on your TradingView Desktop chart (falls back to TV web)",
+          onClick: (e) => { e.stopPropagation(); openInTV(r.t, mode); },
+          style: { marginLeft: "6px", fontSize: "9px", lineHeight: "1", padding: "2px 5px", cursor: "pointer", background: "none", border: "1px solid var(--dk-line)", borderRadius: "5px", color: "var(--dk-dim)", fontFamily: "'SF Mono',monospace" }
+        }, "📈 TV"),
         verdictChip(r, ck),
+        realBuyBadge(r),
         conf ? React.createElement("span", { className: "dk-acc", key: "a", title: "Across " + r._across + " desks: " + (r._acrosslbls || "") }, "⋈" + r._across) : null,
         r._livepx ? React.createElement("span", { className: "dk-live", key: "l", title: "live Schwab quote" }, "● LIVE") : null,
         priceCell(r),
@@ -299,6 +381,8 @@
     const [pMin, setPMin] = React.useState("");
     const [pMax, setPMax] = React.useState("");
     const [ddOpen, setDdOpen] = React.useState({});
+    const [mtOpen, setMtOpen] = React.useState(true);
+    const [mtSort, setMtSort] = React.useState({ key: "verdict", dir: "desc" });
     const [fetchedAt, setFetchedAt] = React.useState(0);
     const [, setTick] = React.useState(0);
     const load = React.useCallback(() => {
@@ -382,9 +466,117 @@
             b.n >= 2 ? React.createElement("span", { className: "dk-acc", key: "x", title: b.desks.join(" · ") }, "⋈" + b.n) : null,
             b.price != null ? React.createElement("span", { className: "px", key: "p" }, "$" + (+b.price).toFixed(2) + (b.chg != null ? "  " + (b.chg >= 0 ? "+" : "") + (+b.chg).toFixed(1) + "%" : "")) : null,
           ]),
+          realBuyBadge(b),
           React.createElement("div", { className: "d", key: "d" }, b.desks.join(" · ")),
         ]))),
     ]) : null;
+
+    // ── Master leaderboard: one row per unique ticker across ALL desks ──
+    // Pure display over the same payload the cards use. A ticker can appear in
+    // several desks; we keep its strongest verdict as the primary row and list
+    // every desk that flagged it. Honors the same search/price/BUY/overflow filters.
+    const DK_SHORT = { mom: "MOM", bo: "BO", pb: "PB", qf: "QF", cat: "CAT", mr: "MR", val: "VAL", smart: "SMART", qual: "QUAL", def: "DEF", short: "SHORT" };
+    const keyColor = {}; (data.desks || []).forEach((d) => { keyColor[d.key] = d.color; });
+    const PRI = { BUY: 5, SHORT: 4, WATCH: 3, PASS: 2, AVOID: 1 };
+    function buildMaster() {
+      const byT = {};
+      Object.keys(books).forEach((k) => {
+        (books[k].rows || []).forEach((r) => {
+          const t = r.t; if (!t) return;
+          let e = byT[t];
+          if (!e) { e = { t, keys: [], best: r, pri: PRI[r._dv] || 0 }; byT[t] = e; }
+          if (e.keys.indexOf(k) < 0) e.keys.push(k);
+          const pri = PRI[r._dv] || 0;
+          if (pri > e.pri || (pri === e.pri && (+(r._factor || 0)) > (+(e.best._factor || 0)))) { e.best = r; e.pri = pri; }
+        });
+      });
+      let arr = Object.keys(byT).map((t) => ({ t, r: byT[t].best, desks: byT[t].keys, ndesk: byT[t].keys.length, pri: byT[t].pri }));
+      arr = arr.filter((x) => {
+        const r = x.r;
+        if (qlc && (x.t || "").toUpperCase().indexOf(qlc) < 0) return false;
+        if (!isNaN(pmin) && !(r.price != null && +r.price >= pmin)) return false;
+        if (!isNaN(pmax) && !(r.price != null && +r.price <= pmax)) return false;
+        if (buyOnly) return r._dv === "BUY" || r._dv === "SHORT";
+        if (!showOverflow) return r._dv === "BUY" || r._dv === "WATCH" || r._dv === "SHORT";
+        return true;
+      });
+      const dir = mtSort.dir === "asc" ? 1 : -1, sk = mtSort.key;
+      const val = (x) => {
+        const r = x.r;
+        if (sk === "ticker") return x.t;
+        if (sk === "chg") return r._chg == null ? -1e9 : +r._chg;
+        if (sk === "rr") return +r._rr || 0;
+        if (sk === "rsi") return r.rsi == null ? -1 : +r.rsi;
+        if (sk === "rs") return r.rs == null ? -1 : +r.rs;
+        if (sk === "conf") return x.ndesk;
+        if (sk === "edge") return (r._tkt && r._tkt.ev != null) ? +r._tkt.ev : -1e9;
+        return x.pri * 1e6 + (+(r._factor || 0));   // verdict (default)
+      };
+      arr.sort((a, b) => { const va = val(a), vb = val(b); return (typeof va === "string") ? va.localeCompare(vb) * dir : (va - vb) * dir; });
+      return arr;
+    }
+    const masterRows = buildMaster();
+    const setSort = (k) => setMtSort((s) => s.key === k ? { key: k, dir: s.dir === "asc" ? "desc" : "asc" } : { key: k, dir: k === "ticker" ? "asc" : "desc" });
+    const th = (label, k, num) => React.createElement("th", { key: k, className: num ? "num" : "", onClick: () => setSort(k), title: "sort by " + label },
+      [label, mtSort.key === k ? React.createElement("span", { className: "ar", key: "a" }, mtSort.dir === "asc" ? " ▲" : " ▼") : null]);
+    function mRow(x, i) {
+      const r = x.r, tk = r._tkt || {};
+      const vd = String(r._dv || "").toUpperCase();
+      const vcls = vd === "BUY" ? "buy" : vd === "WATCH" ? "watch" : vd === "SHORT" ? "short" : vd === "PASS" ? "pass" : "avoid";
+      const rr = n(r._rr), rrCls = rr == null ? "" : rr >= 3 ? "good" : rr < 1 ? "bad" : "";
+      const chg = n(r._chg), px = n(r.price);
+      const deskBadges = x.desks.map((k) => React.createElement("span", { key: k, className: "dk-mt-db", style: { color: keyColor[k] || "var(--dk-dim)", borderColor: (keyColor[k] || "var(--dk-line)") } }, DK_SHORT[k] || k.toUpperCase()));
+      const stack = (r.above50 || r.above200) ? React.createElement("span", { className: "dk-mt-stk" }, (r.above50 ? "50▲" : "50▽") + (r.above200 ? "200▲" : "200▽")) : null;
+      const edge = tk.p != null ? ("P " + Math.round(tk.p * 100) + "% · " + ((tk.ev >= 0 ? "+" : "") + tk.ev)) : "—";
+      const risk = [];
+      if (tk.beta != null) risk.push(React.createElement("span", { key: "b" }, "β" + (+tk.beta).toFixed(2)));
+      if (tk.ear_days != null && tk.ear_days >= 0 && tk.ear_days <= 10) risk.push(React.createElement("span", { key: "e", className: "b" }, "⚠E" + tk.ear_days + "d"));
+      if (tk.short_float != null && +tk.short_float >= 10) risk.push(React.createElement("span", { key: "s", className: "w" }, "SI" + (+tk.short_float).toFixed(0) + "%"));
+      return React.createElement("tr", { key: x.t + i, onClick: () => onTicker && onTicker(x.t) }, [
+        React.createElement("td", { key: "rk", className: "dk-mt-rk" }, i + 1),
+        React.createElement("td", { key: "sym" }, [
+          React.createElement("span", { className: "dk-mt-sym", key: "y" }, x.t),
+          x.ndesk >= 2 ? React.createElement("span", { className: "dk-acc", key: "c", title: x.desks.map((k) => DK_SHORT[k] || k).join(" · ") }, "⋈" + x.ndesk) : null,
+          r._livepx ? React.createElement("span", { className: "dk-mt-live", key: "l", title: "live Schwab quote" }, "●") : null,
+        ]),
+        React.createElement("td", { key: "px", className: "num" }, [
+          px != null ? "$" + px.toFixed(2) : "—",
+          chg != null ? React.createElement("span", { className: chg >= 0 ? "dk-mt-up" : "dk-mt-dn", key: "c" }, "  " + (chg >= 0 ? "+" : "") + chg.toFixed(1) + "%") : null,
+        ]),
+        React.createElement("td", { key: "dk" }, React.createElement("div", { className: "dk-mt-desks" }, deskBadges)),
+        React.createElement("td", { key: "vd" }, vd ? React.createElement("span", { className: "dk-vc " + vcls, title: r._why || "" }, vd) : "—"),
+        React.createElement("td", { key: "rr", className: "num dk-mt-rr " + rrCls }, rr != null ? rr.toFixed(1) : "—"),
+        React.createElement("td", { key: "eq" }, [pill(r), pill(r) ? " " : null, stack]),
+        React.createElement("td", { key: "rsi", className: "num" }, r.rsi != null ? (+r.rsi).toFixed(0) : "—"),
+        React.createElement("td", { key: "rs", className: "num" }, (r.rs != null ? r.rs : "—") + (r.sharpe != null ? " · " + (+r.sharpe).toFixed(1) : "")),
+        React.createElement("td", { key: "fn", className: "num" }, [
+          r.fwd_pe != null ? (+r.fwd_pe).toFixed(1) : "—",
+          " · ", r.roe != null ? (+r.roe).toFixed(0) + "%" : "—",
+          " · ", r.gm != null ? (+r.gm).toFixed(0) + "%" : "—",
+        ]),
+        React.createElement("td", { key: "ed", className: "num" }, edge),
+        React.createElement("td", { key: "rk2" }, React.createElement("div", { className: "dk-mt-risk" }, risk.length ? risk : "—")),
+      ]);
+    }
+    const masterTable = React.createElement("div", { className: "dk-mt" }, [
+      React.createElement("div", { className: "dk-mt-h", key: "h", onClick: () => setMtOpen((o) => !o) }, [
+        React.createElement("span", { className: "cv", key: "cv" }, mtOpen ? "▾" : "▸"),
+        React.createElement("span", { className: "t", key: "t" }, "★ ALL NAMES · MASTER TABLE"),
+        React.createElement("span", { className: "c", key: "c" }, masterRows.length + " tickers across all desks · " + hz),
+        React.createElement("span", { className: "hint", key: "hn" }, "click a header to sort · click a row to open"),
+      ]),
+      mtOpen ? React.createElement("div", { className: "dk-mt-scroll", key: "s" },
+        masterRows.length ? React.createElement("table", { className: "dk-mtbl" }, [
+          React.createElement("thead", { key: "th" }, React.createElement("tr", null, [
+            React.createElement("th", { key: "rk" }, "#"),
+            th("TICKER", "ticker"), th("PRICE / Δ", "chg", true), React.createElement("th", { key: "dk" }, "DESKS"),
+            th("VERDICT", "verdict"), th("R:R", "rr", true), React.createElement("th", { key: "eq" }, "ENTRY / TREND"),
+            th("RSI", "rsi", true), th("RS·SHRP", "rs", true), React.createElement("th", { key: "fn", className: "num" }, "FWDPE·ROE·GM"),
+            th("EDGE P·E[R]", "edge", true), React.createElement("th", { key: "rk2" }, "RISK"),
+          ])),
+          React.createElement("tbody", { key: "tb" }, masterRows.map(mRow)),
+        ]) : React.createElement("div", { className: "dk-mt-empty" }, "No names match the current filters. Toggle 'show overflow' or clear the search / price filter.")) : null,
+    ]);
 
     const cols = (data.desks || []).map((d) => {
       const bk = books[d.key] || { rows: [], n: 0 };
@@ -401,7 +593,7 @@
       } else {
         body = rows.map((r, i) => {
           const kk = d.key + "|" + r.t;
-          return React.createElement(Card, { key: r.t + i, r, i, ck: d.key, onTicker, maxSize, desk: d,
+          return React.createElement(Card, { key: r.t + i, r, i, ck: d.key, onTicker, maxSize, desk: d, mode: hz,
             open: !!ddOpen[kk], onToggle: () => setDdOpen((o) => Object.assign({}, o, { [kk]: !o[kk] })) });
         });
       }
@@ -445,7 +637,7 @@
       React.createElement("div", { key: "sub", style: { color: "var(--dk-dim)", fontSize: "12px", margin: "0 0 8px" } },
         "11 desks each decide BUY on their own raw-signal checklist over the FULL universe · hover a verdict for its why."),
       freshBar,
-      regimeStrip, hzToggle, ctrls, bestStrip,
+      regimeStrip, hzToggle, ctrls, masterTable, bestStrip,
       React.createElement("div", { className: "dk-grid", key: "g" }, cols),
       React.createElement("div", { className: "dk-foot", key: "f" },
         "Each desk scans the whole universe and calls BUY/WATCH/PASS on its OWN criteria — never the old scanner's score or verdict. Regime sets LEADING/ACTIVE/DORMANT; confluence ⋈ is internal agreement only. Hover any verdict chip to see which conditions passed/failed."),
