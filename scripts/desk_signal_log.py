@@ -46,6 +46,16 @@ def _n(x, d=0.0):
         return d
 
 
+def _today_pt():
+    """Today's calendar date in Pacific (the timezone the daily scan stamps
+    run_date/run_timestamp in). Returned as an ISO YYYY-MM-DD string."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/Los_Angeles")).date().isoformat()
+    except Exception:
+        return datetime.now().date().isoformat()
+
+
 def _read_log():
     if not LOG.exists():
         return []
@@ -72,6 +82,20 @@ def log_today():
     date = str(date)[:10]  # YYYY-MM-DD
     if not date:
         print("no scan date — skip log")
+        return 0
+    # ── freshness guard ──────────────────────────────────────────────────
+    # The on-disk bundle's session date MUST be today (PT). The daily scan
+    # stamps run_date = today's PT calendar date. This job can fire before
+    # the scan finishes (e.g. the 14:20 run on a day the scan lands late, or
+    # any manual/early run), leaving a STALE prior-session bundle on disk.
+    # If we stamped rows with that stale date, every dedup key would already
+    # exist → 0 rows append SILENTLY, and today's desk signals are never
+    # captured. Skip loudly instead; a later run against the fresh bundle
+    # logs today's rows exactly once (existing dedup prevents double-logging).
+    today_pt = _today_pt()
+    if date != today_pt:
+        print(f"bundle stale: session {date} != today {today_pt} "
+              f"(scan not yet finished) — skip log, will capture once fresh bundle exists")
         return 0
     existing = {(e["date"], e["horizon"], e["desk"], e["ticker"]) for e in _read_log()}
     new = []
