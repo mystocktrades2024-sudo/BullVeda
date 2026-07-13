@@ -2988,10 +2988,10 @@ def get_sparks(symbols: list, n: int = 22) -> dict:
 def get_market_regime(breadth: dict | None = None) -> dict:
     """
     Assess market regime from SPY + QQQ technicals + VIX + market breadth.
-    4-regime classification:
-    - risk_on_trending: SPY > 50/200, QQQ > 50, VIX < 18, breadth > 65%
-    - risk_on_choppy: SPY > 50, VIX 18-25, breadth 40-65%
-    - risk_off_trending: SPY < 50, VIX 25-35, breadth 20-40%
+    4-regime classification (V4 thresholds, relaxed 2026-05-10 backtest):
+    - risk_on_trending: SPY > 50/200, QQQ > 50, VIX < 20, breadth > 60%
+    - risk_on_choppy: SPY > 50, VIX 20-25, breadth 40-60%
+    - risk_off_trending: SPY < 50 (2 consecutive closes), VIX 25-35, breadth 20-40%
     - panic: VIX > 35 OR breadth < 20%
     Legacy mapping: risk_on_trending→bull, risk_on_choppy→neutral, risk_off→bear, panic→bear
     """
@@ -3132,7 +3132,7 @@ def get_market_regime(breadth: dict | None = None) -> dict:
 
         # ── Audit 2026-06-03 regime guards (flag-gated, reversible) ──────────────
         # Fix B (default ON): when VIX/breadth are DEGRADED we cannot confirm the
-        #   risk_on_trending criteria (VIX<18, breadth>65) — refuse the risk-on upgrade
+        #   risk_on_trending criteria (VIX<20, breadth>60) — refuse the risk-on upgrade
         #   and lean defensive instead of trusting the 20/50 defaults. Pure data-integrity
         #   (principle 18); only ever REDUCES risk (trending→choppy).
         # Fix A (default OFF): a sub-EMA50 tape that hasn't yet confirmed risk-off is NOT
@@ -4478,6 +4478,35 @@ def get_stocktwits_data(ticker: str) -> dict:
 
 # ── VIX / Market Fear ────────────────────────────────────────────────────────
 
+def drop_partial_today_bar(obj):
+    """Return `obj` (a Series or DataFrame with a DatetimeIndex) with its last row
+    dropped IFF that row's date == today's US-Pacific date — i.e. the still-forming,
+    partial current-session bar that EODHD serves intraday.
+
+    Regime inputs (VIX level, breadth, the QQQ-SPY momentum spread) must read the
+    last COMPLETED daily session, never a live partial bar. The regime4 system is
+    explicitly anchored to the last completed daily bar and must not recompute/flip
+    intraday (see memory project_regime_live_overlay_2026_06_08).
+
+    Rule: exclude the last row iff its date == today (PT). On weekend/holiday runs
+    the last bar's date is already < today (e.g. Friday's bar on a Saturday run), so
+    it is a completed session and is kept untouched.
+    """
+    try:
+        if obj is None or len(obj) <= 1:
+            return obj
+        from datetime import datetime as _dt
+        from zoneinfo import ZoneInfo as _ZI
+        _today_pt = _dt.now(_ZI("America/Los_Angeles")).date()
+        _last = obj.index[-1]
+        _last_date = _last.date() if hasattr(_last, "date") else _last
+        if _last_date == _today_pt:
+            return obj.iloc[:-1]
+    except Exception:
+        pass
+    return obj
+
+
 def get_vix_data() -> dict:
     """
     Fetch VIX + VIX3M (audit gap #3, 2026-05-11) to capture vol dynamics
@@ -4512,6 +4541,9 @@ def get_vix_data() -> dict:
         if _vix_df is None or len(_vix_df) < 10:
             empty["error"] = "No VIX data"
             return empty
+        # Regime anchor: drop today's partial (still-forming) bar during market
+        # hours so VIX level/MA/slopes read the last COMPLETED daily session.
+        _vix_df = drop_partial_today_bar(_vix_df)
         close = _vix_df["Close"]
         current = float(close.iloc[-1])
         ma20 = float(close.rolling(20).mean().iloc[-1]) if len(close) >= 20 else current

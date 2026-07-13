@@ -4413,8 +4413,11 @@ def run_daily_scan(force_fresh: bool = False):
             _qqq_data = _fmd(["QQQ"], period="3mo").get("QQQ")
             if (_qqq_data is not None and "Close" in _qqq_data.columns
                     and _spy_data is not None and "Close" in _spy_data.columns):
-                _qqq_c = _qqq_data["Close"].dropna()
-                _spy_c = _spy_data["Close"].dropna()
+                # Regime anchor: drop today's partial bar so the 21d momentum
+                # spread reads the last COMPLETED daily session (never intraday).
+                from data_fetcher import drop_partial_today_bar as _drop_partial
+                _qqq_c = _drop_partial(_qqq_data["Close"].dropna())
+                _spy_c = _drop_partial(_spy_data["Close"].dropna())
                 if len(_qqq_c) >= 22 and len(_spy_c) >= 22:
                     _qqq_21 = (_qqq_c.iloc[-1] / _qqq_c.iloc[-22] - 1) * 100
                     _spy_21 = (_spy_c.iloc[-1] / _spy_c.iloc[-22] - 1) * 100
