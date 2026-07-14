@@ -56,6 +56,13 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
 QUIVER_URL = "https://api.quiverquant.com/beta/live/congresstrading"
+# House Stock Watcher — community-maintained mirror of the official House Clerk
+# PTR PDFs, parsed to ticker level (each row carries source_url back to
+# disclosures-clerk.house.gov for provenance). The canonical timothycarambat
+# Senate/House repos went dark in 2021; the TattooedHead fork is the live mirror
+# (verified pushed within 2 days, latest disclosure current). Free, no key.
+HOUSE_SW_URL = ("https://raw.githubusercontent.com/TattooedHead/"
+                "house-stock-watcher-data/main/data/all_transactions.json")
 HOUSE_ZIP_TMPL = "https://disclosures-clerk.house.gov/public_disc/financial-pdfs/{year}FD.ZIP"
 SENATE_HOME = "https://efdsearch.senate.gov/search/home/"
 SENATE_DATA = "https://efdsearch.senate.gov/search/report/data/"
@@ -173,6 +180,82 @@ def fetch_quiver(retries: int = 3) -> tuple[list[dict], dict]:
                 "source":       "quiver",
             })
         status.update(ok=True, n=len(out))
+        return out, status
+    except Exception as e:  # pragma: no cover - network
+        status["error"] = str(e)[:120]
+        return [], status
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# SOURCE 1b — House Stock Watcher mirror (PRIMARY ticker-level, House chamber)
+# ──────────────────────────────────────────────────────────────────────────
+def fetch_house_stock_watcher(retries: int = 3) -> tuple[list[dict], dict]:
+    """Ticker-level House PTR transactions from the House Stock Watcher mirror.
+
+    This is the live free replacement for the dead Quiver beta endpoint: it
+    parses the same official House Clerk PTR PDFs (source_url points straight
+    back to disclosures-clerk.house.gov) to (representative × ticker × buy/sell).
+    Senate is NOT covered here (the Senate Stock Watcher repo has been dead since
+    2021); Senate ticker-level would require OCR of eFD PDFs — a documented gap.
+    """
+    status = {"name": "house_stock_watcher", "ok": False, "n": 0, "error": None}
+    rows = None
+    for attempt in range(retries):
+        try:
+            r = requests.get(HOUSE_SW_URL,
+                             headers={"User-Agent": UA, "Accept": "application/json"},
+                             timeout=60)
+            if r.status_code == 200:
+                rows = r.json()
+                break
+            status["error"] = f"HTTP {r.status_code}"
+            if attempt == retries - 1:
+                return [], status
+            import time as _t
+            _t.sleep(1.5 * (attempt + 1))
+        except Exception as e:  # pragma: no cover - network
+            status["error"] = str(e)[:120]
+            if attempt == retries - 1:
+                return [], status
+            import time as _t
+            _t.sleep(1.5 * (attempt + 1))
+    if rows is None:
+        return [], status
+    try:
+        today = _dt.date.today()
+        out = []
+        for d in rows or []:
+            tk = (d.get("ticker") or "").strip().upper()
+            if not _is_us_common_stock(tk):
+                continue  # skips "--" (non-stock/blank) and non-common tickers
+            trade_iso = _iso_or_blank(d.get("transaction_date"))
+            disc_iso = _iso_or_blank(d.get("disclosure_date"))
+            # Data-quality guard: a handful of rows carry a future/typo trade date
+            # (e.g. 2026-12-26 disclosed 2026-07). Fall back to disclosure date so
+            # the 90d recency window isn't poisoned by look-ahead rows.
+            td = _parse_date(trade_iso)
+            if td and td > today:
+                trade_iso = disc_iso
+            amt_mid = d.get("amount_mid")
+            try:
+                amt_min = float(amt_mid) if amt_mid not in (None, "") \
+                    else _amount_min_from_range(d.get("amount") or "")
+            except Exception:
+                amt_min = _amount_min_from_range(d.get("amount") or "")
+            out.append({
+                "politician":   (d.get("representative") or "").strip(),
+                "party":        "",   # not provided by the House feed
+                "chamber":      "House",
+                "ticker":       tk,
+                "type":         _norm_type(d.get("type")),
+                "size_range":   (d.get("amount") or "").strip(),
+                "amount_min":   amt_min,
+                "trade_date":   trade_iso,
+                "publish_date": disc_iso,
+                "source":       "house_stock_watcher",
+            })
+        status.update(ok=bool(out), n=len(out),
+                      error=None if out else "0 usable rows")
         return out, status
     except Exception as e:  # pragma: no cover - network
         status["error"] = str(e)[:120]
@@ -438,6 +521,8 @@ def aggregate(txs: list[dict], lookback_days: int = LOOKBACK_DAYS) -> dict:
 def build(lookback_days: int = LOOKBACK_DAYS, verbose: bool = True) -> dict:
     sources = []
 
+    house_sw_tx, s0 = fetch_house_stock_watcher()
+    sources.append(s0)
     quiver_tx, s1 = fetch_quiver()
     sources.append(s1)
     capitol_tx, s2 = fetch_capitol_trades()
@@ -447,8 +532,9 @@ def build(lookback_days: int = LOOKBACK_DAYS, verbose: bool = True) -> dict:
     senate_filings, s4 = fetch_senate_efd_filings()
     sources.append(s4)
 
-    # Quiver first so it wins dedup ties
-    all_tx = _dedup(quiver_tx + capitol_tx)
+    # House Stock Watcher first (live, richest, official source_url), then Quiver
+    # (adds Senate when up), then Capitol Trades — dedup keeps the first seen.
+    all_tx = _dedup(house_sw_tx + quiver_tx + capitol_tx)
     agg = aggregate(all_tx, lookback_days)
 
     # official-provenance freshness (corroboration that aggregator isn't stale)
@@ -470,7 +556,7 @@ def build(lookback_days: int = LOOKBACK_DAYS, verbose: bool = True) -> dict:
         "n_tickers": len(agg["leaderboard"]),
         "sources": sources,
         "provenance": provenance,
-        "ticker_level_ok": s1["ok"] or s2["ok"],
+        "ticker_level_ok": s0["ok"] or s1["ok"] or s2["ok"],
     }
 
     # legacy candidates/tickers (universe wire-up backward compat)
