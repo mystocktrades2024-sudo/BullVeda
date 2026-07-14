@@ -1480,8 +1480,13 @@ def run_daily_scan(force_fresh: bool = False):
 
     # Sector ETF rotation + macro signals (parallel)
     log.info("  Fetching sector ETF rotation + macro signals...")
+    # 2026-07-13 — sector-leadership lookback is config-flagged (default 63 =
+    # current live behavior byte-for-byte). A shorter window (e.g. 21) makes the
+    # narrow-leadership dispersion signal track recent rotation instead of
+    # lagging by up to a quarter. See regime_classifier._note_sector_leadership_lookback.
+    _sll_days = int((cfg.get("regime_classifier") or {}).get("sector_leadership_lookback_days", 63))
     with ThreadPoolExecutor(max_workers=3) as _pool:
-        _sector_fut  = _pool.submit(get_sector_etf_data, 63)
+        _sector_fut  = _pool.submit(get_sector_etf_data, _sll_days)
         _macro_fut   = _pool.submit(get_macro_signals)
         _fg_fut      = _pool.submit(get_fear_greed)
         sector_etf_data = _sector_fut.result()
