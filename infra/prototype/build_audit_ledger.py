@@ -53,6 +53,23 @@ def _load_existing():
         return {}
 
 
+def _snap_weekend(d):
+    """BUG-WEEKEND-PHANTOM-PICKS: snap a Sat/Sun pick date forward to the next
+    Monday. Markets are closed on weekends so EODHD has no close to price the
+    pick — a weekend-dated row is a phantom (a manual re-scan of Friday's bar).
+    Snapping forward gives trade-day semantics: 'entered on the next session'.
+    Returns (snapped_date, was_snapped). Display/audit only; never mutates the
+    source picks_history or signal_log files. Mirrors the record_run() +
+    log_signals() write-time snaps so historical rows are also cleaned."""
+    try:
+        dow = datetime.strptime(d, "%Y-%m-%d").weekday()  # Mon=0 .. Sun=6
+        if dow == 5:   return (datetime.strptime(d, "%Y-%m-%d") + timedelta(days=2)).strftime("%Y-%m-%d"), True
+        if dow == 6:   return (datetime.strptime(d, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d"), True
+    except Exception:
+        pass
+    return d, False
+
+
 def _merge_pick_sources():
     """Merge picks_history.runs + signal_log → dict[(ticker, date) → base record]."""
     out = {}
@@ -61,6 +78,7 @@ def _merge_pick_sources():
         for run in (ph.get("runs") or []):
             d = run.get("run_date")
             if not d: continue
+            d, _snapped = _snap_weekend(d)  # phantom weekend picks → next Monday
             for pick in (run.get("picks") or []):
                 tkr = pick.get("ticker")
                 if not tkr: continue
@@ -69,6 +87,7 @@ def _merge_pick_sources():
                 out[key] = {
                     "ticker": tkr,
                     "pick_date": d,
+                    **({"pick_date_orig": run.get("run_date")} if _snapped else {}),
                     "price_at_pick": pick.get("entry_price"),
                     "verdict": pick.get("verdict"),
                     "direction": pick.get("direction", "long"),
@@ -120,6 +139,8 @@ def _merge_pick_sources():
         for s in (sl or []):
             tkr = s.get("ticker"); d = s.get("date")
             if not tkr or not d: continue
+            d_orig = d
+            d, _snapped = _snap_weekend(d)  # phantom weekend picks → next Monday
             key = (tkr, d)
             rec = out.get(key)
             if not rec:
@@ -127,6 +148,7 @@ def _merge_pick_sources():
                 rec = {
                     "ticker": tkr,
                     "pick_date": d,
+                    **({"pick_date_orig": d_orig} if _snapped else {}),
                     "price_at_pick": s.get("entry_price"),
                     "verdict": _verdict_from_status(s),
                     "direction": s.get("direction", "long"),

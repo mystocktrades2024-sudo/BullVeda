@@ -52,6 +52,19 @@ def record_run(picks: list[dict], run_date: str | None = None,
     history = _load_history()
     now = datetime.now()
     run_date = run_date or now.strftime("%Y-%m-%d")
+    # BUG-WEEKEND-PHANTOM-PICKS (2026-07) · If a scan runs on a weekend (manual
+    # rerun / late launchd fire), snap the recorded run_date forward to the next
+    # Monday so the audit ledger doesn't log phantom weekend picks that EODHD
+    # can't price anyway. Mirrors the identical snap already shipped in
+    # signal_tracker.log_signals() (2026-05-19). Trade-day semantics: "this
+    # signal would have been entered on the next trading day." Date-label only —
+    # does NOT change which picks are generated or scored.
+    try:
+        _dow = datetime.strptime(run_date, "%Y-%m-%d").weekday()  # Mon=0 .. Sun=6
+        if _dow == 5:    run_date = (datetime.strptime(run_date, "%Y-%m-%d") + timedelta(days=2)).strftime("%Y-%m-%d")
+        elif _dow == 6:  run_date = (datetime.strptime(run_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+    except Exception:
+        pass
     run_time = now.strftime("%H:%M")
     regime_name = (regime_name or "unknown").lower()
 
