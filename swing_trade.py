@@ -3774,6 +3774,14 @@ def run_daily_scan(force_fresh: bool = False):
                 "fund_max":             _fund.get("max"),
                 # Catalyst tier (used by the conditional fund_adequacy bypass).
                 "catalyst_tier":        c.get("catalyst_tier"),
+                # BUG-TV-SIGNAL-LOG-DROP (fixed 2026-07-13): pass the full
+                # tv_rating dict through the flatten step. signal_tracker.log_signals
+                # reads `c.get("tv_rating")` to persist tv_recommendation/tv_rec_value.
+                # This flattener previously omitted it, so every signal_log row landed
+                # with tv_recommendation=None despite the scored candidate carrying a
+                # real TV rating — leaving the Phase-2 TV-bonus Wilson validation at
+                # n=0 for 2 months. Do NOT drop this key.
+                "tv_rating":            c.get("tv_rating"),
                 # A6 (2026-05-09): entry-time feature suite for ML training corpus
                 **entry_features,
             }

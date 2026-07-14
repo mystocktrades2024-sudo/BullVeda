@@ -223,16 +223,27 @@ def _infer_mode(setup_family):
 
 
 def _fetch_history(ticker, from_date, to_date):
-    """Wrapper around eodhd_client.eod with simple error handling."""
+    """Wrapper around eodhd_client.eod. Returns (rows, status).
+
+    status distinguishes a GENUINE no-data response from a TRANSIENT failure —
+    a distinction that matters for honest ledger marking (BUG-MISSING-D1S):
+      "ok"    — non-empty bar list returned.
+      "empty" — the API responded but with NO bars → the ticker is delisted /
+                has no coverage in the window. Safe to mark rows as no_data.
+      "error" — exception (quota guard, network blip, HTTP error). TRANSIENT —
+                the row must be left untouched so the NEXT run retries it. Never
+                record a transient failure as a permanent data gap.
+    """
     try:
         import eodhd_client
         rows = eodhd_client.eod(ticker, from_date=from_date, to_date=to_date)
-        if not rows: return None
-        # Normalize: list of {date, open, high, low, close, adjusted_close, volume}
-        return rows
     except Exception as e:
         print(f"  fetch {ticker} {from_date}→{to_date}: {e}")
-        return None
+        return None, "error"
+    if rows:
+        # Normalize: list of {date, open, high, low, close, adjusted_close, volume}
+        return rows, "ok"
+    return [], "empty"
 
 
 def _compute_returns_for_ticker(ticker, ticker_records, today):
@@ -250,8 +261,16 @@ def _compute_returns_for_ticker(ticker, ticker_records, today):
     except Exception:
         return
 
-    hist = _fetch_history(ticker, from_d, to_d)
+    hist, _fstatus = _fetch_history(ticker, from_d, to_d)
     if not hist:
+        # Genuine empty API response → delisted / no-coverage ticker. Mark every
+        # pick for it honestly as no_data so its null forward returns read as
+        # "legitimately uncomputable", not "silently dropped" (BUG-MISSING-D1S).
+        # A transient "error" is left untouched so the next run retries it.
+        if _fstatus == "empty":
+            for _rec in ticker_records:
+                _rec["forward_data_status"] = "no_data"
+                _rec["forward_data_reason"] = "eodhd_no_bars"
         return
 
     # Build date → close map (sorted)
@@ -262,6 +281,9 @@ def _compute_returns_for_ticker(ticker, ticker_records, today):
         if d and close is not None and close > 0:
             prices[d] = float(close)
     if not prices:
+        for _rec in ticker_records:
+            _rec["forward_data_status"] = "no_data"
+            _rec["forward_data_reason"] = "eodhd_no_valid_closes"
         return
     sorted_dates = sorted(prices.keys())
     date_idx = {d: i for i, d in enumerate(sorted_dates)}
@@ -275,7 +297,10 @@ def _compute_returns_for_ticker(ticker, ticker_records, today):
         # close — the actual entry is the Monday following.
         if pd not in date_idx:
             forward = [d for d in sorted_dates if d >= pd]
-            if not forward: continue
+            if not forward:
+                rec["forward_data_status"] = "no_data"
+                rec["forward_data_reason"] = "no_bar_on_or_after_pick_date"
+                continue
             snapped = forward[0]
             if snapped != pd:
                 rec["pick_date_orig"] = pd     # preserve original for audit
@@ -309,6 +334,17 @@ def _compute_returns_for_ticker(ticker, ticker_records, today):
             p = prices[sorted_dates[tgt_i]]
             if p:
                 rec[label] = round(sign * (p / anchor - 1) * 100, 2)
+
+        # Honest status stamp (BUG-MISSING-D1S): D1 present ⇒ the row has real
+        # forward data. D1 absent here (bars fetched fine, but none after the
+        # pick) ⇒ the pick is too recent for even a 1-day forward close to
+        # exist yet — "pending", NOT a data gap. Either way, no silent null.
+        if rec.get("d1") is not None:
+            rec["forward_data_status"] = "ok"
+            rec.pop("forward_data_reason", None)
+        elif rec.get("forward_data_status") is None:
+            rec["forward_data_status"] = "pending"
+            rec["forward_data_reason"] = "insufficient_forward_bars"
 
         # MAE / MFE over next ~60 trading days
         mae, mfe = 0.0, 0.0

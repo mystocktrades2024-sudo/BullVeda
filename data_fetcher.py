@@ -4068,10 +4068,33 @@ def get_tv_ratings_batch(tickers: list[str], exchange_map: dict | None = None) -
         "EMA20", "EMA50", "EMA200", "volume",
     ]
 
-    batch_size = 200
-    for i in range(0, len(tickers), batch_size):
-        batch = tickers[i:i + batch_size]
-        symbols = [_format(t) for t in batch]
+    def _parse(row):
+        """Parse one TV scanner row into (raw_ticker, rating_dict) or None."""
+        raw_ticker = row.get("s", "").split(":")[-1].upper()
+        d = row.get("d", [])
+        if not d or d[1] is None:
+            return None
+        rec_val = d[1]  # -1 (strong sell) to +1 (strong buy)
+        if   rec_val >= 0.5:  rec = "STRONG_BUY"
+        elif rec_val >= 0.1:  rec = "BUY"
+        elif rec_val >= -0.1: rec = "NEUTRAL"
+        elif rec_val >= -0.5: rec = "SELL"
+        else:                 rec = "STRONG_SELL"
+        return raw_ticker, {
+            "recommendation": rec,
+            "rec_value":      round(rec_val, 3),
+            "ma_rec":         d[2],
+            "osc_rec":        d[3],
+            "rsi":            round(d[4], 1) if d[4] else None,
+            "macd":           round(d[5], 4) if d[5] else None,
+            "macd_signal":    round(d[6], 4) if len(d) > 6 and d[6] else None,
+            "ema20":          round(d[8],  2) if len(d) > 8  and d[8]  else None,
+            "ema50":          round(d[9],  2) if len(d) > 9  and d[9]  else None,
+            "ema200":         round(d[10], 2) if len(d) > 10 and d[10] else None,
+        }
+
+    def _scan(symbols):
+        """POST a batch of exchange:ticker symbols; merge parsed rows into results."""
         try:
             resp = requests.post(
                 "https://scanner.tradingview.com/america/scan",
@@ -4085,34 +4108,34 @@ def get_tv_ratings_batch(tickers: list[str], exchange_map: dict | None = None) -
             )
             if resp.status_code != 200:
                 log.warning(f"TV scanner HTTP {resp.status_code}")
-                continue
-
+                return
             for row in resp.json().get("data", []):
-                raw_ticker = row.get("s", "").split(":")[-1].upper()
-                d = row.get("d", [])
-                if not d or d[1] is None:
-                    continue
-                rec_val = d[1]  # -1 (strong sell) to +1 (strong buy)
-                if   rec_val >= 0.5:  rec = "STRONG_BUY"
-                elif rec_val >= 0.1:  rec = "BUY"
-                elif rec_val >= -0.1: rec = "NEUTRAL"
-                elif rec_val >= -0.5: rec = "SELL"
-                else:                 rec = "STRONG_SELL"
-
-                results[raw_ticker] = {
-                    "recommendation": rec,
-                    "rec_value":      round(rec_val, 3),
-                    "ma_rec":         d[2],
-                    "osc_rec":        d[3],
-                    "rsi":            round(d[4], 1) if d[4] else None,
-                    "macd":           round(d[5], 4) if d[5] else None,
-                    "macd_signal":    round(d[6], 4) if len(d) > 6 and d[6] else None,
-                    "ema20":          round(d[8],  2) if len(d) > 8  and d[8]  else None,
-                    "ema50":          round(d[9],  2) if len(d) > 9  and d[9]  else None,
-                    "ema200":         round(d[10], 2) if len(d) > 10 and d[10] else None,
-                }
+                parsed = _parse(row)
+                if parsed:
+                    results[parsed[0]] = parsed[1]
         except Exception as e:
-            log.warning(f"TV scanner batch {i}–{i+batch_size} failed: {e}")
+            log.warning(f"TV scanner batch failed: {e}")
+
+    batch_size = 200
+
+    # Pass 1 — best-guess exchange per ticker (from yfinance exchange_map,
+    # default NASDAQ). This resolves NASDAQ names + anything with a known map.
+    for i in range(0, len(tickers), batch_size):
+        batch = tickers[i:i + batch_size]
+        _scan([_format(t) for t in batch])
+
+    # Pass 2 — exchange fallback. The exchange_map is frequently empty under the
+    # EODHD-primary pipeline (yfinance info is sparse), so every unmapped ticker
+    # defaults to NASDAQ and TV silently drops the NYSE/AMEX listings. Retry the
+    # still-unresolved set against each remaining US exchange until it resolves.
+    # TV's /scan is a free public endpoint, so the extra passes are cheap.
+    for ex in ("NYSE", "NASDAQ", "AMEX"):
+        unresolved = [t for t in tickers if t.upper() not in results]
+        if not unresolved:
+            break
+        for i in range(0, len(unresolved), batch_size):
+            batch = unresolved[i:i + batch_size]
+            _scan([f"{ex}:{t}" for t in batch])
 
     log.info(f"TV ratings: {len(results)}/{len(tickers)} tickers")
     return results
