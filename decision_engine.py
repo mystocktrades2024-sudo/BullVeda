@@ -1217,23 +1217,51 @@ def _compute_final_verdict_impl(t: dict, regime: str | None = None,
     # Mechanism: P2 factor attribution found TC mom_β +0.74, BE mom_β +0.78 — both
     # statistically significant momentum exposure with ZERO alpha. When momentum factor
     # drawdowns, these setups lose by construction. Audit: cache/factor_attribution_2026-05-18.json
+    # rule_mode (MOMGATE-REDERIVE 2026-07-13) selects the demotion rule. DEFAULT
+    # "current" => live behavior UNCHANGED. Other modes are PROPOSALS pending paper
+    # validation (500-user signal-enable bar): OOS harness in
+    # scratchpad/oos_momgate_candidates.py -> cache/oos_momgate_candidates_result.json.
+    #   current            : demote spread < min_spread_pct (0.0)              [LIVE]
+    #   regime_conditional : same, but gate OFF in risk_on_choppy
+    #   toxic_zone         : demote ONLY spread < toxic_threshold_pct (-1.0)   [RECOMMENDED]
+    #   disabled           : never demote (A/B parity with _enabled=false)
     _mom_gate_cfg = (config or {}).get("momentum_condition_gate") or {}
     if _mom_gate_cfg.get("_enabled", False):
         _affected = set(_mom_gate_cfg.get("affected_setups", ["Trend Continuation", "Breakout Expansion"]))
         _t_setup = t.get("setup_family") or ""
         if _t_setup in _affected:
             _mom_spread = t.get("_runtime_qqq_spy_momentum_21d")  # injected by build_data
-            if _mom_spread is not None and _mom_spread < _mom_gate_cfg.get("min_spread_pct", 0.0):
+            _rule_mode = str(_mom_gate_cfg.get("rule_mode") or "current").lower()
+            _min_spread = _mom_gate_cfg.get("min_spread_pct", 0.0)
+            _toxic_thr = _mom_gate_cfg.get("toxic_threshold_pct", -1.0)
+            # Resolve the effective demotion threshold + whether the gate applies.
+            _gate_applies = True
+            _thr = _min_spread
+            _reason_zone = f"< {_min_spread:+.2f}%"
+            if _rule_mode == "disabled":
+                _gate_applies = False
+            elif _rule_mode == "regime_conditional":
+                # Gate off in choppy (OOS: choppy >0-zone PF 2.63 is best; disabling hurts)
+                if str(regime or "") == "risk_on_choppy":
+                    _gate_applies = False
+            elif _rule_mode == "toxic_zone":
+                # Demote only the genuinely-toxic deep-negative zone (OOS PF ~1.02);
+                # leave [-1%,0) admitted (restores OOS-best [-1,-0.5%) zone PF 1.56).
+                _thr = _toxic_thr
+                _reason_zone = f"< {_toxic_thr:+.2f}% (toxic zone)"
+            if (_gate_applies and _mom_spread is not None
+                    and _mom_spread < _thr):
                 return {
                     "verdict": "WATCH",
-                    "reason": f"momentum_condition_gate: {_t_setup} demoted — QQQ-SPY 21d spread {_mom_spread:+.2f}% < threshold",
+                    "reason": f"momentum_condition_gate[{_rule_mode}]: {_t_setup} demoted — QQQ-SPY 21d spread {_mom_spread:+.2f}% {_reason_zone}",
                     "caveats": [f"setup is pure-momentum factor play (P2 evidence); paused during momentum drawdown"],
                     "gates_evaluated": [{
                         "name": "momentum_condition_gate",
                         "passed": False,
-                        "reason": f"QQQ-SPY 21d spread {_mom_spread:+.2f}% < 0",
+                        "reason": f"QQQ-SPY 21d spread {_mom_spread:+.2f}% {_reason_zone}",
                         "severity": "medium",
-                        "stats": {"setup": _t_setup, "mom_spread_pct": _mom_spread},
+                        "stats": {"setup": _t_setup, "mom_spread_pct": _mom_spread,
+                                  "rule_mode": _rule_mode, "threshold_pct": _thr},
                     }],
                     "demote_to": "watch_list",
                 }
