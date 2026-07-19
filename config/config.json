@@ -21,10 +21,10 @@
   },
   "_meta": {
     "schema_version": "2.0",
-    "last_backtested": "2026-06-20",
+    "last_backtested": "2026-07-12",
     "last_backtest_wr": 0.857,
     "last_backtest_config": "config_e (4x20%, 5d hold, score>=68 bull/72 choppy)",
-    "last_modified": "2026-06-20",
+    "last_modified": "2026-07-12",
     "notes": "Fix #23 \u2014 version-locked. Don't change thresholds without a fresh backtest.",
     "trading_style_defaults": "swing",
     "swing_defaults_applied": "2026-04-14",
@@ -330,6 +330,14 @@
       "max_size_pct": 70,
       "vix_max": 25,
       "breadth_min": 40,
+      "entry_quality_rules": {
+        "FRESH": "BUY",
+        "PULLBACK": "BUY",
+        "VALID": "BUY",
+        "EXTENDED": "WATCH",
+        "MISSED": "WATCH"
+      },
+      "_entry_quality_rules_note": "2026-07-13 edge-erosion diagnostic \u2014 in risk_on_choppy, EXTENDED/MISSED demote to WATCH with NO breakout-bypass leak (analysis.py profile-rules dispatch now applies to bypassed setups too). Evidence: Jun-Jul live BUY cohort (all choppy) \u2014 EXTENDED n=754 avg w1 -1.27%, MISSED n=804 -0.90%, vs PULLBACK +0.29% / VALID +0.69% / FRESH +0.32%. Chasing extension has no follow-through in chop. FRESH restored to BUY here (the global FRESH->WATCH demotion rests on n=20, below the n>=30 floor). Trending-regime rules untouched; catalyst sleeves keep their decision_engine bypass. Rollback: delete this entry_quality_rules block.",
       "_note": "2026-05-10 \u2014 restored to documented baseline (CLAUDE.md table). Was 80; choppy regime requires 7-pt premium over trending = 72. buy_max_score:90 per Q1-step6."
     },
     "risk_off_trending": {
@@ -453,6 +461,16 @@
     "min_sector_percentile_for_buy": 60.0,
     "demote_to_watch_below_threshold": true,
     "min_candidates_per_sector_for_ranking": 3
+  },
+  "signal_edge_brake": {
+    "_enabled": true,
+    "_note": "EDGE-EROSION BRAKE (2026-07-13, principle 11). Replaces the throttle lost when rolling_sharpe_kill was decoupled from the signal layer (portfolio-blind, 2026-06-07): when the trailing 28d BUY cohort's avg 5-day forward return (w1, from cache/audit_ledger.json — the UNIVERSAL system pick record, portfolio-blind by construction) is net-negative on n>=min_n, buy_min_score is raised by the deepest matching tier delta. Never lowers the bar; never full-halts (QUANT-1 starvation lesson). Evidence: w1 by month Apr +1.85 / May +1.35 / Jun -0.56 / Jul -1.87 — 2,232 BUYs fired into a negative-edge tape with no brake. Implementation: edge_brake.py; hook in analysis make_decision after effective_buy_min. Rollback: _enabled=false.",
+    "lookback_days": 28,
+    "min_n": 150,
+    "tiers": [
+      {"below": 0.0, "delta": 8},
+      {"below": -1.0, "delta": 15}
+    ]
   },
   "rolling_sharpe_kill": {
     "_enabled": false,
@@ -1104,7 +1122,7 @@
     "_max_enrichment_note": "Fix #25: was 1200 = full universe enrichment. 2026-04-27: cut to 300 to control EODHD daily call volume. Zacks #1 still guaranteed in pre-screen, so no premium pick is missed. Raise carefully \u2014 each +100 here adds ~800 EODHD calls per scan (8 enrichment endpoints). 2026-05-22: bumped 500\u2192700 to absorb Tier-2/3/4 curated-source guarantees (IPO/PEAD/insider/congress/newHi/newLo/crypto ~140 tickers) without starving R2000/MID/SML/NDX of top-ranked OHLCV slots. Daily EODHD quota=95K, scan uses ~30K, plenty of headroom. 2026-05-30: REVERTED 3000->700 \u2014 a 10x regression had crept in, deep-enriching ~2,500 tickers x ~14 endpoints and bursting EODHD's per-MINUTE limit (950/min); daily quota was fine (~8.7K/95K). Root cause was THIS knob, not a missing bulk endpoint (bulk_eod already exists + wired). 700 is the validated two-stage shortlist size.",
     "prescreen_v2": true,
     "_note_prescreen_v2": "2026-06-02: enhanced top-N selection score. v1 was pure trend-momentum (under-ranked RS leaders in flat tape, scored coiled VCP/squeeze ~0, PENALIZED pullbacks that the Mean-Rev/EMA-pullback sleeves buy). v2 adds: RS-vs-SPY (regime-aware), liquidity tilt (deeper $ vol), volatility-contraction bonus (VCP/squeeze pre-breakout), and replaces the blanket pullback penalty with oversold-above-200EMA credit. Set false to revert to v1 momentum-only. Changes WHICH 1500 get scored, not how many.",
-    "max_enrichment_tickers": 1000,
+    "max_enrichment_tickers": 700,
     "_note_enrich": "Tickers above this threshold are cut by fast OHLCV pre-screen before Step 4. Guaranteed inclusions (SP500, Zacks #1, earnings-window, PEAD, curated info-edge sources) bypass the cap; remaining slots fill from top-ranked OHLCV. Raise if you want wider coverage, lower for fewer EODHD calls. 2026-06-01: 1000->1500 (user: 'top 1500 + NASDAQ'). Safe ONLY because the cross-process shared EODHD limiter (eodhd_client._SharedRateLimiter, EODHD_SHARED_LIMITER=1) now gives the whole key ONE 950/min budget so concurrent jobs pace behind the scan instead of bursting past EODHD's 1000/min. ~1500x8=12K calls/scan vs 94K daily headroom; per-MINUTE is the binding constraint, handled by the shared limiter + job staggering. Without the shared limiter this WILL re-trigger the 2026-05-30 abort regression \u2014 do not raise here while EODHD_SHARED_LIMITER=0. 2026-06-06: 1500->1000 (user-approved). The 06-06 08:30 scan exhausted the DAILY quota (99,431/100,000; 15/15 data-health checks failed, all_scored=0) \u2014 enrichment + the morning launchd stack (scan + enrich-nightly + eod-snapshots) collectively burned ~14.7K per-ticker daily-bar calls at 5-6am, then the 08:30 scan correctly aborted at \u226597%. 1000 restores daily-quota headroom for the 500-user precompute/serve path; raise again only after confirming a normal day stays well under 100K.",
     "deep_enrichment_top_n": 500,
     "_note_deep_enrich": "DECOUPLED from max_enrichment_tickers 2026-06-02. This is the EXPENSIVE-tier cap: only the top N (by pre-screen score, + guaranteed sets) get the heavy per-ticker external scrapes (options/UOA/gamma/WSB/StockTwits/congressional/SEC). The remaining (max_enrichment_tickers - N) are LIGHT tier: scored on OHLCV + cheap EODHD fundamentals, WATCH-eligible only. Was 1500 (== max), which made a full deep run scrape all 1500 names \u2014 the external-scrape tail (StockTwits/WSB/congressional w/ timeouts) does NOT scale to 1500 and stalled the 06:00 run for hours. 500 keeps the actionable top fully enriched (BUY candidates are top ~50-100) while the 500-1500 tail still ranks. Intraday SCAN_MODE=light shrinks this further to light_deep_enrichment_top_n.",
@@ -1368,7 +1386,9 @@
     "_rollback": "Set _enabled=false (or restore config/config.json.bak.*). Applies forward-only on next scan."
   },
   "entry_quality_score_tilt": {
-    "_enabled": true,
+    "_enabled": false,
+    "_disabled_at": "2026-07-13",
+    "_disabled_note": "DISABLED 2026-07-13 (edge-erosion diagnostic). The May-22 basis (MISSED PF 1.80 best / FRESH PF 0.14 worst) REVERSED in the Jun-Jul live forward window: audit_ledger BUY cohort 2026-06-01..07-13 — MISSED n=804 avg w1 -0.90%, EXTENDED n=754 -1.27%, while PULLBACK +0.29% / VALID +0.69% / FRESH +0.32%. A tilt whose sign flips across adjacent windows has no stable edge (principle 11); OFF rather than sign-flipped. Rollback: _enabled=true.",
     "_activated_at": "2026-05-22",
     "_note": "2026-05-22 \u2014 Additive tilt on the composite (0-100) score based on realized PF/Sharpe per entry_quality bucket. Companion to entry_quality_rules_override (which controls the verdict gate); this controls BUY-pool RANKING. Reorders the BUY pool to favor empirically profitable qualities (MISSED PF 1.80 n=369, EXTENDED PF 1.12 n=457) over historically unprofitable ones (FRESH PF 0.14 n=20, PULLBACK PF 0.91 n=97). Asymmetric magnitudes: high-confidence buckets (n>=300) get full weight; preliminary buckets (n<30) get half-weight per CLAUDE.md retail calibration. FLAG-GATED \u2014 flip _enabled=true to apply forward-only.",
     "_evidence": "cache/picks_history.json 2026-05-22: 1061 closed trades by entry_quality x regime4. Inversion holds across both risk_on_trending (MISSED PF 3.26 n=107, FRESH PF 0.10 n=7) and risk_on_choppy (MISSED PF 1.51 n=262, FRESH PF 0.18 n=13). No regime where FRESH/PULLBACK beat EXTENDED/MISSED.",
@@ -1901,11 +1921,10 @@
     },
     "Breakout Expansion": {
       "bull": 0.0,
-      "neutral": 1.0,
+      "neutral": 0.0,
+      "risk_on_choppy": 0.0,
       "bear": 1.0,
-      "_staged_neutral": 0.5,
-      "_staged_risk_on_choppy": 0.5,
-      "_staged_note": "STAGED 2026-06-08, INERT. Proposed 0.5 demote of Breakout Expansion in choppy (regime4 risk_on_choppy == 3-regime neutral). Evidence in _validations.'Breakout Expansion'.risk_on_choppy. Engine ignores '_'-prefixed keys, so this is a no-op until activated. ACTIVATE (after walk-forward confirms): set 'neutral' to 0.5 (and optionally add 'risk_on_choppy': 0.5), then delete the _staged_* keys."
+      "_activated_note": "ACTIVATED 2026-07-13 (staged 2026-06-08 as 0.5 demote pending walk-forward). Upgraded demote->KILL because BOTH post-train windows are negative: (a) 6/08 holdout PF 0.52, (b) LIVE forward audit_ledger BUY cohort 2026-06-01..07-13 n=283, avg w1 -1.88%, WR 46% — true out-of-sample confirmation of the 6/08 in-sample finding. Rollback: set neutral+risk_on_choppy to 1.0. Evidence: _validations.'Breakout Expansion'.risk_on_choppy + edge-erosion diagnostic 2026-07-13 (docs/strategy_validation_report.html)."
     },
     "Impulse Catalyst": {
       "risk_on_choppy": 0.0
@@ -2414,7 +2433,8 @@
     "_activated_at": "2026-06-13",
     "_activation_note": "PAPER A/B OBSERVATION (paper-only system per feedback_paper_only_automation). Offline activation test on cache/last_bundle.json (06-13 risk_on_choppy, weak-catalyst day): BUY 34->6, all 6 survivors = Trend Continuation (the only profitable family, audit PF 1.41); 30 low-rank momentum BUYs demoted to WATCH, 2 quality WATCHes promoted. rank_score still emitted for every row so the A/B (composite verdict vs rank verdict) is observable in the audit ledger. Thresholds are outcome-calibrated on historical BUYs but on a single 2-month window \u2014 RE-CALIBRATE as paper volume accrues; revert with _enabled=false (byte-identical legacy path).",
     "_comment": "RANK-REBUILD-2026-06-13 (audit docs/signal_screener_audit_2026_06_13). The composite 5-pillar `score` is ANTI-correlated with realized return (Pearson IC -0.10, t=-4.0); the inversion is regime-conditional (momentum pillars tech/rs work trending, invert choppy) and the Zacks/news bonus is a crowding fade (IC -0.14 choppy). signal_rank.compute_rank_score builds a regime-conditional rank from the PRE-bonus pillar norms (bonus structurally excluded). Validated (scripts/signal_walkforward.py): ranking each scan-day's top tercile by rank_score lifts the picked set PF 1.01 -> 1.71 (gate+rank 1.77). When _enabled, decision_engine ranks/promotes on rank_score while keeping score>=`gate_floor` as a quality GATE; the composite score is demoted from ranker to gate. DEFAULT OFF: rank_score is always computed + emitted (for A/B observation) but does not drive the verdict until flipped. Reversible: set _enabled=false. Weights live in signal_rank.DEFAULT_WEIGHTS unless overridden in `weights` below.",
-    "gate_floor": 60,
+    "gate_floor": 70,
+    "_gate_floor_audit": "GATEFLOOR-60->70-2026-07-06: raised from 60 to 70. Evidence: dual-log (picks_history + signal_log) composite-score-band audit over 2026-04-06..07-01. The 60-69 composite band loses in BOTH logs, FULL history AND post-ranker (>=06-13): picks_history 60-69 PF 0.79 full / 65-69 PF 0.20 post; signal_log 60-69 PF 0.55 full / 65-69 PF 0.44 post. This empirically REFUTES the prior comment's assumption that the ranker separates the 65-72 band finely enough to keep it (the ranker is NOT salvaging 65-69 post-activation). The 70-89 band is the edge (picks 1.35 / signal 1.70 full). Asymmetric-safe: a GATE raise only REMOVES ~562 confirmed-losing trades (combined -474% totR), cannot add trades. Reversible: set gate_floor=60 (backup config/config.json.bak.20260706_113721). Walk-forward (wf_accuracy_20260706, running) corroborates OOS and may justify pushing to 75/80.",
     "rank_buy_threshold": {
       "trending": 50,
       "choppy": 36,
@@ -2436,6 +2456,16 @@
     ],
     "families": [
       "Breakout"
+    ]
+  },
+  "tc_catalyst_confluence_gate": {
+    "_enabled": true,
+    "_activated_at": "2026-07-13",
+    "_comment": "TC-CATALYST-CONFLUENCE-2026-07-13 (edge-erosion diagnostic). Trend Continuation = 62% of Jun-Jul BUY volume (n=1,393) at -0.68%/wk in choppy tape; factor attribution 2026-05-19 shows TC carries ZERO alpha (pure momentum beta +0.74). Principle 14: pure-technical setups without catalyst = lower conviction. In the listed regimes, a TC BUY requires catalyst_tier <= max_catalyst_tier (T1 PEAD/UOA/VCP/52wk or T2 squeeze/pullback/insider); tier-3 (analyst headlines/social/none) demotes to WATCH. Enforced in decision_engine._compute_final_verdict_impl. Trending regimes untouched (TC is the natural momentum family there; no negative evidence). Reversible: _enabled=false.",
+    "max_catalyst_tier": 2,
+    "regimes": [
+      "risk_on_choppy",
+      "neutral"
     ]
   },
   "buy_score_floor": {
@@ -2485,10 +2515,23 @@
     ]
   },
   "entry_watch": {
-    "shadow_slack": true
+    "shadow_slack": false,
+    "send_enabled": true,
+    "firm_only": true
   },
   "executor": {
     "max_entry_price": 150,
     "_max_entry_price_note": "2026-06-16 \u2014 EXECUTOR-only share-price ceiling per owner: paper auto-buy trades only stocks < $150 (share granularity on $10k account). Does NOT affect filters.max_price ($1000 universe cap) \u2014 signals stay universal for all users. Set 0/null to disable."
+  },
+  "screener_desks": {
+    "mr_falling_knife_guard": {
+      "_enabled": true,
+      "_comment": "2026-07-04 \u2014 Mean-Reversion desk falling-knife guard. Demotes oversold BUYs (RSI<30) whose relative strength has fully collapsed (rs_rank<rs_min = deep knife) to WATCH. Display/screening layer only \u2014 gates no canonical verdict. Set _enabled=false to revert to the 2-condition rule (RSI<30 & >200EMA -> BUY). CALIBRATED by signal-replay (scripts/backtest_mr_guard.py, 673 oversold events): (1) bearish EMA stack is COLLINEAR with RSI<30 (100% of oversold names are bearish-stack) -> useless separator -> reject_bear_stack=false; (2) rs_min=30 was BACKWARDS \u2014 deep knives rs<15 are a coin flip (WR 51%, mean +0.06%) while rs 15-30 bounce best (n=44, WR 70%, Wilson 56%), so demote only the collapsed-RS extreme (rs<15). PROVISIONAL: n thin, ~8-wk single-regime window; see docs/strategy_validation_report.html.",
+      "rs_min": 15,
+      "reject_bear_stack": false
+    }
+  },
+  "desk_watch": {
+    "send_enabled": true
   }
 }

@@ -585,6 +585,18 @@ def run_daily_scan(force_fresh: bool = False):
     except Exception as e:
         log.debug(f"State backup failed: {e}")
 
+    # Edge-erosion brake (2026-07-13) — refresh trailing-cohort state from the
+    # universal audit ledger so per-ticker scoring reads a fresh cached delta.
+    try:
+        import edge_brake
+        _eb_state = edge_brake.recompute_state(cfg)
+        if _eb_state.get("delta"):
+            log.warning(f"EDGE BRAKE ACTIVE: {_eb_state.get('note')}")
+        else:
+            log.info(f"Edge brake: {_eb_state.get('note')}")
+    except Exception as e:
+        log.debug(f"Edge brake recompute failed (non-fatal): {e}")
+
     # Pre-scan connectivity check — detect DNS/network outages before they
     # silently kill ~35% of the universe. If any critical endpoint fails to
     # resolve, enable archive-first degraded mode (Fix #1 + #5).

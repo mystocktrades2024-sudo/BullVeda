@@ -8678,6 +8678,22 @@ def make_decision(total_score: float, rr_ratio: float, config: dict,
     buy_min = _pre_breadth_final
     _season_note = _ebm_pre.get("season_note", "")
 
+    # EDGE-EROSION BRAKE (2026-07-13, principle 11) — when the trailing BUY
+    # cohort's universal forward return (audit_ledger w1) is net-negative,
+    # raise the BUY bar so marginal signals stop firing into a losing tape.
+    # Portfolio-blind: reads only the universal audit ledger, never the
+    # owner's signal_log/portfolio. Longs only; never lowers the bar.
+    _edge_brake_note = ""
+    if direction != "short":
+        try:
+            import edge_brake as _eb
+            _eb_delta, _eb_state = _eb.get_delta(config)
+            if _eb_delta > 0:
+                buy_min = min(95, buy_min + _eb_delta)
+                _edge_brake_note = f"edge brake +{_eb_delta} ({_eb_state.get('note', '')})"
+        except Exception:
+            pass
+
     # Fix #7: Setup-specific minimum R:R — look up by setup family, fall back to default
     # Risk-Off regime override (4.0) still takes priority
     _min_rr_cfg = config.get("technicals", {}).get("min_rr", {})
@@ -8792,7 +8808,13 @@ def make_decision(total_score: float, rr_ratio: float, config: dict,
     _eq_rules = _eq_rules_regime if _eq_rules_regime else _eq_rules_global
     if _eq_rules and direction == "long" and entry_quality:
         _eq_verdict = _eq_rules.get(entry_quality, "")
-        if _eq_verdict == "WATCH" and entry_quality not in ("EXTENDED", "MISSED"):
+        # 2026-07-13: when the hardcoded EXTENDED/MISSED demote above was
+        # BYPASSED (breakout bypass / rules override), profile rules must be
+        # allowed to demote EXTENDED/MISSED — otherwise bypassed setups have
+        # NO entry-quality gate at all. Jun–Jul live: EXTENDED/MISSED BUYs
+        # were 70% of volume at −0.9%..−1.3%/wk while in-zone entries were
+        # positive. The exclusion below now only applies when not bypassed.
+        if _eq_verdict == "WATCH" and (entry_quality not in ("EXTENDED", "MISSED") or _eq_bypass):
             return {"verdict": "WATCH", "emoji": "eye", "color": "#d97706",
                     "bear_type": "",
                     "reason": f"Entry quality {entry_quality} → WATCH per profile (score {total_score:.0f})"}
