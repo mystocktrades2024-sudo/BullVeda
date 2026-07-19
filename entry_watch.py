@@ -54,6 +54,12 @@ BASE_DIR = Path(__file__).parent
 BUNDLE_PATH = BASE_DIR / "cache" / "last_bundle.json"
 CONFIG_PATH = BASE_DIR / "config" / "config.json"
 SHADOW_LOG = BASE_DIR / "cache" / "entry_watch_shadow.jsonl"
+HEALTH_PATH = BASE_DIR / "cache" / "entry_watch_health.json"
+
+# Consecutive failed cycles before the watcher self-reports as DOWN. At the
+# 5-min launchd interval, 6 ≈ 30 minutes of blindness. Override via
+# config.json -> entry_watch.health_alert_after.
+HEALTH_ALERT_AFTER = 6
 
 MODE = "swing"  # v1 — entry timing is most acute for swings
 
@@ -289,7 +295,111 @@ def _live_rr(price: float, t1: float, stop: float) -> float | None:
     return (t1 - price) / (price - stop)
 
 
+def _heartbeat(result: dict) -> None:
+    """Record watcher health on EVERY pass, and self-report when it goes blind.
+
+    The gap this fills (2026-07-18): run_entry_watch.sh only logs a line when a
+    pass produced an alert or an error, so a HEALTHY-but-quiet cycle and a DEAD
+    cycle look identical (both write nothing). The watcher was in fact blind
+    from 2026-06-18 to 2026-07-14 — 26 days, 117 failed cycles on an expired
+    Schwab token, unable to fire a single alert — and nothing surfaced it.
+
+    Every terminal path now stamps cache/entry_watch_health.json, and a run of
+    consecutive failures escalates to Slack ONCE (not per-cycle), with a
+    matching recovery note. Silence now means "healthy and quiet"; a dead
+    watcher says so itself.
+
+    Market-closed cycles update last_run but never touch the failure streak —
+    otherwise every weekend would page as an outage.
+    """
+    from datetime import datetime
+
+    now = datetime.now().isoformat(timespec="seconds")
+    try:
+        state = json.load(open(HEALTH_PATH))
+    except Exception:
+        state = {}
+
+    reason = result.get("reason") or ""
+    if result.get("skipped") and reason == "outside_market_hours":
+        state["last_run"] = now
+        state["status"] = "closed"
+        _write_health(state)
+        return
+
+    # no_bullish_targets = empty/stale bundle. Not an exception, but the watcher
+    # is just as blind as it is on a dead token — treat it as a failure.
+    failure = result.get("error") or (reason if result.get("skipped") else "")
+
+    try:
+        cfg = json.load(open(CONFIG_PATH))
+        alert_after = int((cfg.get("entry_watch") or {}).get(
+            "health_alert_after", HEALTH_ALERT_AFTER))
+    except Exception:
+        alert_after = HEALTH_ALERT_AFTER
+
+    state["last_run"] = now
+    if failure:
+        streak = int(state.get("consecutive_failures") or 0) + 1
+        state["consecutive_failures"] = streak
+        state["last_failure"] = failure
+        state["last_failure_at"] = now
+        state["status"] = "down" if streak >= alert_after else "degraded"
+        if streak >= alert_after and not state.get("alerted"):
+            state["alerted"] = True
+            if _send_enabled():
+                _slack(
+                    "WARN",
+                    "Entry watcher is DOWN",
+                    f"*{streak}* consecutive failed cycles (~{streak * 5} min blind).\n"
+                    f"Reason: `{failure}`\n"
+                    f"Last healthy pass: {state.get('last_ok') or 'unknown'}\n"
+                    f"No entry alerts can fire until this clears.",
+                )
+    else:
+        if state.get("alerted") and _send_enabled():
+            _slack(
+                "INFO",
+                "Entry watcher recovered",
+                f"Quotes flowing again after {state.get('consecutive_failures')} "
+                f"failed cycles. Watching {result.get('bullish_watched')} names.",
+            )
+        state["consecutive_failures"] = 0
+        state["alerted"] = False
+        state["status"] = "ok"
+        state["last_ok"] = now
+        state["last_ok_detail"] = {
+            "bullish_watched": result.get("bullish_watched"),
+            "quotes_returned": result.get("quotes_returned"),
+            "in_zone": result.get("in_zone"),
+            "alerts_sent": len(result.get("alerts_sent") or []),
+        }
+    _write_health(state)
+
+
+def _write_health(state: dict) -> None:
+    """Atomic write so a crash mid-write can't leave unparseable health state."""
+    tmp = HEALTH_PATH.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(state, indent=2))
+    tmp.replace(HEALTH_PATH)
+
+
 def run_entry_watch_pass(dry_run: bool = False) -> dict:
+    """Public entry — runs a pass, then records health on every path.
+
+    Health is skipped for dry runs so testing never pollutes the real state or
+    fires a false DOWN/recovery alert.
+    """
+    result = _run_entry_watch_pass(dry_run=dry_run)
+    if not dry_run:
+        try:
+            _heartbeat(result)
+        except Exception:
+            log.exception("heartbeat write failed")  # never break the watcher
+    return result
+
+
+def _run_entry_watch_pass(dry_run: bool = False) -> dict:
     """Main entry — called every cycle by run_entry_watch.sh during market hours.
 
     dry_run=True computes everything and returns what WOULD fire without sending
@@ -321,10 +431,15 @@ def run_entry_watch_pass(dry_run: bool = False) -> dict:
         allow = set(ew_cfg.get("family_allowlist") or FAMILY_ALLOWLIST)
         soft_min_rr = float(ew_cfg.get("soft_min_rr", SOFT_MIN_RR))
         soft_depth_frac = float(ew_cfg.get("soft_depth_frac", SOFT_DEPTH_FRAC))
+        # firm_only: suppress Tier-1 SOFT "entering zone" pings; Slack only the
+        # Tier-2 FIRM "BUY confirmed" flips. Kills the soft-touch firehose so
+        # every alert is actionable. (owner choice 2026-07-05)
+        firm_only = bool(ew_cfg.get("firm_only", False))
     except Exception:
         allow = FAMILY_ALLOWLIST
         soft_min_rr = SOFT_MIN_RR
         soft_depth_frac = SOFT_DEPTH_FRAC
+        firm_only = False
 
     regime = _current_regime()
     quotes = _get_schwab_batch(list(targets.keys()))
@@ -413,8 +528,8 @@ def run_entry_watch_pass(dry_run: bool = False) -> dict:
                 continue  # don't also send Tier-1 for the same name
 
         # Tier 1 — soft: a real pullback into the zone (R:R floor + depth), not a
-        # ceiling graze, but other gates may still apply.
-        if soft_ok and not sent(ticker, "entry_zone"):
+        # ceiling graze, but other gates may still apply. Suppressed when firm_only.
+        if not firm_only and soft_ok and not sent(ticker, "entry_zone"):
             blk = "" if z["sole_blocker_is_entry"] else " (other gates still apply — verify on dashboard)"
             emit(
                 "WARN",

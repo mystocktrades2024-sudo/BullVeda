@@ -76,6 +76,19 @@ NAS_MARKERS = {
 SCHWAB_OK_MARKER = ROOT / "cache" / "logs" / ".schwab_token_ok"
 SCHWAB_OK_MAX_AGE_H = 26      # probe runs daily; >26h ⇒ no recent SUCCESS (rejected/not-run)
 
+# Entry-watch liveness. The watcher stamps this every pass (entry_watch._heartbeat).
+# Motivation (2026-07-18): entry_watch was blind 2026-06-18 → 2026-07-14 (26 days,
+# 117 failed cycles on a dead token) while its plist stayed LOADED and exited 0 —
+# so check_fleet() reported all-clear the whole time. This is the detector for
+# "loaded and green, but not actually working."
+#   status == "down"  ⇒ the watcher itself reported a failure streak.
+#   last_run stale    ⇒ no pass ran at all (machine asleep / agent wedged), which
+#                       the watcher can't self-report because it never executed.
+# Threshold spans a weekend: the watcher no-ops outside market hours but still
+# stamps last_run each 5-min cycle, so >72h means it genuinely stopped firing.
+ENTRY_WATCH_HEALTH = ROOT / "cache" / "entry_watch_health.json"
+ENTRY_WATCH_MAX_AGE_H = 72
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -209,6 +222,52 @@ def check_schwab_token(now: datetime) -> tuple[list[str], datetime | None]:
     return probs, dt
 
 
+def check_entry_watch(now: datetime) -> tuple[list[str], datetime | None, str]:
+    """Detect an entry watcher that is loaded-and-green but not actually working.
+
+    Two distinct failure modes, only one of which the watcher can self-report:
+      - it RAN and failed (dead token, stale bundle) ⇒ status "down", already
+        Slacked once by entry_watch._heartbeat; surfaced here as a second witness
+        in case that alert was missed.
+      - it never ran ⇒ nothing self-reports, so staleness of last_run is the only
+        signal. This is the one check_fleet() structurally cannot catch.
+    Returns (problems, last_run_dt|None, status).
+    """
+    if not ENTRY_WATCH_HEALTH.exists():
+        return (["entry-watch: no health file — watcher has not run since the "
+                 "heartbeat shipped (2026-07-18), or cache was cleared"], None, "unknown")
+    try:
+        state = json.loads(ENTRY_WATCH_HEALTH.read_text())
+    except Exception as e:
+        return ([f"entry-watch: health file unreadable ({e})"], None, "unknown")
+
+    status = str(state.get("status") or "unknown")
+    dt = None
+    raw = state.get("last_run")
+    if raw:
+        try:
+            dt = datetime.fromisoformat(raw).astimezone(timezone.utc)
+        except Exception:
+            dt = None
+
+    probs: list[str] = []
+    if dt is None:
+        probs.append("entry-watch: health file has no readable last_run")
+    elif (now - dt) > timedelta(hours=ENTRY_WATCH_MAX_AGE_H):
+        probs.append(f"entry-watch: last pass {_fmt_age(dt, now)} — exceeds "
+                     f"{ENTRY_WATCH_MAX_AGE_H}h (agent loaded but not firing)")
+
+    if status == "down":
+        probs.append(
+            f"entry-watch: watcher reports DOWN — "
+            f"{state.get('consecutive_failures')} consecutive failed cycles, "
+            f"last error `{state.get('last_failure')}`. "
+            f"Last healthy pass: {state.get('last_ok') or 'unknown'}. "
+            f"No entry alerts can fire."
+        )
+    return probs, dt, status
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="heartbeat_check.py")
     ap.add_argument("--dry-run", action="store_true",
@@ -220,6 +279,7 @@ def main(argv=None) -> int:
     cl_problems, log_dt, resolved_dt = check_close_loop(now)
     nas_problems, nas_ages = check_nas_sync(now)
     schwab_problems, schwab_dt = check_schwab_token(now)
+    ew_problems, ew_dt, ew_status = check_entry_watch(now)
 
     # ── report (always) ──
     print(f"heartbeat @ {now.astimezone().strftime('%Y-%m-%d %H:%M %Z')}")
@@ -230,7 +290,8 @@ def main(argv=None) -> int:
     for name, dt in nas_ages.items():
         print(f"  {name}: {_fmt_age(dt, now)}")
     print(f"  Schwab token (last good probe): {_fmt_age(schwab_dt, now)}")
-    for p in cl_problems + nas_problems + schwab_problems:
+    print(f"  entry-watch: {_fmt_age(ew_dt, now)} [{ew_status}]")
+    for p in cl_problems + nas_problems + schwab_problems + ew_problems:
         print(f"    ⚠ {p}")
 
     problems: list[str] = []
@@ -242,15 +303,17 @@ def main(argv=None) -> int:
     problems.extend(cl_problems)
     problems.extend(nas_problems)
     problems.extend(schwab_problems)
+    problems.extend(ew_problems)
 
     if not problems:
-        print("✓ heartbeat OK — fleet fully loaded, close-loop fresh")
+        print("✓ heartbeat OK — fleet fully loaded, close-loop fresh, entry-watch live")
         return 0
 
     title = "Heartbeat: " + (
         f"{len(missing)} job(s) unloaded" if missing
         else "NAS sync stale" if nas_problems
         else "Schwab token invalid" if schwab_problems
+        else "entry watcher blind" if ew_problems
         else "ML close-loop stalled"
     )
     body = "\n".join(f"• {p}" for p in problems) + (
