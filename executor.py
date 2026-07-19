@@ -410,6 +410,15 @@ def main():
         log.info(f"Skip execution: {reason}")
         print(f"Paper trading not enabled — {reason}")
         print("Run `python3 executor.py --activate` to enable.")
+        # Loud alert: the 60d window expired silently on 2026-06-29 and no
+        # trades fired for 2 weeks before anyone noticed (2026-07-13 diagnostic).
+        # Any blocked scheduled run must page the owner.
+        try:
+            from alerts import send_alert
+            send_alert("critical", "Paper executor BLOCKED — no trades will fire",
+                       f"Reason: {reason}\nFix: python3 executor.py --activate --duration-days 0")
+        except Exception as _e:
+            log.warning(f"executor-blocked alert failed: {_e}")
         return 0
     log.info(f"Paper trading ON — {reason}")
 

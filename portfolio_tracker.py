@@ -426,6 +426,12 @@ def is_paper_trading_enabled() -> tuple[bool, str]:
         start = date.fromisoformat(d["start_date"])
         elapsed = (date.today() - start).days
         duration = int(d.get("duration_days", PAPER_TRADING_DURATION_DAYS))
+        # duration_days <= 0 means indefinite — account is 100% paper (Alpaca
+        # paper=True hard-enforced in executor), so no auto-expiry. The 60-day
+        # window expired silently on 2026-06-29 and froze execution for 2 weeks
+        # with zero alerts (2026-07-13 diagnostic) — never again.
+        if duration <= 0:
+            return True, f"Day {elapsed + 1} (indefinite — paper-only)"
         if elapsed >= duration:
             return False, f"Paper trading period ended ({elapsed}d since {start.isoformat()})"
         return True, f"Day {elapsed + 1}/{duration}"

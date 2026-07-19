@@ -96,6 +96,18 @@ def _login_driver(creds: dict):
         kwargs["version_main"] = major
         log.info("Launching undetected-chromedriver for Chrome %d", major)
     driver = uc.Chrome(**kwargs)
+    # Harden against slow morning loads / ChromeDriver command-channel hangs — the
+    # 5AM job died on a single 120s WebDriver ReadTimeoutError. Give commands, page
+    # loads, and scripts more room than the defaults.
+    try:
+        driver.command_executor.set_timeout(240)
+    except Exception:
+        pass
+    try:
+        driver.set_page_load_timeout(90)
+        driver.set_script_timeout(60)
+    except Exception:
+        pass
 
     driver.get("https://www.zacks.com/ultimate/")
     time.sleep(4)
@@ -626,6 +638,50 @@ def write_excel(rows: list[dict], best_rows: list[dict], trade_rows: list[dict],
 
 
 # ---------------------------------------------------------------------------
+def _scrape_with_retries(attempts=3, backoff=20):
+    """Run scrape_all() with a FRESH browser session per try. The 5AM job used to
+    die on a single transient ChromeDriver read-timeout with no retry; a slow
+    morning page load or a stale session now gets 2 more shots before giving up."""
+    import time
+    last = None
+    for k in range(1, attempts + 1):
+        try:
+            return scrape_all()
+        except Exception as e:
+            last = e
+            log.warning("scrape attempt %d/%d failed: %s", k, attempts, e)
+            if k < attempts:
+                time.sleep(backoff * k)          # 20s, then 40s
+    raise last
+
+
+def _clear_stale_marker():
+    try:
+        (OUTPUT_DIR / "zacks_stale.json").unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _write_stale_marker(as_of, err):
+    """Breadcrumb so MasterAlgo can surface 'Zacks list is stale — this morning's
+    refresh failed'. Never touches the good picks.json from the last success."""
+    try:
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        serving = None
+        if WEB_PICKS_JSON.exists():
+            try:
+                serving = json.loads(WEB_PICKS_JSON.read_text()).get("as_of")
+            except Exception:
+                pass
+        (OUTPUT_DIR / "zacks_stale.json").write_text(json.dumps({
+            "stale": True, "failed_at": as_of, "error": str(err)[:300],
+            "serving_as_of": serving,
+        }, indent=2))
+        log.warning("wrote staleness marker — serving prior list (as_of=%s)", serving)
+    except Exception:
+        pass
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="scrape+parse, print, write no files")
@@ -652,7 +708,7 @@ def main():
             trades = snap.get("all_trades") or []
             as_of = snap.get("as_of", as_of)
         else:
-            data = scrape_all()
+            data = _scrape_with_retries(attempts=3)
             rows, best, trades = data["buy_list"], data["best_stocks"], data["all_trades"]
 
         verdicts = load_engine_verdicts()
@@ -708,11 +764,13 @@ def main():
             "xlsx": "Zacks/zacks_picks_latest.xlsx",
             "picks": merged,
         }, indent=2))
+        _clear_stale_marker()                    # fresh list written — clear any prior staleness flag
         log.info("DONE — Rank#1 %d + Best %d + Trades %d | %d unique → %s (+ picks.json)",
                  len(rows), len(best), len(trades), len(merged), out_paths[-1])
         return 0
     except Exception as e:
-        log.error("zacks_buylist_export FAILED: %s", e, exc_info=True)
+        log.error("zacks_buylist_export FAILED after retries: %s", e, exc_info=True)
+        _write_stale_marker(as_of, e)            # leave last-good picks.json intact + flag it stale
         return 1
 
 

@@ -17,5 +17,14 @@ LOG_FILE="$LOG_DIR/desk_signal_log.log"
 
 mkdir -p "$LOG_DIR"
 cd "$SCRIPT_DIR"
-echo "=== $(date) ===" >> "$LOG_FILE"
-"$PYTHON" scripts/desk_signal_log.py >> "$LOG_FILE" 2>&1
+echo "=== $(date) $* ===" >> "$LOG_FILE"
+# Pass-through args: no args = full (log + resolve + aggregate) for the 14:20 run;
+# "--resolve" = grade + aggregate only (skip logging) for the morning grading run.
+"$PYTHON" scripts/desk_signal_log.py "$@" >> "$LOG_FILE" 2>&1
+
+# 2026-07-06: rebuild the Track-Record ledger right after logging so every desk
+# pick reaches Track Record the same run (data_leaders.json is what the Track
+# Record UI reads). Previously build ran on a separate schedule → desk picks
+# logged at 14:20 didn't surface until the next morning's build. Guarantees
+# "whatever comes in the desk lands in Track Record."
+"$PYTHON" infra/prototype/build_leaders.py >> "$LOG_FILE" 2>&1 || echo "build_leaders failed (non-fatal)" >> "$LOG_FILE"

@@ -1446,6 +1446,40 @@ def _compute_final_verdict_impl(t: dict, regime: str | None = None,
                     "demote_to": "watch_list",
                 }
 
+        # TC CATALYST-CONFLUENCE GATE (2026-07-13, edge-erosion diagnostic).
+        # Trend Continuation was 62% of all BUY volume in Jun–Jul (n=1,393)
+        # at −0.68%/wk in choppy tape, and the 2026-05-19 factor attribution
+        # showed TC carries ZERO alpha (pure momentum beta +0.74). Pure-
+        # technical TC (catalyst_tier 3 = analyst headlines / social / none)
+        # is exactly principle 14's "pure technicals without catalyst" case.
+        # Require catalyst_tier <= 2 for a TC BUY in the configured regimes;
+        # otherwise demote to WATCH (not kill — preserves agency + trending
+        # regimes untouched by default). Reversible:
+        # config["tc_catalyst_confluence_gate"]["_enabled"] = false.
+        _tcg = (config or {}).get("tc_catalyst_confluence_gate", {}) or {}
+        if _tcg.get("_enabled"):
+            _tcg_regs = [str(x).lower() for x in (_tcg.get("regimes") or ["risk_on_choppy", "neutral"])]
+            _tcg_max_tier = int(_tcg.get("max_catalyst_tier", 2))
+            _sf_name2 = str(t.get("setup_family") or "")
+            _cat_tier2 = t.get("catalyst_tier")
+            _cat_ok = isinstance(_cat_tier2, (int, float)) and _cat_tier2 <= _tcg_max_tier
+            if ((regime or "").lower() in _tcg_regs
+                    and "Trend Continuation" in _sf_name2 and not _cat_ok):
+                return {
+                    "verdict": "WATCH",
+                    "reason": (f"tc_catalyst_confluence: Trend Continuation without a "
+                               f"tier-{_tcg_max_tier} catalyst (tier={_cat_tier2}) demoted to WATCH "
+                               f"in {regime or 'choppy'} — pure-technical TC has zero alpha "
+                               f"(factor attribution 2026-05-19; live Jun-Jul n=1393 −0.68%/wk)"),
+                    "caveats": caveats + [f"tc_catalyst_confluence:tier{_cat_tier2}@{regime}"],
+                    "gates_evaluated": gates + [{
+                        "name": "tc_catalyst_confluence",
+                        "passed": False,
+                        "reason": f"Trend Continuation catalyst_tier={_cat_tier2} > {_tcg_max_tier} in {regime}",
+                    }],
+                    "demote_to": "watch_list",
+                }
+
         # A2 (2026-05-09): signal_filter whitelist gate. Demote to WATCH if
         # the (setup × regime × score_band × entry_quality) combination isn't
         # whitelisted. Off by default (config["signal_filter"]["_enabled"]=false)

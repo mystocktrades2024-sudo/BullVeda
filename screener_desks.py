@@ -74,6 +74,19 @@ SMART_EMPTY = ("No cluster today — 0 names hit ≥3 insiders / $200K in 30d; "
                "congressional feed unavailable. Desk populates when a cluster forms.")
 
 
+def _mr_guard_cfg():
+    """Mean-Reversion falling-knife guard config (screener_desks.mr_falling_knife_guard).
+    Read fresh per build so a config flip needs no server restart. Defaults = guard ON."""
+    import json as _j, os as _os
+    default = {"_enabled": True, "rs_min": 30, "reject_bear_stack": True}
+    try:
+        p = _os.path.join(_os.path.dirname(__file__), "config", "config.json")
+        blk = (_j.load(open(p)).get("screener_desks") or {}).get("mr_falling_knife_guard") or {}
+        return {**default, **blk}
+    except Exception:
+        return default
+
+
 def _n(x, d=0.0):
     try:
         return float(x)
@@ -420,11 +433,44 @@ def _desk_verdict(desk, r, ctx, hz="swing"):
         return "PASS", why
 
     if desk == "mr":  # oversold bounce with the long-term trend intact
-        why = [_ck(rsi and rsi < 30, f"RSI{rsi:.0f}<30"), _ck(r.get("above200"), ">200EMA")]
-        if rsi and rsi < 30 and r.get("above200"):
+        os = bool(rsi and rsi < 30)
+        above200 = bool(r.get("above200"))
+        g = ctx.get("_mr_guard") or _mr_guard_cfg()
+        if not g.get("_enabled", True):
+            # Legacy 2-condition rule (guard OFF) — for A/B and rollback.
+            why = [_ck(os, f"RSI{rsi:.0f}<30"), _ck(above200, ">200EMA")]
+            if os and above200:
+                return "BUY", why
+            if rsi and rsi < 38 and above200:
+                return "WATCH", why
+            return "PASS", why
+        # Falling-knife guard (signal-replay calibrated, scripts/backtest_mr_guard.py):
+        # RSI<30 + >200EMA can't tell an oversold DIP from a name oversold BECAUSE it's
+        # breaking down. The replay (673 events) showed the useful separator is COLLAPSED
+        # relative strength, NOT the EMA stack — 100% of oversold names carry a bearish
+        # stack (collinear, useless), while deep-knife rs<15 bounce as a coin flip (WR 51%)
+        # vs rs≥15 dips (WR 57%, mean +2.4%). So demote only the rs<rs_min extreme; the
+        # bear-stack test stays available (reject_bear_stack) but ships OFF. Failing the
+        # guard demotes BUY→WATCH (knife risk), never PASS-silently.
+        ema8m, ema21m, ema50m = _n(r.get("ema8")), _n(r.get("ema21")), _n(r.get("ema50i"))
+        bear_stack = bool(ema8m and ema21m and ema50m and ema8m < ema21m < ema50m)
+        if not bear_stack:  # fallback for slim rows: the precomputed EMA-stack signal string
+            bear_stack = "BEAR" in str(r.get("ema_signal") or "").upper()
+        if not g.get("reject_bear_stack", True):
+            bear_stack = False
+        rs_ok = rs >= _n(g.get("rs_min", 30))         # relative strength not collapsed
+        healthy = (not bear_stack) and rs_ok          # a dip within an intact trend
+        why = [_ck(os, f"RSI{rsi:.0f}<30"), _ck(above200, ">200EMA"),
+               _ck(rs_ok, f"RS{int(rs)}≥{int(_n(g.get('rs_min', 30)))} (deep-knife guard)")]
+        if g.get("reject_bear_stack", True):          # only surfaced when it actually gates
+            why.insert(2, _ck(not bear_stack, "no bear EMA stack"
+                              + ("" if not bear_stack else " — 8<21<50 (falling knife)")))
+        if os and above200 and healthy:
             return "BUY", why
-        if rsi and rsi < 38 and r.get("above200"):
-            return "WATCH", why
+        if above200 and healthy and rsi and rsi < 38:
+            return "WATCH", why                       # approaching oversold, trend still intact
+        if os and above200:
+            return "WATCH", why                       # oversold but failed trend guard — knife risk, not a BUY
         return "PASS", why
 
     if desk == "val":  # cheap-decile, quality-gated, revisions not falling
@@ -736,6 +782,7 @@ def build(bundle, setup_stats=None, live=None, insider=None, congress=None, desk
         "max_size": reg.get("max_size_pct"),
         "factor_p90": _pct_threshold([r["_factor"] for r in fullrows], 90),
         "factor_p75": _pct_threshold([r["_factor"] for r in fullrows], 75),
+        "_mr_guard": _mr_guard_cfg(),
     }
 
     # Every horizon scans the SAME full universe (self-sustained — no old-scanner

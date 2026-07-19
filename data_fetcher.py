@@ -8031,7 +8031,13 @@ def get_news_articles(ticker: str, limit: int = 10) -> list[dict]:
     _is_weekend = _now.weekday() >= 5
     _mins = _now.hour * 60 + _now.minute
     _in_rth = (not _is_weekend) and (6*60+30) <= _mins <= (13*60)
-    NEWS_CACHE_TTL = 14400 if _in_rth else 43200  # 4h RTH / 12h outside
+    # 2026-07-16 EODHD-quota reduction: RTH TTL 14400→43200 (4h→12h). The 5 daily
+    # scans span 05:15–13:30 PT (~8h); a 4h RTH TTL re-fetched news ~2-3×/day for
+    # ~1,373 tickers. News SENTIMENT is slow-moving and does not change the
+    # swing/position/invest verdict intraday, so 12h is coverage-neutral for this
+    # system's horizons while saving ~1.4–2.7K EODHD units/day.
+    # ROLLBACK: restore `14400 if _in_rth else 43200`.
+    NEWS_CACHE_TTL = 43200  # 12h (was: 14400 if _in_rth else 43200)
     cache_key = f"news_{ticker}_{int(time.time()//NEWS_CACHE_TTL)}"
     cached = _cache_read(cache_key, NEWS_CACHE_TTL)
     if cached is not None:
