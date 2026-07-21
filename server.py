@@ -530,6 +530,88 @@ async def _masteralgo_root(auth: HTTPBasicCredentials = Depends(_check_auth)):
         raise HTTPException(404)
     return FileResponse(f, media_type="text/html", headers={"Cache-Control": "no-store"})
 
+
+# ─── MrAlgo — fresh EODHD-free scanner (Schwab + Finviz + Zacks) ───
+_MRALGO_DIR = _PROTOTYPE_DIR.__class__("/Volumes/MyMacDisk/Claude Skills/MrAlgo/cache")
+
+
+@app.api_route("/MRALGO", methods=["GET", "HEAD"])
+@app.api_route("/MRALGO/", methods=["GET", "HEAD"])
+async def _mralgo_root(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    if isinstance(auth, Response):
+        return auth
+    f = _MRALGO_DIR / "scanner_react.html"
+    if not f.exists():
+        raise HTTPException(404)
+    return FileResponse(f, media_type="text/html", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/mralgo/scan")
+async def _mralgo_scan(mode: str = "swing", auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """The full enriched roster for one horizon (heavy tier). mode=swing is the
+    hourly tier (also served as scan.json); position/invest are the daily
+    batteries (scan_position.json / scan_invest.json)."""
+    if isinstance(auth, Response):
+        return auth
+    mode = (mode or "swing").lower()
+    if mode not in ("swing", "position", "invest"):
+        mode = "swing"
+    fname = "scan.json" if mode == "swing" else f"scan_{mode}.json"
+    f = _MRALGO_DIR / fname
+    if not f.exists():
+        return JSONResponse({"cards": [], "horizon": mode,
+                             "screen": f"{mode} — not yet scanned"}, status_code=200)
+    return FileResponse(f, media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/mralgo/prices")
+async def _mralgo_prices(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Live price overlay (cheap tier; refreshed every few minutes)."""
+    if isinstance(auth, Response):
+        return auth
+    f = _MRALGO_DIR / "prices.json"
+    if not f.exists():
+        return JSONResponse({"prices": {}, "at": None}, status_code=200)
+    return FileResponse(f, media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/mralgo/track_record")
+async def _mralgo_track(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """MrAlgo forward-return validation report (Wilson-LB edge by cohort)."""
+    if isinstance(auth, Response):
+        return auth
+    f = _MRALGO_DIR / "track_record.json"
+    if not f.exists():
+        return JSONResponse({"total_logged": 0, "total_matured": 0, "overall": {"n": 0}}, status_code=200)
+    return FileResponse(f, media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/mralgo/quote")
+async def _mralgo_quote(t: str, auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Fresh single-ticker Schwab quote — for the detail view's live-on-open
+    price, so the header updates the instant you select a name (instead of
+    waiting up to 5 min for the batch overlay)."""
+    if isinstance(auth, Response):
+        return auth
+    import subprocess as _subp, json as _json, re as _re
+    sym = (t or "").upper().strip()
+    if not _re.fullmatch(r"[A-Z0-9.\-]{1,12}", sym):
+        return JSONResponse({"ok": False, "error": "bad ticker"}, status_code=400)
+    script = _MRALGO_DIR.parent / "quote_one.py"
+    if not script.exists():
+        return JSONResponse({"ok": False, "error": "quote script not found"}, status_code=404)
+    try:
+        import sys as _sys
+        # sys.executable, not bare "python3": the server's PATH resolves python3
+        # to Homebrew python (missing/different Schwab deps), which returned
+        # empty quotes. Use the SAME interpreter the server runs on.
+        p = _subp.run([_sys.executable, str(script), sym], capture_output=True, text=True,
+                      timeout=15, cwd=str(script.parent))
+        out = (p.stdout or "").strip()
+        return JSONResponse(_json.loads(out.splitlines()[-1]) if out else {"ok": False})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=200)
+
 @app.api_route("/MASTERALGO/lookup", methods=["GET", "HEAD"])
 async def _masteralgo_lookup(t: str, mode: str = "all",
                             auth: HTTPBasicCredentials = Depends(_check_auth)):
@@ -2929,6 +3011,121 @@ async def tv_open_symbol(t: str, mode: str = "swing",
         return JSONResponse({"ok": False, "error": "bridge timed out (45s)", "web": web}, status_code=200)
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}", "web": web}, status_code=200)
+
+
+@app.get("/api/tv/target_check")
+async def tv_target_check(t: str, auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Cross-check a candidate's T1/T2 against the supply zones our TradingView
+    indicators draw (ChartPrime HV Boxes + LuxAlgo PAC order blocks).
+
+    Answers the one thing the ATR-derived target can't: does T1/T2 sit under a
+    wall of resting supply that will cap the move? Drives the dedicated bridge
+    tab (not the owner's chart), validates the instrument (SAIL lesson), and
+    caches to cache/tv_targets/. Informational — never alters the plan."""
+    import subprocess as _subp, json as _json, re as _re
+    sym = (t or "").upper().strip()
+    if not _re.fullmatch(r"[A-Z0-9.\-]{1,12}", sym):
+        return JSONResponse({"ok": False, "error": "bad ticker"}, status_code=400)
+    script = Path("/Volumes/MyMacDisk/Claude Skills/MasterAlgo/tv_target_crosscheck.py")
+    if not script.exists():
+        return JSONResponse({"ok": False, "error": "crosscheck script not found"}, status_code=404)
+    try:
+        proc = _subp.run(["python3", str(script), sym, "--stdout"],
+                         capture_output=True, text=True, timeout=90, cwd=str(script.parent))
+        out = (proc.stdout or "").strip()
+        if not out:
+            return JSONResponse({"ok": False, "error": "empty response",
+                                 "tail": (proc.stderr or "")[-300:]}, status_code=200)
+        return JSONResponse(_json.loads(out.splitlines()[-1]))
+    except _subp.TimeoutExpired:
+        return JSONResponse({"ok": False, "error": "timeout"}, status_code=200)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=200)
+
+
+@app.post("/api/tv/draw_plan")
+async def tv_draw_plan(t: str, auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Draw a MasterAlgo candidate's entry/stop/T1/T2 on the TradingView chart.
+
+    Targets the FOCUSED tab on purpose — the inverse of the screener pull. A
+    background pull must avoid the chart you're working in; this is a button you
+    pressed, so the levels belong where you're actually looking.
+
+    ONE-WAY by limitation: this build's bridge implements `draw shape`, but
+    `draw list` and `draw clear` both fail with "getChartApi is not defined", so
+    drawings cannot be removed programmatically. Clear them in TradingView
+    (right-click -> Remove Drawings). POST (not GET) because it mutates the
+    user's chart, and never runs on a schedule or in bulk for the same reason.
+    """
+    import subprocess as _subp, json as _json, re as _re
+    sym = (t or "").upper().strip()
+    if not _re.fullmatch(r"[A-Z0-9.\-]{1,12}", sym):
+        return JSONResponse({"ok": False, "error": "bad ticker"}, status_code=400)
+    script = Path("/Volumes/MyMacDisk/Claude Skills/MasterAlgo/tv_draw_levels.py")
+    if not script.exists():
+        return JSONResponse({"ok": False, "error": "draw script not found"}, status_code=404)
+    try:
+        proc = _subp.run(["python3", str(script), sym, "--stdout"],
+                         capture_output=True, text=True, timeout=90, cwd=str(script.parent))
+        out = (proc.stdout or "").strip()
+        if not out:
+            return JSONResponse({"ok": False, "error": "empty response",
+                                 "tail": (proc.stderr or "")[-300:]}, status_code=200)
+        return JSONResponse(_json.loads(out.splitlines()[-1]))
+    except _subp.TimeoutExpired:
+        return JSONResponse({"ok": False, "error": "timeout"}, status_code=200)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=200)
+
+
+@app.get("/api/tv/live")
+async def tv_live_screener(t: str, auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Live LuxAlgo S&O screener read for ONE ticker, on demand.
+
+    Unlike /api/tv/values (which hunts for a tab already showing the symbol and
+    reads its Data Window), this drives MasterAlgo's DEDICATED bridge tab to the
+    ticker and returns the full 1H/4H/1D screener grid + dashboard. Because it
+    uses the pinned tab it does not disturb the chart the owner is working in.
+
+    Runs the same code path as the scheduled pull, so it inherits the instrument
+    validation added 2026-07-19: a bare ticker is not unique across exchanges
+    ("SAIL" resolved to Steel Authority of India, not SailPoint), so the capture
+    is only returned if the live quote matches the scan price.
+
+    Slow by nature (~6-15s: symbol switch + screener recompute), so the UI must
+    treat it as an explicit user action, never an on-load fetch.
+
+    Informational only — never feeds verdict, score or conviction. Owner's
+    TradingView + LuxAlgo seats; do not expose to other users unauthenticated.
+    """
+    import subprocess as _subp, json as _json, re as _re
+    sym = (t or "").upper().strip()
+    if not _re.fullmatch(r"[A-Z0-9.\-]{1,12}", sym):
+        return JSONResponse({"ok": False, "error": "bad ticker"}, status_code=400)
+    script = Path("/Volumes/MyMacDisk/Claude Skills/MasterAlgo/tv_pull_buys.py")
+    if not script.exists():
+        return JSONResponse({"ok": False, "error": "puller not found"}, status_code=404)
+    try:
+        proc = _subp.run(
+            ["python3", str(script), "--tickers", sym, "--stdout"],
+            capture_output=True, text=True, timeout=90, cwd=str(script.parent),
+        )
+        out = (proc.stdout or "").strip()
+        if not out:
+            return JSONResponse({"ok": False, "error": "empty response from puller",
+                                 "tail": (proc.stderr or "")[-300:]}, status_code=200)
+        payload = _json.loads(out.splitlines()[-1])
+        if payload.get("captures"):
+            payload["capture"] = payload["captures"][0]
+        return JSONResponse(payload)
+    except _subp.TimeoutExpired:
+        return JSONResponse({"ok": False, "error": "timeout",
+                             "detail": "TradingView did not respond within 90s"}, status_code=200)
+    except _json.JSONDecodeError:
+        return JSONResponse({"ok": False, "error": "puller returned non-JSON",
+                             "tail": (proc.stderr or "")[-300:]}, status_code=200)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=200)
 
 
 @app.get("/api/tv/values")
