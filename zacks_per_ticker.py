@@ -124,9 +124,11 @@ def fetch_zacks_quote_lightweight(ticker: str, cache_ttl: int = 6 * 3600) -> dic
             out["sector_rank"]  = None
             out["sector_total"] = None
 
-        # Style scores (V/G/M/VGM) — these appear in DOM as "Value" "Growth" etc badges
+        # Style scores (V/G/M/VGM). DOM: <strong>Value Score</strong>
+        # <span class="composite_val">A</span> — the old regex expected the grade
+        # right after the label tag and never matched, so these were always None.
         for k in ("Value", "Growth", "Momentum", "VGM"):
-            m = re.search(rf'{k}\s+Score[^<]*<[^>]*>\s*([A-F])\b', text)
+            m = re.search(rf'{k}\s+Score</strong>\s*<span class="composite_val">\s*([A-F])', text)
             out[f"style_{k.lower()}"] = m.group(1) if m else None
 
         # Long-term growth estimate — "Long-Term Growth ... 12.5%"
