@@ -82,6 +82,41 @@ def _write_env(updates: dict[str, str]) -> None:
     env_path.write_text("\n".join(out) + "\n")
 
 
+def _sync_masteralgo(updates: dict[str, str]) -> None:
+    """Mirror the rotated Schwab token into MasterAlgo/.env — the file MrAlgo's
+    SchwabClient reads. Schwab ROTATES the refresh-token string on every
+    refresh, so if only SwingTrade/.env is updated, MasterAlgo keeps the old
+    (now-superseded) string and MrAlgo starts failing with 'invalid/expired'
+    even though the 7-day anchor hasn't passed. Keeping the two .env files in
+    lockstep is what prevents that orphaning. Best-effort — never fail the
+    check over it."""
+    try:
+        ma = BASE.parent / "MasterAlgo" / ".env"
+        if not ma.exists():
+            return
+        lines = ma.read_text().splitlines()
+        seen = set()
+        for i, line in enumerate(lines):
+            s = line.strip()
+            if s and not s.startswith("#") and "=" in s:
+                k = s.split("=", 1)[0].strip()
+                if k in updates:
+                    lines[i] = f"{k}={updates[k]}"
+                    seen.add(k)
+        for k, v in updates.items():
+            if k not in seen:
+                lines.append(f"{k}={v}")
+        ma.write_text("\n".join(lines) + "\n")
+        # Drop MasterAlgo's cached access token so its client re-refreshes with
+        # the freshly-synced refresh token instead of a stale access token.
+        cache = BASE.parent / "MasterAlgo" / "cache" / "schwab_token.json"
+        if cache.exists():
+            cache.unlink()
+        log.info("  ↪ synced rotated token into MasterAlgo/.env (MrAlgo)")
+    except Exception as e:
+        log.warning(f"  MasterAlgo/.env sync skipped ({type(e).__name__}: {e})")
+
+
 def _slack_alert(title: str, body: str, level: str = "WARN") -> None:
     """Forward to alerts.send_alert which handles Slack + macOS notification."""
     try:
@@ -189,6 +224,7 @@ def main() -> int:
         "SCHWAB_TOKEN_EXPIRES_AT": str(expires_at),
     }
     _write_env(updates)
+    _sync_masteralgo(updates)          # keep MrAlgo's MasterAlgo/.env in lockstep
 
     try:  # probe genuinely succeeded → stamp the validity marker for the heartbeat
         OK_MARKER.parent.mkdir(parents=True, exist_ok=True)

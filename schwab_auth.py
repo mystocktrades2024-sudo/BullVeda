@@ -204,12 +204,36 @@ def oauth_interactive() -> None:
     exp_in  = int(tok.get("expires_in", 1800))
     exp_at  = int(time.time()) + exp_in - 60  # 60s buffer
 
-    _write_env({
+    _tok = {
         "SCHWAB_ACCESS_TOKEN":       access,
         "SCHWAB_REFRESH_TOKEN":      refresh,
         "SCHWAB_TOKEN_EXPIRES_AT":   str(exp_at),
         "SCHWAB_REFRESH_ISSUED_AT":   str(int(time.time())),
-    })
+    }
+    _write_env(_tok)
+    # Mirror into MasterAlgo/.env (MrAlgo's SchwabClient reads that file). Without
+    # this a fresh re-auth leaves MrAlgo on the old token until the daily checker
+    # syncs it — up to 24h of MrAlgo being broken right after you re-login.
+    try:
+        ma = BASE_DIR.parent / "MasterAlgo" / ".env"
+        if ma.exists():
+            lines = ma.read_text().splitlines(); seen = set()
+            for i, ln in enumerate(lines):
+                s = ln.strip()
+                if s and not s.startswith("#") and "=" in s:
+                    k = s.split("=", 1)[0].strip()
+                    if k in _tok:
+                        lines[i] = f"{k}={_tok[k]}"; seen.add(k)
+            for k, v in _tok.items():
+                if k not in seen:
+                    lines.append(f"{k}={v}")
+            ma.write_text("\n".join(lines) + "\n")
+            _c = BASE_DIR.parent / "MasterAlgo" / "cache" / "schwab_token.json"
+            if _c.exists():
+                _c.unlink()
+            print("   ↪ also synced to MasterAlgo/.env (MrAlgo)")
+    except Exception as _e:
+        print(f"   ⚠ MasterAlgo/.env sync skipped: {_e}")
 
     print("\n✅ SUCCESS")
     print(f"   Access token:  {access[:12]}... (expires in {exp_in}s)")
