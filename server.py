@@ -634,6 +634,29 @@ async def _mralgo_zacks(auth: HTTPBasicCredentials = Depends(_check_auth)):
         return JSONResponse({"rows": [], "error": f"{type(e).__name__}"}, status_code=200)
 
 
+@app.get("/api/mralgo/zacks_pt")
+async def _mralgo_zacks_pt(t: str, auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Zacks analyst price-target forecast (avg/high/low/upside/n) for one ticker,
+    scraped on demand from the price-target page. Backs the Overview price-target
+    comparison table."""
+    if isinstance(auth, Response):
+        return auth
+    import subprocess as _subp, json as _json, re as _re, sys as _sys
+    sym = (t or "").upper().strip()
+    if not _re.fullmatch(r"[A-Z0-9.\-]{1,12}", sym):
+        return JSONResponse({"ok": False, "error": "bad ticker"}, status_code=400)
+    script = _MRALGO_DIR.parent / "zacks_pt_one.py"
+    if not script.exists():
+        return JSONResponse({"ok": False, "error": "script not found"}, status_code=404)
+    try:
+        p = _subp.run([_sys.executable, str(script), sym], capture_output=True, text=True,
+                      timeout=20, cwd=str(script.parent))
+        out = (p.stdout or "").strip()
+        return JSONResponse(_json.loads(out.splitlines()[-1]) if out else {"ok": False})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=200)
+
+
 @app.get("/api/mralgo/history")
 async def _mralgo_history(t: str, auth: HTTPBasicCredentials = Depends(_check_auth)):
     """Weekly close series (~2Y) for the Overview forecast chart. Fetched
