@@ -88,6 +88,20 @@ def fetch_zacks_quote_lightweight(ticker: str, cache_ttl: int = 6 * 3600) -> dic
 
     out: dict = {"ticker": ticker, "error": None}
     try:
+        # PRIMARY rank source: Zacks' own JSON quote-feed. The HTML rank regexes
+        # matched the 5-box education legend, not the CURRENT rank (returned e.g.
+        # 2 when MRVL was actually 3). The feed is authoritative + gives forward
+        # PE / yield / next-earnings for free. No login.
+        feed = {}
+        try:
+            fr = requests.get(f"https://quote-feed.zacks.com/index?t={ticker}",
+                              headers={**_HEADERS, "Referer": "https://www.zacks.com/"},
+                              timeout=12)
+            if fr.status_code == 200 and fr.text.strip():
+                feed = (fr.json() or {}).get(ticker.upper(), {}) or {}
+        except Exception:
+            feed = {}
+
         url = f"https://www.zacks.com/stock/quote/{ticker}"
         resp = requests.get(url, headers=_HEADERS, timeout=15)
         if resp.status_code != 200:
@@ -96,40 +110,49 @@ def fetch_zacks_quote_lightweight(ticker: str, cache_ttl: int = 6 * 3600) -> dic
         text = resp.text
         soup = BeautifulSoup(text, "html.parser")
 
-        # Zacks Rank
-        m = re.search(r'rank_chip[^>]*>.*?(\d)', text, re.DOTALL) or \
-            re.search(r'rankrect_(\d)', text) or \
-            re.search(r'Zacks\s+Rank[^<]*<[^>]*>\s*(\d)', text)
-        out["rank"] = int(m.group(1)) if m else None
-        out["rank_text"] = {1: "Strong Buy", 2: "Buy", 3: "Hold",
-                            4: "Sell", 5: "Strong Sell"}.get(out["rank"])
+        # Zacks Rank — feed first, then the rank_view / "N-Text" HTML fallbacks
+        # (both give the CURRENT rank, unlike the old rank_chip/rankrect legend).
+        rank = None
+        try:
+            rank = int(feed.get("zacks_rank")) if feed.get("zacks_rank") else None
+        except (TypeError, ValueError):
+            rank = None
+        if rank is None:
+            m = re.search(r'rank_view[^>]*>\s*(\d)\b', text) or \
+                re.search(r'(\d)-(?:Strong Buy|Buy|Hold|Sell|Strong Sell)', text)
+            rank = int(m.group(1)) if m else None
+        out["rank"] = rank
+        out["rank_text"] = feed.get("zacks_rank_text") or {1: "Strong Buy", 2: "Buy",
+                            3: "Hold", 4: "Sell", 5: "Strong Sell"}.get(rank)
+        # Reliable feed extras (all JSON, no scrape fragility)
+        try:
+            out["fwd_pe"] = round(float(feed["pe_f1"]), 1) if feed.get("pe_f1") not in (None, "", "NA") else None
+        except (TypeError, ValueError):
+            out["fwd_pe"] = None
+        try:
+            out["dividend_yield"] = round(float(feed["dividend_yield"]), 2) if feed.get("dividend_yield") not in (None, "", "NA", "0") else None
+        except (TypeError, ValueError):
+            out["dividend_yield"] = None
+        out["next_earnings_ts"] = feed.get("expected_reporting_date") or None
+        out["company_name"] = feed.get("ap_short_name") or feed.get("company_short_name")
 
-        # Industry Rank — typically rendered as "23 / 254"
-        ir_match = re.search(r'Industry\s+Rank[^<]*<[^>]*>[^0-9]*(\d+)\s*/\s*(\d+)', text)
+        # Industry Rank — rendered as "Top 19% (47 out of 247)".
+        ir_match = re.search(r'Top\s+(\d+)%\s*\((\d+)\s+out of\s+(\d+)\)', text)
         if ir_match:
-            out["industry_rank"]  = int(ir_match.group(1))
-            out["industry_total"] = int(ir_match.group(2))
-            out["industry_pct"]   = round(int(ir_match.group(1)) / int(ir_match.group(2)) * 100, 1)
+            out["industry_pct"]   = int(ir_match.group(1))     # "Top X%"
+            out["industry_rank"]  = int(ir_match.group(2))
+            out["industry_total"] = int(ir_match.group(3))
         else:
-            out["industry_rank"]  = None
-            out["industry_total"] = None
-            out["industry_pct"]   = None
+            out["industry_rank"] = out["industry_total"] = out["industry_pct"] = None
+        # Industry name — "Industry: Electronics - Semiconductors"
+        inm = re.search(r'Industry:\s*(?:<[^>]*>\s*)*([A-Za-z][A-Za-z0-9 &,/\-]+?)\s*<', text)
+        out["industry_name"] = inm.group(1).strip() if inm else None
 
-        # Sector Rank (sometimes displayed)
-        sr_match = re.search(r'Sector\s+Rank[^<]*<[^>]*>[^0-9]*(\d+)\s*/\s*(\d+)', text)
-        if sr_match:
-            out["sector_rank"]  = int(sr_match.group(1))
-            out["sector_total"] = int(sr_match.group(2))
-        else:
-            out["sector_rank"]  = None
-            out["sector_total"] = None
-
-        # Style scores (V/G/M/VGM). DOM: <strong>Value Score</strong>
-        # <span class="composite_val">A</span> — the old regex expected the grade
-        # right after the label tag and never matched, so these were always None.
-        for k in ("Value", "Growth", "Momentum", "VGM"):
-            m = re.search(rf'{k}\s+Score</strong>\s*<span class="composite_val">\s*([A-F])', text)
-            out[f"style_{k.lower()}"] = m.group(1) if m else None
+        # Style Scores (V/G/M/VGM) are JS-rendered on the quote page — the static
+        # HTML only carries a tooltip EXAMPLE (which the old regex matched, giving
+        # bogus grades). Left as None rather than shipping wrong data; a JS/Premium
+        # source (the daily Selenium buy-list) can backfill these later.
+        out["style_value"] = out["style_growth"] = out["style_momentum"] = out["style_vgm"] = None
 
         # Long-term growth estimate — "Long-Term Growth ... 12.5%"
         ltg = re.search(r'Long[-\s]Term\s+Growth[^0-9-]*(-?\d+(?:\.\d+)?)\s*%', text)
