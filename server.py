@@ -613,6 +613,27 @@ async def _mralgo_quote(t: str, auth: HTTPBasicCredentials = Depends(_check_auth
         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=200)
 
 
+@app.get("/api/mralgo/zacks")
+async def _mralgo_zacks(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """The daily Zacks Rank #1 (Strong Buy) list scraped each morning — 219
+    names with per-ticker Value/Growth/Momentum/VGM style scores. Served from
+    SwingTrade/cache/zacks_buylist_latest.json."""
+    if isinstance(auth, Response):
+        return auth
+    import json as _json
+    f = _MRALGO_DIR.parent.parent / "SwingTrade" / "cache" / "zacks_buylist_latest.json"
+    if not f.exists():
+        return JSONResponse({"rows": [], "as_of": None, "count": 0}, status_code=200)
+    try:
+        d = _json.loads(f.read_text())
+        return JSONResponse({"as_of": d.get("as_of"), "count": d.get("count"),
+                             "rows": d.get("rows") or [],
+                             "best_stocks": d.get("best_stocks") or []},
+                            headers={"Cache-Control": "no-store"})
+    except Exception as e:
+        return JSONResponse({"rows": [], "error": f"{type(e).__name__}"}, status_code=200)
+
+
 @app.get("/api/mralgo/history")
 async def _mralgo_history(t: str, auth: HTTPBasicCredentials = Depends(_check_auth)):
     """Weekly close series (~2Y) for the Overview forecast chart. Fetched
