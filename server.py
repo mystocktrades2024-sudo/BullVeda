@@ -554,7 +554,7 @@ async def _mralgo_scan(mode: str = "swing", auth: HTTPBasicCredentials = Depends
     if isinstance(auth, Response):
         return auth
     mode = (mode or "swing").lower()
-    if mode not in ("swing", "position", "invest"):
+    if mode not in ("swing", "position", "invest", "etf"):
         mode = "swing"
     fname = "scan.json" if mode == "swing" else f"scan_{mode}.json"
     f = _MRALGO_DIR / fname
