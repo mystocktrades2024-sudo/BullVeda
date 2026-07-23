@@ -564,6 +564,19 @@ async def _mralgo_scan(mode: str = "swing", auth: HTTPBasicCredentials = Depends
     return FileResponse(f, media_type="application/json", headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/mralgo/research_board")
+async def _mralgo_research_board(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """The research/idea universe enriched through the card engine, grouped by
+    sector (cache/research_board.json, built by build_research_board.py)."""
+    if isinstance(auth, Response):
+        return auth
+    f = _MRALGO_DIR / "research_board.json"
+    if not f.exists():
+        return JSONResponse({"cards": [], "sectors": {}, "count": 0,
+                             "note": "not yet built"}, status_code=200)
+    return FileResponse(f, media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/mralgo/prices")
 async def _mralgo_prices(auth: HTTPBasicCredentials = Depends(_check_auth)):
     """Live price overlay (cheap tier; refreshed every few minutes)."""
