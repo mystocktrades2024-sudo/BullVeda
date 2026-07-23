@@ -958,6 +958,41 @@ async def root(request: Request, auth: HTTPBasicCredentials = Depends(_check_aut
     return _serve_bullveda_bundle(request, inject_guard=not force_desktop)
 
 
+@app.api_route("/MRBULLALGO", methods=["GET", "HEAD"])
+@app.api_route("/MRBULLALGO/", methods=["GET", "HEAD"])
+async def _mrbullalgo_root(request: Request, auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """MrBullAlgo — BullVeda's UI + MrAlgo's decision core (owner-only, parallel to
+    BullVeda). Phase 0: serves the BullVeda bundle rebranded, with the
+    mrbullalgo-override.js shim injected as a render-blocking head script (no data
+    rerouting yet — pure pass-through clone). Later phases reroute the decision
+    contracts to /api/mralgo/* inside that shim."""
+    if isinstance(auth, Response):
+        return auth
+    p = (_PROTOTYPE_DIR / "bullveda" / "BullVeda.html").resolve()
+    if not p.exists():
+        return JSONResponse({"error": "bundle not built"}, status_code=500)
+    html = p.read_bytes()
+    # inject the override shim FIRST in <head> so it runs before the inlined boot adapter
+    inject = b'<script src="/mrbullalgo-override.js"></script>'
+    html = html.replace(b"<head>", b"<head>" + inject, 1)
+    html = html.replace(b"<title>BullVeda \xe2\x80\x94 Terminal (bundled)</title>",
+                        b"<title>MrBullAlgo \xe2\x80\x94 Terminal</title>", 1)
+    return Response(content=html, media_type="text/html",
+                    headers={"Cache-Control": "private, max-age=30, must-revalidate"})
+
+
+@app.get("/mrbullalgo-override.js")
+async def _mrbullalgo_override(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """The MrBullAlgo adapter shim (injected only on /MRBULLALGO)."""
+    if isinstance(auth, Response):
+        return auth
+    f = (_PROTOTYPE_DIR / "bullveda" / "mrbullalgo-override.js").resolve()
+    if not f.exists():
+        return Response(content="/* missing */", media_type="application/javascript")
+    return FileResponse(f, media_type="application/javascript",
+                        headers={"Cache-Control": "no-store"})
+
+
 def _serve_bullveda_bundle(request: Request, inject_guard: bool):
     """Serve the 2.5MB BullVeda bundle with ETag revalidation so the browser CACHES it
     and only re-downloads when it actually changes (after a rebuild). Repeat loads get a
