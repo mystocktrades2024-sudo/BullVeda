@@ -1,35 +1,71 @@
 /* mrbullalgo-override.js — MrBullAlgo adapter shim.
  *
- * MrBullAlgo = BullVeda's UI + MrAlgo's decision core. This file is a
- * render-blocking <head> script injected ONLY on the /MRBULLALGO route (BullVeda
- * itself never loads it). It runs BEFORE the inlined bullveda-boot adapter, so it
- * can wrap the network layer and re-route the decision contracts (universe /
- * ticker / trade_engine / fundamentals / pattern) to MrAlgo's engine, while
- * ML / options / earnings / crypto pass through to SwingTrade unchanged.
+ * MrBullAlgo = BullVeda's UI + MrAlgo's decision core. Render-blocking <head>
+ * script injected ONLY on /MRBULLALGO (BullVeda itself never loads it). Runs
+ * BEFORE the inlined bullveda-boot adapter, so it can wrap the network layer and
+ * re-route the decision contracts to MrAlgo's engine; ML / options / earnings /
+ * crypto pass through to SwingTrade unchanged.
  *
- * PHASE 0 (this version): NO data rerouting yet — pure pass-through clone, so
- * MrBullAlgo === BullVeda under a new name (zero behaviour change). Only the
- * brand is swapped so the two are visually distinguishable. Phase 1 adds the
- * fetch/XHR shim here.
+ * PHASE 1: reroute the combined boot payload's universe -> MrAlgo. BullVeda pulls
+ * the whole universe inside /api/bullveda-boot (BOOT.universe.screener); we rewrite
+ * that request to /api/mrbull/boot, which returns the same payload with the
+ * screener swapped for MrAlgo-mapped rows (Tech+Fund verdict, @Buy zone ->
+ * entry_quality, score, structural targets). Everything else is untouched.
  */
 (function () {
   "use strict";
   window.__MRBULLALGO__ = true;
-  window.__MRBULLALGO_PHASE__ = 0;
-  try { console.log("[MrBullAlgo] override loaded · phase 0 (pass-through clone)"); } catch (e) {}
+  window.__MRBULLALGO_PHASE__ = 1;
 
-  // Cosmetic rebrand once the DOM is up (BullVeda -> MrBullAlgo in visible chrome).
+  // ── network shim: rewrite the boot endpoint to the MrAlgo-backed one ──
+  // "/api/bullveda-boot" -> "/api/mrbull/boot"  (does NOT touch "/api/bullveda-heavy")
+  function remap(url) {
+    if (typeof url !== "string") return url;
+    if (url.indexOf("/api/bullveda-boot") !== -1) {
+      return url.replace("/api/bullveda-boot", "/api/mrbull/boot");
+    }
+    return url;
+  }
+
+  try {
+    var _open = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method, url) {
+      var args = Array.prototype.slice.call(arguments);
+      var nu = remap(url);
+      if (nu !== url) { try { console.log("[MrBullAlgo] XHR ->", nu); } catch (e) {} }
+      args[1] = nu;
+      return _open.apply(this, args);
+    };
+  } catch (e) {}
+
+  try {
+    var _fetch = window.fetch;
+    if (_fetch) {
+      window.fetch = function (input, init) {
+        try {
+          if (typeof input === "string") input = remap(input);
+          else if (input && input.url) {
+            var nu = remap(input.url);
+            if (nu !== input.url) input = new Request(nu, input);
+          }
+        } catch (e) {}
+        return _fetch.call(this, input, init);
+      };
+    }
+  } catch (e) {}
+
+  try { console.log("[MrBullAlgo] override loaded · phase 1 (universe -> MrAlgo)"); } catch (e) {}
+
+  // ── cosmetic rebrand ──
   function rebrand() {
     try {
       document.title = "MrBullAlgo — Terminal";
-      // Loading-screen label (static HTML, present before React mounts).
       var ld = document.getElementById("bv-loading");
       if (ld) {
         ld.querySelectorAll("div").forEach(function (d) {
           if (/LOADING BULLVEDA/i.test(d.textContent)) d.textContent = "LOADING MRBULLALGO · LIVE DATA";
         });
       }
-      // In-app brand text (rendered by React later) — swap on a light observer.
       var swap = function () {
         document.querySelectorAll("*").forEach(function (el) {
           if (el.childElementCount === 0 && el.textContent === "BullVeda") el.textContent = "MrBullAlgo";
@@ -38,13 +74,9 @@
       swap();
       var mo = new MutationObserver(function () { swap(); });
       mo.observe(document.documentElement, { childList: true, subtree: true });
-      // Stop the observer after the app has settled to avoid churn.
       setTimeout(function () { try { mo.disconnect(); } catch (e) {} }, 8000);
     } catch (e) {}
   }
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", rebrand);
-  } else {
-    rebrand();
-  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", rebrand);
+  else rebrand();
 })();

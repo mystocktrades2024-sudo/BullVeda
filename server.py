@@ -564,6 +564,122 @@ async def _mralgo_scan(mode: str = "swing", auth: HTTPBasicCredentials = Depends
     return FileResponse(f, media_type="application/json", headers={"Cache-Control": "no-store"})
 
 
+def _mrbull_universe_rows():
+    """Map MrAlgo's scan rosters (swing/position/invest cards) into BullVeda's raw
+    /api/universe row contract so the MrBullAlgo scanner shows MrAlgo's Tech+Fund
+    verdict, @Buy zone (-> entry_quality), score, and structural targets. Fields
+    MrAlgo doesn't produce are left null; BV.scanRow fills sensible defaults."""
+    import json as _j
+    from pathlib import Path as _P
+    base = _P("/Volumes/MyMacDisk/Claude Skills/MrAlgo/cache")
+    modes = {"swing": "scan.json", "position": "scan_position.json", "invest": "scan_invest.json"}
+    by_tk = {}
+    for m, fn in modes.items():
+        p = base / fn
+        if not p.exists():
+            continue
+        try:
+            for c in (_j.loads(p.read_text()).get("cards") or []):
+                by_tk.setdefault(c.get("ticker"), {})[m] = c
+        except Exception:
+            continue
+    GRs = {"A": 92, "B": 78, "C": 58, "D": 38, "F": 15}
+    def _biasw(card):
+        tb = ((card.get("legs") or {}).get("tech") or {}).get("bull")
+        return "bullish" if tb is True else "bearish" if tb is False else "neutral"
+    rows = []
+    for tk, bym in by_tk.items():
+        if not tk:
+            continue
+        c = bym.get("swing") or bym.get("position") or bym.get("invest")
+        det = c.get("detail") or {}
+        legs = c.get("legs") or {}
+        tech = legs.get("tech") or {}; fund = legs.get("fund") or {}
+        entry = c.get("entry") or {}
+        tg = det.get("targets") or {}
+        pt = c.get("pac_targets") or {}
+        stack = det.get("stack") or {}
+        macd = det.get("macd") or {}
+        comp = c.get("company") or {}
+        verdict = c.get("verdict")
+        dbm = {}
+        for m, cc in bym.items():
+            mk = "investment" if m == "invest" else m
+            vv = cc.get("verdict")
+            dbm[mk] = {"verdict": vv, "bias": _biasw(cc), "action": (vv or "").lower()}
+        def _pctpos(key):
+            v = (stack.get(key) or {}).get("pct")
+            return (v is not None and v > 0)
+        rows.append({
+            "ticker": tk, "name": c.get("description") or tk,
+            "sector": comp.get("sector"), "industry": comp.get("industry"),
+            "score": c.get("score"), "stage": verdict,
+            "bias": _biasw(c), "action": (verdict or "").lower(), "reason_class": None,
+            "setup": None, "setup_type": None,
+            "conviction_tier": c.get("conviction"), "catalyst_tier": None,
+            "entry_quality": entry.get("band"),        # @Buy zone → entry_quality pill
+            "breakout_state": None,
+            "price": c.get("price"), "pct_chg": c.get("change_pct"),
+            "rr": pt.get("rr") if pt.get("rr") is not None else tg.get("rr"),
+            "stop": entry.get("ob_stop") if entry.get("ob_stop") is not None else tg.get("stop"),
+            "entry_lo": tg.get("entry"), "t1": tg.get("t1"), "t2": tg.get("t2"), "t3": None,
+            "decisions_by_mode": dbm or None,
+            "rvol": det.get("rvol"), "rsi": det.get("rsi"), "adx": det.get("adx"),
+            "beta": comp.get("beta"), "market_cap": comp.get("market_cap"),
+            "tech_score": GRs.get(str(tech.get("grade") or "").upper()), "tech_max": 100,
+            "fund_score": GRs.get(str(fund.get("grade") or "").upper()), "fund_max": 100,
+            "smc_score": None, "smc_max": 15, "sent_score": None, "sent_max": 10,
+            "macd_signal": ("bullish" if (macd.get("hist") or 0) > 0
+                            else "bearish" if (macd.get("hist") or 0) < 0 else None),
+            "above_50ema": _pctpos("SMA50") or _pctpos("EMA50"),
+            "above_200sma": _pctpos("SMA200"),
+            "week52_high": None, "iv_rank": (c.get("options") or {}).get("iv_atm"),
+            "is_etf": c.get("is_etf"),
+            "_mrbull": True,
+        })
+    return rows
+
+
+@app.get("/api/mrbull/boot")
+async def _mrbull_boot(auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """MrBullAlgo boot payload = BullVeda's combined boot with universe.screener
+    swapped for MrAlgo-mapped rows (decision layer = MrAlgo). Everything else
+    (portfolio, ML, options, earnings feeds) passes through unchanged."""
+    if isinstance(auth, Response):
+        return auth
+    import json as _j, gzip as _gz
+    resp = await bullveda_boot(auth)
+    try:
+        raw = resp.body
+        if (resp.headers.get("Content-Encoding") or "") == "gzip":
+            raw = _gz.decompress(raw)
+        payload = _j.loads(raw)
+    except Exception as e:
+        return JSONResponse({"error": f"boot decode: {type(e).__name__}"}, status_code=500)
+    try:
+        rows = _mrbull_universe_rows()
+        if rows:
+            if not isinstance(payload.get("universe"), dict):
+                payload["universe"] = {}
+            payload["universe"]["screener"] = rows
+            payload["universe"]["_mrbull"] = True
+            payload["universe"]["_count"] = len(rows)
+    except Exception as e:
+        payload["_mrbull_error"] = f"{type(e).__name__}: {e}"
+    # Browser JSON.parse rejects NaN/Infinity (Python's json.loads accepts them),
+    # so a single non-finite float would blank the whole universe. Sanitize.
+    import math as _m
+    def _clean(o):
+        if isinstance(o, float):
+            return o if _m.isfinite(o) else None
+        if isinstance(o, dict):
+            return {k: _clean(v) for k, v in o.items()}
+        if isinstance(o, list):
+            return [_clean(v) for v in o]
+        return o
+    return JSONResponse(_clean(payload))
+
+
 @app.get("/api/mralgo/research_board")
 async def _mralgo_research_board(auth: HTTPBasicCredentials = Depends(_check_auth)):
     """The research/idea universe enriched through the card engine, grouped by
