@@ -664,6 +664,17 @@ async def _mrbull_boot(auth: HTTPBasicCredentials = Depends(_check_auth)):
             payload["universe"]["screener"] = rows
             payload["universe"]["_mrbull"] = True
             payload["universe"]["_count"] = len(rows)
+            # home SCAN FUNNEL reads the `critical` feed — re-derive its counts from
+            # the MrAlgo verdict distribution so home matches the scanner.
+            from collections import Counter as _C
+            vc = _C((r.get("stage") or "").upper() for r in rows)
+            crit = payload.get("critical")
+            if isinstance(crit, dict):
+                crit["scan_count"] = len(rows)
+                crit["buy_count"] = vc.get("BUY", 0)
+                crit["watch_count"] = vc.get("WATCH", 0)
+                crit["killed_count"] = vc.get("AVOID", 0)
+                crit["short_count"] = vc.get("SHORT", 0)
     except Exception as e:
         payload["_mrbull_error"] = f"{type(e).__name__}: {e}"
     # Browser JSON.parse rejects NaN/Infinity (Python's json.loads accepts them),
@@ -678,6 +689,85 @@ async def _mrbull_boot(auth: HTTPBasicCredentials = Depends(_check_auth)):
             return [_clean(v) for v in o]
         return o
     return JSONResponse(_clean(payload))
+
+
+def _mrbull_card(sym, mode):
+    """Load one MrAlgo card for (ticker, api-mode) from its scan cache."""
+    import json as _j
+    from pathlib import Path as _P
+    fn = {"swing": "scan.json", "position": "scan_position.json",
+          "invest": "scan_invest.json", "etf": "scan_etf.json"}.get(mode, "scan.json")
+    p = _P("/Volumes/MyMacDisk/Claude Skills/MrAlgo/cache") / fn
+    if not p.exists():
+        return None
+    try:
+        for c in (_j.loads(p.read_text()).get("cards") or []):
+            if str(c.get("ticker") or "").upper() == str(sym or "").upper():
+                return c
+    except Exception:
+        return None
+    return None
+
+
+@app.get("/api/mrbull/trade_engine")
+async def _mrbull_trade_engine(t: str = "", mode: str = "swing",
+                               auth: HTTPBasicCredentials = Depends(_check_auth)):
+    """Per-mode trade plan from MrAlgo (structural + PAC targets), shaped like
+    /api/trade_engine so the MrBullAlgo Overview hero renders MrAlgo's T1/T2/stop/
+    entry per horizon. Falls back to {detail:...} (no-plan sentinel) when MrAlgo
+    has no card/targets for that ticker+mode."""
+    if isinstance(auth, Response):
+        return auth
+    mode = (mode or "swing").lower()
+    if mode not in ("swing", "position", "invest", "etf"):
+        mode = "swing"
+    c = _mrbull_card(t, mode)
+    if not c:
+        return JSONResponse({"detail": "no MrAlgo card", "ticker": t, "mode": mode})
+    det = c.get("detail") or {}
+    tg = det.get("targets") or {}
+    pt = c.get("pac_targets") or {}
+    entry_o = c.get("entry") or {}
+    price = c.get("price")
+    verdict = (c.get("verdict") or "").upper()
+    t1 = tg.get("t1") if tg.get("t1") is not None else pt.get("t1")
+    t2 = tg.get("t2") if tg.get("t2") is not None else pt.get("t2")
+    stop = entry_o.get("ob_stop") if entry_o.get("ob_stop") is not None else tg.get("stop")
+    entry_px = tg.get("entry") if tg.get("entry") is not None else price
+    if t1 is None or stop is None:
+        return JSONResponse({"detail": "no MrAlgo targets", "ticker": t, "mode": mode})
+    atr = det.get("atr")
+    zone = None
+    if entry_px is not None and atr:
+        zone = {"low": round(entry_px - 0.25 * atr, 2), "high": round(entry_px + 0.25 * atr, 2)}
+    def _rm(px):
+        try:
+            risk = abs(entry_px - stop)
+            return round(abs(px - entry_px) / risk, 2) if risk else None
+        except Exception:
+            return None
+    def _dp(px):
+        try:
+            return round((px / price - 1) * 100, 2) if price else None
+        except Exception:
+            return None
+    direction = "short" if verdict == "SHORT" else "long"
+    decision = "trade" if verdict in ("BUY", "SHORT") else ("watch" if verdict == "WATCH" else "avoid")
+    out = {
+        "ticker": (t or "").upper(), "mode": mode, "direction": direction, "decision": decision,
+        "price_at_analysis": price, "is_etf": bool(c.get("is_etf")),
+        "entry": {"price": entry_px, "zone": zone, "basis": entry_o.get("band") or "structural", "atr": atr},
+        "stop": {"price": stop, "basis": ("bull_ob" if entry_o.get("ob_stop") is not None else "atr"),
+                 "distance_pct": _dp(stop), "candidates": {}},
+        "t1": {"price": t1, "r_multiple": _rm(t1), "distance_pct": _dp(t1), "confluence": None, "sources": []},
+        "t2": ({"price": t2, "r_multiple": _rm(t2), "distance_pct": _dp(t2), "confluence": None, "sources": []}
+               if t2 is not None else None),
+        "t3": None,
+        "confidence": c.get("conviction"),
+        "warnings": [], "context": {"source": "MrAlgo structural+PAC"},
+        "_mrbull": True,
+    }
+    return JSONResponse(out)
 
 
 @app.get("/api/mralgo/research_board")

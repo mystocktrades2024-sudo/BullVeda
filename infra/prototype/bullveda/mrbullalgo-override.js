@@ -15,14 +15,19 @@
 (function () {
   "use strict";
   window.__MRBULLALGO__ = true;
-  window.__MRBULLALGO_PHASE__ = 1;
+  window.__MRBULLALGO_PHASE__ = 2;
 
   // ── network shim: rewrite the boot endpoint to the MrAlgo-backed one ──
   // "/api/bullveda-boot" -> "/api/mrbull/boot"  (does NOT touch "/api/bullveda-heavy")
   function remap(url) {
     if (typeof url !== "string") return url;
+    // Phase 1: universe (inside the combined boot)
     if (url.indexOf("/api/bullveda-boot") !== -1) {
       return url.replace("/api/bullveda-boot", "/api/mrbull/boot");
+    }
+    // Phase 2: per-mode trade plan (Overview hero) -> MrAlgo structural/PAC targets
+    if (url.indexOf("/api/trade_engine") !== -1) {
+      return url.replace("/api/trade_engine", "/api/mrbull/trade_engine");
     }
     return url;
   }
