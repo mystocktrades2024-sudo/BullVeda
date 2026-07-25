@@ -1,0 +1,309 @@
+// © gamphaniraj
+// GAM - Price Target — structural confluence targets (BullVeda logic ported to Pine)
+// + Swing/Position preset + toggleable EMAs (8/13/20/50/100/200). Standalone, no API.
+//
+// Structural method: candidates = swing/pivot highs (wt 1.5) + Fib ext 1.272/1.618/2.0
+// (wt 1.5) + round numbers (wt 1.0); confluence = sum of weights within ±(tol×ATR);
+// reachability decays past ATR×horizon budget; pick nearest levels clearing
+// minConf/minScore/spacing as T1/T2/T3. Preset auto-sets confluence + horizon:
+//   Swing    → minConf 1.0, horizon 4, cap 6×ATR  (near scale-out ladder)
+//   Position → minConf 1.5, horizon 10, cap 10×ATR (strong far clusters)
+//   Custom   → use the Structural-engine inputs
+// Full engine (Volume-Profile HVN/VAH, AVWAP, MC/analog p_reach, ML) lives in
+// SwingTrade/target_engine.py — /api/trade_engine. This Pine port is standalone.
+//@version=6
+indicator("GAM - Price Target", overlay = true, max_lines_count = 100, max_labels_count = 100)
+
+// ═══════════ Inputs ═══════════
+grpT        = "Trade"
+dir         = input.string("Long", "Direction", options = ["Long", "Short"], group = grpT)
+manualEntry = input.float(0.0, "Entry price (0 = current close)", step = 0.01, group = grpT)
+manualStop  = input.float(0.0, "Stop price (0 = auto ATR)", step = 0.01, group = grpT)
+
+grpM       = "Target method"
+targetMode = input.string("Structural (BullVeda)", "Target method", options = ["Structural (BullVeda)", "Manual / R-multiple"], group = grpM)
+preset     = input.string("Swing", "Preset (auto-sets confluence + horizon)", options = ["Swing", "Position", "Custom"], group = grpM)
+
+grpR    = "ATR / stop"
+atrLen  = input.int(14, "ATR length", minval = 1, group = grpR)
+atrMult = input.float(1.5, "ATR × for auto stop", step = 0.1, minval = 0.1, group = grpR)
+
+grpST      = "Structural engine (Custom preset only)"
+pvLen      = input.int(10, "Swing pivot length", minval = 2, group = grpST)
+fibLB      = input.int(60, "Fib leg lookback", minval = 10, group = grpST)
+confTolATR = input.float(0.5, "Confluence tolerance (×ATR)", step = 0.1, group = grpST)
+minConf    = input.float(1.0, "Min confluence to qualify", step = 0.5, group = grpST)
+minScore   = input.float(0.4, "Min score (conf × reach)", step = 0.1, group = grpST)
+horizonB   = input.int(6, "Reachability horizon (bars)", minval = 1, group = grpST)
+capATR     = input.float(8.0, "Max target distance (×ATR)", step = 0.5, group = grpST)
+minGapATR  = input.float(0.5, "Min gap to T1 (×ATR)", step = 0.1, group = grpST)
+spaceATR   = input.float(0.6, "Min spacing between targets (×ATR)", step = 0.1, group = grpST)
+
+grpMan = "Manual / R-multiple (that mode only)"
+t1man  = input.float(0.0, "T1 price", step = 0.01, group = grpMan)
+t2man  = input.float(0.0, "T2 price", step = 0.01, group = grpMan)
+t3man  = input.float(0.0, "T3 price", step = 0.01, group = grpMan)
+r1     = input.float(2.0, "T1 R", step = 0.5, group = grpMan)
+r2     = input.float(3.0, "T2 R", step = 0.5, group = grpMan)
+r3     = input.float(5.0, "T3 R", step = 0.5, group = grpMan)
+
+grpE   = "Moving Averages (EMA)"
+e8on   = input.bool(true, "EMA 8",   inline = "e8",   group = grpE)
+e8c    = input.color(#ffd54f, "",     inline = "e8",   group = grpE)
+e13on  = input.bool(true, "EMA 13",  inline = "e13",  group = grpE)
+e13c   = input.color(#ff9800, "",     inline = "e13",  group = grpE)
+e20on  = input.bool(true, "EMA 20",  inline = "e20",  group = grpE)
+e20c   = input.color(#26c6da, "",     inline = "e20",  group = grpE)
+e50on  = input.bool(true, "EMA 50",  inline = "e50",  group = grpE)
+e50c   = input.color(#2962ff, "",     inline = "e50",  group = grpE)
+e100on = input.bool(true, "EMA 100", inline = "e100", group = grpE)
+e100c  = input.color(#ab47bc, "",     inline = "e100", group = grpE)
+e200on = input.bool(true, "EMA 200", inline = "e200", group = grpE)
+e200c  = input.color(#ef5350, "",     inline = "e200", group = grpE)
+
+grpV      = "Display"
+tblPosIn  = input.string("Bottom Left", "Table position", options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group = grpV)
+showTable = input.bool(true, "Show summary table", group = grpV)
+
+// ═══════════ Preset → effective knobs ═══════════
+minConfEff = preset == "Swing" ? 1.0 : preset == "Position" ? 1.5 : minConf
+horizonEff = preset == "Swing" ? 4   : preset == "Position" ? 10  : horizonB
+capEff     = preset == "Swing" ? 6.0 : preset == "Position" ? 10.0 : capATR
+
+// ═══════════ Base calcs ═══════════
+isLong = dir == "Long"
+useStruct = targetMode == "Structural (BullVeda)"
+entry  = manualEntry > 0 ? manualEntry : close
+atrVal = ta.atr(atrLen)
+stop   = manualStop > 0 ? manualStop : (isLong ? entry - atrVal * atrMult : entry + atrVal * atrMult)
+risk   = math.abs(entry - stop)
+rMult(p) => risk > 0 and not na(p) ? math.abs(p - entry) / risk : na
+
+// ═══════════ EMAs ═══════════
+ema8   = ta.ema(close, 8)
+ema13  = ta.ema(close, 13)
+ema20  = ta.ema(close, 20)
+ema50  = ta.ema(close, 50)
+ema100 = ta.ema(close, 100)
+ema200 = ta.ema(close, 200)
+plot(e8on   ? ema8   : na, "EMA 8",   color = e8c,   linewidth = 1)
+plot(e13on  ? ema13  : na, "EMA 13",  color = e13c,  linewidth = 1)
+plot(e20on  ? ema20  : na, "EMA 20",  color = e20c,  linewidth = 1)
+plot(e50on  ? ema50  : na, "EMA 50",  color = e50c,  linewidth = 2)
+plot(e100on ? ema100 : na, "EMA 100", color = e100c, linewidth = 2)
+plot(e200on ? ema200 : na, "EMA 200", color = e200c, linewidth = 2)
+
+// EMA number tags — plain text at the line's right edge, no boxes
+var label tE8   = na
+var label tE13  = na
+var label tE20  = na
+var label tE50  = na
+var label tE100 = na
+var label tE200 = na
+if barstate.islast
+    label.delete(tE8), label.delete(tE13), label.delete(tE20), label.delete(tE50), label.delete(tE100), label.delete(tE200)
+    xE = bar_index + 1
+    if e8on
+        tE8   := label.new(xE, ema8,   "EMA8",   style = label.style_none, textcolor = e8c,   size = size.small)
+    if e13on
+        tE13  := label.new(xE, ema13,  "EMA13",  style = label.style_none, textcolor = e13c,  size = size.small)
+    if e20on
+        tE20  := label.new(xE, ema20,  "EMA20",  style = label.style_none, textcolor = e20c,  size = size.small)
+    if e50on
+        tE50  := label.new(xE, ema50,  "EMA50",  style = label.style_none, textcolor = e50c,  size = size.small)
+    if e100on
+        tE100 := label.new(xE, ema100, "EMA100", style = label.style_none, textcolor = e100c, size = size.small)
+    if e200on
+        tE200 := label.new(xE, ema200, "EMA200", style = label.style_none, textcolor = e200c, size = size.small)
+
+// ═══════════ Persistent pivots ═══════════
+ph = ta.pivothigh(pvLen, pvLen)
+pl = ta.pivotlow(pvLen, pvLen)
+var array<float> pivHi = array.new<float>()
+var array<float> pivLo = array.new<float>()
+if not na(ph)
+    array.push(pivHi, ph)
+    if array.size(pivHi) > 50
+        array.shift(pivHi)
+if not na(pl)
+    array.push(pivLo, pl)
+    if array.size(pivLo) > 50
+        array.shift(pivLo)
+
+swLo = ta.lowest(low, fibLB)
+swHi = ta.highest(high, fibLB)
+
+// ═══════════ Structural target selection ═══════════
+f_findNext(array<float> px, array<float> cf, array<float> sc, float fromPx, float _minConf, float _minScore) =>
+    float best = na
+    float bestC = na
+    int   nn = array.size(px)
+    for i = 0 to nn - 1
+        p = array.get(px, i)
+        if p > fromPx and array.get(cf, i) >= _minConf and array.get(sc, i) >= _minScore and (na(best) or p < best)
+            best := p
+            bestC := array.get(cf, i)
+    [best, bestC]
+
+var float sT1 = na
+var float sT2 = na
+var float sT3 = na
+var float sC1 = na
+var float sC2 = na
+var float sC3 = na
+
+if barstate.islast and useStruct
+    cPx = array.new<float>()
+    cWt = array.new<float>()
+
+    src = isLong ? pivHi : pivLo
+    for i = 0 to array.size(src) - 1
+        pv = array.get(src, i)
+        if (isLong and pv > entry) or (not isLong and pv < entry)
+            array.push(cPx, pv)
+            array.push(cWt, 1.5)
+
+    leg = swHi - swLo
+    if leg > 0
+        f272 = isLong ? swLo + leg * 1.272 : swHi - leg * 1.272
+        f618 = isLong ? swLo + leg * 1.618 : swHi - leg * 1.618
+        f200 = isLong ? swLo + leg * 2.0   : swHi - leg * 2.0
+        if (isLong and f272 > entry) or (not isLong and f272 < entry)
+            array.push(cPx, f272)
+            array.push(cWt, 1.5)
+        if (isLong and f618 > entry) or (not isLong and f618 < entry)
+            array.push(cPx, f618)
+            array.push(cWt, 1.5)
+        if (isLong and f200 > entry) or (not isLong and f200 < entry)
+            array.push(cPx, f200)
+            array.push(cWt, 1.5)
+
+    step = entry < 5 ? 0.5 : entry < 20 ? 1.0 : entry < 50 ? 2.5 : entry < 100 ? 5.0 : entry < 250 ? 10.0 : entry < 1000 ? 25.0 : 50.0
+    capDist = capEff * atrVal
+    if isLong
+        rp = math.ceil(entry / step) * step
+        g = 0
+        while rp <= entry + capDist and g < 80
+            array.push(cPx, rp)
+            array.push(cWt, 1.0)
+            rp := rp + step
+            g := g + 1
+    else
+        rp = math.floor(entry / step) * step
+        g = 0
+        while rp >= entry - capDist and g < 80
+            array.push(cPx, rp)
+            array.push(cWt, 1.0)
+            rp := rp - step
+            g := g + 1
+
+    n   = array.size(cPx)
+    tol = confTolATR * atrVal
+    budget = atrVal * horizonEff
+    cf  = array.new<float>()
+    sc  = array.new<float>()
+    for i = 0 to n - 1
+        pi = array.get(cPx, i)
+        c = 0.0
+        for j = 0 to n - 1
+            if math.abs(pi - array.get(cPx, j)) <= tol
+                c := c + array.get(cWt, j)
+        d = math.abs(pi - entry)
+        reach = d <= budget ? 1.0 : math.max(0.15, 1.0 - (d / budget - 1.0) * 0.6)
+        array.push(cf, c)
+        array.push(sc, c * reach)
+
+    minGap = minGapATR * atrVal
+    space  = spaceATR * atrVal
+    base   = isLong ? entry + minGap : entry - minGap
+    fromA  = isLong ? base : -1e12
+    [a1, k1] = f_findNext(cPx, cf, sc, fromA, minConfEff, minScore)
+    from2 = na(a1) ? base : (isLong ? a1 + space : a1 - space)
+    fromB = isLong ? from2 : -1e12
+    [a2, k2] = f_findNext(cPx, cf, sc, fromB, minConfEff, minScore)
+    from3 = na(a2) ? from2 : (isLong ? a2 + space : a2 - space)
+    fromC = isLong ? from3 : -1e12
+    [a3, k3] = f_findNext(cPx, cf, sc, fromC, minConfEff, minScore)
+    sT1 := a1
+    sC1 := k1
+    sT2 := a2
+    sC2 := k2
+    sT3 := a3
+    sC3 := k3
+
+mT1 = t1man > 0 ? t1man : (isLong ? entry + risk * r1 : entry - risk * r1)
+mT2 = t2man > 0 ? t2man : (isLong ? entry + risk * r2 : entry - risk * r2)
+mT3 = t3man > 0 ? t3man : (isLong ? entry + risk * r3 : entry - risk * r3)
+
+t1 = useStruct ? sT1 : mT1
+t2 = useStruct ? sT2 : mT2
+t3 = useStruct ? sT3 : mT3
+c1 = useStruct ? sC1 : na
+c2 = useStruct ? sC2 : na
+c3 = useStruct ? sC3 : na
+
+// ═══════════ Colors ═══════════
+cEntry  = color.new(color.gray, 0)
+cStop   = color.new(color.red, 0)
+cTgt    = color.new(color.teal, 0)
+
+// ═══════════ Drawings ═══════════
+f_lbl(float p, string txt, color col) => label.new(bar_index + 2, p, txt, style = label.style_label_left, color = col, textcolor = color.white, size = size.normal)
+
+var line lnE = na
+var line lnS = na
+var line lnT1 = na
+var line lnT2 = na
+var line lnT3 = na
+var label lbE = na
+var label lbS = na
+var label lbT1 = na
+var label lbT2 = na
+var label lbT3 = na
+
+if barstate.islast
+    line.delete(lnE), line.delete(lnS), line.delete(lnT1), line.delete(lnT2), line.delete(lnT3)
+    label.delete(lbE), label.delete(lbS), label.delete(lbT1), label.delete(lbT2), label.delete(lbT3)
+    x1 = bar_index
+    x2 = bar_index + 1
+
+    lnE := line.new(x1, entry, x2, entry, extend = extend.both, color = cEntry, width = 2)
+    lnS := line.new(x1, stop,  x2, stop,  extend = extend.both, color = cStop, style = line.style_dashed)
+    lbE := f_lbl(entry, "Entry " + str.tostring(entry, format.mintick), cEntry)
+    lbS := f_lbl(stop,  "Stop −1R  " + str.tostring(stop, format.mintick), cStop)
+
+    if not na(t1)
+        lnT1 := line.new(x1, t1, x2, t1, extend = extend.both, color = cTgt, style = line.style_dashed)
+        lbT1 := f_lbl(t1, "T1  " + str.tostring(t1, format.mintick) + "  (+" + str.tostring(rMult(t1), "#.#") + "R" + (useStruct and not na(c1) ? " · conf " + str.tostring(c1, "#.#") : "") + ")", cTgt)
+    if not na(t2)
+        lnT2 := line.new(x1, t2, x2, t2, extend = extend.both, color = cTgt, style = line.style_dashed)
+        lbT2 := f_lbl(t2, "T2  " + str.tostring(t2, format.mintick) + "  (+" + str.tostring(rMult(t2), "#.#") + "R" + (useStruct and not na(c2) ? " · conf " + str.tostring(c2, "#.#") : "") + ")", cTgt)
+    if not na(t3)
+        lnT3 := line.new(x1, t3, x2, t3, extend = extend.both, color = cTgt, style = line.style_dashed)
+        lbT3 := f_lbl(t3, "T3  " + str.tostring(t3, format.mintick) + "  (+" + str.tostring(rMult(t3), "#.#") + "R" + (useStruct and not na(c3) ? " · conf " + str.tostring(c3, "#.#") : "") + ")", cTgt)
+
+// ═══════════ Table ═══════════
+f_fmt(float p) => na(p) ? "—" : str.tostring(p, format.mintick)
+f_rr(float p)  => na(p) ? "—" : "+" + str.tostring(rMult(p), "#.#") + "R"
+tblPos = tblPosIn == "Top Right" ? position.top_right : tblPosIn == "Top Left" ? position.top_left : tblPosIn == "Bottom Right" ? position.bottom_right : position.bottom_left
+var table tbl = na
+if showTable and barstate.islast
+    table.delete(tbl)
+    tbl := table.new(tblPos, 2, 8, frame_color = color.new(color.gray, 40), frame_width = 1, border_width = 1)
+    hb  = color.new(color.teal, 0)
+    table.cell(tbl, 0, 0, "GAM Target", text_color = color.white, bgcolor = hb, text_size = size.small)
+    table.cell(tbl, 1, 0, useStruct ? preset : "R-mult", text_color = color.white, bgcolor = hb, text_size = size.small)
+    table.cell(tbl, 0, 1, "Entry", text_size = size.small)
+    table.cell(tbl, 1, 1, f_fmt(entry), text_size = size.small)
+    table.cell(tbl, 0, 2, "ATR", text_size = size.small)
+    table.cell(tbl, 1, 2, str.tostring(atrVal, "#.##"), text_size = size.small)
+    table.cell(tbl, 0, 3, "Stop / 1R", text_color = color.red, text_size = size.small)
+    table.cell(tbl, 1, 3, f_fmt(stop) + " / " + str.tostring(risk, "#.##"), text_color = color.red, text_size = size.small)
+    table.cell(tbl, 0, 4, "T1", text_color = color.teal, text_size = size.small)
+    table.cell(tbl, 1, 4, f_fmt(t1) + "  " + f_rr(t1), text_color = color.teal, text_size = size.small)
+    table.cell(tbl, 0, 5, "T2", text_color = color.teal, text_size = size.small)
+    table.cell(tbl, 1, 5, f_fmt(t2) + "  " + f_rr(t2), text_color = color.teal, text_size = size.small)
+    table.cell(tbl, 0, 6, "T3", text_color = color.teal, text_size = size.small)
+    table.cell(tbl, 1, 6, f_fmt(t3) + "  " + f_rr(t3), text_color = color.teal, text_size = size.small)
+    table.cell(tbl, 0, 7, "R:R T1", text_size = size.small)
+    table.cell(tbl, 1, 7, na(t1) ? "—" : str.tostring(rMult(t1), "#.#") + " : 1", text_size = size.small)

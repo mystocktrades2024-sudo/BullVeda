@@ -1,0 +1,473 @@
+// © gamphaniraj
+// ═══════════════════════════════════════════════════════════════════════════
+// GAM - Price Target v2
+// Structural confluence target engine — full source table (BullVeda-style):
+//
+//   Source                      Weight  Behavior  Mechanism
+//   ── Tier A (transaction evidence) ─────────────────────────────
+//   Volume-profile HVN (approx)  2.0    WALL      real volume traded there
+//   Swing/pivot highs            1.5    WALL      proven supply
+//   Bearish order block          1.5    WALL      institutional footprint
+//   Anchored VWAP (low & peak)   1.25   WALL      institutional cost basis
+//   ── Tier B (behavioral / liquidity) ───────────────────────────
+//   PDH / PWH / PMH              1.0    MAGNET    stop-liquidity pools
+//   Round numbers                1.0    MAGNET    order clustering
+//   Measured move                1.0    MAGNET    pattern symmetry
+//   ── Tier C (geometric) ────────────────────────────────────────
+//   Fib ext 1.272/1.618/2.0      1.0    MAGNET    self-fulfilling geometry
+//
+// Confluence = sum of weights within ±(tol×ATR), CAPPED at 4.0 (dedupe guard).
+// Cluster is a WALL if wall-weight within tolerance ≥ 1.5, else MAGNET.
+// Reachability decays past ATR×horizon budget. T1 may not leapfrog the
+// nearest strong wall (overhead-supply guard). ATR is ONLY the ruler
+// (tolerance/budget/auto-stop) — never a target source.
+// Presets: Swing (minConf 1.0, horizon 4, cap 6×ATR) · Position (1.5/10/10) · Custom.
+// v1 kept at indicators/gam_price_target.pine for A/B.
+// ═══════════════════════════════════════════════════════════════════════════
+//@version=6
+indicator("GAM - Price Target v2", overlay = true, max_lines_count = 100, max_labels_count = 100)
+max_bars_back(time, 500)
+
+// ═══════════ Inputs ═══════════
+grpT        = "Trade"
+dir         = input.string("Long", "Direction", options = ["Long", "Short"], group = grpT)
+manualEntry = input.float(0.0, "Entry price (0 = current close)", step = 0.01, group = grpT)
+manualStop  = input.float(0.0, "Stop price (0 = auto ATR)", step = 0.01, group = grpT)
+
+grpM       = "Target method"
+preset     = input.string("Swing", "Preset (auto-sets confluence + horizon)", options = ["Swing", "Position", "Custom"], group = grpM)
+
+grpR    = "ATR / stop"
+atrLen  = input.int(14, "ATR length", minval = 1, group = grpR)
+atrMult = input.float(1.5, "ATR × for auto stop", step = 0.1, minval = 0.1, group = grpR)
+
+grpSrc  = "Target sources (A/B toggles)"
+srcSwing = input.bool(true, "Swing highs/lows (1.5 · wall)", group = grpSrc)
+srcHVN   = input.bool(true, "Volume-profile HVN (2.0 · wall)", group = grpSrc)
+srcOB    = input.bool(true, "Order blocks (1.5 · wall)", group = grpSrc)
+srcAVW   = input.bool(true, "Anchored VWAP (1.25 · wall)", group = grpSrc)
+srcPrior = input.bool(true, "PDH/PWH/PMH (1.0 · magnet)", group = grpSrc)
+srcRound = input.bool(true, "Round numbers (1.0 · magnet)", group = grpSrc)
+srcMM    = input.bool(true, "Measured move (1.0 · magnet)", group = grpSrc)
+srcFib   = input.bool(true, "Fib extensions (1.0 · magnet)", group = grpSrc)
+
+grpST      = "Structural engine (Custom preset only)"
+pvLen      = input.int(10, "Swing pivot length", minval = 2, group = grpST)
+fibLB      = input.int(60, "Fib / AVWAP-low leg lookback", minval = 10, group = grpST)
+confTolATR = input.float(0.5, "Confluence tolerance (×ATR)", step = 0.1, group = grpST)
+minConf    = input.float(1.0, "Min confluence to qualify", step = 0.5, group = grpST)
+minScore   = input.float(0.4, "Min score (conf × reach)", step = 0.1, group = grpST)
+horizonB   = input.int(6, "Reachability horizon (bars)", minval = 1, group = grpST)
+capATR     = input.float(8.0, "Max target distance (×ATR)", step = 0.5, group = grpST)
+minGapATR  = input.float(0.5, "Min gap to T1 (×ATR)", step = 0.1, group = grpST)
+spaceATR   = input.float(0.6, "Min spacing between targets (×ATR)", step = 0.1, group = grpST)
+
+grpVP   = "Volume profile / order blocks"
+vpLB    = input.int(150, "VP lookback (bars)", minval = 30, maxval = 300, group = grpVP)
+vpBins  = input.int(24, "VP bins", minval = 8, maxval = 50, group = grpVP)
+hvnMult = input.float(1.6, "HVN threshold (× avg bin vol)", step = 0.1, group = grpVP)
+obImpA  = input.float(0.5, "OB impulse size (×ATR)", step = 0.1, group = grpVP)
+
+grpE   = "Moving Averages (EMA)"
+e8on   = input.bool(true, "EMA 8",   inline = "e8",   group = grpE)
+e8c    = input.color(#ffd54f, "",     inline = "e8",   group = grpE)
+e13on  = input.bool(true, "EMA 13",  inline = "e13",  group = grpE)
+e13c   = input.color(#ff9800, "",     inline = "e13",  group = grpE)
+e20on  = input.bool(true, "EMA 20",  inline = "e20",  group = grpE)
+e20c   = input.color(#26c6da, "",     inline = "e20",  group = grpE)
+e50on  = input.bool(true, "EMA 50",  inline = "e50",  group = grpE)
+e50c   = input.color(#2962ff, "",     inline = "e50",  group = grpE)
+e100on = input.bool(true, "EMA 100", inline = "e100", group = grpE)
+e100c  = input.color(#ab47bc, "",     inline = "e100", group = grpE)
+e200on = input.bool(true, "EMA 200", inline = "e200", group = grpE)
+e200c  = input.color(#ef5350, "",     inline = "e200", group = grpE)
+
+grpV      = "Display"
+tblPosIn  = input.string("Bottom Left", "Table position", options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group = grpV)
+showTable = input.bool(true, "Show summary table", group = grpV)
+
+// ═══════════ Preset → effective knobs ═══════════
+minConfEff = preset == "Swing" ? 1.0 : preset == "Position" ? 1.5 : minConf
+horizonEff = preset == "Swing" ? 4   : preset == "Position" ? 10  : horizonB
+capEff     = preset == "Swing" ? 6.0 : preset == "Position" ? 10.0 : capATR
+
+// ═══════════ Base calcs ═══════════
+isLong = dir == "Long"
+entry  = manualEntry > 0 ? manualEntry : close
+atrVal = ta.atr(atrLen)
+stop   = manualStop > 0 ? manualStop : (isLong ? entry - atrVal * atrMult : entry + atrVal * atrMult)
+risk   = math.abs(entry - stop)
+rMult(p) => risk > 0 and not na(p) ? math.abs(p - entry) / risk : na
+
+// ═══════════ EMAs ═══════════
+ema8   = ta.ema(close, 8)
+ema13  = ta.ema(close, 13)
+ema20  = ta.ema(close, 20)
+ema50  = ta.ema(close, 50)
+ema100 = ta.ema(close, 100)
+ema200 = ta.ema(close, 200)
+plot(e8on   ? ema8   : na, "EMA 8",   color = e8c,   linewidth = 1)
+plot(e13on  ? ema13  : na, "EMA 13",  color = e13c,  linewidth = 1)
+plot(e20on  ? ema20  : na, "EMA 20",  color = e20c,  linewidth = 1)
+plot(e50on  ? ema50  : na, "EMA 50",  color = e50c,  linewidth = 2)
+plot(e100on ? ema100 : na, "EMA 100", color = e100c, linewidth = 2)
+plot(e200on ? ema200 : na, "EMA 200", color = e200c, linewidth = 2)
+
+var label tE8   = na
+var label tE13  = na
+var label tE20  = na
+var label tE50  = na
+var label tE100 = na
+var label tE200 = na
+if barstate.islast
+    label.delete(tE8), label.delete(tE13), label.delete(tE20), label.delete(tE50), label.delete(tE100), label.delete(tE200)
+    xE = bar_index + 1
+    if e8on
+        tE8   := label.new(xE, ema8,   "EMA8",   style = label.style_none, textcolor = e8c,   size = size.small)
+    if e13on
+        tE13  := label.new(xE, ema13,  "EMA13",  style = label.style_none, textcolor = e13c,  size = size.small)
+    if e20on
+        tE20  := label.new(xE, ema20,  "EMA20",  style = label.style_none, textcolor = e20c,  size = size.small)
+    if e50on
+        tE50  := label.new(xE, ema50,  "EMA50",  style = label.style_none, textcolor = e50c,  size = size.small)
+    if e100on
+        tE100 := label.new(xE, ema100, "EMA100", style = label.style_none, textcolor = e100c, size = size.small)
+    if e200on
+        tE200 := label.new(xE, ema200, "EMA200", style = label.style_none, textcolor = e200c, size = size.small)
+
+// ═══════════ Global series (computed every bar) ═══════════
+ph = ta.pivothigh(pvLen, pvLen)
+pl = ta.pivotlow(pvLen, pvLen)
+var array<float> pivHi = array.new<float>()
+var array<float> pivLo = array.new<float>()
+if not na(ph)
+    array.push(pivHi, ph)
+    if array.size(pivHi) > 50
+        array.shift(pivHi)
+if not na(pl)
+    array.push(pivLo, pl)
+    if array.size(pivLo) > 50
+        array.shift(pivLo)
+
+swLo = ta.lowest(low, fibLB)
+swHi = ta.highest(high, fibLB)
+loBarsOff = ta.lowestbars(low, fibLB)     // negative offset to swing low
+hiBarsOff = ta.highestbars(high, fibLB)   // negative offset to swing high
+
+vpHi = ta.highest(high, vpLB)
+vpLo = ta.lowest(low, vpLB)
+vpSrc = hlc3
+vpVol = volume
+
+// prior-period liquidity levels (confirmed values — no repaint)
+pdh = request.security(syminfo.tickerid, "D", high[1], lookahead = barmerge.lookahead_on)
+pwh = request.security(syminfo.tickerid, "W", high[1], lookahead = barmerge.lookahead_on)
+pmh = request.security(syminfo.tickerid, "M", high[1], lookahead = barmerge.lookahead_on)
+pdl = request.security(syminfo.tickerid, "D", low[1],  lookahead = barmerge.lookahead_on)
+pwl = request.security(syminfo.tickerid, "W", low[1],  lookahead = barmerge.lookahead_on)
+pml = request.security(syminfo.tickerid, "M", low[1],  lookahead = barmerge.lookahead_on)
+
+// measured move: last consolidation range projected beyond its edge
+rngH = ta.highest(high, 20)[1]
+rngL = ta.lowest(low, 20)[1]
+
+// ═══════════ Order blocks (state — every bar) ═══════════
+lo3prev = ta.lowest(low, 3)[1]
+hi3prev = ta.highest(high, 3)[1]
+var array<float> obBear = array.new<float>()   // tops of bearish OBs (resistance)
+var array<float> obBull = array.new<float>()   // bottoms of bullish OBs (support)
+
+bearImp = bar_index > 10 and close < lo3prev and (open - close) > obImpA * atrVal
+bullImp = bar_index > 10 and close > hi3prev and (close - open) > obImpA * atrVal
+
+if bearImp
+    for j = 1 to 6
+        if close[j] > open[j]
+            array.push(obBear, high[j])
+            break
+if bullImp
+    for j = 1 to 6
+        if close[j] < open[j]
+            array.push(obBull, low[j])
+            break
+
+// mitigation: a broken OB is dead (rebuild-filter, ascending loop only)
+if array.size(obBear) > 0
+    keepB = array.new<float>()
+    for i = 0 to array.size(obBear) - 1
+        if close <= array.get(obBear, i)
+            array.push(keepB, array.get(obBear, i))
+    obBear := keepB
+if array.size(obBull) > 0
+    keepU = array.new<float>()
+    for i = 0 to array.size(obBull) - 1
+        if close >= array.get(obBull, i)
+            array.push(keepU, array.get(obBull, i))
+    obBull := keepU
+if array.size(obBear) > 20
+    array.shift(obBear)
+if array.size(obBull) > 20
+    array.shift(obBull)
+
+// ═══════════ Helper functions (global scope) ═══════════
+f_add(array<float> px, array<float> wt, array<bool> wl, float p, float w, bool isWall, float _entry, bool _long) =>
+    if not na(p) and (_long ? p > _entry : p < _entry)
+        array.push(px, p)
+        array.push(wt, w)
+        array.push(wl, isWall)
+
+// nearest qualifying level in trade direction, beyond fromPx
+f_findNext(array<float> px, array<float> cf, array<float> sc, array<bool> wl, float fromPx, float _minConf, float _minScore, bool _long) =>
+    float best = na
+    float bestC = na
+    bool  bestW = false
+    int   nn = array.size(px)
+    if nn > 0
+        for i = 0 to nn - 1
+            p = array.get(px, i)
+            ok = _long ? p > fromPx : p < fromPx
+            closer = na(best) or (_long ? p < best : p > best)
+            if ok and array.get(cf, i) >= _minConf and array.get(sc, i) >= _minScore and closer
+                best := p
+                bestC := array.get(cf, i)
+                bestW := array.get(wl, i)
+    [best, bestC, bestW]
+
+// ═══════════ Structural target selection (last bar) ═══════════
+var float sT1 = na
+var float sT2 = na
+var float sT3 = na
+var float sC1 = na
+var float sC2 = na
+var float sC3 = na
+var bool  sW1 = false
+var bool  sW2 = false
+var bool  sW3 = false
+
+if barstate.islast
+    cPx = array.new<float>()
+    cWt = array.new<float>()
+    cWl = array.new<bool>()
+
+    // 1) swing/pivot levels — WALL 1.5
+    if srcSwing
+        src = isLong ? pivHi : pivLo
+        if array.size(src) > 0
+            for i = 0 to array.size(src) - 1
+                f_add(cPx, cWt, cWl, array.get(src, i), 1.5, true, entry, isLong)
+
+    // 2) volume-profile HVNs — WALL 2.0 (approx volume-at-price, hlc3-binned)
+    if srcHVN and bar_index > vpLB and vpHi > vpLo
+        bins = array.new<float>(vpBins, 0.0)
+        bw = (vpHi - vpLo) / vpBins
+        for b = 0 to vpLB - 1
+            p = vpSrc[b]
+            v = vpVol[b]
+            if not na(p) and not na(v)
+                idx = math.min(vpBins - 1, math.max(0, int(math.floor((p - vpLo) / bw))))
+                array.set(bins, idx, array.get(bins, idx) + v)
+        tot = 0.0
+        for i = 0 to vpBins - 1
+            tot := tot + array.get(bins, i)
+        avgBin = tot / vpBins
+        for i = 0 to vpBins - 1
+            if array.get(bins, i) > hvnMult * avgBin
+                f_add(cPx, cWt, cWl, vpLo + (i + 0.5) * bw, 2.0, true, entry, isLong)
+
+    // 3) order blocks — WALL 1.5 (bearish above for longs, bullish below for shorts)
+    if srcOB
+        obs = isLong ? obBear : obBull
+        if array.size(obs) > 0
+            for i = 0 to array.size(obs) - 1
+                f_add(cPx, cWt, cWl, array.get(obs, i), 1.5, true, entry, isLong)
+
+    // 4) anchored VWAP from swing low + prior peak — WALL 1.25
+    if srcAVW
+        offL = int(math.min(-loBarsOff, 480))
+        if offL > 0
+            pv = 0.0
+            vv = 0.0
+            for i = 0 to offL
+                pv := pv + vpVol[i] * vpSrc[i]
+                vv := vv + vpVol[i]
+            if vv > 0
+                f_add(cPx, cWt, cWl, pv / vv, 1.25, true, entry, isLong)
+        offH = int(math.min(-hiBarsOff, 480))
+        if offH > 0
+            pv2 = 0.0
+            vv2 = 0.0
+            for i = 0 to offH
+                pv2 := pv2 + vpVol[i] * vpSrc[i]
+                vv2 := vv2 + vpVol[i]
+            if vv2 > 0
+                f_add(cPx, cWt, cWl, pv2 / vv2, 1.25, true, entry, isLong)
+
+    // 5) prior-period liquidity — MAGNET 1.0
+    if srcPrior
+        f_add(cPx, cWt, cWl, isLong ? pdh : pdl, 1.0, false, entry, isLong)
+        f_add(cPx, cWt, cWl, isLong ? pwh : pwl, 1.0, false, entry, isLong)
+        f_add(cPx, cWt, cWl, isLong ? pmh : pml, 1.0, false, entry, isLong)
+
+    // 6) round numbers — MAGNET 1.0
+    if srcRound
+        step = entry < 5 ? 0.5 : entry < 20 ? 1.0 : entry < 50 ? 2.5 : entry < 100 ? 5.0 : entry < 250 ? 10.0 : entry < 1000 ? 25.0 : 50.0
+        capDist = capEff * atrVal
+        if isLong
+            rp = math.ceil(entry / step) * step
+            g = 0
+            while rp <= entry + capDist and g < 80
+                f_add(cPx, cWt, cWl, rp, 1.0, false, entry, isLong)
+                rp := rp + step
+                g := g + 1
+        else
+            rp = math.floor(entry / step) * step
+            g = 0
+            while rp >= entry - capDist and g < 80
+                f_add(cPx, cWt, cWl, rp, 1.0, false, entry, isLong)
+                rp := rp - step
+                g := g + 1
+
+    // 7) measured move — MAGNET 1.0
+    if srcMM and rngH > rngL
+        f_add(cPx, cWt, cWl, isLong ? rngH + (rngH - rngL) : rngL - (rngH - rngL), 1.0, false, entry, isLong)
+
+    // 8) Fib extensions — MAGNET 1.0
+    if srcFib
+        leg = swHi - swLo
+        if leg > 0
+            f_add(cPx, cWt, cWl, isLong ? swLo + leg * 1.272 : swHi - leg * 1.272, 1.0, false, entry, isLong)
+            f_add(cPx, cWt, cWl, isLong ? swLo + leg * 1.618 : swHi - leg * 1.618, 1.0, false, entry, isLong)
+            f_add(cPx, cWt, cWl, isLong ? swLo + leg * 2.0   : swHi - leg * 2.0,   1.0, false, entry, isLong)
+
+    // ── confluence (capped) + wall tagging + reachability ──
+    n   = array.size(cPx)
+    tol = confTolATR * atrVal
+    budget = atrVal * horizonEff
+    cf  = array.new<float>()
+    sc  = array.new<float>()
+    wl  = array.new<bool>()
+    if n > 0
+        for i = 0 to n - 1
+            pi = array.get(cPx, i)
+            c = 0.0
+            wallWt = 0.0
+            for j = 0 to n - 1
+                if math.abs(pi - array.get(cPx, j)) <= tol
+                    c := c + array.get(cWt, j)
+                    if array.get(cWl, j)
+                        wallWt := wallWt + array.get(cWt, j)
+            c := math.min(c, 4.0)                     // anti confluence-theater cap
+            d = math.abs(pi - entry)
+            reach = d <= budget ? 1.0 : math.max(0.15, 1.0 - (d / budget - 1.0) * 0.6)
+            array.push(cf, c)
+            array.push(sc, c * reach)
+            array.push(wl, wallWt >= 1.5)
+
+    // ── selection: nearest qualifying, spaced ──
+    minGap = minGapATR * atrVal
+    space  = spaceATR * atrVal
+    base   = isLong ? entry + minGap : entry - minGap
+    [a1, k1, w1] = f_findNext(cPx, cf, sc, wl, base, minConfEff, minScore, isLong)
+    from2 = na(a1) ? base : (isLong ? a1 + space : a1 - space)
+    [a2, k2, w2] = f_findNext(cPx, cf, sc, wl, from2, minConfEff, minScore, isLong)
+    from3 = na(a2) ? from2 : (isLong ? a2 + space : a2 - space)
+    [a3, k3, w3] = f_findNext(cPx, cf, sc, wl, from3, minConfEff, minScore, isLong)
+
+    // ── overhead-supply guard: T1 may not leapfrog the nearest strong wall ──
+    float nearWall = na
+    if n > 0
+        for i = 0 to n - 1
+            p = array.get(cPx, i)
+            if array.get(wl, i) and array.get(cf, i) >= 1.5
+                if isLong and p > base and (na(nearWall) or p < nearWall)
+                    nearWall := p
+                if not isLong and p < base and (na(nearWall) or p > nearWall)
+                    nearWall := p
+    if not na(a1) and not na(nearWall)
+        if isLong and a1 > nearWall + 0.05 * atrVal
+            a1 := nearWall
+            w1 := true
+        if not isLong and a1 < nearWall - 0.05 * atrVal
+            a1 := nearWall
+            w1 := true
+
+    sT1 := a1
+    sC1 := k1
+    sW1 := w1
+    sT2 := a2
+    sC2 := k2
+    sW2 := w2
+    sT3 := a3
+    sC3 := k3
+    sW3 := w3
+
+t1 = sT1
+t2 = sT2
+t3 = sT3
+
+// ═══════════ Colors ═══════════
+cEntry  = color.new(color.gray, 0)
+cStop   = color.new(color.red, 0)
+cTgt    = color.new(color.teal, 0)
+
+// ═══════════ Drawings ═══════════
+f_lbl(float p, string txt, color col) => label.new(bar_index + 2, p, txt, style = label.style_label_left, color = col, textcolor = color.white, size = size.normal)
+f_bhv(bool w) => w ? " · wall" : " · magnet"
+
+var line lnE = na
+var line lnS = na
+var line lnT1 = na
+var line lnT2 = na
+var line lnT3 = na
+var label lbE = na
+var label lbS = na
+var label lbT1 = na
+var label lbT2 = na
+var label lbT3 = na
+
+if barstate.islast
+    line.delete(lnE), line.delete(lnS), line.delete(lnT1), line.delete(lnT2), line.delete(lnT3)
+    label.delete(lbE), label.delete(lbS), label.delete(lbT1), label.delete(lbT2), label.delete(lbT3)
+    x1 = bar_index
+    x2 = bar_index + 1
+
+    lnE := line.new(x1, entry, x2, entry, extend = extend.both, color = cEntry, width = 2)
+    lnS := line.new(x1, stop,  x2, stop,  extend = extend.both, color = cStop, style = line.style_dashed)
+    lbE := f_lbl(entry, "Entry " + str.tostring(entry, format.mintick), cEntry)
+    lbS := f_lbl(stop,  "Stop −1R  " + str.tostring(stop, format.mintick), cStop)
+
+    if not na(t1)
+        lnT1 := line.new(x1, t1, x2, t1, extend = extend.both, color = cTgt, style = line.style_dashed)
+        lbT1 := f_lbl(t1, "T1  " + str.tostring(t1, format.mintick) + "  (+" + str.tostring(rMult(t1), "#.#") + "R · conf " + str.tostring(sC1, "#.#") + f_bhv(sW1) + ")", cTgt)
+    if not na(t2)
+        lnT2 := line.new(x1, t2, x2, t2, extend = extend.both, color = cTgt, style = line.style_dashed)
+        lbT2 := f_lbl(t2, "T2  " + str.tostring(t2, format.mintick) + "  (+" + str.tostring(rMult(t2), "#.#") + "R · conf " + str.tostring(sC2, "#.#") + f_bhv(sW2) + ")", cTgt)
+    if not na(t3)
+        lnT3 := line.new(x1, t3, x2, t3, extend = extend.both, color = cTgt, style = line.style_dashed)
+        lbT3 := f_lbl(t3, "T3  " + str.tostring(t3, format.mintick) + "  (+" + str.tostring(rMult(t3), "#.#") + "R · conf " + str.tostring(sC3, "#.#") + f_bhv(sW3) + ")", cTgt)
+
+// ═══════════ Table ═══════════
+f_fmt(float p) => na(p) ? "—" : str.tostring(p, format.mintick)
+f_rr(float p)  => na(p) ? "—" : "+" + str.tostring(rMult(p), "#.#") + "R"
+tblPos = tblPosIn == "Top Right" ? position.top_right : tblPosIn == "Top Left" ? position.top_left : tblPosIn == "Bottom Right" ? position.bottom_right : position.bottom_left
+var table tbl = na
+if showTable and barstate.islast
+    table.delete(tbl)
+    tbl := table.new(tblPos, 2, 8, frame_color = color.new(color.gray, 40), frame_width = 1, border_width = 1)
+    hb  = color.new(color.teal, 0)
+    table.cell(tbl, 0, 0, "GAM Target v2", text_color = color.white, bgcolor = hb, text_size = size.small)
+    table.cell(tbl, 1, 0, preset, text_color = color.white, bgcolor = hb, text_size = size.small)
+    table.cell(tbl, 0, 1, "Entry", text_size = size.small)
+    table.cell(tbl, 1, 1, f_fmt(entry), text_size = size.small)
+    table.cell(tbl, 0, 2, "ATR", text_size = size.small)
+    table.cell(tbl, 1, 2, str.tostring(atrVal, "#.##"), text_size = size.small)
+    table.cell(tbl, 0, 3, "Stop / 1R", text_color = color.red, text_size = size.small)
+    table.cell(tbl, 1, 3, f_fmt(stop) + " / " + str.tostring(risk, "#.##"), text_color = color.red, text_size = size.small)
+    table.cell(tbl, 0, 4, "T1" + (sW1 ? " ▮wall" : " ◇magnet"), text_color = color.teal, text_size = size.small)
+    table.cell(tbl, 1, 4, f_fmt(t1) + "  " + f_rr(t1), text_color = color.teal, text_size = size.small)
+    table.cell(tbl, 0, 5, "T2" + (sW2 ? " ▮wall" : " ◇magnet"), text_color = color.teal, text_size = size.small)
+    table.cell(tbl, 1, 5, f_fmt(t2) + "  " + f_rr(t2), text_color = color.teal, text_size = size.small)
+    table.cell(tbl, 0, 6, "T3" + (sW3 ? " ▮wall" : " ◇magnet"), text_color = color.teal, text_size = size.small)
+    table.cell(tbl, 1, 6, f_fmt(t3) + "  " + f_rr(t3), text_color = color.teal, text_size = size.small)
+    table.cell(tbl, 0, 7, "R:R T1", text_size = size.small)
+    table.cell(tbl, 1, 7, na(t1) ? "—" : str.tostring(rMult(t1), "#.#") + " : 1", text_size = size.small)
